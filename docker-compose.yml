@@ -1,0 +1,69 @@
+# AR-57: every service declares an explicit `mem_limit`. Unbounded growth in one
+# container OOM-killing Postgres is the classic single-box failure, and it is the
+# specific risk that makes 8 GB adequate rather than merely arithmetically
+# sufficient (Hostinger KVM 2 — 2 vCPU, 8 GB, São Paulo).
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-allmywallet_migrator}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-allmywallet}
+      POSTGRES_DB: ${POSTGRES_DB:-allmywallet}
+      # pt-BR collation, so ORDER BY on asset names sorts the way a Brazilian
+      # user expects rather than by code point.
+      LANG: pt_BR.utf8
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-allmywallet_migrator}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1500m
+
+  web:
+    image: ghcr.io/rafaelfqueiroz/allmywallet:${IMAGE_TAG:-latest}
+    profiles: ['app']
+    restart: unless-stopped
+    command: ['node', 'server.js']
+    env_file: [.env]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 1000m
+
+  # Same image, different command — the worker is a second entrypoint into the
+  # same codebase, not a separate service (ARCHITECTURE §2).
+  worker:
+    image: ghcr.io/rafaelfqueiroz/allmywallet:${IMAGE_TAG:-latest}
+    profiles: ['app']
+    restart: unless-stopped
+    command: ['node', 'dist/worker.js']
+    env_file: [.env]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    mem_limit: 500m
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ['app']
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [web]
+    mem_limit: 128m
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,36 @@
+{
+  "app": {
+    "name": "AllMyWallet",
+    "tagline": "Seus investimentos, em um só lugar"
+  },
+  "nav": {
+    "dashboard": "Painel",
+    "transactions": "Transações",
+    "wallets": "Carteiras",
+    "reports": "Relatórios",
+    "settings": "Configurações"
+  },
+  "common": {
+    "loading": "Carregando…",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "delete": "Excluir",
+    "back": "Voltar",
+    "empty": "Nada por aqui ainda"
+  },
+  "errors": {
+    "NOT_FOUND": "Não encontramos o que você procura.",
+    "FORBIDDEN": "Você não tem acesso a este recurso.",
+    "VALIDATION_FAILED": "Verifique os dados informados.",
+    "CONFLICT": "Esta operação conflita com o estado atual.",
+    "UNEXPECTED": "Algo deu errado. Tente novamente em instantes."
+  },
+  "vocabulary": {
+    "patrimonio": "Patrimônio",
+    "proventos": "Proventos",
+    "precoMedio": "Preço médio",
+    "rentabilidade": "Rentabilidade",
+    "composicao": "Composição"
+  }
+}
