@@ -44,18 +44,22 @@ The default posture on substantial work is **orchestrator**: plan, dispatch, ver
 
 ### Model tiering
 
+Five project agents are defined in [`.claude/agents/`](.claude/agents/), each pinning its own model and constraints. Prefer them over a bare `general-purpose` dispatch — the constraints are in the definition, so the brief does not have to re-derive them.
+
 | Work | Agent | Model |
 |---|---|---|
-| "Where is X", naming-convention sweeps, file location | `Explore` | `haiku` |
-| Mechanical edits from an unambiguous spec | `general-purpose` | `haiku` |
-| Implementing a module + its tests | `general-purpose` | `sonnet` |
-| Migration + RLS policy authoring | `general-purpose` | `sonnet` |
-| UI components, wiring, adapters | `general-purpose` | `sonnet` |
-| **Calculation engine** — TWR, XIRR, `preço médio`, fixed-income accrual | `general-purpose` | `opus` |
-| **AC conformity and correctness review** | `general-purpose` | `opus` |
-| Implementation strategy for a whole board task | `Plan` | `opus` |
+| "Where is X", naming sweeps, file location | `Explore` *(built-in)* | `haiku` |
+| Implementation strategy for a whole board task | `Plan` *(built-in)* | `opus` |
+| `core/` use cases, ports, adapters, wiring | [`spec-implementer`](.claude/agents/spec-implementer.md) | `sonnet` |
+| Schema, migration, RLS policy, isolation test | [`migration-author`](.claude/agents/migration-author.md) | `sonnet` |
+| App Router, components, charts, i18n | [`ui-implementer`](.claude/agents/ui-implementer.md) | `sonnet` |
+| **Calculation engine** — `preço médio`, TWR, XIRR, accrual | [`calc-engine`](.claude/agents/calc-engine.md) | `opus` |
+| **AC conformity and correctness review** | [`ac-reviewer`](.claude/agents/ac-reviewer.md) | `opus` |
+| Mechanical edits from an unambiguous instruction | `general-purpose` | `haiku` |
 
-The calculation engine gets the strongest model because money math is the one place where a *subtly wrong* answer is worse than an obvious failure — it ships, it looks plausible, and it is discovered by a user reconciling against their broker. That is also why it carries the 100% branch-coverage gate.
+Two roles get the strongest model, for the same reason. The **calculation engine** is where a *subtly wrong* answer beats an obvious failure to the worst outcome — it ships, it looks plausible, and a user finds it reconciling against their broker, at which point every number the product ever showed them is in doubt. That is also why it carries the 100% branch-coverage gate. **Review** gets it because catching that class of defect requires the same depth as avoiding it.
+
+`ac-reviewer` is read-only by design: it reports findings rather than fixing them, so nothing is silently repaired before the person who needs to see it does.
 
 ### Briefs are self-contained
 
