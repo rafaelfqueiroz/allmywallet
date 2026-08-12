@@ -44,22 +44,24 @@ The default posture on substantial work is **orchestrator**: plan, dispatch, ver
 
 ### Model tiering
 
-Five project agents are defined in [`.claude/agents/`](.claude/agents/), each pinning its own model and constraints. Prefer them over a bare `general-purpose` dispatch — the constraints are in the definition, so the brief does not have to re-derive them.
+Six project agents are defined in [`.claude/agents/`](.claude/agents/), each pinning its own model and constraints. Prefer them over a bare `general-purpose` dispatch — the constraints are in the definition, so the brief does not have to re-derive them.
 
 | Work | Agent | Model |
 |---|---|---|
-| "Where is X", naming sweeps, file location | `Explore` *(built-in)* | `haiku` |
-| Implementation strategy for a whole board task | `Plan` *(built-in)* | `opus` |
+| Repetitive mechanical edits; reporting sweeps | [`chore`](.claude/agents/chore.md) | `haiku` |
+| "Where is X", naming sweeps, file location | `Explore` *(built-in, override at dispatch)* | `haiku` |
 | `core/` use cases, ports, adapters, wiring | [`spec-implementer`](.claude/agents/spec-implementer.md) | `sonnet` |
 | Schema, migration, RLS policy, isolation test | [`migration-author`](.claude/agents/migration-author.md) | `sonnet` |
 | App Router, components, charts, i18n | [`ui-implementer`](.claude/agents/ui-implementer.md) | `sonnet` |
 | **Calculation engine** — `preço médio`, TWR, XIRR, accrual | [`calc-engine`](.claude/agents/calc-engine.md) | `opus` |
 | **AC conformity and correctness review** | [`ac-reviewer`](.claude/agents/ac-reviewer.md) | `opus` |
-| Mechanical edits from an unambiguous instruction | `general-purpose` | `haiku` |
+| Implementation strategy for a whole board task | `Plan` *(built-in)* | `opus` |
 
 Two roles get the strongest model, for the same reason. The **calculation engine** is where a *subtly wrong* answer beats an obvious failure to the worst outcome — it ships, it looks plausible, and a user finds it reconciling against their broker, at which point every number the product ever showed them is in doubt. That is also why it carries the 100% branch-coverage gate. **Review** gets it because catching that class of defect requires the same depth as avoiding it.
 
 `ac-reviewer` is read-only by design: it reports findings rather than fixing them, so nothing is silently repaired before the person who needs to see it does.
+
+At the other end, `chore` is walled off from the calculation engine, migrations, RLS, auth and anything holding money — and is instructed to **stop and report** when a task turns out to need judgement rather than guess at it. On this codebase "repetitive" and "mechanical" are not synonyms, and the cheapest model is the one least likely to notice the difference. Its most valuable use is often the *reporting* sweep — find every hardcoded string, every table lacking an isolation test, every `parseFloat` — which is cheap, exhaustive, and hands a precise list to an expensive agent.
 
 ### Briefs are self-contained
 
