@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# environment — DV-24: secrets never enter the repository
+.env
+.env.*
+!.env.example
+
+# test output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# B3 extracts contain a real CPF and real holdings.
+# DV-24 / TS-19: never commit one. Test fixtures are generated, not captured.
+*.xlsx
+*.xls
+
+# database dumps — same reasoning, plus every user's position in one file
+*.dump
+*.sql.gz
+*.age
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
