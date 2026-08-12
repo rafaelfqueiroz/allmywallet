@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+
+/*
+ * shadcn/ui token names, defined once here. SPEC-016 BR-016-15 requires WCAG AA
+ * contrast, so these pairs are chosen for their ratio, not their look.
+ */
+@theme {
+  --color-background: oklch(1 0 0);
+  --color-foreground: oklch(0.15 0 0);
+  --color-muted: oklch(0.96 0 0);
+  --color-muted-foreground: oklch(0.45 0 0);
+  --color-border: oklch(0.9 0 0);
+  --color-primary: oklch(0.42 0.16 258);
+  --color-primary-foreground: oklch(0.99 0 0);
+  --color-positive: oklch(0.5 0.14 150);
+  --color-negative: oklch(0.53 0.19 25);
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: oklch(0.16 0.01 260);
+    --color-foreground: oklch(0.97 0 0);
+    --color-muted: oklch(0.24 0.01 260);
+    --color-muted-foreground: oklch(0.7 0 0);
+    --color-border: oklch(0.3 0.01 260);
+    --color-primary: oklch(0.72 0.13 258);
+    --color-primary-foreground: oklch(0.16 0.01 260);
+    --color-positive: oklch(0.72 0.16 150);
+    --color-negative: oklch(0.7 0.18 25);
+  }
+}
+
+/* Respect the user's motion preference — an animated chart is not worth a migraine. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

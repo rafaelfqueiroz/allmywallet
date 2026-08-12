@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # Fast gates first: a formatting failure should not wait on Testcontainers.
+  static:
+    name: Typecheck · lint · format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # AR-05: the import-boundary rules are in here. This is what keeps core/
+      # free of the framework rather than discipline doing it.
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  unit:
+    name: Unit tests · coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # TS-28: 100% branch on the calculation engine, 80% everywhere else.
+      # Thresholds live in vitest.config.ts so a local run gates identically.
+      - run: pnpm test:coverage
+
+  integration:
+    name: Integration · migrations
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allmywallet_migrator
+          POSTGRES_PASSWORD: allmywallet
+          POSTGRES_DB: allmywallet
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U allmywallet_migrator"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_MIGRATION_URL: postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet
+      DATABASE_URL: postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # A migration that does not apply to an empty database is a broken deploy,
+      # and with no staging environment (AR-67) this is the only place it is caught.
+      - name: Migrations apply cleanly to an empty database
+        run: pnpm db:migrate
+      - run: pnpm test:integration
+
+  isolation:
+    name: Tenant isolation (blocking)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allmywallet_migrator
+          POSTGRES_PASSWORD: allmywallet
+          POSTGRES_DB: allmywallet
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U allmywallet_migrator"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_MIGRATION_URL: postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet
+      DATABASE_URL: postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      # SPEC-003 BR-003-04 / TS-13. This gate stays blocking regardless of suite
+      # time: the cost of the alternative is a stranger reading someone's
+      # complete financial position. The enumeration test fails on any
+      # tenant-scoped table lacking a policy or a test — never a maintained list.
+      - run: pnpm test:isolation
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+        env:
+          DATABASE_URL: postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet
+
+  audit:
+    name: Dependency vulnerabilities
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # SPEC-003 progress log: dependency vulnerability scanning in CI.
+      - run: pnpm audit --audit-level high

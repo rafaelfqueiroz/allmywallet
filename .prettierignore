@@ -1,0 +1,14 @@
+node_modules
+.next
+dist
+coverage
+pnpm-lock.yaml
+playwright-report
+test-results
+src/db/migrations
+
+# The guidelines, PRD extracts and CLAUDE.md are hand-formatted: their tables are
+# aligned for reading in a diff, and Prettier reflows them into a wall of pipes.
+# Prose is reviewed, not linted.
+*.md
+docs/**/*.md
