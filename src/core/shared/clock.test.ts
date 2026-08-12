@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BusinessDate, FakeClock, businessDateInSaoPaulo } from './clock';
+import { BusinessDate, FakeClock, SystemClock, businessDateInSaoPaulo } from './clock';
 
 describe('BusinessDate', () => {
   it('accepts an ISO date', () => {
@@ -68,5 +68,20 @@ describe('FakeClock', () => {
     const first = clock.now();
     first.setUTCFullYear(2030);
     expect(clock.now().toISOString()).toBe('2026-03-16T13:30:00.000Z');
+  });
+});
+
+describe('SystemClock', () => {
+  it('reports the real instant and the São Paulo date it falls on', () => {
+    const clock = new SystemClock();
+    const before = Date.now();
+    const now = clock.now().getTime();
+    expect(now).toBeGreaterThanOrEqual(before);
+    expect(now).toBeLessThanOrEqual(Date.now());
+
+    // Whatever "today" is, it must be a valid business date in São Paulo — the
+    // assertion that matters is the type contract, not a fixed value.
+    expect(() => BusinessDate.of(clock.today())).not.toThrow();
+    expect(clock.today()).toBe(businessDateInSaoPaulo(clock.now()));
   });
 });

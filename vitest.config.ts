@@ -62,10 +62,19 @@ export default defineConfig({
       exclude: [
         'src/**/*.test.ts',
         'src/**/*.test.tsx',
+        'src/**/*.d.ts',
+        // TS-30: do not chase coverage on framework wiring by testing framework
+        // behaviour. These files construct a pool, register a queue consumer,
+        // render a route or configure next-intl — they hold no decision worth
+        // asserting, and the behaviour that matters in them is exercised by the
+        // integration, isolation and E2E suites against the real thing.
         'src/db/migrations/**',
         'src/db/migrate.ts',
-        'src/app/**/layout.tsx',
-        'src/**/*.d.ts',
+        'src/db/client.ts',
+        'src/db/schema/**',
+        'src/app/**',
+        'src/worker/index.ts',
+        'src/i18n/request.ts',
       ],
       thresholds: {
         // TS-28: 80% is the floor everywhere...

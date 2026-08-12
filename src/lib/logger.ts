@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import pino from 'pino';
-import { env } from '@/lib/env';
 
 /**
  * AR-49: logs carry a correlation id and, where relevant, a *hashed* user id —
@@ -10,8 +9,23 @@ import { env } from '@/lib/env';
  * personal data must not reach logs at all, so the log helpers below take
  * structured facts and refuse to be handed an entity.
  */
+const LEVELS = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'] as const;
+
+/**
+ * Read directly from `process.env` rather than through `env()`, which is the one
+ * deliberate exception to AR-43's "one place reads the environment". The logger
+ * has to be importable where there is no database — including inside the
+ * failure path that reports *why* `env()` could not be parsed. Routing it
+ * through `env()` would mean a bad `DATABASE_URL` produced a crash with no log
+ * line explaining it.
+ */
+function level(): pino.Level {
+  const configured = process.env.LOG_LEVEL;
+  return LEVELS.includes(configured as pino.Level) ? (configured as pino.Level) : 'info';
+}
+
 export const logger = pino({
-  level: env().LOG_LEVEL,
+  level: level(),
   // Structured JSON, so the VPS log shipper and any future Loki query see the
   // same shape. Never pretty-print in production.
   formatters: {
