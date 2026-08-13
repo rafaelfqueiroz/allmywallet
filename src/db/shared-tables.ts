@@ -15,7 +15,39 @@ export const SHARED_TABLES: readonly string[] = [
   'price_quotes',
   'latest_quotes',
   'index_series',
+  // Added by SPEC-002, beyond the five BR-003-06 names. BR-003-06 requires a
+  // review when the list grows, so the reasoning is here rather than in a
+  // commit message:
+  //
+  // `runtime_state` holds values the *system* wrote about itself — a degraded
+  // quote cadence and the reason for it (BR-002-05). One row per key, no user
+  // column, nothing derived from anyone's holdings. It meets BR-003-06's stated
+  // test ("holds no personal data") without being one of the five tables that
+  // rule happened to enumerate.
+  'runtime_state',
 ];
+
+/**
+ * `audit_log` is exempt for a different reason, and a weaker one — recorded
+ * separately so it does not hide inside the list above.
+ *
+ * Cross-tenant readability is the point of an audit log: BR-004-17 requires
+ * operator access to personal data to be recorded in it, and an operator
+ * reviewing that record is by definition reading across tenants. An RLS policy
+ * keyed on `app.user_id` would make the table useless for the thing it exists
+ * to do.
+ *
+ * What that leaves open, stated plainly rather than argued away: for a
+ * user-level config key, `previous_value` and `new_value` are that user's own
+ * preferences (BR-002-07), so the table does hold tenant data even though it
+ * has no `user_id` column to scope by. Today nothing tenant-facing queries it,
+ * which is the actual mitigation. Two consequences belong to SPEC-004 (#7) and
+ * are raised on that issue rather than settled here: retention
+ * (`retention.audit_months`, BR-004-15) and whether a deleted account's audit
+ * rows are purged, anonymised or kept — which cannot be answered by a table
+ * with no foreign key to `users`.
+ */
+export const AUDIT_TABLES: readonly string[] = ['audit_log'];
 
 /**
  * Machinery, not application data: Drizzle's migration bookkeeping and pg-boss's
@@ -75,6 +107,7 @@ export function isSharedTable(tableName: string): boolean {
   return (
     SHARED_TABLES.includes(tableName) ||
     INFRASTRUCTURE_TABLES.includes(tableName) ||
-    AUTH_SUBSTRATE_TABLES.includes(tableName)
+    AUTH_SUBSTRATE_TABLES.includes(tableName) ||
+    AUDIT_TABLES.includes(tableName)
   );
 }

@@ -21,13 +21,14 @@
     "test:watch": "vitest --project unit",
     "test:integration": "vitest run --project integration",
     "test:isolation": "vitest run --project isolation",
-    "test:coverage": "vitest run --project unit --coverage",
+    "test:coverage": "vitest run --project unit --project integration --project isolation --coverage",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check"
+    "check": "pnpm typecheck && pnpm lint && pnpm format:check",
+    "test:coverage:unit": "vitest run --project unit --coverage"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",

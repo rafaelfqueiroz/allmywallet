@@ -40,5 +40,41 @@
     "precoMedio": "Preço médio",
     "rentabilidade": "Rentabilidade",
     "composicao": "Composição"
+  },
+  "preferences": {
+    "title": "Preferências",
+    "description": "Ajustes que valem só para a sua conta.",
+    "saved": "Preferência salva.",
+    "saveFailed": "Não foi possível salvar. Tente novamente.",
+    "save": "Salvar",
+    "signedOut": "Entre na sua conta para ajustar preferências.",
+    "keys": {
+      "import.staleness_days": {
+        "label": "Dias sem importar até avisar",
+        "description": "Quantos dias sem uma nova importação disparam o lembrete."
+      },
+      "import.reminder_enabled": {
+        "label": "Lembrete de importação",
+        "description": "Receber um aviso quando a carteira estiver desatualizada."
+      },
+      "reports.concentration_threshold_pct": {
+        "label": "Limite de concentração (%)",
+        "description": "A partir de qual peso um ativo é sinalizado como concentrado."
+      },
+      "reports.default_grouping": {
+        "label": "Agrupamento padrão dos relatórios",
+        "description": "Como os relatórios agrupam suas posições por padrão."
+      },
+      "reports.benchmarks": {
+        "label": "Benchmarks de comparação",
+        "description": "Índices exibidos junto da sua rentabilidade."
+      }
+    },
+    "groupingOptions": {
+      "asset_class": "Classe de ativo",
+      "asset": "Ativo",
+      "institution": "Instituição",
+      "wallet": "Carteira"
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AUDIT_TABLES,
   AUTH_SUBSTRATE_TABLES,
   INFRASTRUCTURE_TABLES,
   SHARED_TABLES,
@@ -14,16 +15,34 @@ import {
  * something that happens by autocomplete.
  */
 describe('shared table declaration', () => {
-  it('declares exactly the five reference tables the architecture exempts', () => {
-    // ARCHITECTURE §5 AR-15 names these five and no others. Adding a sixth means
-    // asserting it holds no personal data — which is a decision, not an edit.
+  it('pins the exempt list exactly, so growing it fails a test rather than passing quietly', () => {
+    // AR-15 names five; `runtime_state` was added by SPEC-002 under BR-003-06's
+    // "reviewed when added" clause — it holds a system-written cadence value and
+    // the reason for it, nothing derived from anyone's holdings. The reasoning
+    // lives in src/db/shared-tables.ts.
+    //
+    // This assertion is deliberately exact. Its whole value is that the next
+    // person to widen the tenant-boundary exemption has to come here and say
+    // why, rather than appending a string and watching the suite stay green.
     expect([...SHARED_TABLES].sort()).toEqual([
       'assets',
       'index_series',
       'institutions',
       'latest_quotes',
       'price_quotes',
+      'runtime_state',
     ]);
+  });
+
+  it('keeps the audit log exempt for a stated reason, not by being lumped in', () => {
+    // Cross-tenant readability is the point of an audit log (BR-004-17), so it
+    // cannot carry a policy keyed on app.user_id. It is a weaker exemption than
+    // the reference tables — it *can* hold tenant data in previous/new value —
+    // so it is declared apart from them, and its retention and deletion
+    // semantics are raised on SPEC-004 (#7) rather than settled here.
+    expect(AUDIT_TABLES).toEqual(['audit_log']);
+    expect(SHARED_TABLES).not.toContain('audit_log');
+    expect(isSharedTable('audit_log')).toBe(true);
   });
 
   it('treats an unlisted table as tenant-scoped', () => {
