@@ -11,6 +11,20 @@ import { submitPreferenceForm } from '@/app/(settings)/preferences/actions';
  * add a key with `levels: [..., 'user']` in src/config/registry.ts and it
  * appears here with no other change (BR-002-01).
  */
+
+/**
+ * Never prerendered, and this is a tenant-isolation requirement rather than a
+ * build detail. The page renders one account's own preferences; a statically
+ * generated copy would be built once — from whatever session existed at build
+ * time, or none — and then served to every user from the cache. That is
+ * cross-tenant leakage arriving through the CDN rather than through a missing
+ * WHERE clause, and no RLS policy can catch it, because the query never runs
+ * again.
+ *
+ * It also happens to be why `pnpm build` failed: prerendering ran the config
+ * lookup at build time, with no database to reach.
+ */
+export const dynamic = 'force-dynamic';
 export default async function PreferencesPage() {
   const t = await getTranslations('preferences');
   const userId = trySessionUserId();
