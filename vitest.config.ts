@@ -120,11 +120,10 @@ export default defineConfig({
         // proven against a mock — that would mock away the exact thing under
         // test. withTenant is straight-line (no branches) and is proven
         // against real Postgres by tests/isolation/two-tenant-rls.test.ts.
-        'src/db/tenant.ts',
+
         // TS-30: an adapter/repository — covered by
         // tests/integration/user-repository.test.ts exercising real Postgres,
         // not by chasing unit coverage on Drizzle query-builder calls.
-        'src/adapters/db/user-repository.ts',
       ],
       thresholds: {
         // TS-28: 80% is the floor everywhere...
