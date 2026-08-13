@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
+import { resetConfigState, resetUsers } from '../support/reset';
 
 import * as schema from '@/db/schema';
 import { auditLog } from '@/db/schema/config';
@@ -22,6 +23,10 @@ describe('SPEC-002 — audit trail (integration)', () => {
   beforeAll(async () => {
     testDb = await startTestDatabase();
     await applyMigrations(testDb.migrationUrl);
+    // TS-03: another suite file may have left rows behind when the database
+    // is reused rather than created per file.
+    await resetConfigState(testDb.migrationUrl);
+    await resetUsers(testDb.migrationUrl);
 
     pool = new Pool({ connectionString: testDb.appUrl, max: 1 });
     db = drizzle(pool, { schema });

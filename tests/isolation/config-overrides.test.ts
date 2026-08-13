@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
+import { resetConfigState, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
 import { withTenantContext } from '../support/tenant-context';
 import * as schema from '@/db/schema';
@@ -31,6 +32,10 @@ describe('SPEC-002 — config_overrides tenant isolation', () => {
   beforeAll(async () => {
     testDb = await startTestDatabase();
     await applyMigrations(testDb.migrationUrl);
+    // TS-03: another suite file may have left rows behind when the database
+    // is reused rather than created per file.
+    await resetConfigState(testDb.migrationUrl);
+    await resetUsers(testDb.migrationUrl);
     await seedUser(testDb.migrationUrl, userA);
     await seedUser(testDb.migrationUrl, userB);
 
