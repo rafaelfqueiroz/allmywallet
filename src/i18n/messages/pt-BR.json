@@ -32,7 +32,20 @@
     "FORBIDDEN": "Você não tem acesso a este recurso.",
     "VALIDATION_FAILED": "Verifique os dados informados.",
     "CONFLICT": "Esta operação conflita com o estado atual.",
-    "UNEXPECTED": "Algo deu errado. Tente novamente em instantes."
+    "UNEXPECTED": "Algo deu errado. Tente novamente em instantes.",
+    "INSUFFICIENT_QUANTITY": "Em {date} você tinha {held} cota(s) deste ativo e a operação pede {requested}. Registre a compra que está faltando ou ajuste a quantidade.",
+    "MISSING_EVENT_RATIO": "O evento de {date} não informa a proporção do desdobramento ou grupamento, então não é possível recalcular o preço médio.",
+    "INVALID_EVENT_RATIO": "A proporção {ratio} informada para o evento de {date} não é válida — ela precisa ser maior que zero.",
+    "TRANSACTION_NOT_FOUND": "Esta transação não existe mais. Atualize a página e tente de novo.",
+    "INVALID_QUANTITY": "A quantidade {quantity} não é válida para uma transação do tipo {type}.",
+    "NEGATIVE_UNIT_PRICE": "O preço unitário não pode ser negativo.",
+    "NEGATIVE_FEES": "As taxas não podem ser negativas.",
+    "RATIO_REQUIRED": "Informe a proporção do {type} — por exemplo, 2 para um desdobramento de 1:2.",
+    "RATIO_NOT_APPLICABLE": "Uma transação do tipo {type} não tem proporção. Verifique se o tipo está correto.",
+    "INVALID_RATIO": "A proporção {ratio} precisa ser maior que zero.",
+    "FUTURE_TRADE_DATE": "A data {tradeDate} está no futuro. O extrato registra apenas operações já realizadas.",
+    "EMPTY_SELECTION": "Selecione ao menos uma transação.",
+    "INVALID_PAGINATION": "Não foi possível carregar esta página da lista."
   },
   "vocabulary": {
     "patrimonio": "Patrimônio",
