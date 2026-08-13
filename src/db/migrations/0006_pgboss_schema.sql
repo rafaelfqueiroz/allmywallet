@@ -1,0 +1,23 @@
+-- ARCHITECTURE §6: pg-boss owns scheduling and queueing, using the Postgres
+-- already present. It manages its own tables inside a dedicated `pgboss`
+-- schema (src/worker/index.ts's `new PgBoss({ schema: 'pgboss' })`) and
+-- creates/migrates them itself on `boss.start()` — but under the two-role
+-- split (ARCHITECTURE §5), `allmywallet_app` (the role web/worker connect as)
+-- has no CREATE privilege on the database by default, so that self-managed
+-- provisioning fails with a bare permissions error the first time a worker
+-- ever boots against a fresh database.
+--
+-- DEVIATION (SPEC-016 #19, for the Decision log): found by actually running
+-- the built worker image against a migrated database end to end (this
+-- report's Docker smoke test), not from reading the code. Predates this task
+-- — pg-boss usage was introduced in #21 (M0 foundations) — but blocks the
+-- worker from starting at all, so it is fixed here rather than left for a
+-- separate issue.
+--
+-- The schema itself is created by the migrator (DDL stays with the role that
+-- owns DDL); the grant is scoped to *this one schema* only, not the whole
+-- database, so `allmywallet_app` still cannot create objects in `public` or
+-- anywhere else it doesn't already have rights to.
+CREATE SCHEMA IF NOT EXISTS pgboss;
+--> statement-breakpoint
+GRANT USAGE, CREATE ON SCHEMA pgboss TO allmywallet_app;

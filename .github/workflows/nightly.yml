@@ -1,0 +1,83 @@
+name: Nightly performance budgets
+
+on:
+  schedule:
+    # 03:00 America/Sao_Paulo = 06:00 UTC. Brazil has observed no DST since
+    # 2019, so this does not drift twice a year.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  budgets:
+    name: Performance budgets (advisory)
+    runs-on: ubuntu-latest
+    # ADVISORY, NOT BLOCKING. The guidelines amend SPEC-016 BR-016-07 to this
+    # (docs/guidelines/README.md, amendments table): seeding the reference
+    # workload makes per-PR runs too slow to be worth the wait. A regression
+    # raises an alert; it does not block a merge.
+    #
+    # The compensating check is TS-32, which *is* blocking and lives in the PR
+    # suite: it asserts reports read from DailyValuationSnapshot rather than
+    # recomputing the ledger. That is the cheap structural check that predicts
+    # the expensive measurement, which is the useful half of the trade.
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allmywallet_migrator
+          POSTGRES_PASSWORD: allmywallet
+          POSTGRES_DB: allmywallet
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U allmywallet_migrator"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_MIGRATION_URL: postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet
+      DATABASE_URL: postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The alert names a commit range, so the run needs more than the tip.
+          fetch-depth: 50
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+
+      # TS-23: 100 assets, 10,000 transactions, 5 years, generated from a fixed
+      # seed. Deterministic is the point — numbers are only comparable across
+      # runs if the workload is identical.
+      - name: Seed the reference workload
+        run: pnpm db:seed:reference
+
+      - name: Measure against the budgets
+        id: budgets
+        run: pnpm test:performance
+
+      # BR-016-13: a regression that nobody sees is indistinguishable from no
+      # regression. Naming the commit range is what makes the alert actionable
+      # rather than merely alarming.
+      - name: Raise an issue on regression
+        if: failure() && steps.budgets.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RANGE="$(git log --oneline -20 --format='%h %s' | head -20)"
+          printf '%s\n\n%s\n\n%s\n' \
+            "The nightly performance run missed a budget on \`main\`." \
+            "Budgets (TESTING §8): dashboard < 2s p95 · any report < 3s p95 · import preview 10k rows < 30s · import commit 10k rows < 60s." \
+            "Recent commits:" > /tmp/body.md
+          printf '```\n%s\n```\n' "$RANGE" >> /tmp/body.md
+          gh issue create \
+            --title "Nightly performance regression — $(date -u +%Y-%m-%d)" \
+            --label "performance" \
+            --body-file /tmp/body.md

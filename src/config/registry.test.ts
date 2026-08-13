@@ -10,8 +10,12 @@ import {
 } from './registry';
 
 describe('registry', () => {
-  it('has exactly the 18 keys from the SPEC-002 initial registry table', () => {
-    expect(CONFIG_KEYS).toHaveLength(18);
+  it('has exactly the 21 keys from the SPEC-002 initial registry table, plus SPEC-016 additions', () => {
+    // 18 keys from SPEC-002's own table, plus three SPEC-016 additions:
+    // `alerts.queue_backlog_threshold` (BR-016-13/BR-016-14: thresholds are
+    // config, not code) and the two `observability.worker_heartbeat_*`
+    // cadence/threshold keys behind AR-50's health endpoint.
+    expect(CONFIG_KEYS).toHaveLength(21);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {

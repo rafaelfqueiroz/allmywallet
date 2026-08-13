@@ -17,7 +17,7 @@ import { getEffectiveConfig } from './effective';
  * not just through `resolveConfig` directly.
  */
 describe('getEffectiveConfig — against a fake Tx with nothing set', () => {
-  it('lists all 18 registry keys, each resolved to its own default, with description and levels attached', async () => {
+  it('lists all registry keys, each resolved to its own default, with description and levels attached', async () => {
     invalidateDeploymentCache();
     const tx = fakeTx({ selectRows: [] });
 

@@ -1,0 +1,132 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time. `cancel-in-progress: false` is deliberate: cancelling a
+# run mid-way could abort it between the migration step and the container
+# restart, which is the one window where the schema and the running code
+# disagree.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-image:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        # DV-26: images are tagged with the commit SHA, so a rollback is
+        # redeploying a previous SHA. That only works because migrations are
+        # forward-only (AR-23) and expand/contract (DV-27) — the old image must
+        # still run against the new schema.
+        run: echo "sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # AR-58: images are built in CI, never on the VPS. This is what keeps a
+      # 2-vCPU box viable — it only pulls and runs.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Migrate and release
+    needs: build-image
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SSH key
+        # DV-28: deploy secrets live in GitHub Actions secrets. Runtime secrets
+        # live in the VPS `.env` and never pass through CI.
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Pull the new image
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "cd /srv/allmywallet && IMAGE_TAG=${{ needs.build-image.outputs.image_tag }} docker compose pull web worker"
+
+      # DV-25: migrations run as a separate, GATED step BEFORE containers
+      # restart. A failed migration aborts the deploy here and leaves the
+      # running version untouched — which is the whole reason this is its own
+      # step rather than a container entrypoint. There is no staging (AR-67),
+      # so this gate is the only thing between a bad migration and production.
+      - name: Run migrations (gated — deploy aborts if this fails)
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "cd /srv/allmywallet && IMAGE_TAG=${{ needs.build-image.outputs.image_tag }} \
+             docker compose run --rm --no-deps web node_modules/.bin/tsx src/db/migrate.ts"
+
+      - name: Restart web and worker
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "cd /srv/allmywallet && IMAGE_TAG=${{ needs.build-image.outputs.image_tag }} docker compose up -d web worker"
+
+      # AR-50: /api/health reports database reachability, worker liveness and
+      # last successful quote sync. A deploy that starts but cannot serve is a
+      # failed deploy, so the health check decides, not `docker compose up`'s
+      # exit code.
+      - name: Health check
+        id: health
+        run: |
+          for attempt in $(seq 1 10); do
+            if curl -fsS --max-time 10 "https://${{ secrets.APP_HOST }}/api/health" > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            echo "health check attempt $attempt failed; retrying in 6s"
+            sleep 6
+          done
+          echo "health check never succeeded"
+          exit 1
+
+      - name: Roll back to the previous image
+        if: failure() && steps.health.outcome == 'failure'
+        # DV-26: rollback is redeploying a previous SHA. The schema is left
+        # alone — forward-only migrations mean the previous image must still
+        # run against the migrated schema, which is exactly what DV-27's
+        # expand/contract discipline buys.
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "cd /srv/allmywallet && docker compose rollback.sh || \
+             (IMAGE_TAG=\$(cat .last-good-tag) docker compose up -d web worker)"
+          echo "::error::Deploy failed its health check and was rolled back. Schema was NOT reverted (AR-23: forward-only)."
+          exit 1
+
+      - name: Record this image as last-known-good
+        run: |
+          ssh -i ~/.ssh/id_ed25519 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "cd /srv/allmywallet && echo ${{ needs.build-image.outputs.image_tag }} > .last-good-tag"

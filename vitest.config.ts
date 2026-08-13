@@ -44,7 +44,10 @@ export default defineConfig({
         resolve: { alias },
         test: {
           name: 'unit',
-          include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+          // tests/structural: TS-32/BR-016-07a's snapshot-read check — a
+          // source-code scan, not a database test, so it belongs in the fast,
+          // always-blocking project rather than tests/performance/'s nightly one.
+          include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/structural/**/*.test.ts'],
           environment: 'node',
           env: testEnv,
         },
@@ -104,6 +107,13 @@ export default defineConfig({
         'src/db/migrate.ts',
         'src/db/client.ts',
         'src/db/schema/**',
+        // SPEC-016: a thin `pnpm db:seed:reference` entrypoint (module-level
+        // singleton pool + a process.argv-guarded main, same shape as
+        // migrate.ts above). The upsert-by-id logic it wraps is exercised for
+        // real by tests/integration/seed-reference.test.ts; the pure
+        // generator it calls (src/db/reference-workload.ts) is not excluded
+        // and carries its own unit tests.
+        'src/db/seed-reference.ts',
         'src/app/**',
         'src/worker/index.ts',
         'src/i18n/request.ts',

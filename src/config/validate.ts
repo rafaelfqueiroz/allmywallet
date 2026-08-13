@@ -52,7 +52,7 @@ export async function collectConfigFailures(db: Tx): Promise<readonly ConfigFail
 }
 
 /**
- * AR-40/AR-41: both `web` (src/app/instrumentation.ts) and `worker`
+ * AR-40/AR-41: both `web` (src/instrumentation.ts) and `worker`
  * (src/worker/index.ts#startWorker) call this before accepting a request or
  * a job. BR-002-04: an invalid value fails the boot loudly — the message
  * names the key, the offending value and the permitted range — and never

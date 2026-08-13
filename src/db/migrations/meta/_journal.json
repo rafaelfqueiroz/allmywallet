@@ -36,6 +36,20 @@
       "when": 1786657746303,
       "tag": "0004_spec_008_market_data",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786658646133,
+      "tag": "0005_worker_heartbeats",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786658646134,
+      "tag": "0006_pgboss_schema",
+      "breakpoints": true
     }
   ]
 }
