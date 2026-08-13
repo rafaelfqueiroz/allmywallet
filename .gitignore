@@ -21,6 +21,11 @@ playwright-report/
 blob-report/
 .playwright/
 
+# tests/integration/config-validate.test.ts spawns a real subprocess to
+# assert boot-time exit behaviour; the script has to live inside the project
+# tree for node_modules resolution and is cleaned up after each run.
+tests/integration/.boot-test-*
+
 # B3 extracts contain a real CPF and real holdings.
 # DV-24 / TS-19: never commit one. Test fixtures are generated, not captured.
 *.xlsx
