@@ -40,3 +40,33 @@ export async function resetUsers(migrationUrl: string): Promise<void> {
     await pool.end();
   }
 }
+
+/**
+ * SPEC-006/SPEC-007 reference data.
+ *
+ * `assets` and `institutions` are **shared** tables (AR-15), so they carry no
+ * `user_id` and `resetUsers`'s cascade does not reach them — a suite that
+ * seeded `PETR4` would leave it behind for the next file, whose own insert
+ * then trips the `assets_code_unique` constraint. `transactions` and
+ * `positions` *are* cascaded by `resetUsers`, but they are truncated here too
+ * so a file can reset the ledger without disturbing another suite's tenants.
+ *
+ * TRUNCATE runs as the migrator, which owns the tables — and `FORCE ROW LEVEL
+ * SECURITY` does not apply to TRUNCATE, so no tenant context is needed.
+ */
+const LEDGER_TABLES = [
+  'positions',
+  'transactions',
+  'import_batches',
+  'assets',
+  'institutions',
+] as const;
+
+export async function resetLedger(migrationUrl: string): Promise<void> {
+  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
+  try {
+    await pool.query(`TRUNCATE ${LEDGER_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+  } finally {
+    await pool.end();
+  }
+}
