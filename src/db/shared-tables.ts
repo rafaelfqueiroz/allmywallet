@@ -25,6 +25,16 @@ export const SHARED_TABLES: readonly string[] = [
   // test ("holds no personal data") without being one of the five tables that
   // rule happened to enumerate.
   'runtime_state',
+  // Added by SPEC-008 (#11), same reviewed-addition path as `runtime_state`
+  // above. `quote_budget_usage` is a process-wide monthly counter of provider
+  // requests, partitioned 'scheduled'/'ondemand' (BR-008-19/20) — one row per
+  // (year_month, kind), no user column, nothing derived from anyone's
+  // holdings. It is *not* one of AR-15's five named tables either, so it
+  // needs its own explicit exemption on the same "holds no personal data"
+  // test — flagged in the #11 dispatch report as a deviation from the
+  // issue's Modules table, which named only price_quotes/latest_quotes/
+  // index_series.
+  'quote_budget_usage',
 ];
 
 /**

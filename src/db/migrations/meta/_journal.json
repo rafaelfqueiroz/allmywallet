@@ -29,6 +29,13 @@
       "when": 1786638526770,
       "tag": "0003_ledger_and_positions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786657746303,
+      "tag": "0004_spec_008_market_data",
+      "breakpoints": true
     }
   ]
 }
