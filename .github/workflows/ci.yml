@@ -34,6 +34,22 @@ jobs:
   unit:
     name: Unit tests · coverage
     runs-on: ubuntu-latest
+    # Coverage is measured across unit, integration and isolation together, so
+    # this job needs a database like the others. See the note on the run step.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allmywallet_migrator
+          POSTGRES_PASSWORD: allmywallet
+          POSTGRES_DB: allmywallet
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U allmywallet_migrator"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_MIGRATION_URL: postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet
+      DATABASE_URL: postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -42,8 +58,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
       # TS-28: 100% branch on the calculation engine, 80% everywhere else.
       # Thresholds live in vitest.config.ts so a local run gates identically.
+      #
+      # Measured across all three suites, not unit alone. TS-30 says adapters
+      # are covered by integration tests exercising real behaviour rather than
+      # by chasing unit coverage on framework calls — but a unit-only
+      # measurement counts those files as zero, so following TS-30 correctly
+      # would have dragged the global figure under its own 80% floor. The two
+      # rules only agree if coverage sees the tests that actually exercise the
+      # code.
       - run: pnpm test:coverage
 
   integration:
