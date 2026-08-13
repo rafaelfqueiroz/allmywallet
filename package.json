@@ -13,6 +13,7 @@
     "start": "next start",
     "worker:dev": "tsx watch src/worker/index.ts",
     "worker": "tsx src/worker/index.ts",
+    "build:worker": "esbuild src/worker/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/worker.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
@@ -28,7 +29,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
-    "test:coverage:unit": "vitest run --project unit --coverage"
+    "test:coverage:unit": "vitest run --project unit --coverage",
+    "test:performance": "vitest run --project performance"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",
@@ -39,11 +41,13 @@
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tabs": "^1.1.13",
+    "@sentry/nextjs": "^10.70.0",
     "@tanstack/react-table": "^8.21.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "decimal.js": "^10.6.0",
+    "drizzle-orm": "^0.45.2",
     "exceljs": "^4.4.0",
     "lucide-react": "^1.31.0",
     "next": "^16.3.0",
@@ -60,6 +64,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.39.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4.3.3",
@@ -70,7 +75,7 @@
     "@types/react-dom": "^19.2.4",
     "@vitest/coverage-v8": "^4.1.10",
     "drizzle-kit": "^0.31.10",
-    "drizzle-orm": "^0.45.2",
+    "esbuild": "^0.28.2",
     "eslint": "^9.39.0",
     "eslint-config-next": "^16.3.0",
     "eslint-config-prettier": "^10.1.8",

@@ -254,6 +254,21 @@ export default tseslint.config(
           ],
         },
       ],
+      // SPEC-016 AR-44/BR-016-17 — TESTING §6's "static check: no string
+      // literals in components." Flags a JSX text node containing a letter
+      // (Latin or accented pt-BR), which is what next-intl's `t(...)` should
+      // have produced instead — whitespace-only text nodes (indentation
+      // between elements) are unaffected, and non-JSX string literals
+      // (`className`, `href`, config keys used as map lookups) are
+      // deliberately out of scope, since those are not user-facing prose.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXText[value=/[A-Za-zÀ-ÿ]/]',
+          message:
+            'AR-44: no string literals in components — route user-facing text through next-intl.',
+        },
+      ],
     },
   },
 

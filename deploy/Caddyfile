@@ -1,0 +1,44 @@
+# AR-56: Caddy terminates TLS and sets security headers. CSP is defined
+# explicitly here, not left to Caddy's (nonexistent) default — an unset CSP
+# is not "no policy", it is "browser default", which permits everything.
+#
+# {$DOMAIN} comes from the VPS's root-only .env (AR-43/SPEC-003 BR-003-09),
+# injected via docker-compose.yml's `env_file: [.env]` on the caddy service —
+# never hardcoded here, since this file is committed and the domain is not a
+# secret but also has no business being duplicated in source.
+{$DOMAIN} {
+	# Automatic TLS (Caddy's own ACME client) needs nothing else configured —
+	# this line's presence alone is what makes it happen.
+
+	encode zstd gzip
+
+	header {
+		# AR-56: CSP defined explicitly. `default-src 'self'` is the floor;
+		# `connect-src 'self'` is what lets the app call its own API/server
+		# actions from the browser without opening it up to third-party
+		# origins. No external script/style/font/image origin is
+		# whitelisted — SPEC-004 BR-004-04/AR-52 mean nothing here ever needs
+		# to load a third-party widget or SDK.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
+		# HSTS: once a browser has seen this over HTTPS, never fall back to
+		# plain HTTP for a year, subdomains included.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# AR-56 companions — the standard hardening set alongside CSP.
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+
+		# Next.js already sends this (`poweredByHeader: false` in
+		# next.config.ts) — removed again here in case a future change to
+		# that config regresses it without anyone noticing at the app layer.
+		-Server
+		-X-Powered-By
+	}
+
+	# ARCHITECTURE §2: `web` is the only container Caddy talks to directly —
+	# the worker has no HTTP surface, it consumes pg-boss jobs.
+	reverse_proxy web:3000
+}

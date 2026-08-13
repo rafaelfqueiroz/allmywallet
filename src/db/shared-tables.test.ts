@@ -16,10 +16,11 @@ import {
  */
 describe('shared table declaration', () => {
   it('pins the exempt list exactly, so growing it fails a test rather than passing quietly', () => {
-    // AR-15 names five; `runtime_state` was added by SPEC-002 under BR-003-06's
-    // "reviewed when added" clause — it holds a system-written cadence value and
-    // the reason for it, nothing derived from anyone's holdings. The reasoning
-    // lives in src/db/shared-tables.ts.
+    // AR-15 names five; `runtime_state` was added by SPEC-002 and
+    // `worker_heartbeats` by SPEC-016 (AR-50), both under BR-003-06's
+    // "reviewed when added" clause — each holds a system-written value and
+    // nothing derived from anyone's holdings. The reasoning for each lives in
+    // src/db/shared-tables.ts.
     //
     // This assertion is deliberately exact. Its whole value is that the next
     // person to widen the tenant-boundary exemption has to come here and say
@@ -32,6 +33,7 @@ describe('shared table declaration', () => {
       'price_quotes',
       'quote_budget_usage',
       'runtime_state',
+      'worker_heartbeats',
     ]);
   });
 

@@ -205,6 +205,34 @@ export const REGISTRY = {
     description: 'Feature flag for non-xlsx IngestionPort adapters, e.g. Open Finance (FR-4.5).',
     range: 'boolean',
   },
+  'alerts.queue_backlog_threshold': {
+    key: 'alerts.queue_backlog_threshold',
+    // SPEC-016 BR-016-13/BR-016-14: thresholds are config, not code. Read by
+    // src/worker/index.ts's dead-letter consumer.
+    schema: z.number().int().min(1),
+    default: 50,
+    levels: ['deployment'],
+    description:
+      'Pending jobs in the dead-letter queue that raise a background-job-backlog alert (BR-016-13).',
+    range: 'positive integer',
+  },
+  'observability.worker_heartbeat_interval_seconds': {
+    key: 'observability.worker_heartbeat_interval_seconds',
+    schema: z.number().int().min(5).max(3600),
+    default: 30,
+    levels: ['deployment'],
+    description: 'How often the worker writes its liveness heartbeat (AR-50).',
+    range: 'integer seconds, 5–3600',
+  },
+  'observability.worker_heartbeat_stale_seconds': {
+    key: 'observability.worker_heartbeat_stale_seconds',
+    schema: z.number().int().min(5).max(7200),
+    default: 120,
+    levels: ['deployment'],
+    description:
+      '/api/health reports the worker unhealthy once its heartbeat is older than this (AR-50).',
+    range: 'integer seconds, 5–7200',
+  },
 } as const satisfies Record<string, RegistryEntryDef>;
 
 export type ConfigKey = keyof typeof REGISTRY;

@@ -34,6 +34,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # SPEC-016 AR-50: `/api/health` — polled here so `docker compose up -d`
+    # (and deploy.yml's post-deploy check) can tell a container that started
+    # but never became ready from one that is actually serving traffic.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     mem_limit: 1000m
 
   # Same image, different command — the worker is a second entrypoint into the
@@ -53,6 +68,10 @@ services:
     image: caddy:2-alpine
     profiles: ['app']
     restart: unless-stopped
+    # AR-56: `{$DOMAIN}` in deploy/Caddyfile reads from here — the same
+    # root-only VPS .env every other service uses (AR-43), not a value
+    # duplicated into source.
+    env_file: [.env]
     ports:
       - '80:80'
       - '443:443'

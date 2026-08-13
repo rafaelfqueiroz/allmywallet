@@ -35,6 +35,10 @@ export const SHARED_TABLES: readonly string[] = [
   // issue's Modules table, which named only price_quotes/latest_quotes/
   // index_series.
   'quote_budget_usage',
+  // Added by SPEC-016 (AR-50): the worker's own liveness heartbeat — a
+  // process identity string and a timestamp, nothing derived from any
+  // tenant's data. Same "holds no personal data" test as `runtime_state`.
+  'worker_heartbeats',
 ];
 
 /**
