@@ -61,6 +61,14 @@ export async function startTestDatabase(): Promise<TestDatabase> {
  * against a bare container exercises the same two-role split production uses —
  * a table owner bypasses its own policies unless FORCE is set, and the whole
  * isolation gate is meaningless if tests connect as the owner.
+ *
+ * The password is set unconditionally, not only on creation, because the role
+ * legitimately arrives by two routes and only one of them supplies one.
+ * `0000_roles.sql` creates it with `LOGIN` and no password — correct, since a
+ * migration must never hardcode a credential — so whichever ran first used to
+ * win: Testcontainers locally (helper first, password set) versus a CI service
+ * container (migrations first, no password, then `28P01` on every connection).
+ * A test-only password applied every time makes the two orders agree.
  */
 async function ensureAppRole(migrationUrl: string, _appUrl: string): Promise<void> {
   const pool = new Pool({ connectionString: migrationUrl, max: 1 });
@@ -70,6 +78,8 @@ async function ensureAppRole(migrationUrl: string, _appUrl: string): Promise<voi
       BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
           CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOBYPASSRLS;
+        ELSE
+          ALTER ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}' NOBYPASSRLS;
         END IF;
       END
       $$;

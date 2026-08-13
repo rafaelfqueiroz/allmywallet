@@ -33,6 +33,11 @@ export const RLS_HARNESS_TABLE_PREFIX = '_rls_harness_';
  */
 export async function createRlsHarnessTable(migratorPool: Pool, name: string): Promise<string> {
   const table = `${RLS_HARNESS_TABLE_PREFIX}${name}`;
+  // TS-03: every test is independent. Dropping first matters only when the
+  // database outlives the run — a CI service container, or a crashed suite that
+  // never reached its teardown. With a fresh Testcontainer per file the
+  // collision is invisible, which is exactly why it reached CI.
+  await migratorPool.query(`DROP TABLE IF EXISTS ${table}`);
   await migratorPool.query(`
     CREATE TABLE ${table} (
       id uuid PRIMARY KEY,

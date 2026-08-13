@@ -17,7 +17,14 @@ const alias = { '@': fileURLToPath(new URL('./src', import.meta.url)) };
  */
 const testEnv = {
   NODE_ENV: 'test' as const,
+  // Defer to a real URL when the environment supplies one. Overriding it
+  // unconditionally poisons `startTestDatabase`'s reuse path: with a CI service
+  // container, `DATABASE_URL` is how the suite finds the real database, and
+  // replacing it with a placeholder pointed every integration and isolation
+  // test at a database that does not exist. The placeholder exists only to get
+  // past import-time validation where no database is involved at all.
   DATABASE_URL:
+    process.env.DATABASE_URL ??
     'postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet_unused_placeholder',
   AUTH_SECRET: 'vitest-placeholder-secret-not-a-real-secret-000',
   AUTH_GOOGLE_ID: 'vitest-placeholder-google-client-id',
