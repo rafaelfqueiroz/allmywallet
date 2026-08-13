@@ -120,9 +120,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # SPEC-001: src/auth.ts's requireAuthEnv() fails startup (AR-40/AR-41)
+      # if these are absent, and `next build` executes route module code
+      # while collecting page data for /signin — so the build needs
+      # syntactically valid values even though it never signs anyone in.
+      # Dummy, not secret: no real OAuth flow ever runs in this job.
       - run: pnpm build
         env:
           DATABASE_URL: postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet
+          AUTH_SECRET: ci-build-placeholder-secret-not-real-0000000
+          AUTH_GOOGLE_ID: ci-build-placeholder-google-client-id
+          AUTH_GOOGLE_SECRET: ci-build-placeholder-google-client-secret
 
   audit:
     name: Dependency vulnerabilities

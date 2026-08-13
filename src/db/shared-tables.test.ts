@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { INFRASTRUCTURE_TABLES, SHARED_TABLES, isSharedTable } from '@/db/shared-tables';
+import {
+  AUTH_SUBSTRATE_TABLES,
+  INFRASTRUCTURE_TABLES,
+  SHARED_TABLES,
+  isSharedTable,
+} from '@/db/shared-tables';
 
 /**
  * AR-15 / BR-003-06. The enumeration gate in `tests/isolation/` treats every
@@ -40,5 +45,47 @@ describe('shared table declaration', () => {
     for (const table of INFRASTRUCTURE_TABLES) {
       expect(isSharedTable(table)).toBe(true);
     }
+  });
+});
+
+/**
+ * SPEC-001 (#4): the auth substrate exemption is a *different* kind of
+ * declaration from BR-003-06 above — these tables are not reference data,
+ * they are the mechanism that determines tenant identity in the first place
+ * (see the long comment on `AUTH_SUBSTRATE_TABLES` in shared-tables.ts for
+ * why RLS cannot apply to them). Asserted separately so the two exemption
+ * reasons stay distinguishable in the test output, not just in a comment.
+ */
+describe('auth substrate declaration (SPEC-001 #4)', () => {
+  it('declares exactly the four Auth.js tables and no others', () => {
+    expect([...AUTH_SUBSTRATE_TABLES].sort()).toEqual([
+      'accounts',
+      'sessions',
+      'users',
+      'verification_tokens',
+    ]);
+  });
+
+  it('recognises every declared auth substrate table', () => {
+    for (const table of AUTH_SUBSTRATE_TABLES) {
+      expect(isSharedTable(table)).toBe(true);
+    }
+  });
+
+  it('does not conflate the auth substrate with the BR-003-06 reference tables', () => {
+    for (const table of AUTH_SUBSTRATE_TABLES) {
+      expect(SHARED_TABLES).not.toContain(table);
+    }
+  });
+});
+
+describe('isolation-test scratch tables', () => {
+  it('exempts nothing by name pattern — fixtures are the test suite’s problem', () => {
+    // The harness prefix is filtered inside tests/isolation/enumeration.test.ts
+    // instead. A production exemption keyed on a name pattern is a hole a real
+    // table can be walked through by naming it correctly, and this declaration
+    // is the one place in the codebase that must not have one.
+    expect(isSharedTable('_rls_harness_two_tenant')).toBe(false);
+    expect(isSharedTable('wallets_rls_harness_not_a_prefix')).toBe(false);
   });
 });
