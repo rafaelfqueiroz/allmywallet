@@ -5,4 +5,4 @@
  *
  * Each spec adds its own file and re-exports it from here.
  */
-export {};
+export * from './users';

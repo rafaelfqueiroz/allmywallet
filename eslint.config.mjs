@@ -197,6 +197,39 @@ export default tseslint.config(
   },
 
   // ---------------------------------------------------------------------------
+  // SPEC-001 BR-001-08 / SPEC-003 BR-003-04 — tenant identity comes from the
+  // authenticated session (src/lib/session.ts's requireUserId()) only. A
+  // user/tenant id read out of a request body, query string, params or
+  // header anywhere else is a security defect, not a style issue — this is
+  // the mechanical backstop for that rule, scoped to the layers that
+  // actually see request input (app/ and adapters/) and excluding
+  // session.ts itself, which is the one sanctioned place this pattern is
+  // allowed to appear (it reads `session.user.id`, not request input, but is
+  // excluded so the rule never has to special-case its own source).
+  // ---------------------------------------------------------------------------
+  {
+    files: ['src/app/**/*.{ts,tsx}', 'src/adapters/**/*.ts', 'src/worker/**/*.ts'],
+    ignores: ['src/lib/session.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            'MemberExpression[object.name=/^(body|params|query|input|searchParams|req|request)$/i][property.name=/^(userId|user_id)$/i]',
+          message:
+            'BR-001-08: tenant id must come from requireUserId() (src/lib/session.ts), never read directly from request input.',
+        },
+        {
+          selector:
+            'VariableDeclarator[init.name=/^(body|params|query|input|searchParams|req|request)$/i] Property[key.name=/^(userId|user_id)$/i]',
+          message:
+            'BR-001-08: tenant id must come from requireUserId() (src/lib/session.ts), never destructured from request input.',
+        },
+      ],
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // AR-35 / AR-44 — components hold no business logic and no string literals.
   // ---------------------------------------------------------------------------
   {

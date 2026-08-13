@@ -3,6 +3,14 @@
     "name": "AllMyWallet",
     "tagline": "Seus investimentos, em um só lugar"
   },
+  "auth": {
+    "signIn": {
+      "title": "Entrar no AllMyWallet",
+      "description": "Use sua conta Google para acessar seus investimentos.",
+      "googleButton": "Entrar com o Google",
+      "noRecoveryNotice": "Se você perder o acesso à sua conta Google, perderá o acesso ao AllMyWallet — não há recuperação de conta por outro meio."
+    }
+  },
   "nav": {
     "dashboard": "Painel",
     "transactions": "Transações",

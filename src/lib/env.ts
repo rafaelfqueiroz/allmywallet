@@ -18,6 +18,13 @@ const envSchema = z.object({
   /** Migrations only, as `allmywallet_migrator`. Absent at runtime by design. */
   DATABASE_MIGRATION_URL: z.string().url().optional(),
 
+  // Optional *here* deliberately: env.ts is imported by every process,
+  // including the worker (which never touches auth) and every test file
+  // (transitively, via src/db/client.ts) — making these required at this
+  // level would force every one of them to carry Google OAuth credentials
+  // just to boot. SPEC-001 does require them present wherever auth is
+  // actually used — src/auth.ts's `requireAuthEnv()` enforces that,
+  // narrowly, and fails startup there (AR-40/AR-41) rather than here.
   AUTH_SECRET: z.string().min(32).optional(),
   AUTH_GOOGLE_ID: z.string().optional(),
   AUTH_GOOGLE_SECRET: z.string().optional(),
