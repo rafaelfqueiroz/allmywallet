@@ -3,7 +3,8 @@ import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { db } from '@/db/client';
 import { validateConfigOrExit } from '@/config/validate';
-import { DEAD_LETTER_QUEUE, QUEUE_POLICIES, type QueueName } from '@/worker/queues';
+import { DEAD_LETTER_QUEUE, QUEUE_POLICIES } from '@/worker/queues';
+import { REGISTRATIONS, type JobHandler, type RegisteredWorker } from '@/worker/registrations';
 
 /**
  * The worker is a second entrypoint into the same image, not a separate service
@@ -13,23 +14,12 @@ import { DEAD_LETTER_QUEUE, QUEUE_POLICIES, type QueueName } from '@/worker/queu
  *
  * AR-16: **only the worker registers schedules.** The web process may enqueue,
  * never schedule or consume — that keeps cron ownership in exactly one place.
+ *
+ * The registration list itself — `REGISTRATIONS`, `JobHandler`,
+ * `RegisteredWorker` — lives in `./registrations.ts` and is re-exported here
+ * unchanged, so this file's public surface is exactly what it was before.
  */
-
-export type JobHandler<T extends object> = (payload: T) => Promise<void>;
-
-export interface RegisteredWorker {
-  readonly queue: QueueName;
-  readonly handler: JobHandler<never>;
-  /** AR-17: cron is registered with `tz: 'America/Sao_Paulo'` — market hours are local. */
-  readonly cron?: string;
-}
-
-/**
- * Each spec appends its worker registration here. Kept as a list rather than
- * scattered `boss.work` calls so the set of scheduled work is readable in one
- * place — which is what makes AR-16 checkable.
- */
-const REGISTRATIONS: readonly RegisteredWorker[] = [];
+export { REGISTRATIONS, type JobHandler, type RegisteredWorker };
 
 export async function startWorker(): Promise<PgBoss> {
   // AR-41: both entrypoints validate on boot. SPEC-002 BR-002-04 — an invalid

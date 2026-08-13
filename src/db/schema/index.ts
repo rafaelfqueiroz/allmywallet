@@ -10,3 +10,4 @@ export * from './config';
 export * from './assets';
 export * from './transactions';
 export * from './positions';
+export * from './market';

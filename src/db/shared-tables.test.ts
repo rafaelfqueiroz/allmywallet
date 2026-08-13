@@ -30,6 +30,7 @@ describe('shared table declaration', () => {
       'institutions',
       'latest_quotes',
       'price_quotes',
+      'quote_budget_usage',
       'runtime_state',
     ]);
   });

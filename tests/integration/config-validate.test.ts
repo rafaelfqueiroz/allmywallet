@@ -37,6 +37,15 @@ describe('SPEC-002 — startup validation (integration)', () => {
   }, 180_000);
 
   afterAll(async () => {
+    // TS-03, the symmetric half of the `beforeAll` reset above. This file
+    // deliberately leaves an invalid `quotes.cadence_minutes = 0` row in place
+    // for the subprocess test to find, and `config_overrides` at deployment
+    // level is global — so on a reused database (CI runs one Postgres for the
+    // whole suite) every file that resolves config afterwards would read it
+    // and throw. Whether that happens depends only on vitest's file ordering,
+    // which is why it surfaced as a flake rather than a consistent failure.
+    await resetConfigState(testDb.migrationUrl);
+
     // See the top-level note in config-resolve.test.ts's afterAll for why
     // this must close before `testDb.stop()`.
     await pool.end();
