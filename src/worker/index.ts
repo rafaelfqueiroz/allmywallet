@@ -1,6 +1,8 @@
 import { PgBoss, type Job } from 'pg-boss';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { db } from '@/db/client';
+import { validateConfigOrExit } from '@/config/validate';
 import { DEAD_LETTER_QUEUE, QUEUE_POLICIES, type QueueName } from '@/worker/queues';
 
 /**
@@ -30,6 +32,11 @@ export interface RegisteredWorker {
 const REGISTRATIONS: readonly RegisteredWorker[] = [];
 
 export async function startWorker(): Promise<PgBoss> {
+  // AR-41: both entrypoints validate on boot. SPEC-002 BR-002-04 — an invalid
+  // value must fail the worker's boot loudly, the same as it does web's
+  // (src/app/instrumentation.ts). A bad value must not start half the system.
+  await validateConfigOrExit(db);
+
   const boss = new PgBoss({
     connectionString: env().DATABASE_URL,
     schema: 'pgboss',

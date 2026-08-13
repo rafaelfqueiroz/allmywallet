@@ -15,6 +15,13 @@
       "when": 1786576092300,
       "tag": "0001_users_and_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786620124634,
+      "tag": "0002_config_layer",
+      "breakpoints": true
     }
   ]
 }
