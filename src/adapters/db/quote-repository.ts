@@ -1,17 +1,24 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import { latestQuotes, priceQuotes } from '@/db/schema/market';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
 import type { LatestQuote, PriceQuote, QuoteRepositoryPort } from '@/core/quotes/ports';
+import type { PriceHistoryPort } from '@/core/valuation/ports';
 
 /**
  * SPEC-008 BR-008-10 — the two tables below are queried and written
  * independently, on purpose: nothing in this class can make an intraday
  * write touch `price_quotes`, or a close-price write touch `latest_quotes`.
  * Both are shared reference tables (AR-15/BR-003-06); no `withTenant`.
+ *
+ * It also satisfies SPEC-009's `PriceHistoryPort` — the read side valuation
+ * needs. One class rather than two because the underlying tables are the same
+ * and a second adapter would only add a way for the two to disagree about
+ * what "the close" means; the ports stay separate so `core/valuation` depends
+ * on the two methods it uses rather than on the write surface it must not.
  */
-export class DrizzleQuoteRepository implements QuoteRepositoryPort {
+export class DrizzleQuoteRepository implements QuoteRepositoryPort, PriceHistoryPort {
   constructor(private readonly db: Database) {}
 
   async getLatestQuote(assetId: AssetId): Promise<LatestQuote | null> {
@@ -50,6 +57,47 @@ export class DrizzleQuoteRepository implements QuoteRepositoryPort {
       .from(priceQuotes)
       .where(and(eq(priceQuotes.assetId, assetId), eq(priceQuotes.date, date)));
     return row ? toPriceQuote(row) : null;
+  }
+
+  /**
+   * SPEC-009 BR-009-03 — the carry-forward lookup: the most recent close at
+   * or before `date`. Returns the row **with its own date**, which is what
+   * lets the caller say a price was carried forward instead of passing a
+   * stale figure off as the day's own.
+   */
+  async getCloseOnOrBefore(assetId: AssetId, date: BusinessDate): Promise<PriceQuote | null> {
+    const [row] = await this.db
+      .select()
+      .from(priceQuotes)
+      .where(and(eq(priceQuotes.assetId, assetId), lte(priceQuotes.date, date)))
+      .orderBy(desc(priceQuotes.date))
+      .limit(1);
+    return row ? toPriceQuote(row) : null;
+  }
+
+  /**
+   * SPEC-009 — every close in `[from, to]`, ascending. A snapshot rebuild
+   * covers years of dates; asking per date would be one query per asset per
+   * day. Paired with a single `getCloseOnOrBefore(asset, from)` anchor, this
+   * is the whole price history a rebuild needs, in two queries per asset.
+   */
+  async listCloses(
+    assetId: AssetId,
+    from: BusinessDate,
+    to: BusinessDate,
+  ): Promise<readonly PriceQuote[]> {
+    const rows = await this.db
+      .select()
+      .from(priceQuotes)
+      .where(
+        and(
+          eq(priceQuotes.assetId, assetId),
+          gte(priceQuotes.date, from),
+          lte(priceQuotes.date, to),
+        ),
+      )
+      .orderBy(asc(priceQuotes.date));
+    return rows.map(toPriceQuote);
   }
 
   /** BR-008-09: the official close supersedes the day's intraday quote in history — never a different day's row (the PK is `(asset_id, date)`). */

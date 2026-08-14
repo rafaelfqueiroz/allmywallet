@@ -16,6 +16,9 @@ import type { TesouroPricePoint, TesouroPriceProvider } from '@/core/quotes/port
  * — a string operation — before `Money.fromString`; the value never passes
  * through a JS `number`.
  *
+ * SPEC-009 BR-009-06 governs **which** column is read: `PU Venda Manhã`, the
+ * sell price. See the comment at the extraction site.
+ *
  * Expected columns (header row, semicolon-delimited):
  *   Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha
  */
@@ -94,6 +97,7 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     titulo: header.indexOf('Tipo Titulo'),
     vencimento: header.indexOf('Data Vencimento'),
     dataBase: header.indexOf('Data Base'),
+    puVenda: header.indexOf('PU Venda Manha'),
     puBase: header.indexOf('PU Base Manha'),
   };
 
@@ -104,9 +108,27 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     const titulo = cols[idx.titulo]?.trim();
     const vencimento = cols[idx.vencimento]?.trim();
     const dataBase = cols[idx.dataBase]?.trim();
+    /**
+     * SPEC-009 BR-009-06 / DL-009-04: **the sell price**, `PU Venda Manhã` —
+     * what the holder would actually realise. This column feeds
+     * `price_quotes`, which is the only price `core/valuation/tesouro.ts`
+     * ever sees, so the rule is enforced here or it is not enforced at all.
+     *
+     * Using `PU Base Manhã` (as this parser originally did, before SPEC-009
+     * existed to say otherwise) or `PU Compra Manhã` would overstate every
+     * Tesouro holding by roughly half the spread or the whole of it — small
+     * per title, in the same direction every day, across every position.
+     *
+     * `PU Base Manhã` remains the fallback for the real case the published
+     * file contains: a title no longer offered for redemption leaves the
+     * venda column blank. A stale-but-observed base price beats dropping the
+     * title and understating the portfolio silently (DL-009-05).
+     */
+    const puVenda = cols[idx.puVenda]?.trim();
     const puBase = cols[idx.puBase]?.trim();
-    if (!titulo || !vencimento || !dataBase || !puBase) continue;
-    rows.push({ ticker: `${titulo} ${vencimento}`, date: dataBase, price: puBase });
+    const price = puVenda || puBase;
+    if (!titulo || !vencimento || !dataBase || !price) continue;
+    rows.push({ ticker: `${titulo} ${vencimento}`, date: dataBase, price });
   }
   if (rows.length === 0) return [];
 
