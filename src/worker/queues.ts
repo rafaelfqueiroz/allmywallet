@@ -19,9 +19,9 @@ export const QUEUE = {
   BUDGET_CHECK: 'budget.check',
   // SPEC-004 BR-004-09/10: the scheduled half of self-service account
   // deletion — purges every account whose grace window has elapsed.
-  ACCOUNT_DELETION_SWEEP: 'account.deletion.sweep',
+  ACCOUNT_DELETION_SWEEP: 'account.deletion-sweep',
   // SPEC-004 BR-004-15: audit_log retention (`retention.audit_months`).
-  AUDIT_RETENTION_SWEEP: 'privacy.audit-retention.sweep',
+  AUDIT_RETENTION_SWEEP: 'privacy.audit-retention-sweep',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
