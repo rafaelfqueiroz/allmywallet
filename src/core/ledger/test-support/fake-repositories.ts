@@ -110,6 +110,17 @@ export class FakeTransactionRepository implements TransactionRepository {
     return highest + 1;
   }
 
+  async occurrenceCounts(naturalKeys: readonly string[]): Promise<ReadonlyMap<string, number>> {
+    const wanted = new Set(naturalKeys);
+    const counts = new Map<string, number>();
+    for (const row of this.#rows) {
+      if (!wanted.has(row.naturalKey)) continue;
+      const current = counts.get(row.naturalKey) ?? 0;
+      if (row.occurrence > current) counts.set(row.naturalKey, row.occurrence);
+    }
+    return counts;
+  }
+
   #toListItem(row: Transaction): TransactionListItem {
     const asset = this.#assets.get(row.assetId);
     return {

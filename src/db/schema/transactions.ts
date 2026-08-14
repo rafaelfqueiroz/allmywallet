@@ -4,6 +4,7 @@ import {
   date,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -26,13 +27,21 @@ import { TRANSACTION_STATUSES, TRANSACTION_TYPES } from '@/core/ledger/transacti
  * BR-006-02: provenance. Every transaction records the batch it came from, or
  * carries none and is a manual entry.
  *
- * SPEC-005 owns this table's real shape — file name, row counts, reconciliation
- * outcome, the preview/commit lifecycle. What is here is the minimum that makes
- * `transactions.import_batch_id` a genuine foreign key rather than a loose
- * uuid. Deliberately **no file name column**: it is the one field that could
- * carry personal data (users name exports after themselves), and SPEC-004
- * BR-004-02's CPF discipline is much easier to keep if the column arrives with
- * the spec that has thought about it.
+ * SPEC-005 (#8) owns this table's real shape and ALTERs it — see the four
+ * columns below `status`. `source` was SPEC-006's own column and SPEC-005
+ * reuses it as the extract-type discriminant rather than adding a second,
+ * redundant `extract_type` column the issue's first-read plan named: `source`
+ * already carries exactly `b3_movimentacao` / `b3_negociacao` / `b3_posicao`
+ * (plus `manual`, reserved), so a second column with materially the same
+ * values would only be one more place for the two to quietly disagree.
+ *
+ * Deliberately **still no file name column**, for the same reason SPEC-006
+ * left it out: it is the one field a user could plausibly have renamed after
+ * themselves (`extrato-joao-silva.xlsx`), and SPEC-004 BR-004-02's CPF
+ * discipline is easiest to keep by never having the field at all. The
+ * transient upload's storage path is derived deterministically from the
+ * batch id instead (`src/worker/handlers/import.ts`), so nothing about the
+ * original filename needs to be retained anywhere.
  */
 const IMPORT_SOURCES = ['b3_movimentacao', 'b3_negociacao', 'b3_posicao', 'manual'] as const;
 const IMPORT_STATUSES = ['pending', 'previewed', 'committed', 'discarded'] as const;
@@ -48,6 +57,19 @@ export const importBatches = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     source: text('source').notNull(),
     status: text('status').notNull().default('pending'),
+    /** BR-005-27: distinct from `created_at` in intent — "when the user's file arrived" for the freshness UI, not row bookkeeping. */
+    uploadedAt: timestamp('uploaded_at', { withTimezone: true }).notNull().defaultNow(),
+    /** BR-005-13/28: null until `commitBatch` succeeds — the freshness prompt reads this, not `uploadedAt`. */
+    committedAt: timestamp('committed_at', { withTimezone: true }),
+    /** BR-005-10: the preview summary (`ImportRowCounts`, AR-10-serialised). */
+    rowCounts: jsonb('row_counts').$type<Record<string, unknown> | null>(),
+    /**
+     * BR-005-22..26: the reconciliation report, `b3_posicao` batches only.
+     * Not in the issue's original column list — added deliberately alongside
+     * `row_counts` in this same migration; see the dispatch report's
+     * Decision log.
+     */
+    reconciliation: jsonb('reconciliation').$type<Record<string, unknown> | null>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

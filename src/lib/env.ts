@@ -31,6 +31,21 @@ const envSchema = z.object({
 
   SENTRY_DSN: z.string().optional(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+
+  /**
+   * SPEC-005 — where an uploaded extract's bytes live between `import.stage`
+   * and `import.commit`/`import.cancel` (BR-005-12/DL-005-07: deleted at
+   * either). A filesystem path rather than a SPEC-002 config key: it is
+   * infrastructure (which volume the two containers share), not an operator
+   * tunable like a cadence or a threshold, and changing it means a redeploy —
+   * exactly DEVELOPMENT.md's line for what belongs here instead of the
+   * registry. `web` and `worker` are two commands over the *same* image
+   * (ARCHITECTURE §2) sharing one Compose volume in production, so a plain
+   * path is enough; there is deliberately no filename in it (see
+   * `src/db/schema/transactions.ts`'s comment on why `import_batches` carries
+   * none) — files are named by `batchId` alone.
+   */
+  IMPORT_UPLOAD_DIR: z.string().default('.data/imports'),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -86,4 +86,14 @@ export interface TransactionRepository {
    * is what is unique and this returns the next free occurrence.
    */
   nextOccurrence(naturalKey: string): Promise<number>;
+
+  /**
+   * SPEC-005's bulk-import counterpart to `nextOccurrence`: one query for
+   * every natural key a staged batch touches, rather than one query per row.
+   * A key absent from the result has no existing occurrence at all (count 0)
+   * — `core/ingestion/occurrence.ts`'s `planOccurrences` treats a missing
+   * entry and an explicit 0 identically, so the repository is free to omit
+   * keys with no rows rather than return a sparse zero-filled map.
+   */
+  occurrenceCounts(naturalKeys: readonly string[]): Promise<ReadonlyMap<string, number>>;
 }

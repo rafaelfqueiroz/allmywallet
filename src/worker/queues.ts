@@ -12,6 +12,7 @@ export const QUEUE = {
   QUOTES_CLOSE_CAPTURE: 'quotes.close-capture',
   TESOURO_SYNC: 'tesouro.sync',
   BCB_SYNC: 'bcb.sync',
+  IMPORT_STAGE: 'import.stage',
   IMPORT_COMMIT: 'import.commit',
   VALUATION_SNAPSHOT: 'valuation.snapshot',
   FIXEDINCOME_ACCRUE: 'fixedincome.accrue',
@@ -49,6 +50,15 @@ export const QUEUE_POLICIES: Readonly<Record<QueueName, QueuePolicy>> = {
   [QUEUE.QUOTES_CLOSE_CAPTURE]: { ...DEFAULT_POLICY, retryLimit: 5, retryDelaySeconds: 120 },
   [QUEUE.TESOURO_SYNC]: { ...DEFAULT_POLICY, retryLimit: 3, retryDelaySeconds: 300 },
   [QUEUE.BCB_SYNC]: { ...DEFAULT_POLICY, retryLimit: 3, retryDelaySeconds: 300 },
+  // Parsing a 10.000-row extract is the other half of BR-005-13's 60s
+  // budget and the reason AR-53 keeps it out of the web process at all — one
+  // retry, generous expiry, same reasoning as IMPORT_COMMIT below.
+  [QUEUE.IMPORT_STAGE]: {
+    ...DEFAULT_POLICY,
+    retryLimit: 1,
+    retryDelaySeconds: 60,
+    expireInSeconds: 1800,
+  },
   // A 10,000-row commit can exceed any request timeout, which is why it is a
   // job at all. It gets an hour and one retry — a second failure is a defect,
   // not a blip, and the user is waiting for an answer either way.

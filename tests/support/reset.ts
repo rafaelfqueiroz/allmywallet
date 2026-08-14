@@ -57,6 +57,8 @@ export async function resetUsers(migrationUrl: string): Promise<void> {
 const LEDGER_TABLES = [
   'positions',
   'transactions',
+  'import_rows',
+  'fixed_income_contracts',
   'import_batches',
   'assets',
   'institutions',

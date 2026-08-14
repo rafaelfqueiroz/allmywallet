@@ -148,6 +148,25 @@ export class DrizzleTransactionRepository implements TransactionRepository {
     return (row?.highest ?? 0) + 1;
   }
 
+  /**
+   * SPEC-005's bulk-import counterpart to `nextOccurrence`: one grouped query
+   * for every natural key a staged batch touches (typically thousands), so a
+   * 10.000-row commit is not 10.000 round trips (BR-005-13's 60s budget).
+   * `max(occurrence)` doubles as the existing *count* only because occurrence
+   * assignment is always sequential from 1 with no gaps — every writer
+   * (`createTransaction`, this repository's own `insert`) goes through
+   * `nextOccurrence`/`occurrenceCounts`, never a hand-picked number.
+   */
+  async occurrenceCounts(naturalKeys: readonly string[]): Promise<ReadonlyMap<string, number>> {
+    if (naturalKeys.length === 0) return new Map();
+    const rows = await this.tx
+      .select({ naturalKey: transactions.naturalKey, highest: max(transactions.occurrence) })
+      .from(transactions)
+      .where(inArray(transactions.naturalKey, [...naturalKeys]))
+      .groupBy(transactions.naturalKey);
+    return new Map(rows.map((row) => [row.naturalKey, row.highest ?? 0]));
+  }
+
   private baseQuery(where: SQL | undefined) {
     return (
       this.tx

@@ -15,6 +15,7 @@ import type {
 import { computeSnapshots, earliestTradeDate, persistSnapshots } from '@/core/valuation/snapshot';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
+import { DrizzleFixedIncomeContractReader } from '@/adapters/db/fixed-income-contract-repository';
 import { DrizzleIndexSeriesRepository } from '@/adapters/db/index-series-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
@@ -48,30 +49,23 @@ export interface ValuationHandlerDeps {
   readonly prices: PriceHistoryPort;
   readonly indexSeries: IndexSeriesReaderPort;
   /**
-   * SPEC-005 (#8) owns `fixed_income_contracts` and the table does not exist
-   * yet, so there is no Drizzle adapter to default to. Until it lands, the
-   * default answers "no contract", which BR-009-13 already has a defined
-   * behaviour for: the position is valued at cost and flagged for the
-   * "Needs attention" queue rather than dropped. Tests inject a fake.
+   * SPEC-005 (#8) owns `fixed_income_contracts`. Left `undefined` here on
+   * purpose rather than defaulted eagerly in `resolveDeps`: the real adapter
+   * (`DrizzleFixedIncomeContractReader`) must be tenant-scoped per lookup
+   * (`fixed_income_contracts` is `FORCE`d RLS), and `resolveDeps` builds one
+   * `deps` object shared across every tenant in the run — there is no single
+   * `userId` to construct it with at that point. `rebuildTenant` below
+   * constructs the real, per-tenant instance when this is left unset; tests
+   * inject a fake here directly, tenant-agnostic, which is what every
+   * existing SPEC-009 test already does and is untouched by this change.
    */
-  readonly contracts: FixedIncomeContractPort;
+  readonly contracts?: FixedIncomeContractPort | undefined;
   /** Built per tenant, inside `withTenant` — hence a factory, not an instance. */
   readonly snapshotsFor: (tx: Tx, userId: UserId) => SnapshotRepositoryPort;
   readonly transactionsFor: (
     tx: Tx,
     userId: UserId,
   ) => { listAll(): Promise<readonly Transaction[]> };
-}
-
-/**
- * BR-009-13: the placeholder for SPEC-005's contract store. Named rather than
- * an inline lambda so a `grep` for the unimplemented seam finds it, and so the
- * log below can say which tenants were valued without one.
- */
-export class NoContractStore implements FixedIncomeContractPort {
-  async findByAssetId(): Promise<null> {
-    return null;
-  }
 }
 
 function resolveDeps(overrides?: Partial<ValuationHandlerDeps>): ValuationHandlerDeps {
@@ -82,7 +76,12 @@ function resolveDeps(overrides?: Partial<ValuationHandlerDeps>): ValuationHandle
     calendar: overrides?.calendar ?? new B3TradingCalendar(),
     prices: overrides?.prices ?? new DrizzleQuoteRepository(database),
     indexSeries: overrides?.indexSeries ?? new DrizzleIndexSeriesRepository(database),
-    contracts: overrides?.contracts ?? new NoContractStore(),
+    // BR-009-13: left unset when not overridden — `rebuildTenant` constructs
+    // the real, tenant-scoped `DrizzleFixedIncomeContractReader` per tenant.
+    // A position with no contract still values honestly either way (at cost,
+    // flagged for "Needs attention"): that behaviour lives in
+    // `core/valuation/snapshot.ts` and does not change with this wiring.
+    contracts: overrides?.contracts,
     snapshotsFor:
       overrides?.snapshotsFor ??
       ((tx, userId) => new DrizzleValuationSnapshotRepository(tx, userId)),
@@ -150,15 +149,19 @@ async function rebuildTenant(
       : requestedFrom;
   if (BusinessDate.isAfter(from, today)) return 0;
 
-  // 2. Compute with **no transaction open**. Every table this reads is shared
-  //    reference data (AR-15) and needs no tenant context; holding the tenant
-  //    connection across it would deadlock a single-connection pool and hold a
-  //    transaction open across unrelated work on any other.
+  // 2. Compute with **no transaction open** for the shared reference tables
+  //    (AR-15) this also reads — holding the tenant connection across a
+  //    potentially multi-year computation would tie up a pooled connection
+  //    for no reason. `fixed_income_contracts` is the one exception:
+  //    tenant-scoped and FORCE-RLS'd, so `DrizzleFixedIncomeContractReader`
+  //    opens its own short `withTenant` per lookup rather than needing one
+  //    held open around the whole computation (see that class's own comment).
+  const contracts = deps.contracts ?? new DrizzleFixedIncomeContractReader(deps.database, userId);
   const computed = await computeSnapshots(
     {
       calendar: deps.calendar,
       prices: deps.prices,
-      contracts: deps.contracts,
+      contracts,
       indexSeries: deps.indexSeries,
       assets: new DrizzleAssetCatalogRepository(deps.database),
     },
