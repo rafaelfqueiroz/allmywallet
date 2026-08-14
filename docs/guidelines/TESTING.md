@@ -36,8 +36,10 @@ Tooling: **Vitest** everywhere except E2E, which is **Playwright**.
 |---|---|
 | **TS-01** | Domain and use-case tests never touch a database. If a test needs one to exercise a domain rule, the layering is wrong (AR-01). |
 | **TS-02** | Fakes implement the real port interface. No mocking libraries for ports — a hand-written fake stays honest when the interface changes; a mock silently does not. |
-| **TS-03** | Every test is independent and order-agnostic. Integration tests get a fresh schema or a transaction rolled back at teardown. |
+| **TS-03** | Every test is independent and order-agnostic **against a reused database**. CI runs every suite file against one shared Postgres, so a file inherits whatever the previous file left behind. Each file cleans the rows it touches in **both** `beforeAll` and `afterAll` — the `beforeAll` half protects this file from its predecessors, the `afterAll` half protects its successors from it, and a file that only does the first is a file that breaks whichever suite happens to run after it. |
 | **TS-04** | No test asserts on the implementation's own output as its expectation. Expected values are computed by hand or taken from an external authority. |
+| **TS-33** | Local verification runs each suite **twice against the same database**, and results must be byte-identical. Per-file Testcontainers hide exactly the class of bug CI's shared Postgres finds, because a fresh container makes every file look independent whether or not it is. |
+| **TS-34** | Global, non-tenant rows are the ones that leak between files — deployment-level config overrides, runtime state, shared reference data. Tenant rows are naturally scoped by a per-file tenant id; a deployment-level config override is not scoped by anything, and one left behind silently changes another file's behaviour rather than failing it. |
 
 ## 3. Testing the calculation engine
 
