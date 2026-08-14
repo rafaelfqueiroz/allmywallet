@@ -19,6 +19,22 @@ import type { AccountDeletionStatus } from '@/core/privacy/ports';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * A `Pick`, not the full `PrivacyDependencies` bundle: unlike `consent.ts`
+ * and `export-user-data.ts`, this module's functions run **outside** any
+ * single tenant's `withTenant` transaction — `purgeDueAccounts` iterates
+ * across every account whose window has elapsed, which is precisely the
+ * cross-tenant shape `consents`/`exportData` (both `FORCE`-RLS'd,
+ * tenant-transaction-scoped ports) cannot be constructed for. Requiring only
+ * what this module actually uses is what lets
+ * `src/worker/handlers/account-deletion.ts` wire it up with a plain
+ * `Database` handle and no tenant context at all.
+ */
+export type AccountDeletionDependencies = Pick<
+  PrivacyDependencies,
+  'accountDeletion' | 'auditLog' | 'notifications' | 'clock'
+>;
+
 export interface RequestAccountDeletionInput {
   readonly deletionWindowDays: number;
 }
@@ -36,7 +52,7 @@ export interface RequestAccountDeletionOutcome {
  * `src/worker/handlers/account-deletion.ts`'s scheduled sweep.
  */
 export async function requestAccountDeletion(
-  deps: PrivacyDependencies,
+  deps: AccountDeletionDependencies,
   userId: UserId,
   input: RequestAccountDeletionInput,
 ): Promise<Result<RequestAccountDeletionOutcome, DomainError>> {
@@ -73,7 +89,7 @@ export async function requestAccountDeletion(
 }
 
 export async function getAccountDeletionStatus(
-  deps: PrivacyDependencies,
+  deps: AccountDeletionDependencies,
   userId: UserId,
 ): Promise<AccountDeletionStatus | null> {
   return deps.accountDeletion.findStatus(userId);
@@ -104,7 +120,7 @@ export interface PurgeAccountsOutcome {
  * account after the one that failed.
  */
 export async function purgeDueAccounts(
-  deps: PrivacyDependencies,
+  deps: AccountDeletionDependencies,
   asOf: Date,
   deletionWindowDays: number,
 ): Promise<PurgeAccountsOutcome> {
