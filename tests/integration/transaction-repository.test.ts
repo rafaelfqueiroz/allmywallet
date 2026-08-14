@@ -78,7 +78,12 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
     // reference data that other tests share.
     const pool = new Pool({ connectionString: testDb.migrationUrl, max: 1 });
     try {
-      await pool.query('TRUNCATE positions, transactions RESTART IDENTITY');
+      // CASCADE: SPEC-005's `import_rows.transaction_id` references
+      // `transactions.id`, so a plain TRUNCATE of `transactions` alone fails
+      // once that table exists — cascading here only ever reaches
+      // `import_rows` (empty in every test in this file, which never
+      // exercises SPEC-005) plus `positions`, already named explicitly.
+      await pool.query('TRUNCATE positions, transactions RESTART IDENTITY CASCADE');
     } finally {
       await pool.end();
     }

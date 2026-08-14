@@ -22,6 +22,8 @@ export type TransactionId = Branded<string, 'TransactionId'>;
 export type PositionId = Branded<string, 'PositionId'>;
 export type ImportBatchId = Branded<string, 'ImportBatchId'>;
 export type InstitutionId = Branded<string, 'InstitutionId'>;
+export type ImportRowId = Branded<string, 'ImportRowId'>;
+export type FixedIncomeContractId = Branded<string, 'FixedIncomeContractId'>;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -73,4 +75,15 @@ export const ImportBatchId = {
 export const InstitutionId = {
   of: (value: string): InstitutionId => brandId<InstitutionId>(value, 'InstitutionId'),
   generate: (): InstitutionId => uuidv7() as InstitutionId,
+};
+
+export const ImportRowId = {
+  of: (value: string): ImportRowId => brandId<ImportRowId>(value, 'ImportRowId'),
+  generate: (): ImportRowId => uuidv7() as ImportRowId,
+};
+
+export const FixedIncomeContractId = {
+  of: (value: string): FixedIncomeContractId =>
+    brandId<FixedIncomeContractId>(value, 'FixedIncomeContractId'),
+  generate: (): FixedIncomeContractId => uuidv7() as FixedIncomeContractId,
 };

@@ -4,6 +4,7 @@ import { handleTesouroSync } from '@/worker/handlers/tesouro';
 import { handleBcbSync } from '@/worker/handlers/bcb';
 import { handleBudgetCheck } from '@/worker/handlers/budget';
 import { handleFixedIncomeAccrue, handleValuationSnapshot } from '@/worker/handlers/valuation';
+import { handleImportCommit, handleImportStage } from '@/worker/handlers/import';
 
 /**
  * Split out of `src/worker/index.ts` so this list — pure data plus handler
@@ -63,6 +64,23 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
     queue: QUEUE.BUDGET_CHECK,
     handler: handleBudgetCheck,
     cron: '*/15 * * * *',
+  },
+  /**
+   * SPEC-005 — no `cron`, deliberately. Both are enqueued on demand
+   * (`boss.send`) by a server action under `src/app/(app)/import/` the
+   * moment a user uploads a file or confirms a preview; there is no
+   * schedule for "a user just did something" to fire on. AR-16 still holds:
+   * the *worker* is what consumes them, and nothing about registering a
+   * queue with no cron changes that only the worker ever calls
+   * `boss.work`.
+   */
+  {
+    queue: QUEUE.IMPORT_STAGE,
+    handler: handleImportStage,
+  },
+  {
+    queue: QUEUE.IMPORT_COMMIT,
+    handler: handleImportCommit,
   },
   /**
    * SPEC-009 BR-009-14/16. Both run once daily and both are ordered *after*

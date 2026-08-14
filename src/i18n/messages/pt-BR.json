@@ -15,6 +15,7 @@
     "dashboard": "Painel",
     "transactions": "Transações",
     "wallets": "Carteiras",
+    "import": "Importar",
     "reports": "Relatórios",
     "settings": "Configurações"
   },
@@ -45,7 +46,18 @@
     "INVALID_RATIO": "A proporção {ratio} precisa ser maior que zero.",
     "FUTURE_TRADE_DATE": "A data {tradeDate} está no futuro. O extrato registra apenas operações já realizadas.",
     "EMPTY_SELECTION": "Selecione ao menos uma transação.",
-    "INVALID_PAGINATION": "Não foi possível carregar esta página da lista."
+    "INVALID_PAGINATION": "Não foi possível carregar esta página da lista.",
+    "IMPORT_BATCH_NOT_FOUND": "Esta importação não existe mais.",
+    "IMPORT_BATCH_NOT_PENDING": "Este arquivo já foi processado.",
+    "IMPORT_BATCH_NOT_PREVIEWED": "Revise a prévia antes de confirmar a importação.",
+    "IMPORT_BATCH_NOT_CANCELLABLE": "Esta importação já foi confirmada ou cancelada.",
+    "IMPORT_EMPTY_EXTRACT": "O arquivo não contém nenhuma linha reconhecível.",
+    "IMPORT_ROW_NOT_FOUND": "Este item não existe mais.",
+    "IMPORT_ROW_NOT_UNCLASSIFIED": "Este item já foi classificado.",
+    "INGESTION_UNRECOGNIZED_STRUCTURE": "Não reconhecemos a estrutura deste arquivo. Confira se é um extrato de Movimentação, Negociação ou Posição exportado da B3.",
+    "INGESTION_AMBIGUOUS_STRUCTURE": "Este arquivo corresponde a mais de um tipo de extrato — não foi possível decidir automaticamente.",
+    "INGESTION_FILE_TOO_LARGE": "O arquivo excede o tamanho máximo permitido.",
+    "INGESTION_UNREADABLE_FILE": "Não conseguimos abrir este arquivo. Confira se é um .xlsx ou .xls válido."
   },
   "vocabulary": {
     "patrimonio": "Patrimônio",
@@ -140,5 +152,74 @@
     "allocationsEmpty": "Nenhum ativo atribuído a esta carteira ainda.",
     "editTitle": "Editar carteira",
     "save": "Salvar alterações"
+  },
+  "import": {
+    "title": "Importar extratos B3",
+    "description": "Envie os extratos exportados da Área do Investidor da B3 — Movimentação, Negociação e Posição — para atualizar sua carteira.",
+    "signedOut": "Entre na sua conta para importar extratos.",
+    "uploadTitle": "Enviar um arquivo",
+    "uploadHint": "Envie os arquivos em qualquer ordem, um de cada vez. O tipo é identificado automaticamente pela estrutura do arquivo, não pelo nome.",
+    "fileLabel": "Arquivo (.xlsx ou .xls)",
+    "upload": "Enviar",
+    "historyTitle": "Importações anteriores",
+    "historyEmpty": "Nenhum arquivo importado ainda.",
+    "viewDetails": "Ver detalhes",
+    "uploadedAt": "Enviado em {date}",
+    "commit": "Confirmar importação",
+    "cancel": "Cancelar importação",
+    "countRead": "Linhas lidas",
+    "countNew": "Novas",
+    "countDuplicates": "Duplicadas",
+    "countNeedsAttention": "Precisam de atenção",
+    "needsAttentionTitle": "Precisa de atenção",
+    "needsAttentionEmpty": "Nada esperando classificação nesta importação.",
+    "classifyLabel": "Classificar como",
+    "classifySubmit": "Classificar",
+    "reconciliationTitle": "Reconciliação com a posição da B3",
+    "reconciliationStatus": {
+      "reconciled": "Sem divergências",
+      "discrepancies_found": "Divergências encontradas"
+    },
+    "columnAsset": "Ativo",
+    "columnComputed": "Calculado",
+    "columnB3": "B3",
+    "columnDifference": "Diferença",
+    "columnCause": "Causa provável",
+    "discrepancyCause": {
+      "missing_history_before_import_range": "Histórico anterior ao período importado está faltando",
+      "unclassified_rows_affecting_asset": "Há linhas não classificadas afetando este ativo",
+      "uncaptured_corporate_event": "Possível evento societário não registrado",
+      "undetermined": "Não foi possível determinar a causa"
+    },
+    "acceptAdjustment": "Aceitar valor da B3",
+    "resolved": "Ajustado",
+    "rowsCount": "{count} linha(s) nesta importação",
+    "extractType": {
+      "b3_movimentacao": "Movimentação",
+      "b3_negociacao": "Negociação",
+      "b3_posicao": "Posição",
+      "manual": "Manual"
+    },
+    "status": {
+      "pending": "Enviado, processando",
+      "previewed": "Aguardando confirmação",
+      "committed": "Importado",
+      "discarded": "Cancelado"
+    },
+    "transactionType": {
+      "buy": "Compra",
+      "sell": "Venda",
+      "dividend": "Dividendo",
+      "jcp": "Juros sobre capital próprio",
+      "rendimento": "Rendimento",
+      "amortization": "Amortização",
+      "split": "Desdobramento",
+      "grupamento": "Grupamento",
+      "bonificacao": "Bonificação",
+      "subscription": "Subscrição",
+      "transfer_in": "Transferência de entrada",
+      "transfer_out": "Transferência de saída",
+      "adjustment": "Ajuste"
+    }
   }
 }
