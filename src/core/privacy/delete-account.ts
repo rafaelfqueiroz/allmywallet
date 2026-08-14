@@ -36,6 +36,17 @@ export type AccountDeletionDependencies = Pick<
 >;
 
 export interface RequestAccountDeletionInput {
+  /**
+   * The window in force *at request time* — used only to compute the
+   * `purgeAt` shown back to the user and written to the audit entry below.
+   * It is not stored per-account: `retention.deletion_window_days` is a
+   * single deployment-level config key (SPEC-002), so `purgeDueAccounts`
+   * later sweeps every pending account against whatever window is current
+   * *then*, not the one quoted at request time. A deployment lowering the
+   * window after a request landed purges that account sooner than it was
+   * told — matching BR-004-09's "within the configured window" (a live
+   * property of the deployment), not a promise frozen at request time.
+   */
   readonly deletionWindowDays: number;
 }
 
