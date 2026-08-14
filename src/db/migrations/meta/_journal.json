@@ -50,6 +50,13 @@
       "when": 1786658646134,
       "tag": "0006_pgboss_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786693488099,
+      "tag": "0007_wallets",
+      "breakpoints": true
     }
   ]
 }
