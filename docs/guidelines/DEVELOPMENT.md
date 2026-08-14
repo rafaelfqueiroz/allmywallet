@@ -192,6 +192,20 @@ build image  →  push to GHCR  →  SSH to VPS
 | **DV-27** | Schema changes are **expand/contract**: add the new column, deploy code using both, backfill, drop the old one in a later release. Never a breaking change in a single deploy. |
 | **DV-28** | Deploy secrets (SSH key, registry token) live in GitHub Actions secrets. Runtime secrets live in the VPS `.env`, never in CI. |
 
+#### Deploy is gated until the VPS exists
+
+**There is no deploy target yet.** No VPS is provisioned and the `production` environment holds none of the four secrets the deploy needs, so the `deploy` job is gated behind a `preflight` job and skips.
+
+`build-image` still runs on every push — it is the only check that proves the Dockerfile still builds, which is worth having long before there is anywhere to send the image.
+
+**To turn deploys on**, in this order:
+
+1. Provision the VPS and lay down `/srv/allmywallet` with its Compose file and root-only `.env`.
+2. Add `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY` and `APP_HOST` to the repository's **`production` environment** (not repository-level secrets — the deploy job reads them through that environment).
+3. Set the repository **variable** `DEPLOY_ENABLED` to `true`.
+
+The variable is separate from the secrets on purpose. While it is unset, a missing secret is the expected state and the deploy skips quietly. Once it is set, a missing secret is a genuine fault and `preflight` **fails loudly** rather than skipping — because once a production box exists, a silently skipped deploy is worse than a failed one.
+
 ### Nightly — `nightly.yml`
 
 Performance budgets against the seeded reference workload (SPEC-016, amended to advisory). Regressions raise an alert; they do not block merges.
