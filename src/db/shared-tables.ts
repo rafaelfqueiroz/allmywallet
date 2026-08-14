@@ -55,11 +55,23 @@ export const SHARED_TABLES: readonly string[] = [
  * user-level config key, `previous_value` and `new_value` are that user's own
  * preferences (BR-002-07), so the table does hold tenant data even though it
  * has no `user_id` column to scope by. Today nothing tenant-facing queries it,
- * which is the actual mitigation. Two consequences belong to SPEC-004 (#7) and
- * are raised on that issue rather than settled here: retention
- * (`retention.audit_months`, BR-004-15) and whether a deleted account's audit
- * rows are purged, anonymised or kept — which cannot be answered by a table
- * with no foreign key to `users`.
+ * which is the actual mitigation.
+ *
+ * SPEC-004 (#7) RESOLVED the two consequences this comment used to defer:
+ *
+ * - **Retention**: `retention.audit_months` (SPEC-002 registry, default 12,
+ *   range 1–120) bounds how long a row lives; a daily worker sweep
+ *   (`src/worker/handlers/account-deletion.ts`'s `handleAuditRetentionSweep`)
+ *   purges rows older than that.
+ * - **Purged, anonymised, or kept when the account is deleted?** — **kept**.
+ *   `src/db/schema/config.ts`'s `auditLog` now carries a nullable, plain
+ *   (non-foreign-key) `user_id` column, so it *can* be scoped by user for a
+ *   query, but that column carries no `ON DELETE CASCADE` — a deleted
+ *   account's audit history outlives the account on purpose, which is the
+ *   entire point of BR-004-17's operator-access record. See the long comment
+ *   on `auditLog` itself for the full reasoning, including why this table
+ *   stays off `tests/isolation/deletion-cascade.test.ts`'s cascade check by
+ *   the same declared-exempt mechanism as the rest of this file.
  */
 export const AUDIT_TABLES: readonly string[] = ['audit_log'];
 
