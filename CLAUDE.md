@@ -98,7 +98,7 @@ Git commits and pushes, wiki edits, board and issue updates, the issue's **Decis
 
 ## Rules that cause damage if broken
 
-The full set is [70 `AR-`, 30 `DV-`, 32 `TS-` rules](docs/guidelines/README.md). These are the ones where a violation is expensive or impossible to undo.
+The full set is [70 `AR-`, 30 `DV-`, 34 `TS-` rules](docs/guidelines/README.md). These are the ones where a violation is expensive or impossible to undo.
 
 1. **`core/` imports no framework** (AR-01) — nothing from `next/*`, `drizzle-orm`, `pg`, or `adapters/`. Enforced by ESLint `import/no-restricted-paths`, not by discipline. It is what keeps the calculation engine testable without a database.
 2. **Money is never a JS `number`** (AR-06–AR-10) — `decimal.js` over `NUMERIC(20,8)`. A float reaching a money field corrupts data silently and permanently. The hazards are the JSON boundaries: pg-boss payloads and server-action return values.
