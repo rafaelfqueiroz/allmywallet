@@ -202,8 +202,16 @@ export interface AccountDeletionPort {
   /** BR-004-09: access is revoked immediately — every session row for this user is deleted. */
   revokeSessions(userId: UserId): Promise<void>;
   markDeletionRequested(userId: UserId, requestedAt: Date): Promise<void>;
-  /** Every account whose grace window has elapsed as of `asOf` — the scheduled sweep's input. */
-  findDueForPurge(asOf: Date): Promise<readonly UserId[]>;
+  /**
+   * Every account whose deletion was requested at or before `cutoff` —
+   * `purgeDueAccounts` computes `cutoff = asOf - deletionWindowDays` and
+   * passes it in already resolved, so the adapter is a single comparison
+   * (`deletedAt <= cutoff`) against `users.deletedAt`
+   * (SPEC-001's "deletion requested" marker, reused rather than duplicated —
+   * see that column's own comment in `src/db/schema/users.ts`) with no
+   * config or date-math knowledge of its own.
+   */
+  findDueForPurge(cutoff: Date): Promise<readonly UserId[]>;
   /** Irreversible. Deletes the `users` row; every tenant table cascades (AR-27). */
   purgeUser(userId: UserId): Promise<void>;
 }

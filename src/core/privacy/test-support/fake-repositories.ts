@@ -117,10 +117,10 @@ export class FakeAccountDeletionPort implements AccountDeletionPort {
     this.#statuses.set(userId, { userId, deletionRequestedAt: requestedAt });
   }
 
-  async findDueForPurge(asOf: Date): Promise<readonly UserId[]> {
+  async findDueForPurge(cutoff: Date): Promise<readonly UserId[]> {
     return [...this.#statuses.values()]
       .filter(
-        (status) => status.deletionRequestedAt !== null && status.deletionRequestedAt <= asOf,
+        (status) => status.deletionRequestedAt !== null && status.deletionRequestedAt <= cutoff,
       )
       .map((status) => status.userId);
   }
