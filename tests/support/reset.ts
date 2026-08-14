@@ -70,3 +70,20 @@ export async function resetLedger(migrationUrl: string): Promise<void> {
     await pool.end();
   }
 }
+
+/**
+ * SPEC-010's three tables. `wallet_allocations` and `wallet_asset_rules`
+ * cascade from `wallets` (and from `users` via `resetUsers`), but truncating
+ * them explicitly lets a suite reset wallets alone without disturbing another
+ * file's ledger fixtures on the shared CI database (TS-03).
+ */
+const WALLET_TABLES = ['wallet_allocations', 'wallet_asset_rules', 'wallets'] as const;
+
+export async function resetWallets(migrationUrl: string): Promise<void> {
+  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
+  try {
+    await pool.query(`TRUNCATE ${WALLET_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+  } finally {
+    await pool.end();
+  }
+}
