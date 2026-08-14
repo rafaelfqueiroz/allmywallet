@@ -172,6 +172,82 @@ describe('setConfigValue — early-exit branches never touch the database', () =
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('CONFIG_LEVEL_NOT_PERMITTED');
   });
+
+  /**
+   * SPEC-004 AC: "Retention windows are configurable within a validated
+   * lawful range and cannot be set to an unlawful value (SPEC-002,
+   * BR-002-04)." The registry entries themselves (`src/config/registry.ts`)
+   * already carry the range — DL-002-04 fixes `retention.deletion_window_days`
+   * at 7–365 specifically so it can never reach 0 (immediate, unrecoverable
+   * deletion) or run past a year — this proves the write path actually
+   * enforces it, the same way `quotes.cadence_minutes = 0` is proven above.
+   */
+  it('BR-004-15/AC: retention.audit_months rejects 0 and 121 — the 1–120 lawful range', async () => {
+    const tooLow = await setConfigValue(poisonTx(), {
+      key: 'retention.audit_months',
+      level: 'deployment',
+      value: 0,
+      actor: operator,
+    });
+    expect(tooLow.ok).toBe(false);
+    if (!tooLow.ok) expect(tooLow.error.code).toBe('CONFIG_INVALID_VALUE');
+
+    const tooHigh = await setConfigValue(poisonTx(), {
+      key: 'retention.audit_months',
+      level: 'deployment',
+      value: 121,
+      actor: operator,
+    });
+    expect(tooHigh.ok).toBe(false);
+  });
+
+  it('BR-004-09/AC: retention.deletion_window_days rejects 0 (immediate deletion) and 366 (over a year)', async () => {
+    const zero = await setConfigValue(poisonTx(), {
+      key: 'retention.deletion_window_days',
+      level: 'deployment',
+      value: 0,
+      actor: operator,
+    });
+    expect(zero.ok).toBe(false);
+    if (!zero.ok) expect(zero.error.code).toBe('CONFIG_INVALID_VALUE');
+
+    const tooLong = await setConfigValue(poisonTx(), {
+      key: 'retention.deletion_window_days',
+      level: 'deployment',
+      value: 366,
+      actor: operator,
+    });
+    expect(tooLong.ok).toBe(false);
+
+    // 6 days — one below the DL-002-04 floor — is rejected too, not just 0.
+    const almostZero = await setConfigValue(poisonTx(), {
+      key: 'retention.deletion_window_days',
+      level: 'deployment',
+      value: 6,
+      actor: operator,
+    });
+    expect(almostZero.ok).toBe(false);
+  });
+
+  it('accepts both ends of retention.deletion_window_days’ lawful range — 7 and 365', async () => {
+    const tx7 = fakeTx({ selectRows: [] });
+    const low = await setConfigValue(tx7, {
+      key: 'retention.deletion_window_days',
+      level: 'deployment',
+      value: 7,
+      actor: operator,
+    });
+    expect(low.ok).toBe(true);
+
+    const tx365 = fakeTx({ selectRows: [] });
+    const high = await setConfigValue(tx365, {
+      key: 'retention.deletion_window_days',
+      level: 'deployment',
+      value: 365,
+      actor: operator,
+    });
+    expect(high.ok).toBe(true);
+  });
 });
 
 describe('setConfigValue — write path against a fake Tx', () => {
