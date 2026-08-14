@@ -19,6 +19,61 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # The deploy target does not exist yet. There is no VPS, and the `production`
+  # environment holds none of the four secrets the deploy job needs, so every
+  # push to main failed at `ssh-keyscan -H ""` with a bare `exit code 1` — a
+  # message that reads like a broken SSH key rather than absent configuration.
+  #
+  # This gate makes the pre-infrastructure state explicit instead of noisy. A
+  # Deploy that is red on every commit trains everyone to ignore the one
+  # workflow that touches production, which is exactly the signal worth
+  # keeping.
+  #
+  # `DEPLOY_ENABLED` is a repository variable, deliberately separate from the
+  # secrets: setting it is the one-time act of declaring "production exists".
+  # Before it is set, a missing secret is the expected state and the deploy
+  # skips quietly. After it is set, a missing secret is a real fault and this
+  # job FAILS LOUDLY rather than skipping — because once there is a production
+  # box, a silently skipped deploy is worse than a failed one.
+  #
+  # Gating on a variable rather than on secret presence is what buys that
+  # distinction. `secrets` is not available in a job-level `if:` anyway (only
+  # `github`, `needs`, `vars` and `inputs` are), so the check has to run inside
+  # a step regardless.
+  preflight:
+    name: Check the deploy target is provisioned
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      ready: ${{ steps.gate.outputs.ready }}
+    steps:
+      - id: gate
+        env:
+          DEPLOY_ENABLED: ${{ vars.DEPLOY_ENABLED }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          APP_HOST: ${{ secrets.APP_HOST }}
+        run: |
+          if [ "$DEPLOY_ENABLED" != "true" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Deploy skipped::No deploy target is provisioned. Set the repository variable DEPLOY_ENABLED=true once the VPS exists and the production environment holds VPS_HOST, VPS_USER, VPS_SSH_KEY and APP_HOST."
+            exit 0
+          fi
+
+          missing=""
+          [ -n "$VPS_HOST" ]    || missing="$missing VPS_HOST"
+          [ -n "$VPS_USER" ]    || missing="$missing VPS_USER"
+          [ -n "$VPS_SSH_KEY" ] || missing="$missing VPS_SSH_KEY"
+          [ -n "$APP_HOST" ]    || missing="$missing APP_HOST"
+
+          if [ -n "$missing" ]; then
+            echo "::error title=Deploy secrets missing::DEPLOY_ENABLED is true, so a deploy was expected, but these secrets are empty or unset in the production environment:$missing"
+            exit 1
+          fi
+
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
   build-image:
     name: Build and push image
     runs-on: ubuntu-latest
@@ -59,7 +114,11 @@ jobs:
 
   deploy:
     name: Migrate and release
-    needs: build-image
+    # `build-image` deliberately stays ungated and keeps running on every push:
+    # it is the only thing that proves the Dockerfile still builds, and that
+    # signal is worth having long before there is anywhere to deploy it to.
+    needs: [preflight, build-image]
+    if: needs.preflight.outputs.ready == 'true'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -119,10 +178,21 @@ jobs:
         # alone — forward-only migrations mean the previous image must still
         # run against the migrated schema, which is exactly what DV-27's
         # expand/contract discipline buys.
+        #
+        # This previously read `docker compose rollback.sh || (…fallback…)`.
+        # `rollback.sh` is not a Compose subcommand and no such script exists,
+        # so the first clause could only ever error and the `||` fallback was
+        # what actually ran — every time. It was never noticed because this
+        # step has never executed: the job has failed at its first step on
+        # every run since the pipeline landed. The dead clause is removed
+        # rather than repaired, since the fallback *is* the rollback.
         run: |
           ssh -i ~/.ssh/id_ed25519 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "cd /srv/allmywallet && docker compose rollback.sh || \
-             (IMAGE_TAG=\$(cat .last-good-tag) docker compose up -d web worker)"
+            "cd /srv/allmywallet && \
+             if [ ! -s .last-good-tag ]; then \
+               echo 'no .last-good-tag on the box — nothing to roll back to' >&2; exit 1; \
+             fi && \
+             IMAGE_TAG=\$(cat .last-good-tag) docker compose up -d web worker"
           echo "::error::Deploy failed its health check and was rolled back. Schema was NOT reverted (AR-23: forward-only)."
           exit 1
 
