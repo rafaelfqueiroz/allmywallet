@@ -1,6 +1,7 @@
 import { check, index, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { users } from '@/db/schema/users';
+import { CONSENT_PURPOSES } from '@/core/privacy/ports';
 
 /**
  * SPEC-004 — LGPD data-subject-rights tables.
@@ -25,9 +26,12 @@ import { users } from '@/db/schema/users';
  * "recorded" actually calls for. Two mechanisms for two different questions —
  * "what does the user currently allow" (this table) versus "what happened,
  * in order" (`audit_log`) — is simpler than one table trying to answer both.
+ *
+ * `CONSENT_PURPOSES` is imported from `core/privacy/ports.ts` above rather
+ * than declared here a second time — the same discipline `transactions.ts`
+ * uses for `TRANSACTION_TYPES`, so the CHECK constraint below and the
+ * domain's own notion of "which purposes exist" cannot drift apart.
  */
-export const CONSENT_PURPOSES = ['email_reminders', 'product_analytics'] as const;
-
 export const consents = pgTable(
   'consents',
   {
