@@ -3,6 +3,7 @@ import { handleQuotesCloseCapture, handleQuotesPoll } from '@/worker/handlers/qu
 import { handleTesouroSync } from '@/worker/handlers/tesouro';
 import { handleBcbSync } from '@/worker/handlers/bcb';
 import { handleBudgetCheck } from '@/worker/handlers/budget';
+import { handleFixedIncomeAccrue, handleValuationSnapshot } from '@/worker/handlers/valuation';
 
 /**
  * Split out of `src/worker/index.ts` so this list — pure data plus handler
@@ -62,5 +63,37 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
     queue: QUEUE.BUDGET_CHECK,
     handler: handleBudgetCheck,
     cron: '*/15 * * * *',
+  },
+  /**
+   * SPEC-009 BR-009-14/16. Both run once daily and both are ordered *after*
+   * the market-data jobs above, which is the whole point of the times chosen:
+   * `quotes.close-capture` (17:05), `tesouro.sync` (18:30) and `bcb.sync`
+   * (19:00) are what supply the closes, the Tesouro sell prices and the day's
+   * CDI. A snapshot built before them would be built from yesterday's data and
+   * would then be *correct-looking but stale* — the failure mode this spec
+   * exists to prevent.
+   *
+   * AR-18: neither cron can express a B3 holiday, so `fixedincome.accrue`
+   * re-checks the trading calendar itself and `valuation.snapshot` relies on
+   * carry-forward (BR-009-03) to value a non-trading day honestly.
+   */
+  {
+    queue: QUEUE.FIXEDINCOME_ACCRUE,
+    // Both handlers return a run summary, which pg-boss ignores and the
+    // handler tests assert on. The wrapper is what discards it, rather than
+    // widening `JobHandler` for every queue to accommodate two.
+    handler: async () => {
+      await handleFixedIncomeAccrue();
+    },
+    cron: '20 19 * * 1-5',
+  },
+  {
+    queue: QUEUE.VALUATION_SNAPSHOT,
+    handler: async () => {
+      await handleValuationSnapshot();
+    },
+    // Daily rather than weekdays-only: a Saturday snapshot is a real chart
+    // point, valued from Friday's carried-forward close (BR-009-03).
+    cron: '40 19 * * *',
   },
 ];

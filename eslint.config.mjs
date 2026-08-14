@@ -274,10 +274,24 @@ export default tseslint.config(
 
   // Tests may reach further than production code — fakes, fixtures and harnesses
   // legitimately cross layers.
+  //
+  // `import/no-restricted-paths` is disabled here for one specific, load-bearing
+  // case (added by SPEC-009): a `core/` test that must exercise a rule against
+  // the **real** adapter dataset rather than a fake seeded with the answer.
+  // `core/valuation/business-days.test.ts` counts business days over
+  // `adapters/calendar/b3-calendar.ts`'s actual B3 holiday list — Carnaval,
+  // Sexta-feira Santa, the December half-sessions. A `FakeTradingCalendar`
+  // there would assert only that a `Set` works, while the thing that can
+  // actually be wrong (which days B3 opens) went untested.
+  //
+  // The boundary itself is unchanged: this override matches `*.test.ts` and
+  // `tests/**` only, so every production file under `src/core/` is still held
+  // to AR-01 by both this rule and the `no-restricted-imports` block above.
   {
     files: ['**/*.test.ts', '**/*.test.tsx', 'tests/**/*.ts'],
     rules: {
       'no-restricted-imports': 'off',
+      'import/no-restricted-paths': 'off',
       'no-console': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
     },

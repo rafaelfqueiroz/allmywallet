@@ -21,10 +21,38 @@ describe('parseTesouroCsv (BR-008-12; AR-06 comma-decimal parsing)', () => {
     expect(points).not.toBeNull();
     expect(points).toHaveLength(2); // only 16/03/2026 rows
     const selic = points?.find((p) => p.ticker.startsWith('Tesouro Selic'));
-    // Hand-verified: "14.249,60" -> thousands separator stripped, comma -> dot -> "14249.60"
-    expect(selic?.price.toString()).toBe('14249.6');
+    // Hand-verified: "14.249,00" -> thousands separator stripped, comma -> dot -> "14249.00"
+    expect(selic?.price.toString()).toBe('14249');
     expect(selic?.date).toBe('2026-03-16');
     expect(selic?.source).toBe('tesouro_transparente');
+  });
+
+  /**
+   * SPEC-009 BR-009-06 / DL-009-04 — the sell price is what the holder would
+   * realise, so `PU Venda Manhã` is the column that reaches `price_quotes`.
+   * This parser originally read `PU Base Manhã`; SPEC-009 is what settled the
+   * question, and the assertion lives here because this is where the choice
+   * is actually made.
+   */
+  it('BR-009-06: reads PU Venda Manhã, not PU Compra or PU Base', () => {
+    const points = parseTesouroCsv(RECORDED_CSV, 'tesouro_transparente');
+    const ipca = points?.find((p) => p.ticker.startsWith('Tesouro IPCA+'));
+    // Row for 16/03/2026: compra 3.415,00 | venda 3.413,70 | base 3.414,20
+    expect(ipca?.price.toString()).toBe('3413.7');
+    expect(ipca?.price.toString()).not.toBe('3415'); // buy price — overstates
+    expect(ipca?.price.toString()).not.toBe('3414.2'); // base price — overstates
+  });
+
+  it('falls back to PU Base when a title is no longer offered for redemption', () => {
+    // A real shape in the published file: the venda column is blank for a
+    // title Tesouro no longer buys back. Dropping the row would silently
+    // understate the portfolio (DL-009-05), so the base price is used.
+    const csv = [
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha',
+      'Tesouro Prefixado;01/01/2031;16/03/2026;11,20;;700,10;;701,55',
+    ].join('\n');
+    const points = parseTesouroCsv(csv, 'tesouro_transparente');
+    expect(points?.[0]?.price.toString()).toBe('701.55');
   });
 
   it('rejects a CSV missing the expected columns rather than misreading it', () => {
