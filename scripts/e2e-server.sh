@@ -21,4 +21,12 @@ fi
 # that asks. Nothing that deploys sets it.
 export ALLOW_DEV_ROUTES=true
 
+# Next's standalone server binds to `process.env.HOSTNAME`, and inside a
+# container HOSTNAME is the container id. It then listens on the container's own
+# address and `localhost:3000` answers nothing — which is exactly how the visual
+# job timed out after five minutes with no output at all. Pinning it is the
+# documented fix and is harmless outside a container.
+export HOSTNAME=0.0.0.0
+export PORT="${PORT:-3000}"
+
 exec node .next/standalone/server.js
