@@ -10,12 +10,15 @@ import {
 } from './registry';
 
 describe('registry', () => {
-  it('has exactly the 21 keys from the SPEC-002 initial registry table, plus SPEC-016 additions', () => {
+  it('has exactly the 22 keys from the SPEC-002 initial registry table, plus later additions', () => {
     // 18 keys from SPEC-002's own table, plus three SPEC-016 additions:
     // `alerts.queue_backlog_threshold` (BR-016-13/BR-016-14: thresholds are
     // config, not code) and the two `observability.worker_heartbeat_*`
-    // cadence/threshold keys behind AR-50's health endpoint.
-    expect(CONFIG_KEYS).toHaveLength(21);
+    // cadence/threshold keys behind AR-50's health endpoint; plus one SPEC-011
+    // addition, `reports.default_grouping_wallet_scope` — BR-011-04 specifies
+    // a different default grouping inside a wallet and says both are
+    // user-configurable, which one key cannot express.
+    expect(CONFIG_KEYS).toHaveLength(22);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {
@@ -60,6 +63,9 @@ describe('registry', () => {
       'import.reminder_enabled',
       'reports.concentration_threshold_pct',
       'reports.default_grouping',
+      // SPEC-011 BR-011-04: the wallet-scope default is a second, separately
+      // configurable key — "both are user-configurable".
+      'reports.default_grouping_wallet_scope',
       'reports.benchmarks',
     ] satisfies ConfigKey[]);
   });

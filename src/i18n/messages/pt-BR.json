@@ -221,5 +221,80 @@
       "transfer_out": "Transferência de saída",
       "adjustment": "Ajuste"
     }
+  },
+  "reports": {
+    "title": "Relatórios",
+    "description": "Patrimônio, rentabilidade, proventos e composição da sua carteira.",
+    "signedOut": "Entre na sua conta para ver seus relatórios.",
+    "period": {
+      "label": "Período",
+      "ytd": "No ano",
+      "12m": "12 meses",
+      "24m": "24 meses",
+      "all": "Desde o início",
+      "custom": "Personalizado",
+      "from": "De",
+      "to": "Até",
+      "invalidRange": "A data final não pode ser anterior à data inicial."
+    },
+    "scope": {
+      "label": "Escopo",
+      "portfolio": "Carteira completa",
+      "walletNotFound": "Esta carteira não existe mais. Escolha outra ou volte à carteira completa."
+    },
+    "grouping": {
+      "label": "Agrupar por",
+      "asset_class": "Classe de ativo",
+      "wallet": "Carteira",
+      "asset": "Ativo",
+      "sector": "Setor",
+      "institution": "Instituição"
+    },
+    "assetClass": {
+      "stock": "Ações",
+      "fii": "FIIs",
+      "bdr": "BDRs",
+      "etf": "ETFs",
+      "tesouro_direto": "Tesouro Direto",
+      "cdb": "CDB",
+      "lci": "LCI",
+      "lca": "LCA"
+    },
+    "group": {
+      "unassigned": "Não atribuído",
+      "notClassified": "Não classificado",
+      "expand": "Ver ativos deste grupo",
+      "collapse": "Ocultar ativos deste grupo"
+    },
+    "table": {
+      "group": "Grupo",
+      "assetCode": "Ativo",
+      "assetName": "Nome",
+      "quantity": "Quantidade",
+      "value": "Valor",
+      "costBasis": "Custo",
+      "estimated": "Estimado",
+      "total": "Total",
+      "share": "Participação",
+      "yes": "Sim",
+      "no": "Não"
+    },
+    "estimate": {
+      "badge": "Estimado",
+      "explanation": "Valor estimado, não observado no mercado. Pode vir do custo de aquisição ou do indexador contratado."
+    },
+    "empty": {
+      "portfolioTitle": "Nenhum investimento por aqui ainda",
+      "portfolioBody": "Importe um extrato da B3 ou registre uma transação para ver seus relatórios.",
+      "walletTitle": "Esta carteira ainda está vazia",
+      "walletBody": "Atribua ativos a esta carteira para acompanhar seu desempenho separadamente.",
+      "periodTitle": "Nada neste período",
+      "periodBody": "Não há dados entre as datas escolhidas. Experimente um período maior."
+    },
+    "export": {
+      "csv": "Exportar CSV",
+      "filename": "relatorio"
+    },
+    "apply": "Aplicar"
   }
 }

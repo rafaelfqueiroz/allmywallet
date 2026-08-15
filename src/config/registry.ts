@@ -154,13 +154,32 @@ export const REGISTRY = {
     description: 'Position weight that triggers a concentration flag (FR-5.24).',
     range: 'integer percent, 1–100',
   },
+  /**
+   * SPEC-011 BR-011-04: "asset class is the default grouping at portfolio
+   * scope; individual asset is the default within a single-wallet scope. Both
+   * are user-configurable." Two scopes, two defaults, therefore two keys — one
+   * key could not express the second half of the rule.
+   */
   'reports.default_grouping': {
     key: 'reports.default_grouping',
-    schema: z.enum(['asset_class', 'asset', 'institution', 'wallet']),
+    // 'sector' is one of BR-011-03's five dimensions and was missing here,
+    // which made it the one grouping a user could select but never default to.
+    schema: z.enum(['asset_class', 'wallet', 'asset', 'sector', 'institution']),
     default: 'asset_class',
     levels: ['user'],
-    description: 'Default grouping dimension for composition/earnings reports (FR-5.28).',
-    range: "one of: 'asset_class', 'asset', 'institution', 'wallet'",
+    description: 'Default grouping dimension at portfolio scope (FR-5.28, SPEC-011 BR-011-04).',
+    range: "one of: 'asset_class', 'wallet', 'asset', 'sector', 'institution'",
+  },
+  'reports.default_grouping_wallet_scope': {
+    key: 'reports.default_grouping_wallet_scope',
+    schema: z.enum(['asset_class', 'wallet', 'asset', 'sector', 'institution']),
+    // Inside one wallet the user has already answered "what am I exposed to"
+    // by choosing the wallet, so the useful first question becomes "what is
+    // actually in here" — which is asset-level.
+    default: 'asset',
+    levels: ['user'],
+    description: 'Default grouping dimension within a single-wallet scope (SPEC-011 BR-011-04).',
+    range: "one of: 'asset_class', 'wallet', 'asset', 'sector', 'institution'",
   },
   'reports.benchmarks': {
     key: 'reports.benchmarks',
