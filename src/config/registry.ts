@@ -189,6 +189,17 @@ export const REGISTRY = {
     description: 'Benchmark series shown alongside the user’s own return (FR-5.4).',
     range: "non-empty array of: 'CDI', 'IPCA', 'IBOV'",
   },
+  'ui.theme': {
+    key: 'ui.theme',
+    schema: z.enum(['system', 'light', 'dark']),
+    default: 'system',
+    levels: ['user'],
+    // DL-03: the persisted half of the three-state theming in globals.css.
+    // 'system' stamps no class and lets prefers-color-scheme decide; the other
+    // two stamp .light / .dark, which win over it.
+    description: 'Interface theme — follow the operating system, or force light or dark (DL-03).',
+    range: "one of: 'system', 'light', 'dark'",
+  },
   'auth.session_idle_days': {
     key: 'auth.session_idle_days',
     schema: z.number().int().min(1).max(365),

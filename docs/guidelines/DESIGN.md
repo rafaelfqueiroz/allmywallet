@@ -4,7 +4,7 @@ How the interface is built. The prose companion to [`src/app/globals.css`](../..
 
 Rules are numbered `DS-nn` and are citable from code and PRs the same way `AR-`, `DV-` and `TS-` rules are. The scoping decisions behind them are recorded as `DL-nn` in the Decision log of [#33](https://github.com/rafaelfqueiroz/allmywallet/issues/33); where this document explains *what the rule is*, the Decision log explains *why that option was chosen over the others*.
 
-> **Status.** PR1 of three has landed: tokens, the ten primitives, and the a11y/keyboard harness. Patterns, `AppShell`, charts and `<Money>` land in PR2; the retrofit of the existing screens, the strict lint rule and the visual baselines in PR3. Sections below marked *(PR2)* or *(PR3)* describe committed decisions, not existing code.
+> **Status.** PR1 and PR2 of three have landed: tokens, the ten primitives, the a11y/keyboard harness, the layout primitives, the patterns, `AppShell`, the theme toggle and the chart layer. The retrofit of the existing screens, the strict lint rule, the E2E suite and the visual baselines are PR3. Sections marked *(PR3)* describe committed decisions, not existing code.
 
 ## 1. What this is, and what it is not
 
@@ -14,13 +14,14 @@ Five layers. The design system owns the first four. The fifth belongs to the spe
 |---|---|---|
 | Tokens | `src/app/globals.css` | Named values — colour, radius, density. No opinion about usage |
 | Primitives | `src/components/ui/` | Button, Input, Select, Label, Table, Card, Badge, Dialog, Tabs, Skeleton |
-| Layout *(PR2)* | `src/components/layout/` | Stack, Grid, Cluster — the only sanctioned way a page expresses spacing |
-| Patterns *(PR2)* | `src/components/patterns/` | PageShell, AppShell, EmptyState, ErrorState, DataTable, StatCard, Money |
+| Layout | `src/components/layout/` | Stack, Grid, Cluster — the only sanctioned way a page expresses spacing |
+| Patterns | `src/components/patterns/` | PageShell, AppShell, EmptyState, ErrorState, DataTable, StatCard, Money, theme |
+| Charts | `src/components/charts/` | The palette binding, ChartContainer, ChartLegend and the shared axis/tooltip props |
 | **Pages** | `src/app/` | Screen composition. **Not part of the design system** |
 
 **DS-01 — The test for whether something belongs in the system is whether a second, unrelated screen would need the exact same thing.** A focus ring: yes. A donut chart above a filtered position table: no — that is one report's answer to one spec, and it lives in `src/app/`.
 
-**DS-02 — A primitive knows nothing about the domain.** `Button` has never heard of a wallet. The exception is deliberate and narrow: `Money` *(PR2)* is a domain primitive, because AR-09's round-once-at-display rule needs exactly one home.
+**DS-02 — A primitive knows nothing about the domain.** `Button` has never heard of a wallet. The exception is deliberate and narrow: `Money` is a domain primitive, because AR-09's round-once-at-display rule needs exactly one home.
 
 **DS-03 — Marketing is not the design system.** The landing page ([#37](https://github.com/rafaelfqueiroz/allmywallet/issues/37)) consumes tokens and primitives but its sections live in `src/components/marketing/`. Hero blocks are not reused by anything.
 
@@ -108,13 +109,63 @@ Two caveats carried forward:
 
 **DS-19 — A primitive is accessible before it is pretty.** Keyboard operability, a visible focus ring, and correct roles and labels are entry requirements, not polish. This is the whole economic argument for the design system: the alternative is satisfying them once per screen, forever.
 
-## 8. Testing
+## 8. Layout and patterns
+
+### Layout
+
+**DS-23 — A page expresses spacing through `Stack`, `Cluster` and `Grid`, never raw utilities.** They exist because DS-22 bars `gap-4` and `md:grid-cols-2` in `src/app/`: if layout cannot be written as classes it has to be expressible as components, or the escape hatch gets used on every screen and the rule becomes decorative.
+
+`Stack` is vertical rhythm, `Cluster` is a horizontal group that wraps, `Grid` is responsive columns. Every `Grid` variant starts at one column and widens at a breakpoint, so a caller cannot produce a four-column grid on a phone by forgetting one.
+
+**DS-24 — Components may use raw utilities; pages may not.** The rule is a boundary, not a style preference. Inside `src/components/` the raw classes *are* the implementation — `DataTable`'s card list deliberately uses plain divs, because wrapping `dt`/`dd` in two layout components breaks the `dl` association and axe rejects it.
+
+### Patterns
+
+| Pattern | Contract |
+|---|---|
+| `PageShell` | The page's `<main>`, its `<h1>`, and one of exactly three widths — `narrow`, `default`, `wide`. Replaced the five different max-widths that had accumulated across five peer screens. |
+| `AppShell` | The application frame. One nav definition (`nav-items.ts`), rendered as a collapsible sidebar from `md` and a Dialog-based drawer below it. Owns the skip link. |
+| `EmptyState` | `role="status"`. Explains an absence. |
+| `ErrorState` | `role="alert"`. Explains a failure. |
+| `StatCard` | One headline figure as `dt`/`dd`. Owns framing, never formatting — pass a `<Money>`. |
+| `DataTable` | A real table from `md`, a labelled card list below it. `caption` is required. |
+| `Money` | The only place a figure becomes text. |
+
+**DS-25 — An absence and a failure are different components.** `EmptyState` is `role="status"`; `ErrorState` is `role="alert"`. Only one of them is worth retrying, and rendering them the same way tells the user nothing about which they are looking at. This is why SPEC-011 forbids a misleading zero: "R$ 0,00" and "we have no data for this period" look identical and mean opposite things.
+
+**DS-26 — Every destination lives in `nav-items.ts`.** The sidebar and the drawer render the same array, so they cannot disagree about what exists. Only routes that exist are listed: `nav.dashboard` and `nav.transactions` have catalogue entries but no pages, and a menu whose items 404 is worse than a shorter menu.
+
+**DS-27 — Active navigation state is `aria-current="page"`, not just a background colour.** Styling the active item without it makes the state sighted-only. Matching is on a path boundary, so `/wallets/abc` lights up `/wallets` and `/importar-outro` does not light up `/import`.
+
+**DS-28 — The card list is a second rendering, not responsive classes.** Both renderings are always in the DOM and CSS picks one. That costs markup and buys correctness on resize and in print, without a viewport-width hook — which would be wrong on the server and would force every consumer to be client-rendered on a guess.
+
+### Theme
+
+**DS-29 — The theme is decided in two places, deliberately.** `ThemeScript` runs synchronously in `<head>` from `localStorage` so nobody watches a white page repaint to dark; `ThemeSync` reconciles that guess with the account's stored `ui.theme` after hydration, which is what makes the setting follow a user to a new device. `'system'` stamps no class at all, so the OS keeps control — including when it changes mid-session.
+
+**DS-30 — A new user preference is a registry key, not a component.** `ui.theme` is a `ZodEnum` at `levels: ['user']`, and the SPEC-002 preferences screen renders it with no other change. Adding a bespoke settings control would fork a surface that is currently generated.
+
+## 9. Charts
+
+**DS-31 — A chart is inaccessible by construction, so `ChartContainer` is not optional.** An SVG of coloured wedges carries its entire message in a form a screen reader cannot read. The container supplies the accessible name, a required `summary` holding the same figures as text, and a bounded height — Recharts' `ResponsiveContainer` collapses to zero inside an unbounded parent, which is the most common way a chart ships invisible.
+
+**DS-32 — Import the palette; never pass a literal colour to a chart.** `assetClassColor()` and `chartColorAt()` are the only sources. Series that are not asset classes — benchmarks, wallets — take slots in order from `CHART_SERIES_COLORS`.
+
+**DS-33 — Spread the shared props.** `chartAxisProps`, `chartGridProps`, `chartTooltipProps` and `chartMarkProps` exist so two reports cannot arrive at different tick formatting and different tooltip chrome. `chartMarkProps` carries the background-coloured stroke that keeps `--chart-4` (Okabe–Ito's yellow) legible on a light background.
+
+**DS-34 — Legends render as text below the plot on small screens.** An in-chart legend on a 375px viewport consumes the plot area it exists to explain. `ChartLegend` pairs each swatch with a label and marks the swatch `aria-hidden` — it carries nothing the label does not.
+
+## 10. Testing
 
 The `components` vitest project — jsdom, Testing Library, `vitest-axe` — runs blocking alongside unit, integration and isolation. `pnpm test:components`.
 
-**DS-20 — Every primitive carries an axe assertion, a variants test and, if interactive, a focus-ring assertion.** Dialog, Select and Tabs additionally carry keyboard tests, because Radix behaviour is the reason those three are vendored rather than hand-written.
+**DS-20 — Every primitive and every pattern carries an axe assertion, a variants test and, if interactive, a focus-ring assertion.** Dialog, Select and Tabs additionally carry keyboard tests, because Radix behaviour is the reason those three are vendored rather than hand-written. `AppShell` carries them because navigation that cannot be operated from a keyboard is unusable, not merely awkward.
 
-**DS-21 — Primitives are tested inside the real i18n provider with the real pt-BR catalogue**, never a stub. AR-44 only means something if the key a component uses actually resolves; a stub would let `common.close` ship to production as literal text.
+This is not ceremony. The `dlitem` failure in `DataTable`'s card list — `dt`/`dd` separated from their `dl` by two wrapper divs — was found by the axe assertion and by nothing else; it renders correctly and reads as unlabelled values to a screen reader.
+
+**DS-21 — Components are tested inside the real i18n provider with the real pt-BR catalogue**, never a stub. AR-44 only means something if the key a component uses actually resolves; a stub would let `common.close` ship to production as literal text.
+
+Note that the `components` project matches both `.test.ts` and `.test.tsx` under `src/components/`. The `unit` project excludes that directory wholesale, so a `.test.ts` there would otherwise be collected by no project and silently never run.
 
 **What this harness cannot see.** jsdom has no layout and no paint, so `color-contrast` is explicitly disabled in [`test-utils.tsx`](../../src/components/test-utils.tsx) rather than left to report "incomplete" and read as a pass. Contrast, both themes and both viewports are covered by Playwright screenshot baselines *(PR3)*, generated in a pinned container image because macOS and CI rasterise fonts differently.
 

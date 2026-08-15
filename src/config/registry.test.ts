@@ -17,8 +17,10 @@ describe('registry', () => {
     // cadence/threshold keys behind AR-50's health endpoint; plus one SPEC-011
     // addition, `reports.default_grouping_wallet_scope` — BR-011-04 specifies
     // a different default grouping inside a wallet and says both are
-    // user-configurable, which one key cannot express.
-    expect(CONFIG_KEYS).toHaveLength(22);
+    // user-configurable, which one key cannot express; plus one design-system
+    // addition, `ui.theme` (DL-03/DS-30 — a user preference is a registry key,
+    // so the SPEC-002 screen renders it with no other change).
+    expect(CONFIG_KEYS).toHaveLength(23);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {
@@ -67,6 +69,10 @@ describe('registry', () => {
       // configurable key — "both are user-configurable".
       'reports.default_grouping_wallet_scope',
       'reports.benchmarks',
+      // DS-30: the design system's theme toggle is a registry key rather than
+      // a bespoke settings control, so the generated preferences screen picks
+      // it up with no change of its own.
+      'ui.theme',
     ] satisfies ConfigKey[]);
   });
 

@@ -63,7 +63,11 @@ export default defineConfig({
           // fast enough to stay blocking; see tests/setup/components.ts for what
           // that environment cannot see.
           name: 'components',
-          include: ['src/components/**/*.test.tsx'],
+          // Both extensions: the `unit` project excludes `src/components/**`
+          // wholesale, so a `.test.ts` here (palette tables, prop helpers)
+          // would otherwise be collected by no project at all and silently
+          // never run.
+          include: ['src/components/**/*.test.ts', 'src/components/**/*.test.tsx'],
           environment: 'jsdom',
           env: testEnv,
           setupFiles: ['tests/setup/components.ts'],
