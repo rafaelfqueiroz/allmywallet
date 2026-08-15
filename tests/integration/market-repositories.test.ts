@@ -29,6 +29,21 @@ describe('SPEC-008 market data repositories (integration)', () => {
   }, 180_000);
 
   afterAll(async () => {
+    // TS-34, the half this file was missing. `index_series`, `price_quotes`,
+    // `latest_quotes`, `assets` and `quote_budget_usage` are global rows with
+    // no tenant to scope them — truncating only in `beforeEach` protects this
+    // file from its predecessors but leaves its own rows for whatever runs
+    // next. A stray CDI point surviving into another file's period compounds
+    // into that file's benchmark line and turns an exact figure into a
+    // plausible wrong one, which is the failure TS-33/TS-34 exist to catch.
+    const migratorPool = new Pool({ connectionString: database.migrationUrl, max: 1 });
+    try {
+      await migratorPool.query(
+        'TRUNCATE quote_budget_usage, index_series, price_quotes, latest_quotes, assets RESTART IDENTITY CASCADE',
+      );
+    } finally {
+      await migratorPool.end();
+    }
     await pool.end();
     await database.stop();
   });
