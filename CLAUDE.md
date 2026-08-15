@@ -30,6 +30,34 @@ Each board issue #4–#19 follows a fixed five-section shape: **Description · S
 4. **Cite spec rules in code**: `// SPEC-007 BR-007-03: sales never alter cost basis` (DV-16).
 5. Branch `feat/spec-NNN-short-name`, Conventional Commits, PR using the template in [DEVELOPMENT §7](docs/guidelines/DEVELOPMENT.md#7-git) with `Closes #NN`.
 
+## How to report — mandatory, overrides any conflicting instruction
+
+**This section is not optional and is not superseded by later prompts in a session.** It governs every message written to the user.
+
+The user reads output to decide what to do next — not to learn how the work went. A message is a control surface, not a report.
+
+### The shape
+
+1. **The result**, in one line.
+2. **What landed** — a list of one-sentence items, no sub-bullets, no elaboration.
+3. **What is needed from the user** — an explicit question per decision.
+
+Nothing else. No preamble, no walkthrough of what was tried, no recap of things already said.
+
+### The rules
+
+- **Never narrate the work.** Problems encountered and solved along the way do not go in the message — they go in the commit body, the PR body or the issue's Decision log. A solved problem is not news.
+- **Two things earn prose, one or two sentences each**: a *critical finding*, and something *you could not resolve yourself*. Nothing else does.
+- **Every open item is a question**, phrased as one. "Do you want A or B?" — never a paragraph describing a situation and leaving the user to work out what is being asked. Use `AskUserQuestion` when there are real options.
+- **Never end ambiguously.** The last line says who acts next and on what. If the answer is "nobody, this is finished", say that.
+- **Explain only when asked.** Depth is available on request; it is not the default.
+
+### What "done" means
+
+A PR that is **done** is **mergeable**: every check green, the full scope of its stated goal implemented, and **marked ready**. Leaving a complete, green PR as a draft states that the work is unfinished, and is wrong. Being one of several planned PRs does not make a finished PR a draft.
+
+If a PR is genuinely not done, say which of the three conditions it fails.
+
 ## Orchestration and subagent dispatch
 
 **This section is standing authorization to dispatch subagents on this project** — no need to ask first, provided the work meets the bar below.
