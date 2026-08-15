@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import { formatCurrency, formatQuantity } from '@/i18n/format';
 import {
   allocateAction,
   createWalletAction,
@@ -9,6 +8,27 @@ import {
 } from '@/app/(app)/wallets/actions';
 import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { tryUserId } from '@/app/(app)/wallets/session';
+import { PageShell } from '@/components/patterns/page-shell';
+import { Section } from '@/components/patterns/section';
+import { EmptyState } from '@/components/patterns/empty-state';
+import { Money } from '@/components/patterns/money';
+import { Field } from '@/components/patterns/field';
+import { Stack } from '@/components/layout/stack';
+import { Cluster } from '@/components/layout/cluster';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { List, ListItem } from '@/components/layout/list';
+import { Text } from '@/components/ui/text';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 /**
  * SPEC-010 — wallet CRUD, the Unassigned bucket (BR-010-06), the "Needs
@@ -27,224 +47,203 @@ export default async function WalletsPage() {
 
   if (userId === undefined) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-6 px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-        <p role="status" className="text-muted-foreground">
-          {t('signedOut')}
-        </p>
-      </main>
+      <PageShell title={t('title')}>
+        <EmptyState title={t('signedOut')} />
+      </PageShell>
     );
   }
 
   const { comparison, unassigned, pending, labels } = await loadWalletsPageData(userId);
 
+  const walletOptions = comparison.map((row) => (
+    <option key={row.wallet.id} value={row.wallet.id}>
+      {row.wallet.name}
+    </option>
+  ));
+
   return (
-    <main className="mx-auto flex min-h-dvh max-w-4xl flex-col gap-10 px-6 py-10">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-        <p className="text-muted-foreground">{t('description')}</p>
-      </div>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">{t('createTitle')}</h2>
-        <form action={createWalletAction} className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-sm">
-            {t('nameLabel')}
-            <input
-              name="name"
-              required
-              placeholder={t('namePlaceholder')}
-              className="w-48 rounded-md border px-2 py-1"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            {t('descriptionLabel')}
-            <input name="description" className="w-48 rounded-md border px-2 py-1" />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            {t('goalLabel')}
-            <input name="goal" className="w-48 rounded-md border px-2 py-1" />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            {t('colorLabel')}
-            <input name="color" type="color" className="h-9 w-14 rounded-md border" />
-          </label>
-          <button
-            type="submit"
-            className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
-          >
-            {t('create')}
-          </button>
+    <PageShell title={t('title')} description={t('description')}>
+      <Section title={t('createTitle')}>
+        <form action={createWalletAction}>
+          <Cluster gap="md" align="end">
+            <Field id="wallet-name" label={t('nameLabel')} width="lg">
+              <Input name="name" required placeholder={t('namePlaceholder')} />
+            </Field>
+            <Field id="wallet-description" label={t('descriptionLabel')} width="lg">
+              <Input name="description" />
+            </Field>
+            <Field id="wallet-goal" label={t('goalLabel')} hint={t('goalHint')} width="lg">
+              <Input name="goal" />
+            </Field>
+            <Field id="wallet-color" label={t('colorLabel')} width="xs">
+              <Input name="color" type="color" />
+            </Field>
+            <Button type="submit">{t('create')}</Button>
+          </Cluster>
         </form>
-        <p className="text-xs text-muted-foreground">{t('goalHint')}</p>
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-lg font-medium">{t('comparisonTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('comparisonDescription')}</p>
-        </div>
+      <Section title={t('comparisonTitle')} description={t('comparisonDescription')}>
         {comparison.length === 0 ? (
-          <p className="text-muted-foreground">{t('empty')}</p>
+          <EmptyState title={t('empty')} />
         ) : (
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="py-2 pr-4">{t('columnWallet')}</th>
-                <th className="py-2 pr-4">{t('columnAssetCount')}</th>
-                <th className="py-2 pr-4">{t('columnQuantity')}</th>
-                <th className="py-2 pr-4">{t('columnCostBasis')}</th>
-                <th className="py-2" />
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableCaption className="sr-only">{t('comparisonTitle')}</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">{t('columnWallet')}</TableHead>
+                <TableHead scope="col">{t('columnAssetCount')}</TableHead>
+                <TableHead scope="col">{t('columnQuantity')}</TableHead>
+                <TableHead scope="col">{t('columnCostBasis')}</TableHead>
+                <TableHead scope="col">
+                  <span className="sr-only">{t('viewDetails')}</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {comparison.map((row) => (
-                <tr key={row.wallet.id} className="border-b last:border-0">
-                  <td className="py-2 pr-4 font-medium">{row.wallet.name}</td>
-                  <td className="py-2 pr-4">{row.assetCount}</td>
-                  <td className="py-2 pr-4">{formatQuantity(row.totalQuantity)}</td>
-                  <td className="py-2 pr-4">{formatCurrency(row.totalCostBasis)}</td>
-                  <td className="py-2">
-                    <Link href={`/wallets/${row.wallet.id}`} className="text-sm underline">
-                      {t('viewDetails')}
-                    </Link>
-                  </td>
-                </tr>
+                <TableRow key={row.wallet.id}>
+                  <TableCell className="py-row font-medium">{row.wallet.name}</TableCell>
+                  <TableCell className="py-row tabular-nums">{row.assetCount}</TableCell>
+                  <TableCell className="py-row">
+                    <Money value={row.totalQuantity} kind="quantity" />
+                  </TableCell>
+                  <TableCell className="py-row">
+                    <Money value={row.totalCostBasis} />
+                  </TableCell>
+                  <TableCell className="py-row">
+                    <Button asChild variant="link" size="sm">
+                      <Link href={`/wallets/${row.wallet.id}`}>{t('viewDetails')}</Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-3">
-        <div>
-          <h2 className="text-lg font-medium">{t('unassignedTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('unassignedDescription')}</p>
-        </div>
+      <Section title={t('unassignedTitle')} description={t('unassignedDescription')}>
         {unassigned.length === 0 ? (
-          <p className="text-muted-foreground">{t('unassignedEmpty')}</p>
+          <EmptyState title={t('unassignedEmpty')} />
         ) : (
-          <ul className="flex flex-col gap-2">
+          <List gap="sm">
             {unassigned.map((holding) => {
               const label = labelFor(labels, holding.assetId);
               return (
-                <li
-                  key={holding.assetId}
-                  className="flex items-center justify-between border-b pb-2 text-sm"
-                >
-                  <span>
-                    {label.code} — {label.name}
-                  </span>
-                  <span>{formatQuantity(holding.quantity)}</span>
-                </li>
+                <ListItem key={holding.assetId} separated>
+                  <Cluster justify="between" gap="sm">
+                    <span>
+                      {label.code} — {label.name}
+                    </span>
+                    <Money value={holding.quantity} kind="quantity" />
+                  </Cluster>
+                </ListItem>
               );
             })}
-          </ul>
+          </List>
         )}
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-lg font-medium">{t('needsAttentionTitle')}</h2>
-          <p className="text-sm text-muted-foreground">{t('needsAttentionDescription')}</p>
-        </div>
+      <Section title={t('needsAttentionTitle')} description={t('needsAttentionDescription')}>
         {pending.length === 0 ? (
-          <p className="text-muted-foreground">{t('needsAttentionEmpty')}</p>
+          <EmptyState title={t('needsAttentionEmpty')} />
         ) : (
-          <ul className="flex flex-col gap-4">
+          <List gap="lg">
             {pending.map((item) => {
               const label = labelFor(labels, item.assetId);
               return (
-                <li key={item.assetId} className="flex flex-col gap-2 border-b pb-4 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium">
-                      {label.code} — {label.name}
-                    </span>
-                    <span>{formatQuantity(item.unassignedQuantity)}</span>
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    {t(item.reason === 'no_wallet' ? 'reasonNoWallet' : 'reasonAmbiguousSplit')}
-                  </span>
-                  <div className="flex flex-wrap items-end gap-2">
-                    <form action={allocateAction} className="flex flex-wrap items-end gap-2">
-                      <input type="hidden" name="assetId" value={item.assetId} />
-                      <label className="flex flex-col gap-1 text-xs">
-                        {t('resolveAssign')}
-                        <select name="walletId" required className="rounded-md border px-2 py-1">
-                          <option value="">{t('chooseWallet')}</option>
-                          {comparison.map((row) => (
-                            <option key={row.wallet.id} value={row.wallet.id}>
-                              {row.wallet.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs">
-                        {t('resolveQuantity')}
-                        <input
-                          name="quantity"
-                          defaultValue={item.unassignedQuantity.toString()}
-                          className="w-28 rounded-md border px-2 py-1"
-                        />
-                      </label>
-                      <button
-                        type="submit"
-                        className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent"
-                      >
-                        {t('resolveSubmit')}
-                      </button>
-                    </form>
-                    <form action={setStandingRuleAction} className="flex items-end gap-2">
-                      <input type="hidden" name="assetId" value={item.assetId} />
-                      <select
-                        name="walletId"
-                        required
-                        className="rounded-md border px-2 py-1 text-xs"
-                      >
-                        <option value="">{t('chooseWallet')}</option>
-                        {comparison.map((row) => (
-                          <option key={row.wallet.id} value={row.wallet.id}>
-                            {row.wallet.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="submit"
-                        className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent"
-                      >
-                        {t('standingRuleSet')}
-                      </button>
-                    </form>
-                  </div>
-                </li>
+                <ListItem key={item.assetId} separated>
+                  <Stack gap="sm">
+                    <Cluster justify="between" gap="sm">
+                      <span className="font-medium">
+                        {label.code} — {label.name}
+                      </span>
+                      <Money value={item.unassignedQuantity} kind="quantity" />
+                    </Cluster>
+                    <Text as="span" size="xs" tone="muted">
+                      {t(item.reason === 'no_wallet' ? 'reasonNoWallet' : 'reasonAmbiguousSplit')}
+                    </Text>
+                    <Cluster gap="lg" align="end">
+                      <form action={allocateAction}>
+                        <input type="hidden" name="assetId" value={item.assetId} />
+                        <Cluster gap="sm" align="end">
+                          <Field
+                            id={`allocate-wallet-${item.assetId}`}
+                            label={t('resolveAssign')}
+                            width="md"
+                          >
+                            <NativeSelect name="walletId" required>
+                              <option value="">{t('chooseWallet')}</option>
+                              {walletOptions}
+                            </NativeSelect>
+                          </Field>
+                          <Field
+                            id={`allocate-quantity-${item.assetId}`}
+                            label={t('resolveQuantity')}
+                            width="sm"
+                          >
+                            <Input
+                              name="quantity"
+                              defaultValue={item.unassignedQuantity.toString()}
+                            />
+                          </Field>
+                          <Button type="submit" size="sm">
+                            {t('resolveSubmit')}
+                          </Button>
+                        </Cluster>
+                      </form>
+
+                      <form action={setStandingRuleAction}>
+                        <input type="hidden" name="assetId" value={item.assetId} />
+                        <Cluster gap="sm" align="end">
+                          <Field
+                            id={`standing-rule-${item.assetId}`}
+                            label={t('standingRuleTitle')}
+                            width="md"
+                          >
+                            <NativeSelect name="walletId" required>
+                              <option value="">{t('chooseWallet')}</option>
+                              {walletOptions}
+                            </NativeSelect>
+                          </Field>
+                          <Button type="submit" size="sm" variant="outline">
+                            {t('standingRuleSet')}
+                          </Button>
+                        </Cluster>
+                      </form>
+                    </Cluster>
+                  </Stack>
+                </ListItem>
               );
             })}
-          </ul>
+          </List>
         )}
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">{t('yourWallets')}</h2>
+      <Section title={t('yourWallets')}>
         {comparison.length === 0 ? (
-          <p className="text-muted-foreground">{t('empty')}</p>
+          <EmptyState title={t('empty')} />
         ) : (
-          <ul className="flex flex-col gap-2">
+          <List gap="sm">
             {comparison.map((row) => (
-              <li key={row.wallet.id} className="flex items-center justify-between border-b pb-2">
-                <Link href={`/wallets/${row.wallet.id}`} className="font-medium underline">
-                  {row.wallet.name}
-                </Link>
-                <form action={deleteWalletAction}>
-                  <input type="hidden" name="walletId" value={row.wallet.id} />
-                  <button type="submit" className="text-sm text-destructive hover:underline">
-                    {t('delete')}
-                  </button>
-                </form>
-              </li>
+              <ListItem key={row.wallet.id} separated>
+                <Cluster justify="between" gap="sm">
+                  <Button asChild variant="link">
+                    <Link href={`/wallets/${row.wallet.id}`}>{row.wallet.name}</Link>
+                  </Button>
+                  <form action={deleteWalletAction}>
+                    <input type="hidden" name="walletId" value={row.wallet.id} />
+                    <Button type="submit" variant="destructive" size="sm">
+                      {t('delete')}
+                    </Button>
+                  </form>
+                </Cluster>
+              </ListItem>
             ))}
-          </ul>
+          </List>
         )}
-      </section>
-    </main>
+      </Section>
+    </PageShell>
   );
 }

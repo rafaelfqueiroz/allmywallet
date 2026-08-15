@@ -48,7 +48,8 @@ Everything else is convention. These five are the ones where a violation causes 
 | **Isolation tests — every tenant-scoped table** | ✅ |
 | Coverage — 100% branch on calculation modules, 80% overall | ✅ |
 | Migration applies cleanly to an empty database | ✅ |
-| E2E journeys | ✅ |
+| E2E journeys (desktop + mobile) | ✅ |
+| Visual baselines, light/dark × desktop/mobile | ✅ |
 | Reports read snapshots, not the ledger | ✅ |
 | Performance budgets | ⚠️ Nightly, advisory |
 

@@ -1,5 +1,9 @@
 import { useTranslations } from 'next-intl';
 import { signIn } from '@/auth';
+import { AuthShell } from '@/components/patterns/auth-shell';
+import { Stack } from '@/components/layout/stack';
+import { Button } from '@/components/ui/button';
+import { Text } from '@/components/ui/text';
 
 /**
  * SPEC-001: the only entry point into the product. BR-001-01: Google OAuth is
@@ -19,19 +23,16 @@ export default function SignInPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-6 px-6 text-center">
-      <h1 className="text-3xl font-semibold tracking-tight">{t('title')}</h1>
-      <p className="text-muted-foreground">{t('description')}</p>
-      <form action={signInWithGoogle} className="w-full">
-        <button
-          type="submit"
-          className="w-full rounded-md bg-foreground px-4 py-2 font-medium text-background"
-        >
-          {t('googleButton')}
-        </button>
-      </form>
-      {/* BR-001-12 acceptance criterion: stated on the sign-up screen itself. */}
-      <p className="text-sm text-muted-foreground">{t('noRecoveryNotice')}</p>
-    </main>
+    <AuthShell title={t('title')} description={t('description')}>
+      <Stack gap="md">
+        <form action={signInWithGoogle}>
+          <Button type="submit" size="lg" className="w-full">
+            {t('googleButton')}
+          </Button>
+        </form>
+        {/* BR-001-12 acceptance criterion: stated on the sign-up screen itself. */}
+        <Text tone="muted">{t('noRecoveryNotice')}</Text>
+      </Stack>
+    </AuthShell>
   );
 }

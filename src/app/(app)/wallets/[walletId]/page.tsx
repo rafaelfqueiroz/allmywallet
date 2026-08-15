@@ -2,10 +2,26 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { WalletId } from '@/core/shared/ids';
-import { formatCurrency, formatQuantity } from '@/i18n/format';
 import { deleteWalletAction, updateWalletAction } from '@/app/(app)/wallets/actions';
 import { labelFor, loadWalletDetail } from '@/app/(app)/wallets/data';
 import { tryUserId } from '@/app/(app)/wallets/session';
+import { PageShell } from '@/components/patterns/page-shell';
+import { Section } from '@/components/patterns/section';
+import { EmptyState } from '@/components/patterns/empty-state';
+import { Money } from '@/components/patterns/money';
+import { Field } from '@/components/patterns/field';
+import { Stack } from '@/components/layout/stack';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 /** SPEC-010 BR-010-01/BR-010-07 — a single wallet's edit form and its allocated assets. */
 export const dynamic = 'force-dynamic';
@@ -21,11 +37,9 @@ export default async function WalletDetailPage({
 
   if (userId === undefined) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-6 px-6 py-10">
-        <p role="status" className="text-muted-foreground">
-          {t('signedOut')}
-        </p>
-      </main>
+      <PageShell width="narrow">
+        <EmptyState title={t('signedOut')} />
+      </PageShell>
     );
   }
 
@@ -37,103 +51,86 @@ export default async function WalletDetailPage({
   const { wallet, allocations, labels } = detail;
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-8 px-6 py-10">
-      <Link href="/wallets" className="w-fit text-sm underline">
-        {t('walletDetailBack')}
-      </Link>
-
-      <section className="flex flex-col gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">{wallet.name}</h1>
-        <form action={updateWalletAction} className="flex flex-col gap-3">
+    <PageShell
+      width="narrow"
+      title={wallet.name}
+      actions={
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/wallets">{t('walletDetailBack')}</Link>
+        </Button>
+      }
+    >
+      <Section title={t('editTitle')}>
+        <form action={updateWalletAction}>
           <input type="hidden" name="walletId" value={wallet.id} />
-          <label className="flex flex-col gap-1 text-sm">
-            {t('nameLabel')}
-            <input
-              name="name"
-              defaultValue={wallet.name}
-              className="w-64 rounded-md border px-2 py-1"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            {t('descriptionLabel')}
-            <input
-              name="description"
-              defaultValue={wallet.description ?? ''}
-              className="w-64 rounded-md border px-2 py-1"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            {t('goalLabel')}
-            <input
-              name="goal"
-              defaultValue={wallet.goal ?? ''}
-              className="w-64 rounded-md border px-2 py-1"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            {t('colorLabel')}
-            <input
-              name="color"
-              type="color"
-              defaultValue={wallet.color ?? '#000000'}
-              className="h-9 w-14 rounded-md border"
-            />
-          </label>
-          <button
-            type="submit"
-            className="w-fit rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
-          >
-            {t('save')}
-          </button>
+          <Stack gap="md" align="start">
+            <Field id="wallet-name" label={t('nameLabel')} width="lg">
+              <Input name="name" defaultValue={wallet.name} />
+            </Field>
+            <Field id="wallet-description" label={t('descriptionLabel')} width="lg">
+              <Input name="description" defaultValue={wallet.description ?? ''} />
+            </Field>
+            <Field id="wallet-goal" label={t('goalLabel')} width="lg">
+              <Input name="goal" defaultValue={wallet.goal ?? ''} />
+            </Field>
+            <Field id="wallet-color" label={t('colorLabel')} width="xs">
+              <Input name="color" type="color" defaultValue={wallet.color ?? '#000000'} />
+            </Field>
+            <Button type="submit">{t('save')}</Button>
+          </Stack>
         </form>
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">{t('allocationsTitle')}</h2>
+      <Section title={t('allocationsTitle')}>
         {allocations.length === 0 ? (
-          <p className="text-muted-foreground">{t('allocationsEmpty')}</p>
+          <EmptyState title={t('allocationsEmpty')} />
         ) : (
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="py-2 pr-4">{t('columnAsset')}</th>
-                <th className="py-2 pr-4">{t('columnQuantity')}</th>
-                <th className="py-2">{t('columnCostBasis')}</th>
-              </tr>
-            </thead>
-            <tbody>
+          <Table>
+            <TableCaption className="sr-only">{t('allocationsTitle')}</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">{t('columnAsset')}</TableHead>
+                <TableHead scope="col">{t('columnQuantity')}</TableHead>
+                <TableHead scope="col">{t('columnCostBasis')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {allocations.map((allocation) => {
                 const label = labelFor(labels, allocation.assetId);
                 return (
-                  <tr key={allocation.assetId} className="border-b last:border-0">
-                    <td className="py-2 pr-4">
+                  <TableRow key={allocation.assetId}>
+                    <TableCell className="py-row">
                       {label.code} — {label.name}
-                    </td>
-                    <td className="py-2 pr-4">{formatQuantity(allocation.quantity)}</td>
-                    <td className="py-2">
-                      {allocation.costBasisAtAllocation === null
-                        ? '—'
-                        : formatCurrency(allocation.costBasisAtAllocation)}
-                    </td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="py-row">
+                      <Money value={allocation.quantity} kind="quantity" />
+                    </TableCell>
+                    <TableCell className="py-row">
+                      {allocation.costBasisAtAllocation === null ? (
+                        // An allocation predating cost tracking has no basis to
+                        // show. An em dash says "not recorded"; a zero would
+                        // say "free", which is a different and wrong claim.
+                        <span aria-label={t('costBasisUnknown')}>—</span>
+                      ) : (
+                        <Money value={allocation.costBasisAtAllocation} />
+                      )}
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         )}
-      </section>
+      </Section>
 
-      <section>
+      <Section title={t('delete')}>
         <form action={deleteWalletAction}>
           <input type="hidden" name="walletId" value={wallet.id} />
-          <button
-            type="submit"
-            className="rounded-md border px-3 py-1.5 text-sm text-destructive hover:bg-accent"
-          >
+          <Button type="submit" variant="destructive">
             {t('delete')}
-          </button>
+          </Button>
         </form>
-      </section>
-    </main>
+      </Section>
+    </PageShell>
   );
 }

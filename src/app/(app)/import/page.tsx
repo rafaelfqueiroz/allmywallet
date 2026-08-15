@@ -4,6 +4,16 @@ import { formatDateTime } from '@/i18n/format';
 import { uploadExtractAction } from '@/app/(app)/import/actions';
 import { listImportBatches } from '@/app/(app)/import/data';
 import { tryUserId } from '@/app/(app)/import/session';
+import { PageShell } from '@/components/patterns/page-shell';
+import { Section } from '@/components/patterns/section';
+import { EmptyState } from '@/components/patterns/empty-state';
+import { Field } from '@/components/patterns/field';
+import { Cluster } from '@/components/layout/cluster';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { List, ListItem } from '@/components/layout/list';
+import { Text } from '@/components/ui/text';
 
 /**
  * SPEC-005 — upload, and the history of every batch this tenant has staged,
@@ -20,75 +30,53 @@ export default async function ImportPage() {
 
   if (userId === undefined) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-6 px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-        <p role="status" className="text-muted-foreground">
-          {t('signedOut')}
-        </p>
-      </main>
+      <PageShell title={t('title')}>
+        <EmptyState title={t('signedOut')} />
+      </PageShell>
     );
   }
 
   const batches = await listImportBatches(userId);
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-10 px-6 py-10">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-        <p className="text-muted-foreground">{t('description')}</p>
-      </div>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">{t('uploadTitle')}</h2>
-        <p className="text-sm text-muted-foreground">{t('uploadHint')}</p>
-        <form action={uploadExtractAction} className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-col gap-1 text-sm">
-            {t('fileLabel')}
-            <input
-              type="file"
-              name="file"
-              accept=".xlsx,.xls"
-              required
-              className="rounded-md border px-2 py-1"
-            />
-          </label>
-          <button
-            type="submit"
-            className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
-          >
-            {t('upload')}
-          </button>
+    <PageShell title={t('title')} description={t('description')}>
+      <Section title={t('uploadTitle')} description={t('uploadHint')}>
+        <form action={uploadExtractAction}>
+          <Cluster gap="md" align="end">
+            <Field id="extract-file" label={t('fileLabel')}>
+              <Input type="file" name="file" accept=".xlsx,.xls" required />
+            </Field>
+            <Button type="submit">{t('upload')}</Button>
+          </Cluster>
         </form>
-      </section>
+      </Section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">{t('historyTitle')}</h2>
+      <Section title={t('historyTitle')}>
         {batches.length === 0 ? (
-          <p className="text-muted-foreground">{t('historyEmpty')}</p>
+          <EmptyState title={t('historyEmpty')} />
         ) : (
-          <ul className="flex flex-col gap-2">
+          <List gap="sm">
             {batches.map((batch) => (
-              <li
-                key={batch.id}
-                className="flex items-center justify-between border-b pb-2 text-sm"
-              >
-                <div className="flex flex-col">
-                  <span className="font-medium">{t(`extractType.${batch.source}`)}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {formatDateTime(batch.uploadedAt)}
+              <ListItem key={batch.id} separated>
+                <Cluster justify="between" gap="sm">
+                  <span className="flex flex-col">
+                    <span className="font-medium">{t(`extractType.${batch.source}`)}</span>
+                    <Text as="span" size="xs" tone="muted">
+                      {formatDateTime(batch.uploadedAt)}
+                    </Text>
                   </span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span>{t(`status.${batch.status}`)}</span>
-                  <Link href={`/import/${batch.id}`} className="underline">
-                    {t('viewDetails')}
-                  </Link>
-                </div>
-              </li>
+                  <Cluster gap="sm">
+                    <Badge variant="secondary">{t(`status.${batch.status}`)}</Badge>
+                    <Button asChild variant="link" size="sm">
+                      <Link href={`/import/${batch.id}`}>{t('viewDetails')}</Link>
+                    </Button>
+                  </Cluster>
+                </Cluster>
+              </ListItem>
             ))}
-          </ul>
+          </List>
         )}
-      </section>
-    </main>
+      </Section>
+    </PageShell>
   );
 }
