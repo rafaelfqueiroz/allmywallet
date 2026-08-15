@@ -5,6 +5,10 @@ import { handleBcbSync } from '@/worker/handlers/bcb';
 import { handleBudgetCheck } from '@/worker/handlers/budget';
 import { handleFixedIncomeAccrue, handleValuationSnapshot } from '@/worker/handlers/valuation';
 import { handleImportCommit, handleImportStage } from '@/worker/handlers/import';
+import {
+  handleAccountDeletionSweep,
+  handleAuditRetentionSweep,
+} from '@/worker/handlers/account-deletion';
 
 /**
  * Split out of `src/worker/index.ts` so this list — pure data plus handler
@@ -113,5 +117,25 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
     // Daily rather than weekdays-only: a Saturday snapshot is a real chart
     // point, valued from Friday's carried-forward close (BR-009-03).
     cron: '40 19 * * *',
+  },
+  /**
+   * SPEC-004 BR-004-09/10. Daily, and deliberately not tied to any market
+   * event — deletion has nothing to do with trading hours. 03:00 is chosen
+   * only to run outside the block of market-data/valuation jobs above.
+   */
+  {
+    queue: QUEUE.ACCOUNT_DELETION_SWEEP,
+    handler: async () => {
+      await handleAccountDeletionSweep();
+    },
+    cron: '0 3 * * *',
+  },
+  /** SPEC-004 BR-004-15. Daily is far more often than a 1–120 month retention window needs, but cheap — a single bounded DELETE — and simplest to reason about alongside the sweep above. */
+  {
+    queue: QUEUE.AUDIT_RETENTION_SWEEP,
+    handler: async () => {
+      await handleAuditRetentionSweep();
+    },
+    cron: '15 3 * * *',
   },
 ];

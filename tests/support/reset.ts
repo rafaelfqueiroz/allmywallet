@@ -89,3 +89,18 @@ export async function resetWallets(migrationUrl: string): Promise<void> {
     await pool.end();
   }
 }
+
+/**
+ * SPEC-004's `consents`. Cascades from `resetUsers` already (AR-27), but
+ * truncated explicitly for the same reason `resetWallets` is: a suite that
+ * only cares about consent state can reset it without disturbing another
+ * file's seeded tenants on the shared CI database (TS-03/TS-33/TS-34).
+ */
+export async function resetConsents(migrationUrl: string): Promise<void> {
+  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
+  try {
+    await pool.query('TRUNCATE consents RESTART IDENTITY CASCADE');
+  } finally {
+    await pool.end();
+  }
+}
