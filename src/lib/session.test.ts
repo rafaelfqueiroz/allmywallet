@@ -44,3 +44,21 @@ describe('requireUserId (SPEC-003 BR-003-04 / AR-12)', () => {
     await expect(requireUserId()).rejects.toBeInstanceOf(UnauthenticatedError);
   });
 });
+
+describe('tryUserId', () => {
+  it('returns the session user id when signed in', async () => {
+    const { tryUserId } = await import('./session');
+    const { UserId } = await import('@/core/shared/ids');
+    const id = UserId.generate();
+    authMock.mockResolvedValueOnce({ user: { id } });
+
+    await expect(tryUserId()).resolves.toBe(id);
+  });
+
+  it('returns undefined rather than throwing when there is no session', async () => {
+    const { tryUserId } = await import('./session');
+    authMock.mockResolvedValueOnce(null);
+
+    await expect(tryUserId()).resolves.toBeUndefined();
+  });
+});

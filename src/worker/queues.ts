@@ -17,6 +17,11 @@ export const QUEUE = {
   VALUATION_SNAPSHOT: 'valuation.snapshot',
   FIXEDINCOME_ACCRUE: 'fixedincome.accrue',
   BUDGET_CHECK: 'budget.check',
+  // SPEC-004 BR-004-09/10: the scheduled half of self-service account
+  // deletion — purges every account whose grace window has elapsed.
+  ACCOUNT_DELETION_SWEEP: 'account.deletion-sweep',
+  // SPEC-004 BR-004-15: audit_log retention (`retention.audit_months`).
+  AUDIT_RETENTION_SWEEP: 'privacy.audit-retention-sweep',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -71,4 +76,15 @@ export const QUEUE_POLICIES: Readonly<Record<QueueName, QueuePolicy>> = {
   [QUEUE.VALUATION_SNAPSHOT]: { ...DEFAULT_POLICY, retryLimit: 3, expireInSeconds: 1800 },
   [QUEUE.FIXEDINCOME_ACCRUE]: { ...DEFAULT_POLICY, retryLimit: 3, expireInSeconds: 1800 },
   [QUEUE.BUDGET_CHECK]: { ...DEFAULT_POLICY, retryLimit: 1 },
+  // Irreversible once it runs — a missed day is corrected by the next day's
+  // sweep (a wider grace window than promised, never a narrower one, which
+  // is the safe direction to fail in), so retries buy nothing a day later
+  // wouldn't; one attempt, generous expiry for a sweep that may touch many
+  // accounts.
+  [QUEUE.ACCOUNT_DELETION_SWEEP]: {
+    ...DEFAULT_POLICY,
+    retryLimit: 1,
+    expireInSeconds: 1800,
+  },
+  [QUEUE.AUDIT_RETENTION_SWEEP]: { ...DEFAULT_POLICY, retryLimit: 1, expireInSeconds: 1800 },
 };

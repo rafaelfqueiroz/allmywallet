@@ -85,19 +85,76 @@ export const runtimeState = pgTable('runtime_state', {
  * added because BR-002-07 and the "no AuditLog" gap would otherwise be
  * unimplementable; see the dispatch report for the full rationale.
  *
- * Deliberately has no `user_id` foreign key: `actor` is a free-text
+ * Deliberately has no `user_id` **foreign key**: `actor` is a free-text
  * identifier (`'system'`, `'operator'`, or a user id string), not a relation.
  * That keeps this table outside the "tenant-scoped table" convention (AR-26)
  * that would otherwise require RLS and an isolation test for a table whose
  * primary audience is operators, not the acting user themselves.
+ *
+ * SPEC-004 (#7) DECISION — resolving the two questions
+ * `src/db/shared-tables.ts`'s `AUDIT_TABLES` comment deferred here:
+ *
+ * 1. **`userId` added, `ipHash` added — both nullable, neither a foreign
+ *    key.** Extending this table (expand-only, AR-69) rather than
+ *    introducing a second table also named for the access trail: BR-002-07's
+ *    config-write audit and BR-004-17's operator-access audit are the same
+ *    kind of record (actor did X to entity Y at time Z), and this table
+ *    already carries every column that shape needs except *which account the
+ *    entity belongs to* — `entityKey` holds a config key or similar, not a
+ *    user id, so a "show me everything logged about user X" query had no
+ *    column to filter on. `userId` closes that gap without a second table
+ *    that would immediately need the same actor/action/entity/timestamp
+ *    shape duplicated onto it.
+ * 2. **Purged, anonymised, or kept?** — **kept**, deliberately outliving the
+ *    account. `userId` carries **no** `ON DELETE CASCADE` (in fact no FK
+ *    constraint at all — see below): BR-004-15 retains audit rows for a
+ *    configured period (`retention.audit_months`, default 12) independent of
+ *    whether the account they describe still exists, and BR-004-17's whole
+ *    point is an operator-accountability record — deleting it the moment the
+ *    account it describes is deleted would erase exactly the evidence an
+ *    audit trail exists to keep. This is also why `CASCADE` and "survive
+ *    deletion" were flagged as being in direct conflict: they are, and the
+ *    spec's answer picks "survive."
+ *
+ * **Why no FK constraint at all**, not even `ON DELETE SET NULL`: a
+ * constraint referencing `users(id)` would force every audit row to either
+ * point at a still-existing user or hold `NULL` — indistinguishable, after
+ * deletion, from a system/operator-actor row that never had a user in the
+ * first place. Recording the id as a plain, unconstrained `uuid` is the
+ * conventional shape for an access log (the same tradeoff object-storage and
+ * reverse-proxy access logs make): it may point at nothing after a deletion,
+ * and that is the correct, honest state for a row whose entire purpose is
+ * "this happened, once, regardless of what exists now."
+ *
+ * **RLS stays off.** `src/db/shared-tables.ts`'s `AUDIT_TABLES` comment
+ * already explains why: BR-004-17 requires operator access *across* tenants,
+ * which a `user_id`-keyed policy would make impossible. Adding the column
+ * does not change that reasoning — it is still declared exempt there, not a
+ * newly-tenant-scoped table, so it carries no isolation test and is excluded
+ * from `tests/isolation/deletion-cascade.test.ts`'s cascade check by the same
+ * declaration (that check is precisely what "no CASCADE" above must not
+ * accidentally fail).
  */
-export const auditLog = pgTable('audit_log', {
-  id: uuid('id').primaryKey(),
-  actor: text('actor').notNull(),
-  action: text('action').notNull(),
-  entityType: text('entity_type').notNull(),
-  entityKey: text('entity_key').notNull(),
-  previousValue: jsonb('previous_value'),
-  newValue: jsonb('new_value'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: uuid('id').primaryKey(),
+    actor: text('actor').notNull(),
+    action: text('action').notNull(),
+    entityType: text('entity_type').notNull(),
+    entityKey: text('entity_key').notNull(),
+    previousValue: jsonb('previous_value'),
+    newValue: jsonb('new_value'),
+    // SPEC-004 BR-004-17 — see the module comment above for why this is a
+    // plain, unconstrained column rather than a `references(() => users.id)`.
+    userId: uuid('user_id'),
+    // SPEC-004 — "ip hashed, never raw" (issue #7's data model). The same
+    // one-way hash `src/lib/logger.ts#hashUserId` uses for correlation,
+    // applied to the caller's IP where one is known (a request-scoped
+    // action), so this table can show "recurring access from one caller"
+    // without itself becoming a record of a real IP address.
+    ipHash: text('ip_hash'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('audit_log_user_id_idx').on(table.userId)],
+);
