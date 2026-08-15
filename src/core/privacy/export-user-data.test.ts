@@ -108,8 +108,37 @@ describe('exportUserDataAsJson — AR-10', () => {
 
     expect(typeof parsed.transactions[0]?.unitPrice).toBe('string');
     expect(parsed.transactions[0]?.unitPrice).toBe('32.15');
-    // Never exponential notation and never a bare float — the whole point of AR-10.
-    expect(json).not.toMatch(/\d+e[+-]\d+/i);
+
+    // Never exponential notation and never a bare float — the whole point of
+    // AR-10.
+    //
+    // Checked value by value rather than by scanning the rendered document.
+    // A regex over the whole string is not just weaker, it is *flaky*: a UUID
+    // like `01a0044e-1234-…` contains digits, then `e`, then `-`, then digits,
+    // so `/\d+e[+-]\d+/i` matches it. That made this test pass or fail on the
+    // luck of the generated id — it went green locally and red in CI on the
+    // same commit.
+    //
+    // The walk is also strictly stronger. A bare JSON `number` anywhere is the
+    // actual AR-10 hazard — a Decimal that reached `JSON.stringify` and came
+    // back a float — and the old scan could not see one at all.
+    const offenders: string[] = [];
+    const whollyExponential = /^-?\d+(\.\d+)?e[+-]?\d+$/i;
+
+    const walk = (value: unknown, path: string): void => {
+      if (typeof value === 'number') {
+        offenders.push(`${path}: bare number ${value}`);
+      } else if (typeof value === 'string') {
+        if (whollyExponential.test(value)) offenders.push(`${path}: exponential "${value}"`);
+      } else if (Array.isArray(value)) {
+        value.forEach((item, index) => walk(item, `${path}[${index}]`));
+      } else if (value !== null && typeof value === 'object') {
+        for (const [key, nested] of Object.entries(value)) walk(nested, `${path}.${key}`);
+      }
+    };
+
+    walk(JSON.parse(json), 'export');
+    expect(offenders).toEqual([]);
   });
 });
 
