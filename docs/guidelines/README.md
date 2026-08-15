@@ -1,6 +1,6 @@
 # Engineering Guidelines
 
-How the [specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs) get built. Three documents, each answering a different question.
+How the [specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs) get built. Four documents, each answering a different question.
 
 These guidelines live in the repository, next to the code they govern. The **[PRD](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD)** and **[specifications](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs)** live in the wiki; work is tracked on the **[project board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)**.
 
@@ -9,8 +9,9 @@ These guidelines live in the repository, next to the code they govern. The **[PR
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | How the system is shaped — layering, runtime topology, RLS, money, jobs, database, errors, observability |
 | **[DEVELOPMENT.md](DEVELOPMENT.md)** | How to work — dependencies, conventions, git, CI/CD, deployment, ADRs, definition of done |
 | **[TESTING.md](TESTING.md)** | How correctness is proven — strategy, test types, coverage gates, fixtures, what blocks a merge |
+| **[DESIGN.md](DESIGN.md)** | How the interface is built — tokens, theming, colour, density, primitive contracts |
 
-Rules are numbered `AR-nn` (architecture) and `DV-nn` (development), `TS-nn` (testing), so they can be cited from code comments and PRs the same way spec rules are.
+Rules are numbered `AR-nn` (architecture) and `DV-nn` (development), `TS-nn` (testing), `DS-nn` (design), so they can be cited from code comments and PRs the same way spec rules are.
 
 ## The stack, in one table
 

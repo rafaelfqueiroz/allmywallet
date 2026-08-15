@@ -48,8 +48,25 @@ export default defineConfig({
           // source-code scan, not a database test, so it belongs in the fast,
           // always-blocking project rather than tests/performance/'s nightly one.
           include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/structural/**/*.test.ts'],
+          // Component tests are the `components` project below — they need a
+          // DOM, and running them here as well would run them twice, once in
+          // an environment that cannot render.
+          exclude: ['src/components/**'],
           environment: 'node',
           env: testEnv,
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
+          // DL-09 — the design system's a11y and keyboard gate. jsdom, so it is
+          // fast enough to stay blocking; see tests/setup/components.ts for what
+          // that environment cannot see.
+          name: 'components',
+          include: ['src/components/**/*.test.tsx'],
+          environment: 'jsdom',
+          env: testEnv,
+          setupFiles: ['tests/setup/components.ts'],
         },
       },
       {
@@ -115,6 +132,9 @@ export default defineConfig({
         // and carries its own unit tests.
         'src/db/seed-reference.ts',
         'src/app/**',
+        // The render/audit harness the component tests import. Test
+        // infrastructure, not a subject.
+        'src/components/test-utils.tsx',
         'src/worker/index.ts',
         'src/i18n/request.ts',
         // SPEC-001: Auth.js configuration and provider wiring — the decisions

@@ -39,6 +39,10 @@ export default tseslint.config(
       'test-results/**',
       'src/db/migrations/**',
       'next-env.d.ts',
+      // Agent worktrees are whole checkouts of this repo. Linting them reports
+      // every file twice over and buries real findings — 191k of them, when
+      // this was found.
+      '.claude/worktrees/**',
     ],
   },
 
@@ -261,6 +265,50 @@ export default tseslint.config(
       // between elements) are unaffected, and non-JSX string literals
       // (`className`, `href`, config keys used as map lookups) are
       // deliberately out of scope, since those are not user-facing prose.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXText[value=/[A-Za-zÀ-ÿ]/]',
+          message:
+            'AR-44: no string literals in components — route user-facing text through next-intl.',
+        },
+      ],
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // AR-44 — the design system's primitives are held to the same i18n rule as
+  // pages. A primitive is the *worst* place to hardcode a string: it is wrong
+  // once in the source and wrong on every screen that renders it. Dialog's
+  // close label is the live example — it shipped from the shadcn registry as
+  // "Close" and is now common.close.
+  //
+  // The strict colour/spacing rule that DL-15 calls for is deliberately not
+  // here: it lands in PR3, in the same commit as the retrofit, so it never
+  // fails against screens that have not been converted yet.
+  // ---------------------------------------------------------------------------
+  {
+    files: ['src/components/**/*.tsx'],
+    ignores: ['src/components/**/*.test.tsx', 'src/components/test-utils.tsx'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'decimal.js',
+              message:
+                'AR-35: a component that computes a portfolio figure is a defect. Compute in core/.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['@/db/*', '@/db/**'],
+              message: 'AR-31: components never touch the database.',
+            },
+          ],
+        },
+      ],
       'no-restricted-syntax': [
         'error',
         {

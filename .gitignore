@@ -42,3 +42,6 @@ tests/integration/.boot-test-*
 .vscode/*
 !.vscode/extensions.json
 *.swp
+
+# Agent worktrees — whole checkouts of this repo, created per dispatch.
+.claude/worktrees/
