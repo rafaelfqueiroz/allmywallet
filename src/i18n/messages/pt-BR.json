@@ -17,7 +17,12 @@
     "wallets": "Carteiras",
     "import": "Importar",
     "reports": "Relatórios",
-    "settings": "Configurações"
+    "settings": "Configurações",
+    "appName": "AllMyWallet",
+    "menu": "Navegação",
+    "openMenu": "Abrir menu",
+    "collapseSidebar": "Recolher menu lateral",
+    "expandSidebar": "Expandir menu lateral"
   },
   "common": {
     "loading": "Carregando…",
@@ -27,7 +32,9 @@
     "delete": "Excluir",
     "back": "Voltar",
     "close": "Fechar",
-    "empty": "Nada por aqui ainda"
+    "empty": "Nada por aqui ainda",
+    "skipToContent": "Pular para o conteúdo",
+    "retry": "Tentar novamente"
   },
   "errors": {
     "NOT_FOUND": "Não encontramos o que você procura.",
@@ -94,6 +101,10 @@
       "reports.benchmarks": {
         "label": "Benchmarks de comparação",
         "description": "Índices exibidos junto da sua rentabilidade."
+      },
+      "ui.theme": {
+        "label": "Tema",
+        "description": "Seguir o sistema, ou fixar em claro ou escuro."
       }
     },
     "groupingOptions": {
