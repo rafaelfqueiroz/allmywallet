@@ -240,6 +240,7 @@
     "title": "Relatórios",
     "description": "Patrimônio, rentabilidade, proventos e composição da sua carteira.",
     "signedOut": "Entre na sua conta para ver seus relatórios.",
+    "grossOfTax": "Renda fixa: valores brutos. Nenhum tributo é descontado — nem IR, nem IOF.",
     "period": {
       "label": "Período",
       "ytd": "No ano",
