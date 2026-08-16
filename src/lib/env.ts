@@ -29,6 +29,34 @@ const envSchema = z.object({
   AUTH_GOOGLE_ID: z.string().optional(),
   AUTH_GOOGLE_SECRET: z.string().optional(),
 
+  /**
+   * SPEC-001 (#42) — the canonical public origin, including Auth.js's base
+   * path: `https://allmywallet.example.com/api/auth`.
+   *
+   * This is how production answers "which host do I trust". Auth.js rewrites
+   * every incoming request's origin to this one before building callback URLs
+   * (`next-auth/lib/env.js`'s `reqWithEnvURL`), so a spoofed `Host` or
+   * `X-Forwarded-Host` header cannot redirect an OAuth callback anywhere.
+   * Pinning beats trusting: the app sits behind Caddy, but nothing in the
+   * network guarantees a request *reached* it through Caddy.
+   *
+   * Optional here for the same reason the three above are — the worker never
+   * serves HTTP, and neither does a test. `assertTrustedHostConfigured()`
+   * (src/lib/trusted-host.ts) is where it becomes required, narrowly, in
+   * production only.
+   */
+  AUTH_URL: z.string().url().optional(),
+  /**
+   * Local and CI only: trust whatever `Host` arrives. Auth.js already does
+   * this outside production (`NODE_ENV !== 'production'` is the last term of
+   * its own default chain), so this matters exactly where a *production build*
+   * is run against localhost — `pnpm build` in the Docker builder stage, and
+   * the E2E and visual CI jobs, which serve the standalone output.
+   *
+   * Never set this in production. It is the option `AUTH_URL` was chosen over.
+   */
+  AUTH_TRUST_HOST: z.string().optional(),
+
   SENTRY_DSN: z.string().optional(),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
 

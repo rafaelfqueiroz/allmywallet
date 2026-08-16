@@ -162,6 +162,10 @@ jobs:
       # Without this Auth.js rejects localhost as an untrusted host and every
       # session read throws instead of returning "signed out" — the suite would
       # then be asserting against an error path rather than the real one.
+      # #42: this is now also what satisfies src/lib/trusted-host.ts's startup
+      # assertion, which the standalone server runs with NODE_ENV=production.
+      # `session.spec.ts` asserts the session endpoint actually answers, so a
+      # regression here fails a test rather than only a server log.
       AUTH_TRUST_HOST: 'true'
     steps:
       - uses: actions/checkout@v4
@@ -257,6 +261,12 @@ jobs:
           AUTH_SECRET: ci-build-placeholder-secret-not-real-0000000
           AUTH_GOOGLE_ID: ci-build-placeholder-google-client-id
           AUTH_GOOGLE_SECRET: ci-build-placeholder-google-client-secret
+          # #42: `next build` sets NODE_ENV=production, so the host-trust
+          # assertion (src/lib/trusted-host.ts) applies here too. A build has
+          # no canonical origin to pin, so header trust is the honest answer —
+          # the same reasoning, and the same value, as the Dockerfile's
+          # builder stage.
+          AUTH_TRUST_HOST: 'true'
 
   audit:
     name: Dependency vulnerabilities

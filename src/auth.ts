@@ -8,6 +8,7 @@ import { DrizzleUserRepository } from '@/adapters/db/user-repository';
 import { provisionTenant } from '@/core/identity/provision-tenant';
 import { UserId } from '@/core/shared/ids';
 import { env } from '@/lib/env';
+import { assertTrustedHostConfigured } from '@/lib/trusted-host';
 
 /**
  * `session.user.id` is what `requireUserId()` (src/lib/session.ts) reads —
@@ -237,6 +238,15 @@ function requireAuthEnv(): { authSecret: string; googleId: string; googleSecret:
 }
 
 const authEnv = requireAuthEnv();
+
+// SPEC-001 (#42): fails the boot when production has no pinned origin, rather
+// than letting every session read throw `UntrustedHost` and render as "signed
+// out". Deliberately NOT passed to `NextAuth()` below — Auth.js reads
+// `AUTH_URL` and `AUTH_TRUST_HOST` from the environment itself
+// (`setEnvDefaults` in @auth/core), and setting `trustHost` here as well would
+// create a second source of truth that can disagree with the first. This
+// asserts the environment is right; Auth.js consumes it.
+assertTrustedHostConfigured(env());
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: buildAuthAdapter(),

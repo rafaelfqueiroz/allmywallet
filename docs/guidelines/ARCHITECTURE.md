@@ -315,6 +315,24 @@ Hostinger includes weekly backups of its own. They now match this policy's *freq
 | **AR-69** | Because there is no staging safety net, DV-27's expand/contract discipline is not optional. Every schema change must be safe to deploy alongside the previous version of the code, and safe to roll back to. |
 | **AR-70** | Revisit when a second developer joins, or the first time a migration causes an incident — whichever comes first. |
 
+### Deployment environment variables
+
+Secrets and connection details live in the environment, never in the SPEC-002 config registry (AR-43). On the VPS they sit in a root-only `.env` injected through Compose; in CI they are Actions secrets.
+
+| Variable | Where it is set | Notes |
+|---|---|---|
+| `DATABASE_URL` | VPS `.env` | Runtime, as the restricted `allmywallet_app` role (AR-11) |
+| `DATABASE_MIGRATION_URL` | Deploy step only | Absent from the running containers by design |
+| `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | VPS `.env` | Required wherever auth runs; enforced by `requireAuthEnv()` |
+| **`AUTH_URL`** | **`docker-compose.yml`, derived from `DOMAIN`** | **The canonical public origin, `https://<DOMAIN>/api/auth`** |
+| `AUTH_TRUST_HOST` | Local and CI only | A production *build* served over localhost — never the deployed app |
+| `DOMAIN` | VPS `.env` | One hostname, shared by Caddy's certificate and `AUTH_URL` |
+| `SENTRY_DSN`, `LOG_LEVEL`, `IMPORT_UPLOAD_DIR` | VPS `.env` | |
+
+**Auth.js host trust is pinned, not delegated to a header** (#42). Auth.js refuses to build absolute URLs from an untrusted `Host`, and its own default chain ends in `NODE_ENV !== 'production'` — so development trusts the host and production does not. With nothing configured, a deployed instance throws on every session read and renders it as "signed out": it runs, and recognises nobody.
+
+`AUTH_URL` was chosen over `AUTH_TRUST_HOST` because pinning does not depend on the network topology staying as it is. Caddy is the only route in today, but header trust is only safe while that remains true, and nothing would announce it changing. `src/lib/trusted-host.ts` asserts the choice at startup, so a misconfigured deploy fails its health check instead of serving a signed-out shell.
+
 ---
 
 ## Amendments to existing specs

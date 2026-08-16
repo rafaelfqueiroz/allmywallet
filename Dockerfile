@@ -35,6 +35,13 @@ ENV DATABASE_URL=postgresql://allmywallet_app:allmywallet@localhost:5432/allmywa
 ENV AUTH_SECRET=docker-build-placeholder-secret-not-real-00000
 ENV AUTH_GOOGLE_ID=docker-build-placeholder-google-client-id
 ENV AUTH_GOOGLE_SECRET=docker-build-placeholder-google-client-secret
+# #42: `next build` runs with NODE_ENV=production, so src/lib/trusted-host.ts's
+# assertion applies to the build too. A build serves no traffic and has no
+# canonical origin, so header trust is the honest answer here — and it is
+# confined to this stage: `runner` below starts from `base`, so this ENV never
+# reaches the shipped image. The deployed container is pinned by AUTH_URL,
+# which docker-compose.yml sets from DOMAIN.
+ENV AUTH_TRUST_HOST=true
 RUN pnpm build
 RUN pnpm build:worker
 

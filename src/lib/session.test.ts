@@ -61,4 +61,16 @@ describe('tryUserId', () => {
 
     await expect(tryUserId()).resolves.toBeUndefined();
   });
+
+  // #42: the defining distinction. "Nobody is signed in" and "the session
+  // could not be read" are different facts, and collapsing them is what let a
+  // deployment authenticate nobody while every page rendered its signed-out
+  // state and no error was raised anywhere. Auth.js's `UntrustedHost` arrived
+  // through exactly this path.
+  it('propagates a failure to read the session instead of reporting "signed out"', async () => {
+    const { tryUserId } = await import('./session');
+    authMock.mockRejectedValueOnce(new Error('UntrustedHost: Host must be trusted.'));
+
+    await expect(tryUserId()).rejects.toThrow(/UntrustedHost/);
+  });
 });

@@ -31,6 +31,18 @@ services:
     restart: unless-stopped
     command: ['node', 'server.js']
     env_file: [.env]
+    environment:
+      # SPEC-001 (#42): the canonical origin Auth.js pins its callback URLs
+      # to, derived from the SAME `DOMAIN` that AR-56's Caddyfile requests a
+      # certificate for. Deriving rather than duplicating is the point — two
+      # hostnames in one .env drift, and the way they announce it is a
+      # sign-in loop nobody can reproduce locally.
+      #
+      # `:?` fails `docker compose up` outright when DOMAIN is unset, instead
+      # of starting a web container that authenticates nobody. The app would
+      # refuse to boot anyway (src/lib/trusted-host.ts); failing here names
+      # the actual missing value.
+      AUTH_URL: https://${DOMAIN:?DOMAIN is required — Caddy needs it for TLS and Auth.js pins AUTH_URL to it}/api/auth
     depends_on:
       postgres:
         condition: service_healthy
