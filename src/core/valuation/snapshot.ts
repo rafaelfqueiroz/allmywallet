@@ -1,24 +1,21 @@
 import { BusinessDate } from '@/core/shared/clock';
-import { domainError, type DomainError } from '@/core/shared/domain-error';
+import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId } from '@/core/shared/ids';
 import { Money } from '@/core/shared/money';
-import { err, ok, type Result } from '@/core/shared/result';
+import { ok, type Result } from '@/core/shared/result';
 import Decimal from 'decimal.js';
 import { computeTotalValue, isEarnings, type Transaction } from '@/core/ledger/transaction';
 import { aggregateAcrossInstitutions } from '@/core/positions/aggregate';
 import { replayPositions } from '@/core/positions/replay';
 import type { Asset, AssetCatalogPort } from '@/core/quotes/ports';
 import { listCalendarDays } from '@/core/valuation/business-days';
-import { valueFixedIncome } from '@/core/valuation/accrual';
-import { valueListed, type ListedValuationMode } from '@/core/valuation/listed';
-import { valueTesouro } from '@/core/valuation/tesouro';
+import type { ListedValuationMode } from '@/core/valuation/listed';
+import { FIXED_INCOME_CLASSES, valueHoldingsAt, type Holding } from '@/core/valuation/holdings';
 import {
-  ValuationErrorCode,
   type AssetClass,
   type DailyValuationSnapshot,
   type FixedIncomeContract,
   type FixedIncomeContractPort,
-  type IndexSeriesPoint,
   type IndexSeriesReaderPort,
   type LatestQuote,
   type PriceHistoryPort,
@@ -26,8 +23,13 @@ import {
   type SerializedSnapshot,
   type SnapshotRepositoryPort,
   type TradingCalendar,
+  type ValuationContext,
   type ValuedPosition,
 } from '@/core/valuation/ports';
+
+// Moved to `ports.ts` so `holdings.ts` and this file can share it without a
+// cycle. Re-exported because callers across the codebase import it from here.
+export type { ValuationContext };
 
 /**
  * SPEC-009 BR-009-16..19 — the daily valuation snapshot.
@@ -59,31 +61,6 @@ export interface SnapshotDependencies {
   readonly assets: AssetCatalogPort;
   readonly snapshots: SnapshotRepositoryPort;
 }
-
-/**
- * Everything the valuation of a whole date range needs, loaded once.
- *
- * The alternative — a port call per asset per day — turns a five-year rebuild
- * into hundreds of thousands of queries. Loading up front also makes
- * `valuePortfolioAt` synchronous and therefore trivially testable: given a
- * context and a ledger, the figures are a pure function.
- */
-export interface ValuationContext {
-  readonly calendar: TradingCalendar;
-  readonly assets: ReadonlyMap<AssetId, Asset>;
-  readonly contracts: ReadonlyMap<AssetId, FixedIncomeContract>;
-  /** Ascending by date, per asset. */
-  readonly closes: ReadonlyMap<AssetId, readonly PriceQuote[]>;
-  readonly latest: ReadonlyMap<AssetId, LatestQuote>;
-  /** SGS 12, daily. */
-  readonly cdi: readonly IndexSeriesPoint[];
-  /** SGS 433, monthly. */
-  readonly ipca: readonly IndexSeriesPoint[];
-}
-
-const LISTED_CLASSES: ReadonlySet<AssetClass> = new Set<AssetClass>(['stock', 'fii', 'bdr', 'etf']);
-
-const FIXED_INCOME_CLASSES: ReadonlySet<AssetClass> = new Set<AssetClass>(['cdb', 'lci', 'lca']);
 
 /** Every asset the ledger touches, deduplicated and in a stable order. */
 export function distinctAssetIds(transactions: readonly Transaction[]): readonly AssetId[] {
@@ -124,8 +101,23 @@ export async function loadValuationContext(
   from: BusinessDate,
   to: BusinessDate,
 ): Promise<ValuationContext> {
-  const assetIds = distinctAssetIds(transactions);
+  return loadValuationContextForAssets(deps, distinctAssetIds(transactions), from, to);
+}
 
+/**
+ * The same load, keyed by asset ids rather than by a ledger.
+ *
+ * A report knows what is held from SPEC-007's `positions` cache and must never
+ * touch `transactions` to find out (DL-011-07, TS-32). Deriving the asset list
+ * from a ledger it is not allowed to read would be a contradiction, so the
+ * list is the parameter.
+ */
+export async function loadValuationContextForAssets(
+  deps: Omit<SnapshotDependencies, 'snapshots'>,
+  assetIds: readonly AssetId[],
+  from: BusinessDate,
+  to: BusinessDate,
+): Promise<ValuationContext> {
   const assets = new Map<AssetId, Asset>();
   const contracts = new Map<AssetId, FixedIncomeContract>();
   const closes = new Map<AssetId, readonly PriceQuote[]>();
@@ -179,16 +171,6 @@ export async function loadValuationContext(
   return { calendar: deps.calendar, assets, contracts, closes, latest, cdi, ipca };
 }
 
-/** The last close on or before `date`, from an ascending array. */
-function closeOnOrBefore(history: readonly PriceQuote[], date: BusinessDate): PriceQuote | null {
-  let found: PriceQuote | null = null;
-  for (const quote of history) {
-    if (BusinessDate.isAfter(quote.date, date)) break;
-    found = quote;
-  }
-  return found;
-}
-
 // ---------------------------------------------------------------------------
 // Valuing a portfolio on one date
 // ---------------------------------------------------------------------------
@@ -214,62 +196,18 @@ export function valuePortfolioAt(
   const replayed = replayPositions(transactions, { asOf });
   if (!replayed.ok) return replayed;
 
-  const valued: ValuedPosition[] = [];
   // BR-007-08: positions are held per (asset, institution); a portfolio value
   // is per asset, so they aggregate cost-weighted before anything is priced.
-  for (const position of aggregateAcrossInstitutions(replayed.value)) {
-    if (position.state.quantity.isZero()) continue;
+  // A report does the opposite and values each (asset, institution) row
+  // separately, because it groups by institution — both reach the same total,
+  // which is what `valueHoldingsAt` documents and TS-12 asserts.
+  const holdings: Holding[] = aggregateAcrossInstitutions(replayed.value).map((position) => ({
+    assetId: position.assetId,
+    quantity: position.state.quantity,
+    averageCost: position.state.averageCost,
+  }));
 
-    const asset = context.assets.get(position.assetId);
-    if (asset === undefined) {
-      return err(
-        domainError(ValuationErrorCode.ASSET_NOT_FOUND, { assetId: position.assetId, date: asOf }),
-      );
-    }
-
-    const common = {
-      assetId: position.assetId,
-      quantity: position.state.quantity,
-      averageCost: position.state.averageCost,
-      asOf,
-    };
-
-    if (LISTED_CLASSES.has(asset.assetClass)) {
-      valued.push(
-        valueListed({
-          ...common,
-          assetClass: asset.assetClass,
-          mode,
-          prices: {
-            close: closeOnOrBefore(context.closes.get(position.assetId) ?? [], asOf),
-            latest: context.latest.get(position.assetId) ?? null,
-          },
-        }),
-      );
-    } else if (asset.assetClass === 'tesouro_direto') {
-      valued.push(
-        valueTesouro({
-          ...common,
-          sellPrice: closeOnOrBefore(context.closes.get(position.assetId) ?? [], asOf),
-        }),
-      );
-    } else {
-      // cdb | lci | lca — BR-009-07. A missing contract is not an error here;
-      // `valueFixedIncome` turns it into a cost-valued, flagged position.
-      valued.push(
-        valueFixedIncome({
-          ...common,
-          assetClass: asset.assetClass,
-          calendar: context.calendar,
-          contract: context.contracts.get(position.assetId) ?? null,
-          cdi: context.cdi,
-          ipca: context.ipca,
-        }),
-      );
-    }
-  }
-
-  return ok(valued);
+  return valueHoldingsAt(context, holdings, asOf, mode);
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import type { BusinessDate } from '@/core/shared/clock';
 import type { AssetId } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type {
+  Asset,
   AssetClass,
   IndexSeriesCode,
   LatestQuote,
@@ -18,7 +19,7 @@ import type {
  * adapter, which is what lets every rule below be tested with no database.
  */
 
-export type { AssetClass, IndexSeriesCode, LatestQuote, PriceQuote, TradingCalendar };
+export type { Asset, AssetClass, IndexSeriesCode, LatestQuote, PriceQuote, TradingCalendar };
 
 /**
  * The three valuation methods, and the reason the spec has three: the
@@ -253,4 +254,28 @@ export interface SnapshotRepositoryPort {
   /** BR-009-18: invalidation. Returns how many rows were removed. */
   deleteFrom(date: BusinessDate): Promise<number>;
   listRange(from: BusinessDate, to: BusinessDate): Promise<readonly DailyValuationSnapshot[]>;
+}
+
+/**
+ * Everything the valuation of a whole date range needs, loaded once.
+ *
+ * The alternative — a port call per asset per day — turns a five-year rebuild
+ * into hundreds of thousands of queries. Loading up front also makes
+ * `valueHoldingsAt` synchronous and therefore trivially testable: given a
+ * context and a set of holdings, the figures are a pure function.
+ *
+ * Declared here rather than in `snapshot.ts` so that `holdings.ts` and
+ * `snapshot.ts` can both depend on it without depending on each other.
+ */
+export interface ValuationContext {
+  readonly calendar: TradingCalendar;
+  readonly assets: ReadonlyMap<AssetId, Asset>;
+  readonly contracts: ReadonlyMap<AssetId, FixedIncomeContract>;
+  /** Ascending by date, per asset. */
+  readonly closes: ReadonlyMap<AssetId, readonly PriceQuote[]>;
+  readonly latest: ReadonlyMap<AssetId, LatestQuote>;
+  /** SGS 12, daily. */
+  readonly cdi: readonly IndexSeriesPoint[];
+  /** SGS 433, monthly. */
+  readonly ipca: readonly IndexSeriesPoint[];
 }

@@ -77,14 +77,21 @@ describe('SPEC-011 — report surface tenant isolation', () => {
       'Carteira B',
     ]);
 
-    for (const [userId, assetId, quantity, total] of [
-      [userA, petr, '10', '100'],
-      [userB, vale, '50', '999999'],
+    // `average_cost` is stated per row rather than hardcoded to 10, because
+    // the report now values holdings as quantity × average cost when nothing
+    // can price them (SPEC-009's COST_FALLBACK) instead of reading
+    // `total_cost` directly. The old fixture set B to 50 × 10 with a
+    // `total_cost` of 999999 — a row SPEC-007 could never produce, and one
+    // whose inconsistency only stayed invisible because the column the report
+    // read was the one that had been set by hand.
+    for (const [userId, assetId, quantity, averageCost, total] of [
+      [userA, petr, '10', '10', '100'],
+      [userB, vale, '50', '19999.98', '999999'],
     ] as const) {
       await migratorPool.query(
         `INSERT INTO positions (id, user_id, asset_id, institution_id, quantity, average_cost, total_cost, realized_gain)
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, 10, $5, 0)`,
-        [userId, assetId, xp, quantity, total],
+         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 0)`,
+        [userId, assetId, xp, quantity, averageCost, total],
       );
     }
 
