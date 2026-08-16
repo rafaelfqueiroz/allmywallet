@@ -1,5 +1,10 @@
-import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { SystemClock, type BusinessDate, type Clock } from '@/core/shared/clock';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import {
+  SystemClock,
+  businessDateInSaoPaulo,
+  type BusinessDate,
+  type Clock,
+} from '@/core/shared/clock';
 import { AssetId, InstitutionId, WalletId, type UserId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type {
@@ -26,6 +31,7 @@ import type { AssetClass } from '@/core/quotes/ports';
 import { db } from '@/db/client';
 import { assets, institutions } from '@/db/schema/assets';
 import { positions } from '@/db/schema/positions';
+import { importBatches } from '@/db/schema/transactions';
 import { dailyValuationSnapshots } from '@/db/schema/valuation';
 import { walletAllocations, wallets } from '@/db/schema/wallets';
 import { withTenant, type Tx } from '@/db/tenant';
@@ -256,6 +262,58 @@ export class DrizzleReportDataPort implements ReportDataPort {
       byAssetClass: deserializeAssetClassBreakdown(row.byAssetClass),
       hasEstimates: row.hasEstimates,
     }));
+  }
+
+  /**
+   * SPEC-013 — the snapshot immediately **preceding** a range.
+   *
+   * Growth "during March" is measured from February's close. Using March's own
+   * first snapshot as the opening would silently discard the first day's
+   * movement, which is the classic off-by-one in every period-return
+   * implementation — and it fails quietly, because the number it produces is
+   * still plausible.
+   */
+  async findSnapshotBefore(date: BusinessDate): Promise<DailyValuationSnapshot | null> {
+    const rows = await this.tx
+      .select()
+      .from(dailyValuationSnapshots)
+      .where(sql`${dailyValuationSnapshots.date} < ${date}`)
+      .orderBy(desc(dailyValuationSnapshots.date))
+      .limit(1);
+
+    const row = rows[0];
+    if (row === undefined) return null;
+    return {
+      date: row.date as BusinessDate,
+      totalValue: Money.fromString(String(row.totalValue)),
+      netContributions: Money.fromString(String(row.netContributions)),
+      earningsToDate: Money.fromString(String(row.earningsToDate)),
+      byAssetClass: deserializeAssetClassBreakdown(row.byAssetClass),
+      hasEstimates: row.hasEstimates,
+    };
+  }
+
+  /**
+   * SPEC-013 BR-013-13 / SPEC-005 BR-005-27 — when custody data was last
+   * imported, as a business date.
+   *
+   * Only a **committed** batch counts. A staged-but-abandoned upload has
+   * changed nothing about the portfolio, and reporting it as the last import
+   * would tell the user their figures are fresher than they are — which is the
+   * one thing this date exists to prevent.
+   */
+  async lastImportAt(): Promise<BusinessDate | null> {
+    const rows = await this.tx
+      .select({ committedAt: importBatches.committedAt })
+      .from(importBatches)
+      .where(sql`${importBatches.committedAt} IS NOT NULL`)
+      .orderBy(desc(importBatches.committedAt))
+      .limit(1);
+
+    const committedAt = rows[0]?.committedAt;
+    return committedAt === undefined || committedAt === null
+      ? null
+      : businessDateInSaoPaulo(committedAt);
   }
 
   /** The `all` period's anchor — the first date this tenant has a snapshot for. */
