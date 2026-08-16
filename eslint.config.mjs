@@ -8,6 +8,61 @@ import prettier from 'eslint-config-prettier';
  * A violation fails CI.
  */
 
+/**
+ * DS-22 — the rule that stops the duplication #33 removed from restarting.
+ *
+ * Colour and spacing are design-system decisions. A page that writes them
+ * inline is a page re-deciding them, and eight pages re-deciding them is how a
+ * focus ring ends up correct in some places and not others. Both patterns are
+ * deliberately narrow: they match *values*, not prefixes, so `text-sm`,
+ * `text-right`, `border-b` and the `py-row`/`py-field` density tokens stay
+ * legal — those are typography, alignment, structure and named tokens, not raw
+ * colour or raw spacing.
+ */
+/*
+ * Written without `[...]` character classes or `{n,m}` quantifiers on purpose.
+ * These regexes are embedded in esquery attribute selectors, where a literal
+ * `]` or `,` terminates the selector early — the first draft of this rule
+ * silently matched a truncated pattern and let real violations through.
+ * Alternation and `\d\d?` say the same thing and survive the parser.
+ */
+const PALETTE =
+  'slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose';
+const PALETTE_SHADES = PALETTE.split('|')
+  .map((hue) => `${hue}-\\d\\d\\d?`)
+  .join('|');
+
+const COLOUR_UTILITY = new RegExp(
+  `(^|\\s|:)-?(bg|text|border|ring|fill|stroke|outline|decoration|divide|from|via|to|caret|shadow)-(background|foreground|card|popover|primary|secondary|muted|accent|destructive|input|ring|positive|negative|sidebar|chart-\\d|white|black|${PALETTE_SHADES})`,
+);
+
+const SPACING_UTILITY = new RegExp(
+  '(^|\\s|:)-?(p|px|py|pt|pr|pb|pl|ps|pe|m|mx|my|mt|mr|mb|ml|ms|me|gap|gap-x|gap-y|space-x|space-y)-(\\d|px|auto)',
+);
+
+const DESIGN_SYSTEM_BOUNDARY = [
+  {
+    selector: `JSXAttribute[name.name='className'] Literal[value=${COLOUR_UTILITY}]`,
+    message:
+      'DS-22: no raw colour utilities outside src/components/. Use a primitive, or <Text tone="…">.',
+  },
+  {
+    selector: `JSXAttribute[name.name='className'] TemplateElement[value.raw=${COLOUR_UTILITY}]`,
+    message:
+      'DS-22: no raw colour utilities outside src/components/. Use a primitive, or <Text tone="…">.',
+  },
+  {
+    selector: `JSXAttribute[name.name='className'] Literal[value=${SPACING_UTILITY}]`,
+    message:
+      'DS-22: no raw spacing utilities outside src/components/. Use Stack, Cluster, Grid or List.',
+  },
+  {
+    selector: `JSXAttribute[name.name='className'] TemplateElement[value.raw=${SPACING_UTILITY}]`,
+    message:
+      'DS-22: no raw spacing utilities outside src/components/. Use Stack, Cluster, Grid or List.',
+  },
+];
+
 /** Packages `core/` must never see. AR-01: core is plain TypeScript, runnable without a database. */
 const FRAMEWORK_PACKAGES = [
   { name: 'next', message: 'AR-01: core/ imports nothing from next/*.' },
@@ -316,6 +371,26 @@ export default tseslint.config(
           message:
             'AR-44: no string literals in components — route user-facing text through next-intl.',
         },
+      ],
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // DS-22 — the structural boundary. Lands with the retrofit, in the same
+  // commit, so there is never a window in which a new screen can add fresh
+  // duplication ahead of the rule.
+  // ---------------------------------------------------------------------------
+  {
+    files: ['src/app/**/*.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXText[value=/[A-Za-zÀ-ÿ]/]',
+          message:
+            'AR-44: no string literals in components — route user-facing text through next-intl.',
+        },
+        ...DESIGN_SYSTEM_BOUNDARY,
       ],
     },
   },

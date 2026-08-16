@@ -11,6 +11,28 @@ import {
 } from '@/app/(app)/import/actions';
 import { loadImportBatchDetail } from '@/app/(app)/import/data';
 import { tryUserId } from '@/app/(app)/import/session';
+import { PageShell } from '@/components/patterns/page-shell';
+import { Section } from '@/components/patterns/section';
+import { EmptyState } from '@/components/patterns/empty-state';
+import { StatCard } from '@/components/patterns/stat-card';
+import { Field } from '@/components/patterns/field';
+import { Stack } from '@/components/layout/stack';
+import { Cluster } from '@/components/layout/cluster';
+import { Grid } from '@/components/layout/grid';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { NativeSelect } from '@/components/ui/native-select';
+import { List, ListItem } from '@/components/layout/list';
+import { Text } from '@/components/ui/text';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 /**
  * SPEC-005 BR-005-10/11/19/20/22..26 — the preview: accurate counts, the
@@ -30,11 +52,9 @@ export default async function ImportBatchDetailPage({
 
   if (userId === undefined) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-6 px-6 py-10">
-        <p role="status" className="text-muted-foreground">
-          {t('signedOut')}
-        </p>
-      </main>
+      <PageShell>
+        <EmptyState title={t('signedOut')} />
+      </PageShell>
     );
   }
 
@@ -48,153 +68,142 @@ export default async function ImportBatchDetailPage({
   const canCancel = batch.status === 'pending' || batch.status === 'previewed';
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col gap-8 px-6 py-10">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {t(`extractType.${batch.source}`)}
-        </h1>
-        <p className="text-muted-foreground">
-          {t('uploadedAt', { date: formatDateTime(batch.uploadedAt) })}
-        </p>
-        <p className="font-medium">{t(`status.${batch.status}`)}</p>
-      </div>
-
+    <PageShell
+      title={t(`extractType.${batch.source}`)}
+      description={t('uploadedAt', { date: formatDateTime(batch.uploadedAt) })}
+      actions={<Badge variant="secondary">{t(`status.${batch.status}`)}</Badge>}
+    >
       {batch.rowCounts && (
-        <section className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-          <Stat label={t('countRead')} value={batch.rowCounts.read} />
-          <Stat label={t('countNew')} value={batch.rowCounts.new} />
-          <Stat label={t('countDuplicates')} value={batch.rowCounts.duplicates} />
-          <Stat label={t('countNeedsAttention')} value={batch.rowCounts.needsAttention} />
-        </section>
+        <Grid cols={4} gap="md">
+          <StatCard label={t('countRead')} value={batch.rowCounts.read} />
+          <StatCard label={t('countNew')} value={batch.rowCounts.new} />
+          <StatCard label={t('countDuplicates')} value={batch.rowCounts.duplicates} />
+          <StatCard label={t('countNeedsAttention')} value={batch.rowCounts.needsAttention} />
+        </Grid>
       )}
 
       {(canCommit || canCancel) && (
-        <div className="flex gap-3">
+        <Cluster gap="sm">
           {canCommit && (
             <form action={commitBatchAction}>
               <input type="hidden" name="batchId" value={batch.id} />
-              <button
-                type="submit"
-                className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
-              >
-                {t('commit')}
-              </button>
+              <Button type="submit">{t('commit')}</Button>
             </form>
           )}
           {canCancel && (
             <form action={cancelBatchAction}>
               <input type="hidden" name="batchId" value={batch.id} />
-              <button type="submit" className="text-sm text-destructive hover:underline">
+              <Button type="submit" variant="destructive">
                 {t('cancel')}
-              </button>
+              </Button>
             </form>
           )}
-        </div>
+        </Cluster>
       )}
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">{t('needsAttentionTitle')}</h2>
+      <Section title={t('needsAttentionTitle')}>
         {needsAttention.length === 0 ? (
-          <p className="text-muted-foreground">{t('needsAttentionEmpty')}</p>
+          <EmptyState title={t('needsAttentionEmpty')} />
         ) : (
-          <ul className="flex flex-col gap-4">
+          <List gap="md">
             {needsAttention.map((row) => (
-              <li key={row.id} className="flex flex-col gap-2 border-b pb-4 text-sm">
-                <span className="font-medium">{row.record.assetCode}</span>
-                <span className="text-xs text-muted-foreground">
-                  {row.record.kind === 'transaction' ? row.record.b3Type : ''}
-                </span>
-                {row.classification === 'unclassified' && (
-                  <form action={classifyRowAction} className="flex flex-wrap items-end gap-2">
-                    <input type="hidden" name="rowId" value={row.id} />
-                    <label className="flex flex-col gap-1 text-xs">
-                      {t('classifyLabel')}
-                      <select name="type" required className="rounded-md border px-2 py-1">
-                        {TRANSACTION_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {t(`transactionType.${type}`)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="submit"
-                      className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent"
-                    >
-                      {t('classifySubmit')}
-                    </button>
-                  </form>
-                )}
-              </li>
+              <ListItem key={row.id} separated>
+                <Stack gap="sm" align="start">
+                  <span className="font-medium">{row.record.assetCode}</span>
+                  <Text as="span" size="xs" tone="muted">
+                    {row.record.kind === 'transaction' ? row.record.b3Type : ''}
+                  </Text>
+                  {row.classification === 'unclassified' && (
+                    <form action={classifyRowAction}>
+                      <input type="hidden" name="rowId" value={row.id} />
+                      <Cluster gap="sm" align="end">
+                        <Field id={`classify-${row.id}`} label={t('classifyLabel')} width="lg">
+                          <NativeSelect name="type" required>
+                            {TRANSACTION_TYPES.map((type) => (
+                              <option key={type} value={type}>
+                                {t(`transactionType.${type}`)}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                        </Field>
+                        <Button type="submit" size="sm">
+                          {t('classifySubmit')}
+                        </Button>
+                      </Cluster>
+                    </form>
+                  )}
+                </Stack>
+              </ListItem>
             ))}
-          </ul>
+          </List>
         )}
-      </section>
+      </Section>
 
       {batch.reconciliation && (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-medium">{t('reconciliationTitle')}</h2>
-          <p className="font-medium">{t(`reconciliationStatus.${batch.reconciliation.status}`)}</p>
+        <Section
+          title={t('reconciliationTitle')}
+          actions={
+            <Badge variant="outline">
+              {t(`reconciliationStatus.${batch.reconciliation.status}`)}
+            </Badge>
+          }
+        >
           {batch.reconciliation.discrepancies.length > 0 && (
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="py-2 pr-4">{t('columnAsset')}</th>
-                  <th className="py-2 pr-4">{t('columnComputed')}</th>
-                  <th className="py-2 pr-4">{t('columnB3')}</th>
-                  <th className="py-2 pr-4">{t('columnDifference')}</th>
-                  <th className="py-2 pr-4">{t('columnCause')}</th>
-                  <th className="py-2" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableCaption className="sr-only">{t('reconciliationTitle')}</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">{t('columnAsset')}</TableHead>
+                  <TableHead scope="col">{t('columnComputed')}</TableHead>
+                  <TableHead scope="col">{t('columnB3')}</TableHead>
+                  <TableHead scope="col">{t('columnDifference')}</TableHead>
+                  <TableHead scope="col">{t('columnCause')}</TableHead>
+                  <TableHead scope="col">
+                    <span className="sr-only">{t('acceptAdjustment')}</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {batch.reconciliation.discrepancies.map((d) => (
-                  <tr key={d.assetId} className="border-b last:border-0">
-                    <td className="py-2 pr-4 font-medium">{d.assetCode}</td>
-                    <td className="py-2 pr-4">{d.computedQuantity}</td>
-                    <td className="py-2 pr-4">{d.b3Quantity}</td>
-                    <td className="py-2 pr-4">{d.difference}</td>
-                    <td className="py-2 pr-4 text-xs text-muted-foreground">
-                      {t(`discrepancyCause.${d.cause}`)}
-                    </td>
-                    <td className="py-2">
-                      {!d.resolved && (
+                  <TableRow key={d.assetId}>
+                    <TableCell className="py-row font-medium">{d.assetCode}</TableCell>
+                    <TableCell className="py-row tabular-nums">{d.computedQuantity}</TableCell>
+                    <TableCell className="py-row tabular-nums">{d.b3Quantity}</TableCell>
+                    <TableCell className="py-row tabular-nums">{d.difference}</TableCell>
+                    <TableCell className="py-row">
+                      <Text as="span" size="xs" tone="muted">
+                        {t(`discrepancyCause.${d.cause}`)}
+                      </Text>
+                    </TableCell>
+                    <TableCell className="py-row">
+                      {d.resolved ? (
+                        <Text as="span" size="xs" tone="muted">
+                          {t('resolved')}
+                        </Text>
+                      ) : (
                         <form action={acceptAdjustmentAction}>
                           <input type="hidden" name="batchId" value={batch.id} />
                           <input type="hidden" name="assetId" value={d.assetId} />
                           {d.institutionId && (
                             <input type="hidden" name="institutionId" value={d.institutionId} />
                           )}
-                          <button
-                            type="submit"
-                            className="rounded-md border px-2 py-1 text-xs font-medium hover:bg-accent"
-                          >
+                          <Button type="submit" size="xs" variant="outline">
                             {t('acceptAdjustment')}
-                          </button>
+                          </Button>
                         </form>
                       )}
-                      {d.resolved && (
-                        <span className="text-xs text-muted-foreground">{t('resolved')}</span>
-                      )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
-        </section>
+        </Section>
       )}
 
-      <p className="text-xs text-muted-foreground">{t('rowsCount', { count: rows.length })}</p>
-    </main>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
-    </div>
+      <Text size="xs" tone="muted">
+        {t('rowsCount', { count: rows.length })}
+      </Text>
+    </PageShell>
   );
 }

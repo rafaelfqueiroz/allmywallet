@@ -33,7 +33,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
       <head>
         <ThemeScript />
       </head>
-      <body className="min-h-dvh bg-background text-foreground antialiased">
+      <body className="min-h-dvh antialiased">
         <NextIntlClientProvider messages={messages}>{children}</NextIntlClientProvider>
       </body>
     </html>

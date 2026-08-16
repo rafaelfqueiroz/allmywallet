@@ -4,7 +4,7 @@ How the interface is built. The prose companion to [`src/app/globals.css`](../..
 
 Rules are numbered `DS-nn` and are citable from code and PRs the same way `AR-`, `DV-` and `TS-` rules are. The scoping decisions behind them are recorded as `DL-nn` in the Decision log of [#33](https://github.com/rafaelfqueiroz/allmywallet/issues/33); where this document explains *what the rule is*, the Decision log explains *why that option was chosen over the others*.
 
-> **Status.** PR1 and PR2 of three have landed: tokens, the ten primitives, the a11y/keyboard harness, the layout primitives, the patterns, `AppShell`, the theme toggle and the chart layer. The retrofit of the existing screens, the strict lint rule, the E2E suite and the visual baselines are PR3. Sections marked *(PR3)* describe committed decisions, not existing code.
+> **Status.** Complete. All three PRs under [#33](https://github.com/rafaelfqueiroz/allmywallet/issues/33) have landed: tokens and primitives, layout/patterns/shell/charts, and the retrofit with its enforcement. Every rule below describes code that exists.
 
 ## 1. What this is, and what it is not
 
@@ -155,7 +155,21 @@ Two caveats carried forward:
 
 **DS-34 — Legends render as text below the plot on small screens.** An in-chart legend on a 375px viewport consumes the plot area it exists to explain. `ChartLegend` pairs each swatch with a label and marks the swatch `aria-hidden` — it carries nothing the label does not.
 
-## 10. Testing
+## 10. Forms and pages
+
+**DS-36 — A labelled control is a `Field`.** It takes the id, points the label at it, and attaches hint and error text with `aria-describedby`. The pattern it replaced — wrapping the control in a `<label>` — works until someone adds a hint inside the wrapper, at which point the accessible name silently becomes the label plus the hint.
+
+`Field` takes the control as a **child element and clones it**, not as a render prop: these forms are Server Components, and a function child cannot cross the server/client boundary. `id` is required for the same reason — `useId` is a hook, and making `Field` a Client Component would drag every form on every page with it.
+
+**DS-37 — Form controls are native.** `NativeSelect` and `Checkbox` exist alongside the Radix `Select`, and the reason is not taste: every form on these screens is a `<form action={serverAction}>` that posts without JavaScript, and a Radix control contributes nothing to a native submission without a mirrored hidden input. Reach for Radix `Select` when the control drives client state; reach for the native one when it is a form field.
+
+**DS-38 — A titled region within a page is a `Section`.** `h2` under `PageShell`'s `h1`. Nesting deeper is a signal the page is doing too much, not a reason to add a level prop.
+
+**DS-39 — Pages outside the application frame use `AuthShell`.** Sign-in and the landing placeholder are viewport-centred cards with no navigation, which is a different shape from `PageShell`'s top-aligned document. Collapsing them would produce a component whose props contradict each other half the time.
+
+**DS-40 — Never read the session in the root layout.** A cookie read there opts *every* route into dynamic rendering — it silently turned `/` and `/signin` from prerendered into server-rendered. Per-account state belongs in a route-group layout; `src/app/authenticated-frame.tsx` is where `AppShell` and the theme reconciliation live.
+
+## 11. Testing
 
 The `components` vitest project — jsdom, Testing Library, `vitest-axe` — runs blocking alongside unit, integration and isolation. `pnpm test:components`.
 
@@ -167,6 +181,21 @@ This is not ceremony. The `dlitem` failure in `DataTable`'s card list — `dt`/`
 
 Note that the `components` project matches both `.test.ts` and `.test.tsx` under `src/components/`. The `unit` project excludes that directory wholesale, so a `.test.ts` there would otherwise be collected by no project and silently never run.
 
-**What this harness cannot see.** jsdom has no layout and no paint, so `color-contrast` is explicitly disabled in [`test-utils.tsx`](../../src/components/test-utils.tsx) rather than left to report "incomplete" and read as a pass. Contrast, both themes and both viewports are covered by Playwright screenshot baselines *(PR3)*, generated in a pinned container image because macOS and CI rasterise fonts differently.
+**What this harness cannot see.** jsdom has no layout and no paint, so `color-contrast` is explicitly disabled in [`test-utils.tsx`](../../src/components/test-utils.tsx) rather than left to report "incomplete" and read as a pass. That gap is covered by two browser suites.
 
-**DS-22 *(PR3)* — No raw colour or spacing literal outside `src/components/`.** A lint rule, landing in the same commit as the retrofit so there is no window in which fresh duplication can be added. This is the rule that stops the whole problem from restarting: without it, the system is built once and the next screen begins recreating it by hand.
+**DS-41 — `tests/e2e/` runs axe against the real pages, on desktop and on a phone.** Composition produces violations that no per-primitive test can see, and the navigation is a genuinely different component below `md`.
+
+**DS-42 — `tests/visual/` baselines are recorded and verified in the pinned Playwright container, never natively.** macOS and Linux rasterise fonts differently, so a baseline captured on a laptop fails in CI forever — and fails in a way that reads as a real regression. `pnpm test:visual:docker` is the only sanctioned way to record them; `--update` re-records after an intended change.
+
+The subject is `/primitives`, a kitchen-sink route rendering every primitive in every variant in one document, so four images (light/dark × desktop/mobile) cover the system. The route is gated behind `ALLOW_DEV_ROUTES`, **not** `NODE_ENV`: the standalone server the visual suite runs against *is* a production build, so a `NODE_ENV` guard 404s the very page the screenshots are of.
+
+**DS-22 — No raw colour or spacing literal outside `src/components/`.** Enforced by ESLint on `src/app/**/*.tsx`, landed in the same commit as the retrofit so there was never a window in which fresh duplication could be added. This is the rule that stops the whole problem from restarting: without it, the system is built once and the next screen begins recreating it by hand.
+
+The patterns match **values**, not prefixes. `text-sm`, `text-right`, `border-b`, `sr-only`, `tabular-nums` and the `py-row`/`py-field` density tokens are all legal — they are typography, alignment, structure and named tokens. `text-muted-foreground`, `gap-4` and `p-6` are not.
+
+Two implementation notes worth keeping:
+
+- The regexes are written without `[...]` classes or `{n,m}` quantifiers. They are embedded in esquery attribute selectors, where a literal `]` or `,` ends the selector early — the first draft matched a **truncated** pattern and let real violations through while appearing to work.
+- **There is no escape hatch, and the retrofit needed none.** Every one of the 26 violations the rule found was fixed by moving the decision into a component, which is what produced `Text`, `List`, `Checkbox`, `NativeSelect` and `Field`'s `width` variants. A rule whose exemption gets used routinely is not a rule.
+
+**DS-35 — Components may use raw utilities; pages may not.** The boundary is the point. Inside `src/components/` the raw classes *are* the implementation. `DataTable`'s card list deliberately uses plain divs, because wrapping `dt`/`dd` in two layout components breaks the `dl` association and axe rejects it.

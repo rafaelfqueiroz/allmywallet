@@ -134,6 +134,107 @@ jobs:
       # tenant-scoped table lacking a policy or a test — never a maintained list.
       - run: pnpm test:isolation
 
+  e2e:
+    name: E2E journeys (blocking)
+    runs-on: ubuntu-latest
+    # DL-27: this gate was listed as blocking in DEVELOPMENT.md and in #33's
+    # test plan long before it existed. `tests/e2e/` and this job are what make
+    # the claim true.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allmywallet_migrator
+          POSTGRES_PASSWORD: allmywallet
+          POSTGRES_DB: allmywallet
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U allmywallet_migrator"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_MIGRATION_URL: postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet
+      DATABASE_URL: postgresql://allmywallet_app:allmywallet@localhost:5432/allmywallet
+      # SPEC-001: the build and the running server need syntactically valid
+      # auth values, never real ones — no OAuth flow runs in this suite.
+      AUTH_SECRET: ci-e2e-placeholder-secret-not-real-000000000
+      AUTH_GOOGLE_ID: ci-e2e-placeholder-google-client-id
+      AUTH_GOOGLE_SECRET: ci-e2e-placeholder-google-client-secret
+      # Without this Auth.js rejects localhost as an untrusted host and every
+      # session read throws instead of returning "signed out" — the suite would
+      # then be asserting against an error path rather than the real one.
+      AUTH_TRUST_HOST: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      # 0000_roles.sql creates allmywallet_app without a password on purpose.
+      # The Vitest suites set one via tests/support/postgres.ts; a job that
+      # boots the real server has no such hook, and every connection fails with
+      # 28P01 at startup.
+      - run: pnpm db:provision-app-role
+      - name: Install the browser Playwright is pinned to
+        run: pnpm exec playwright install --with-deps chromium
+      # Runs on desktop and on a phone viewport — DL-12 makes mobile
+      # first-class, and the navigation is a different component there.
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  visual:
+    name: Visual baselines (blocking)
+    runs-on: ubuntu-latest
+    # DL-C2: baselines are recorded in the pinned Playwright image and verified
+    # in the same one. This job runs the container's browser directly — the
+    # image the `test:visual:docker` script pulls locally is this same
+    # `container:`, so a baseline recorded on a laptop matches here.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.1-noble
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allmywallet_migrator
+          POSTGRES_PASSWORD: allmywallet
+          POSTGRES_DB: allmywallet
+        options: >-
+          --health-cmd "pg_isready -U allmywallet_migrator"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      # Inside a job container, services are reachable by name rather than on
+      # localhost.
+      DATABASE_MIGRATION_URL: postgresql://allmywallet_migrator:allmywallet@postgres:5432/allmywallet
+      DATABASE_URL: postgresql://allmywallet_app:allmywallet@postgres:5432/allmywallet
+      AUTH_SECRET: ci-visual-placeholder-secret-not-real-0000000
+      AUTH_GOOGLE_ID: ci-visual-placeholder-google-client-id
+      AUTH_GOOGLE_SECRET: ci-visual-placeholder-google-client-secret
+      AUTH_TRUST_HOST: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:migrate
+      - run: pnpm db:provision-app-role
+      - run: pnpm test:visual
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: visual-diff
+          path: test-results/
+          retention-days: 7
+
   build:
     name: Build
     runs-on: ubuntu-latest

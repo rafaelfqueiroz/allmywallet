@@ -162,6 +162,7 @@
     "walletDetailBack": "Voltar às carteiras",
     "allocationsTitle": "Ativos alocados",
     "allocationsEmpty": "Nenhum ativo atribuído a esta carteira ainda.",
+    "costBasisUnknown": "Custo não registrado",
     "editTitle": "Editar carteira",
     "save": "Salvar alterações"
   },

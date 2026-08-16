@@ -7,11 +7,29 @@ import {
   UNASSIGNED_GROUP_ID,
   type ReportGroup,
 } from '@/core/reporting/ports';
-import { formatCurrency, formatQuantity } from '@/i18n/format';
 import { fromSearchParams } from '@/lib/report-url-state';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { withReportPort } from '@/app/(app)/reports/data';
 import { tryUserId } from '@/app/(app)/reports/session';
+import { PageShell } from '@/components/patterns/page-shell';
+import { EmptyState } from '@/components/patterns/empty-state';
+import { ErrorState } from '@/components/patterns/error-state';
+import { Money } from '@/components/patterns/money';
+import { Stack } from '@/components/layout/stack';
+import { Badge } from '@/components/ui/badge';
+import { List, ListItem } from '@/components/layout/list';
+import { Text } from '@/components/ui/text';
+import { Cluster } from '@/components/layout/cluster';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 /**
  * SPEC-011 — the reporting framework's own page: the shared controls, the
@@ -37,12 +55,9 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <main className="mx-auto flex min-h-dvh max-w-5xl flex-col gap-6 px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-        <p role="status" className="text-muted-foreground">
-          {t('signedOut')}
-        </p>
-      </main>
+      <PageShell width="wide" title={t('title')}>
+        <EmptyState title={t('signedOut')} />
+      </PageShell>
     );
   }
 
@@ -76,12 +91,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
   }));
 
   return (
-    <main className="mx-auto flex min-h-dvh max-w-5xl flex-col gap-8 px-6 py-10">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t('title')}</h1>
-        <p className="text-muted-foreground">{t('description')}</p>
-      </div>
-
+    <PageShell width="wide" title={t('title')} description={t('description')}>
       <Controls
         action="/reports"
         period={state.period}
@@ -93,61 +103,63 @@ export default async function ReportsPage({ searchParams }: PageProps) {
       {!result.ok ? (
         // BR-011-16: a named, explanatory outcome — never a blank page and
         // never a zero that looks like a real figure.
-        <p role="alert" className="rounded-lg border p-6 text-muted-foreground">
-          {result.error.code === 'REPORTING_INVALID_PERIOD_RANGE'
-            ? t('period.invalidRange')
-            : t('scope.walletNotFound')}
-        </p>
+        <ErrorState
+          title={
+            result.error.code === 'REPORTING_INVALID_PERIOD_RANGE'
+              ? t('period.invalidRange')
+              : t('scope.walletNotFound')
+          }
+        />
       ) : result.value.empty ? (
-        <EmptyState scoped={state.scope.kind === 'wallet'} />
+        <ReportEmptyState scoped={state.scope.kind === 'wallet'} />
       ) : (
-        <section className="flex flex-col gap-4">
-          <p className="text-sm text-muted-foreground">
+        <Stack gap="md">
+          <Text tone="muted">
             {result.value.range.from} — {result.value.range.to}
-          </p>
-          <table className="w-full border-collapse text-sm">
-            <caption className="sr-only">{t(`grouping.${result.value.report.grouping}`)}</caption>
-            <thead>
-              <tr className="border-b text-left">
-                <th scope="col" className="py-2">
-                  {t('table.group')}
-                </th>
-                <th scope="col" className="py-2 text-right">
+          </Text>
+          <Table>
+            <TableCaption className="sr-only">
+              {t(`grouping.${result.value.report.grouping}`)}
+            </TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">{t('table.group')}</TableHead>
+                <TableHead scope="col" className="text-right">
                   {t('table.quantity')}
-                </th>
-                <th scope="col" className="py-2 text-right">
+                </TableHead>
+                <TableHead scope="col" className="text-right">
                   {t('table.value')}
-                </th>
-                <th scope="col" className="py-2 text-right">
+                </TableHead>
+                <TableHead scope="col" className="text-right">
                   {t('table.costBasis')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {result.value.report.groups.map((group: ReportGroup) => (
                 <GroupRow key={group.key.id} group={group} />
               ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t font-medium">
-                <th scope="row" className="py-2 text-left">
+            </TableBody>
+            <TableFooter>
+              <TableRow>
+                <TableHead scope="row" className="py-row text-left">
                   {t('table.total')}
-                </th>
-                <td className="py-2 text-right">
-                  {formatQuantity(result.value.report.total.quantity)}
-                </td>
-                <td className="py-2 text-right">
-                  {formatCurrency(result.value.report.total.value)}
-                </td>
-                <td className="py-2 text-right">
-                  {formatCurrency(result.value.report.total.costBasis)}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
-        </section>
+                </TableHead>
+                <TableCell className="py-row text-right">
+                  <Money value={result.value.report.total.quantity} kind="quantity" />
+                </TableCell>
+                <TableCell className="py-row text-right">
+                  <Money value={result.value.report.total.value} />
+                </TableCell>
+                <TableCell className="py-row text-right">
+                  <Money value={result.value.report.total.costBasis} />
+                </TableCell>
+              </TableRow>
+            </TableFooter>
+          </Table>
+        </Stack>
       )}
-    </main>
+    </PageShell>
   );
 }
 
@@ -174,33 +186,43 @@ async function GroupRow({ group }: { readonly group: ReportGroup }) {
       : (group.holdings[0]?.assetCode ?? group.key.id);
 
   return (
-    <tr className="border-b align-top">
-      <td className="py-2">
+    <TableRow className="align-top">
+      <TableCell className="py-row">
         <details>
           <summary className="cursor-pointer">
-            {label}
-            {group.totals.estimated ? (
-              <span className="ml-2 rounded border px-1 text-xs" title={t('estimate.explanation')}>
-                {t('estimate.badge')}
-              </span>
-            ) : null}
+            <Cluster gap="sm" align="baseline">
+              <span>{label}</span>
+              {group.totals.estimated ? (
+                <Badge variant="outline" title={t('estimate.explanation')}>
+                  {t('estimate.badge')}
+                </Badge>
+              ) : null}
+            </Cluster>
           </summary>
-          <ul className="mt-2 flex flex-col gap-1 pl-4 text-xs text-muted-foreground">
+          <List gap="none">
             {group.holdings.map((holding, index) => (
-              <li
+              <ListItem
                 key={`${holding.assetId}-${holding.institutionId ?? NOT_CLASSIFIED_GROUP_ID}-${index}`}
               >
-                {holding.assetCode} · {formatQuantity(holding.quantity)} ·{' '}
-                {formatCurrency(holding.value)}
-              </li>
+                <Text as="span" size="xs" tone="muted">
+                  {holding.assetCode} · <Money value={holding.quantity} kind="quantity" /> ·{' '}
+                  <Money value={holding.value} />
+                </Text>
+              </ListItem>
             ))}
-          </ul>
+          </List>
         </details>
-      </td>
-      <td className="py-2 text-right">{formatQuantity(group.totals.quantity)}</td>
-      <td className="py-2 text-right">{formatCurrency(group.totals.value)}</td>
-      <td className="py-2 text-right">{formatCurrency(group.totals.costBasis)}</td>
-    </tr>
+      </TableCell>
+      <TableCell className="py-row text-right">
+        <Money value={group.totals.quantity} kind="quantity" />
+      </TableCell>
+      <TableCell className="py-row text-right">
+        <Money value={group.totals.value} />
+      </TableCell>
+      <TableCell className="py-row text-right">
+        <Money value={group.totals.costBasis} />
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -209,14 +231,13 @@ async function GroupRow({ group }: { readonly group: ReportGroup }) {
  * zero. The wording differs by scope because the useful next action does: an
  * empty portfolio needs an import, an empty wallet needs an allocation.
  */
-async function EmptyState({ scoped }: { readonly scoped: boolean }) {
+async function ReportEmptyState({ scoped }: { readonly scoped: boolean }) {
   const t = await getTranslations('reports');
+
   return (
-    <div role="status" className="rounded-lg border p-6">
-      <p className="font-medium">{scoped ? t('empty.walletTitle') : t('empty.portfolioTitle')}</p>
-      <p className="text-muted-foreground">
-        {scoped ? t('empty.walletBody') : t('empty.portfolioBody')}
-      </p>
-    </div>
+    <EmptyState
+      title={scoped ? t('empty.walletTitle') : t('empty.portfolioTitle')}
+      description={scoped ? t('empty.walletBody') : t('empty.portfolioBody')}
+    />
   );
 }
