@@ -9,6 +9,8 @@ import {
 } from '@/core/reporting/ports';
 import { fromSearchParams } from '@/lib/report-url-state';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
+import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
+import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { withReportPort } from '@/app/(app)/reports/data';
 import { tryUserId } from '@/app/(app)/reports/session';
 import { PageShell } from '@/components/patterns/page-shell';
@@ -92,6 +94,8 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   return (
     <PageShell width="wide" title={t('title')} description={t('description')}>
+      <ReportNav current="/reports" />
+
       <Controls
         action="/reports"
         period={state.period}
@@ -231,13 +235,3 @@ async function GroupRow({ group }: { readonly group: ReportGroup }) {
  * zero. The wording differs by scope because the useful next action does: an
  * empty portfolio needs an import, an empty wallet needs an allocation.
  */
-async function ReportEmptyState({ scoped }: { readonly scoped: boolean }) {
-  const t = await getTranslations('reports');
-
-  return (
-    <EmptyState
-      title={scoped ? t('empty.walletTitle') : t('empty.portfolioTitle')}
-      description={scoped ? t('empty.walletBody') : t('empty.portfolioBody')}
-    />
-  );
-}

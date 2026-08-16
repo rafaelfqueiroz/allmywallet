@@ -47,10 +47,18 @@ export default defineConfig({
           // tests/structural: TS-32/BR-016-07a's snapshot-read check — a
           // source-code scan, not a database test, so it belongs in the fast,
           // always-blocking project rather than tests/performance/'s nightly one.
-          include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'tests/structural/**/*.test.ts'],
+          include: ['src/**/*.test.ts', 'tests/structural/**/*.test.ts'],
           // Component tests are the `components` project below — they need a
           // DOM, and running them here as well would run them twice, once in
           // an environment that cannot render.
+          //
+          // Selected by **extension** rather than by directory: a `.test.tsx`
+          // renders JSX and therefore needs jsdom wherever it happens to sit,
+          // and colocating a chart test next to the route that owns it
+          // (`src/app/…/_components/`) is the right place for it. Keying the
+          // split on `src/components/**` instead meant such a test was
+          // collected here, in a `node` environment that cannot render, and
+          // failed for a reason that had nothing to do with the component.
           exclude: ['src/components/**'],
           environment: 'node',
           env: testEnv,
@@ -63,11 +71,13 @@ export default defineConfig({
           // fast enough to stay blocking; see tests/setup/components.ts for what
           // that environment cannot see.
           name: 'components',
-          // Both extensions: the `unit` project excludes `src/components/**`
-          // wholesale, so a `.test.ts` here (palette tables, prop helpers)
+          // Every `.test.tsx` in `src/`, plus `.test.ts` under
+          // `src/components/**`. The first half is the rule — JSX needs a DOM;
+          // the second half exists because `unit` excludes that directory
+          // wholesale, so a non-JSX test there (palette tables, prop helpers)
           // would otherwise be collected by no project at all and silently
           // never run.
-          include: ['src/components/**/*.test.ts', 'src/components/**/*.test.tsx'],
+          include: ['src/**/*.test.tsx', 'src/components/**/*.test.ts'],
           environment: 'jsdom',
           env: testEnv,
           setupFiles: ['tests/setup/components.ts'],

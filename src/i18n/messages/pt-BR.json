@@ -309,7 +309,12 @@
       "csv": "Exportar CSV",
       "filename": "relatorio"
     },
-    "apply": "Aplicar"
+    "apply": "Aplicar",
+    "links": {
+      "label": "Relatórios",
+      "overview": "Visão geral",
+      "patrimonio": "Patrimônio"
+    }
   },
   "privacy": {
     "title": "Privacidade e dados",
@@ -435,6 +440,63 @@
     "internationalTransfer": {
       "title": "Transferência internacional",
       "body": "Alguns suboperadores acima ficam fora do Brasil. Essas transferências ocorrem sob cláusulas contratuais padrão, conforme o art. 33 da LGPD."
+    }
+  },
+  "patrimonio": {
+    "title": "Patrimônio",
+    "description": "Quanto você tem, e de onde veio o crescimento.",
+    "freshness": {
+      "valuation": "Valores de {date}",
+      "lastImport": "Última importação: {date}",
+      "neverImported": "Nenhum extrato importado ainda"
+    },
+    "headline": {
+      "currentValue": "Patrimônio atual",
+      "totalInvested": "Total investido",
+      "absoluteGain": "Ganho",
+      "gain": "Ganho %",
+      "notApplicable": "—"
+    },
+    "granularity": {
+      "daily": "Um ponto por dia",
+      "weekly": "Agrupado por semana",
+      "monthly": "Agrupado por mês"
+    },
+    "chart": {
+      "title": "Patrimônio ao longo do tempo",
+      "summary": "Patrimônio do início ao fim do período"
+    },
+    "estimated": {
+      "badge": "Parte do período usa valores estimados",
+      "hint": "Inclui renda fixa acruada, não observada no mercado"
+    },
+    "decomposition": {
+      "title": "De onde veio o crescimento",
+      "description": "Dinheiro que cresceu porque você aportou não é dinheiro que cresceu porque rendeu.",
+      "driver": "Origem",
+      "amount": "Valor",
+      "opening": "Saldo inicial",
+      "contributions": "Aportes líquidos",
+      "priceChange": "Variação de preço",
+      "earnings": "Proventos recebidos",
+      "closing": "Saldo final"
+    },
+    "contributions": {
+      "title": "Aportes por mês",
+      "description": "Meses negativos são retiradas líquidas.",
+      "summary": "Aporte líquido de cada mês"
+    },
+    "stacked": {
+      "title": "Composição ao longo do tempo",
+      "unavailable": "A composição histórica só existe por classe de ativo. Não há histórico guardado por {grouping}, então esta visão não pode ser montada para o agrupamento selecionado."
+    },
+    "table": {
+      "title": "Valores do gráfico",
+      "date": "Data",
+      "value": "Patrimônio",
+      "basis": "Origem do valor",
+      "observed": "Preço observado",
+      "estimated": "Estimado"
     }
   }
 }
