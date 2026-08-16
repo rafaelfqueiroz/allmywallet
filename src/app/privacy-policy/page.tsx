@@ -132,6 +132,12 @@ export default async function PrivacyPolicyPage() {
         <Section title={t('rights.title')}>
           <Stack gap="sm">
             <Text tone="muted">{t('rights.body')}</Text>
+            {/* Stated here rather than discovered by someone already locked
+                out — the same disclosure ethos BR-001-12 applies to the
+                sign-in page. A request we cannot attribute to the account
+                holder is refused, because acting on it would hand one
+                person's financial history to another. */}
+            <Text tone="muted">{t('rights.identityVerification')}</Text>
             <Text>
               <Link href="/privacy" className="underline">
                 {t('rights.link')}
