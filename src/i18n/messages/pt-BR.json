@@ -350,9 +350,9 @@
     "description": "Como o AllMyWallet trata os seus dados pessoais, sob a LGPD (Lei 13.709/2018).",
     "version": "Versão {version}",
     "controller": {
-      "title": "Controlador e contato",
-      "body": "O AllMyWallet é o controlador dos dados pessoais tratados aqui. Para exercer qualquer direito previsto no art. 18 da LGPD, escreva para o encarregado pelo tratamento de dados.",
-      "contactLabel": "Encarregado (DPO)"
+      "title": "Controlador e canal de contato",
+      "body": "O AllMyWallet é o controlador dos dados pessoais tratados aqui. Como agente de tratamento de pequeno porte, não indicamos um encarregado; mantemos, em seu lugar, o canal de comunicação abaixo, por onde você exerce os direitos do art. 18 da LGPD e tira dúvidas sobre este tratamento.",
+      "contactLabel": "Canal de privacidade"
     },
     "credentials": {
       "title": "O que nunca é coletado",
@@ -394,7 +394,8 @@
     },
     "rights": {
       "title": "Os seus direitos",
-      "body": "Art. 18 da LGPD: confirmação, acesso, correção, portabilidade, eliminação, informação sobre compartilhamento e revogação do consentimento. Acesso, portabilidade e eliminação são autoatendimento.",
+      "body": "Art. 18 da LGPD: confirmação, acesso, correção, portabilidade, eliminação, informação sobre compartilhamento e revogação do consentimento. Acesso, portabilidade e eliminação são autoatendimento, dentro da sua conta.",
+      "identityVerification": "Antes de atender qualquer pedido por e-mail precisamos confirmar que ele vem do titular da conta. Como o acesso é feito apenas pela sua conta Google e não há recuperação de conta, quem perde esse acesso não pode ser identificado por nós — e, nesse caso, não conseguimos exportar nem excluir os dados a pedido, porque atender alguém que não conseguimos identificar seria expor os dados de outra pessoa.",
       "link": "Ir para privacidade e dados"
     },
     "subprocessors": {
