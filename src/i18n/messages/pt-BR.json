@@ -18,6 +18,7 @@
     "import": "Importar",
     "reports": "Relatórios",
     "settings": "Configurações",
+    "privacy": "Privacidade",
     "appName": "AllMyWallet",
     "menu": "Navegação",
     "openMenu": "Abrir menu",
@@ -309,5 +310,130 @@
       "filename": "relatorio"
     },
     "apply": "Aplicar"
+  },
+  "privacy": {
+    "title": "Privacidade e dados",
+    "description": "Exporte os seus dados, gerencie consentimentos e exclua a sua conta.",
+    "signedOut": "Entre na sua conta para gerenciar os seus dados.",
+    "policyLink": "Leia a política de privacidade",
+    "consent": {
+      "title": "Consentimentos",
+      "description": "Cada finalidade é opcional e independente. Nada aqui é necessário para usar o AllMyWallet.",
+      "grant": "Permitir",
+      "revoke": "Revogar",
+      "purposes": {
+        "email_reminders": {
+          "label": "Lembretes por e-mail",
+          "description": "Avisos de que os seus extratos estão desatualizados. Nunca marketing."
+        },
+        "product_analytics": {
+          "label": "Análise de uso do produto",
+          "description": "Estatísticas agregadas de navegação. Nunca inclui valores, posições ou operações."
+        }
+      }
+    },
+    "export": {
+      "title": "Exportar os seus dados",
+      "description": "Todos os seus dados em formato legível por máquina: operações, posições, carteiras, proventos e consentimentos.",
+      "json": "Baixar JSON",
+      "csv": "Baixar CSV"
+    },
+    "deletion": {
+      "title": "Excluir a conta",
+      "description": "A exclusão apaga definitivamente todas as suas operações, posições e carteiras. Não há como desfazer depois do prazo de revisão.",
+      "confirm": "Solicitar exclusão da conta",
+      "pending": "Exclusão solicitada em {requestedAt}. Os seus dados serão apagados ao fim do prazo de revisão."
+    }
+  },
+  "privacyPolicy": {
+    "title": "Política de privacidade",
+    "description": "Como o AllMyWallet trata os seus dados pessoais, sob a LGPD (Lei 13.709/2018).",
+    "version": "Versão {version}",
+    "controller": {
+      "title": "Controlador e contato",
+      "body": "O AllMyWallet é o controlador dos dados pessoais tratados aqui. Para exercer qualquer direito previsto no art. 18 da LGPD, escreva para o encarregado pelo tratamento de dados.",
+      "contactLabel": "Encarregado (DPO)"
+    },
+    "credentials": {
+      "title": "O que nunca é coletado",
+      "body": "Nenhuma credencial é coletada, transmitida ou armazenada — nem senha de banco, nem de corretora, nem da B3. O AllMyWallet não acessa nenhuma conta em seu nome. Os dados de custódia vêm dos extratos que você mesmo exporta e envia."
+    },
+    "cpf": {
+      "title": "CPF",
+      "body": "O CPF presente nos extratos da B3 é descartado no momento da leitura do arquivo e nunca é gravado — nem no histórico de operações, nem nos registros de importação, nem em logs ou relatórios de erro."
+    },
+    "legalBases": {
+      "title": "Bases legais",
+      "description": "Art. 7º da LGPD. Cada finalidade tem uma base própria.",
+      "items": {
+        "contract": {
+          "purpose": "Consolidar a sua carteira e gerar relatórios",
+          "basis": "Execução de contrato (art. 7º, V)"
+        },
+        "legalObligation": {
+          "purpose": "Registros de auditoria de acesso e alterações",
+          "basis": "Cumprimento de obrigação legal e segurança da informação (art. 7º, II)"
+        },
+        "consentReminders": {
+          "purpose": "Lembretes por e-mail",
+          "basis": "Consentimento (art. 7º, I) — revogável a qualquer momento"
+        },
+        "consentAnalytics": {
+          "purpose": "Análise de uso do produto",
+          "basis": "Consentimento (art. 7º, I) — revogável a qualquer momento"
+        }
+      }
+    },
+    "retention": {
+      "title": "Prazos de retenção",
+      "description": "Os prazos abaixo são configuráveis pela operação e valem a partir do evento que os inicia.",
+      "ledger": "Operações, posições e carteiras: mantidas enquanto a conta existir.",
+      "deletionWindow": "Após um pedido de exclusão: {days} dias de prazo de revisão, depois apagados definitivamente.",
+      "audit": "Registros de auditoria: {months} meses. Sobrevivem à exclusão da conta, sem vínculo com ela, porque são a evidência de que a exclusão foi feita corretamente.",
+      "backups": "Cópias de segurança: os dados apagados desaparecem ao fim do ciclo de retenção das cópias."
+    },
+    "rights": {
+      "title": "Os seus direitos",
+      "body": "Art. 18 da LGPD: confirmação, acesso, correção, portabilidade, eliminação, informação sobre compartilhamento e revogação do consentimento. Acesso, portabilidade e eliminação são autoatendimento.",
+      "link": "Ir para privacidade e dados"
+    },
+    "subprocessors": {
+      "title": "Suboperadores",
+      "description": "Terceiros que tratam dados em nome do AllMyWallet.",
+      "columns": {
+        "name": "Suboperador",
+        "purpose": "Finalidade",
+        "location": "Local",
+        "transfer": "Transferência internacional"
+      },
+      "yes": "Sim",
+      "no": "Não",
+      "items": {
+        "google": {
+          "name": "Google (Sign-In)",
+          "purpose": "Autenticação — nome, e-mail e foto do perfil",
+          "location": "Estados Unidos"
+        },
+        "hostinger": {
+          "name": "Hostinger",
+          "purpose": "Hospedagem da aplicação e do banco de dados",
+          "location": "São Paulo, Brasil"
+        },
+        "sentry": {
+          "name": "Sentry",
+          "purpose": "Relatórios de erro — sem corpo de requisição, cabeçalhos ou parâmetros",
+          "location": "Estados Unidos"
+        },
+        "brapi": {
+          "name": "brapi.dev",
+          "purpose": "Cotações de mercado — recebe apenas o código do ativo",
+          "location": "Brasil"
+        }
+      }
+    },
+    "internationalTransfer": {
+      "title": "Transferência internacional",
+      "body": "Alguns suboperadores acima ficam fora do Brasil. Essas transferências ocorrem sob cláusulas contratuais padrão, conforme o art. 33 da LGPD."
+    }
   }
 }

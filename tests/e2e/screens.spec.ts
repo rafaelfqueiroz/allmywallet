@@ -14,7 +14,18 @@ import AxeBuilder from '@axe-core/playwright';
  * reachable surface — SPEC-001's session wiring is still stubbed on several of
  * these routes (`TODO(#6)`), so there is no authenticated state to drive yet.
  */
-const ROUTES = ['/', '/signin', '/wallets', '/import', '/reports', '/preferences'] as const;
+const ROUTES = [
+  '/',
+  '/signin',
+  '/wallets',
+  '/import',
+  '/reports',
+  '/preferences',
+  '/privacy',
+  // SPEC-004 BR-004-15: the policy is public and unauthenticated, so it is
+  // reachable in exactly the state this suite runs in.
+  '/privacy-policy',
+] as const;
 
 for (const route of ROUTES) {
   test(`${route} has no accessibility violations`, async ({ page }) => {

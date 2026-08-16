@@ -6,7 +6,25 @@ import { cn } from '@/lib/utils';
 
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    /*
+     * `tabIndex={0}` and the group role are an accessibility requirement, not
+     * decoration (axe `scrollable-region-focusable`, WCAG 2.1.1). The wrapper
+     * scrolls horizontally, and a region that can only be scrolled by dragging
+     * is unreachable to anyone navigating by keyboard — the columns past the
+     * fold simply do not exist for them. Focusable, it scrolls with the arrow
+     * keys.
+     *
+     * `aria-label` comes from the table's own `aria-label`/`aria-labelledby`
+     * when the caller sets one, so the focus stop announces which table it is
+     * rather than an anonymous "group".
+     */
+    <div
+      data-slot="table-container"
+      className="relative w-full overflow-x-auto"
+      tabIndex={0}
+      role="group"
+      {...(typeof props['aria-label'] === 'string' ? { 'aria-label': props['aria-label'] } : {})}
+    >
       <table
         data-slot="table"
         className={cn('w-full caption-bottom text-sm', className)}
