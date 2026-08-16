@@ -36,10 +36,24 @@ const listItemVariants = cva('', {
   defaultVariants: { separated: false },
 });
 
-export type ListProps = React.ComponentProps<'ul'> & VariantProps<typeof listVariants>;
+export type ListProps = Omit<React.ComponentProps<'ul'>, 'ref'> &
+  VariantProps<typeof listVariants> & {
+    /**
+     * `ol` when the order is part of the meaning — a sequence of steps a user
+     * has to perform in order. A screen reader announces the two differently
+     * ("list" versus "ordered list, item 2 of 3"), and instructions rendered as
+     * an unordered list quietly drop the one thing that made them
+     * instructions.
+     *
+     * `ref` is omitted from the props above because the element type is chosen
+     * at the call site and `ul` and `ol` do not share a ref type — the same
+     * reasoning `Text` records for its own polymorphic `as`.
+     */
+    as?: 'ul' | 'ol';
+  };
 
-export function List({ className, gap, ...props }: ListProps) {
-  return <ul data-slot="list" className={cn(listVariants({ gap }), className)} {...props} />;
+export function List({ className, gap, as: Component = 'ul', ...props }: ListProps) {
+  return <Component data-slot="list" className={cn(listVariants({ gap }), className)} {...props} />;
 }
 
 export type ListItemProps = React.ComponentProps<'li'> & VariantProps<typeof listItemVariants>;
