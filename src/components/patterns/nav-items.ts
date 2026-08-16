@@ -1,4 +1,4 @@
-import { ChartPie, Settings, Upload, Wallet, type LucideIcon } from 'lucide-react';
+import { ChartPie, Settings, ShieldCheck, Upload, Wallet, type LucideIcon } from 'lucide-react';
 
 /**
  * The application's destinations, in one place, so the sidebar and the mobile
@@ -13,7 +13,7 @@ import { ChartPie, Settings, Upload, Wallet, type LucideIcon } from 'lucide-reac
  */
 export type NavItem = {
   readonly href: string;
-  readonly labelKey: 'wallets' | 'import' | 'reports' | 'settings';
+  readonly labelKey: 'wallets' | 'import' | 'reports' | 'settings' | 'privacy';
   readonly icon: LucideIcon;
 };
 
@@ -22,4 +22,8 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { href: '/import', labelKey: 'import', icon: Upload },
   { href: '/reports', labelKey: 'reports', icon: ChartPie },
   { href: '/preferences', labelKey: 'settings', icon: Settings },
+  // SPEC-004 BR-004-06/09: export and deletion are *self-service* rights, and
+  // a right the user cannot find is not self-service. It gets its own
+  // destination rather than a link buried inside preferences.
+  { href: '/privacy', labelKey: 'privacy', icon: ShieldCheck },
 ];

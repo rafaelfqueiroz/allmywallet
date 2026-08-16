@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AppShell } from '@/components/patterns/app-shell';
+import { NAV_ITEMS } from '@/components/patterns/nav-items';
 import { audit, render, screen, userEvent, waitFor, within } from '@/components/test-utils';
 
 const pathname = vi.hoisted(() => ({ current: '/wallets' }));
@@ -15,8 +16,14 @@ describe('AppShell', () => {
 
     // Sidebar and drawer share one definition, but only the sidebar is mounted
     // until the drawer is opened.
+    //
+    // Counted against `NAV_ITEMS` rather than a literal: the claim is "every
+    // destination is rendered", and a hardcoded number turns adding a
+    // destination into a failing test about arithmetic rather than about the
+    // shell. Same reasoning as the enumeration in the isolation suite — a
+    // maintained count goes stale silently.
     const nav = screen.getByRole('navigation', { name: 'Navegação' });
-    expect(within(nav).getAllByRole('link')).toHaveLength(4);
+    expect(within(nav).getAllByRole('link')).toHaveLength(NAV_ITEMS.length);
   });
 
   // Styling the active item without aria-current makes the state sighted-only.
