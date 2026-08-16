@@ -40,7 +40,18 @@ export async function requireUserId(): Promise<UserId> {
 export async function tryUserId(): Promise<UserId | undefined> {
   try {
     return await requireUserId();
-  } catch {
-    return undefined;
+  } catch (error) {
+    // #42: only "there is no session" becomes `undefined`. Anything else —
+    // an Auth.js misconfiguration, an unreachable database — propagates.
+    //
+    // A bare `catch {}` here is what let a whole deployment authenticate
+    // nobody while looking healthy: Auth.js threw `UntrustedHost` on every
+    // session read, this swallowed it, and every screen rendered its
+    // signed-out state. The two states are not the same and must not share a
+    // code path. A configuration fault should surface as an error page and a
+    // failed health check, which is loud, immediate and fixable; "everyone is
+    // signed out" is none of those.
+    if (error instanceof UnauthenticatedError) return undefined;
+    throw error;
   }
 }

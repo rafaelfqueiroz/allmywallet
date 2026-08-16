@@ -53,6 +53,15 @@ describe('env', () => {
     expect(() => env()).toThrow(/AUTH_SECRET/);
   });
 
+  it('rejects an AUTH_URL that is not a URL', () => {
+    // #42: this value becomes the origin every callback URL is built from. A
+    // bare hostname parses as "not a URL" here rather than reaching Auth.js
+    // and failing per-request, which is the whole point of validating it.
+    process.env.DATABASE_URL = VALID_URL;
+    process.env.AUTH_URL = 'allmywallet.example.com';
+    expect(() => env()).toThrow(/AUTH_URL/);
+  });
+
   it('rejects an unknown log level instead of falling back', () => {
     process.env.DATABASE_URL = VALID_URL;
     process.env.LOG_LEVEL = 'verbose';
