@@ -1,0 +1,132 @@
+import type { DomainError } from '@/core/shared/domain-error';
+import type { AssetId, UserId } from '@/core/shared/ids';
+import { ok, type Result } from '@/core/shared/result';
+import type { Transaction } from '@/core/ledger/transaction';
+import type { WalletDependencies } from '@/core/wallets/dependencies';
+import { applyBuy, type BuyAllocationOutcome } from '@/core/wallets/apply-buy';
+import { applySell } from '@/core/wallets/apply-sell';
+import { applyCorporateEventToAllocations } from '@/core/wallets/apply-corporate-event';
+
+/**
+ * SPEC-010 BR-010-10/14/15/17/18 — the bridge from "transactions landed in the
+ * ledger" to "allocations reflect them".
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS FILE EXISTS AT ALL
+ *
+ * `applyBuy`, `applySell` and `applyCorporateEventToAllocations` were written,
+ * unit-tested and then never called by anything. The four rules above were
+ * ticked as done on the strength of those tests, and none of them held at
+ * runtime. BR-010-17 is the one that did damage rather than merely omitting a
+ * convenience: a sale shrinks the position but left allocations untouched, so
+ * the BR-010-05 invariant — total allocated never exceeds quantity held — was
+ * violable by any sell of a fully-allocated asset.
+ *
+ * A use case with no caller passes every test it has. This module is the
+ * caller, and `tests/integration/import-pipeline.test.ts` is what stops it
+ * becoming orphaned again.
+ * ---------------------------------------------------------------------------
+ *
+ * **Chronological order, not grouped by kind.** A batch can carry a split, a
+ * buy and a sell for the same asset, and applying all splits first would scale
+ * a quantity that had not been bought yet. Positions replay in trade-date
+ * order (SPEC-007), and allocations are a view over the same history, so they
+ * must be walked the same way or the two disagree about the same batch.
+ */
+
+/**
+ * BR-010-18 / SPEC-007 BR-007-04 — the two events that carry their ratio.
+ *
+ * **A bonificação is deliberately absent, and that is a stated gap rather than
+ * an oversight.** BR-010-18 names it, but a bonificação expresses its effect
+ * as an absolute bonus *quantity*, not a ratio (`transaction.ratio` is null),
+ * so the equivalent ratio is `(held + bonus) / held` and needs the whole-asset
+ * quantity as it stood immediately before the event. This module reads no
+ * positions on purpose — it is a fold over transactions — and inventing a
+ * ratio of 1 would silently claim the event had no effect on allocations when
+ * it did. Tracked on #13.
+ */
+const RATIO_EVENTS = new Set(['split', 'grupamento']);
+
+export interface AllocationMade {
+  readonly assetId: AssetId;
+  readonly outcome: BuyAllocationOutcome;
+}
+
+export interface LedgerEffectsSummary {
+  /** BR-010-15: every allocation this commit made, and every purchase it left pending. */
+  readonly allocations: readonly AllocationMade[];
+}
+
+/**
+ * Applied inside the caller's existing tenant transaction — never its own.
+ * A commit that wrote transactions and then failed to adjust allocations
+ * leaves the sum invariant broken with no retry that repairs it, so the two
+ * have to succeed or fail together (AR-11, AR-19).
+ */
+export async function applyLedgerEffects(
+  deps: WalletDependencies,
+  userId: UserId,
+  transactions: readonly Transaction[],
+): Promise<Result<LedgerEffectsSummary, DomainError>> {
+  const allocations: AllocationMade[] = [];
+
+  for (const transaction of inTradeDateOrder(transactions)) {
+    // BR-006-03: only `active` rows enter calculations, and an allocation is a
+    // calculation over the same ledger. An `unclassified` row is deliberately
+    // stored and deliberately inert (DL-006-06).
+    if (transaction.status !== 'active') continue;
+
+    if (transaction.type === 'buy') {
+      const result = await applyBuy(deps, userId, {
+        assetId: transaction.assetId,
+        purchasedQuantity: transaction.quantity,
+      });
+      if (!result.ok) return result;
+      allocations.push({ assetId: transaction.assetId, outcome: result.value });
+      continue;
+    }
+
+    if (transaction.type === 'sell') {
+      // No `walletId`: an imported sell carries no statement of which purpose
+      // it served, and BR-010-17's proportional reduction is the documented
+      // answer for exactly that case. Inferring one from the split would be
+      // the same guess BR-010-11 refuses to make on the buy side.
+      const result = await applySell(deps, userId, {
+        assetId: transaction.assetId,
+        soldQuantity: transaction.quantity,
+      });
+      if (!result.ok) return result;
+      continue;
+    }
+
+    if (RATIO_EVENTS.has(transaction.type)) {
+      const ratio = transaction.ratio;
+      // A split row with no ratio is a malformed row, not a 1:1 split.
+      // Scaling by an assumed 1 would record that the event was applied and
+      // had no effect, which is a different and less recoverable claim than
+      // "this row could not be applied".
+      if (ratio === null) continue;
+      const result = await applyCorporateEventToAllocations(
+        deps,
+        userId,
+        transaction.assetId,
+        ratio,
+      );
+      if (!result.ok) return result;
+    }
+  }
+
+  return ok({ allocations });
+}
+
+/**
+ * Stable within a date: two transactions on the same day are applied in the
+ * order the ledger produced them, so a rerun over the same batch reaches the
+ * same allocations (DM-4's spirit, applied to wallets).
+ */
+function inTradeDateOrder(transactions: readonly Transaction[]): readonly Transaction[] {
+  return [...transactions].sort((a, b) =>
+    a.tradeDate < b.tradeDate ? -1 : a.tradeDate > b.tradeDate ? 1 : 0,
+  );
+}
