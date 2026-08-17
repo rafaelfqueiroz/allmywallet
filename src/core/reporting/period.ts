@@ -108,9 +108,17 @@ export function monthsBefore(date: BusinessDate, months: number): BusinessDate {
  * single day `today` rather than to an error: an empty portfolio is BR-011-16's
  * explanatory empty state, not a failure.
  *
- * Both ends are inclusive. `from` is the **baseline** — the value on that date
- * is the opening figure a period is measured against — so a 12m period on
- * 2026-08-14 runs 2025-08-14 → 2026-08-14 and covers both endpoints.
+ * Both ends are inclusive: a 12m period on 2026-08-14 runs 2025-08-14 →
+ * 2026-08-14 and covers both endpoints.
+ *
+ * **`from` is the period's first day, not its opening balance**, and the
+ * distinction has cost this codebase two defects. A snapshot dated `from` is
+ * the *close* of `from` (SPEC-009 replays to and including the date), so a
+ * report measuring growth or return from it discards everything that happened
+ * during the period's own first day — plausibly, and invisibly. The opening
+ * balance is the snapshot **before** `from`, which is why SPEC-013 BR-013-02
+ * and SPEC-012 BR-012-01 both reach for `ReportDataPort.findSnapshotBefore`
+ * rather than for the first row in range.
  */
 export function resolvePeriod(
   period: Period,
