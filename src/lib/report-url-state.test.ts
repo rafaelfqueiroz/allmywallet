@@ -53,9 +53,12 @@ describe('round trip — AC-10', () => {
       grouping: 'sector',
     };
     const query = toQueryString(state, 'asset_class');
-    // This is what a user actually copies out of the address bar.
+    // This is what a user actually copies out of the address bar. `scope` is
+    // deliberately absent: the wallet id carries the scope on its own, and a
+    // second parameter that can disagree with it is what made the control
+    // inert in the first place (see `parseScope`).
     expect(query).toBe(
-      `?period=custom&from=2025-01-01&to=2025-12-31&scope=wallet&wallet=${WALLET}&grouping=sector`,
+      `?period=custom&from=2025-01-01&to=2025-12-31&wallet=${WALLET}&grouping=sector`,
     );
     expect(fromSearchParams(new URLSearchParams(query.slice(1)), 'asset_class')).toEqual(state);
   });
@@ -158,16 +161,43 @@ describe('parsing is total — a hand-edited URL never breaks the report', () =>
     expect(parse('scope=wallet&wallet=not-a-uuid').scope).toEqual({ kind: 'portfolio' });
   });
 
-  it('ignores a wallet id when the scope is not a wallet scope', () => {
-    expect(parse(`wallet=${WALLET}`).scope).toEqual({ kind: 'portfolio' });
-    expect(parse(`scope=portfolio&wallet=${WALLET}`).scope).toEqual({ kind: 'portfolio' });
+  /**
+   * BR-011-02 — **a wallet id is what makes a scope a wallet scope.**
+   *
+   * This assertion used to be the exact opposite, and that is what made the
+   * scope control inert: `Controls.tsx` collapses "portfolio or which wallet"
+   * into one `<select>`, because it is one question to a user even though it
+   * was two values in the URL. Its comment stated the contract — "`scope=wallet`
+   * is implied by a non-empty wallet id" — and the parser never implemented
+   * it, so picking a wallet and pressing Aplicar reloaded the full portfolio.
+   * Wallet scope was reachable only by hand-typing a URL.
+   *
+   * Two parameters that can contradict each other is the bug class, not just
+   * the bug: `scope` is no longer written at all, so the id is the single
+   * source of truth. Old bookmarks carrying `scope=wallet` still work — the
+   * id beside it is what is read.
+   */
+  it('reads a wallet scope from the id alone, as the control submits it', () => {
+    expect(parse(`wallet=${WALLET}`).scope).toEqual({ kind: 'wallet', walletId: WALLET });
   });
 
-  it('reads a well-formed wallet scope', () => {
+  it('reads a well-formed wallet scope, including a legacy scope=wallet bookmark', () => {
     expect(parse(`scope=wallet&wallet=${OTHER_WALLET}`).scope).toEqual({
       kind: 'wallet',
       walletId: OTHER_WALLET,
     });
+    // A stale `scope=portfolio` beside a real id does not win: the id is the
+    // answer, and this combination is no longer producible anyway.
+    expect(parse(`scope=portfolio&wallet=${WALLET}`).scope).toEqual({
+      kind: 'wallet',
+      walletId: WALLET,
+    });
+  });
+
+  it('an empty wallet selection is portfolio scope — what the control posts', () => {
+    // The `<select>`'s portfolio option has `value=""`, so this is the exact
+    // query string a user gets by choosing "Portfólio" and pressing Aplicar.
+    expect(parse('wallet=').scope).toEqual({ kind: 'portfolio' });
   });
 
   it('accepts any object exposing get(name), not only URLSearchParams', () => {

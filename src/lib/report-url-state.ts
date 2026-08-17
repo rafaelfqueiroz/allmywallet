@@ -72,10 +72,10 @@ export function toSearchParams(state: ReportUrlState, defaultGrouping: Grouping)
     params.set(PARAM.to, state.period.to);
   }
 
-  if (state.scope.kind === 'wallet') {
-    params.set(PARAM.scope, 'wallet');
-    params.set(PARAM.wallet, state.scope.walletId);
-  }
+  // The id alone carries the scope — see `parseScope`. Writing `scope=wallet`
+  // beside it would reintroduce a second parameter that can disagree with the
+  // first, which is what made the control inert.
+  if (state.scope.kind === 'wallet') params.set(PARAM.wallet, state.scope.walletId);
 
   if (state.grouping !== defaultGrouping) params.set(PARAM.grouping, state.grouping);
 
@@ -138,8 +138,24 @@ function parseDate(raw: string | null): BusinessDate | null {
   }
 }
 
+/**
+ * BR-011-02 — **the wallet id is what makes a scope a wallet scope.**
+ *
+ * `scope` used to be read first, and a request had to carry `scope=wallet`
+ * before the id beside it was even looked at. `Controls.tsx` collapses
+ * "portfolio or which wallet" into a single `<select>` — one question to a
+ * user, even though it was two values in the URL — and submitted `scope`
+ * derived from the *current* scope rather than from that select. From
+ * portfolio scope the form therefore posted `wallet=<uuid>&scope=`, the
+ * parser saw no `scope=wallet`, and the page reloaded showing the whole
+ * portfolio. Wallet scope was reachable only by hand-typing a URL.
+ *
+ * `scope` is no longer written by `toSearchParams` at all: two parameters
+ * that can contradict each other is the defect class, not merely the defect.
+ * It is still *accepted* — an old bookmark carrying `scope=wallet` keeps
+ * working, because the id beside it is what is read.
+ */
 function parseScope(params: ReadableParams): Scope {
-  if (params.get(PARAM.scope) !== 'wallet') return { kind: 'portfolio' };
   const walletId = params.get(PARAM.wallet);
   // `WalletId.of` throws on a non-UUID, and this is attacker-reachable text —
   // ids are interpolated into tenant-scoped comparisons (AR-11), so a value
