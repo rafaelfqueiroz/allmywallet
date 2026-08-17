@@ -176,7 +176,18 @@ function annualRateFactor(annualPercent: Quantity, businessDays: number): Quanti
  *     IPCA daily between 15th-of-month anniversaries. BR-009-10 says
  *     "monthly IPCA applied to principal" and v1 does exactly that; the
  *     figure is labelled an estimate either way (BR-009-11).
- *  2. **A month is applied whole or not at all**, on its publication date.
+ *  2. **A month is applied whole or not at all**, and it counts when the
+ *     point's own date — the first of the month it measures, which is how SGS
+ *     433 publishes and how `bcb-sgs.ts` stores it — falls inside
+ *     `[issueDate, throughDate]`. So a contract issued mid-month does not get
+ *     that month: it did not exist for the half the index measures, and there
+ *     is no pro-rata to give it a share.
+ *
+ *     This previously read "on its publication date", which names a different
+ *     date entirely — a month's IPCA is published in the month *after* the one
+ *     it measures. The two readings differ by a whole month of inflation on
+ *     every contract, and `accrual.test.ts`'s fixture had been written to the
+ *     wrong one, so the suite agreed with neither the code nor BCB.
  *
  * Worked example (DV-17) — R$ 20.000,00 at IPCA + 6% a.a., issued 2026-01-15,
  * valued 2026-04-15, with IPCA 0,42% (Jan), 0,83% (Feb) and 0,16% (Mar):

@@ -273,15 +273,24 @@ describe('BR-009-10 / AC-8 — IPCA + spread', () => {
   /**
    * R$ 20.000,00 at **IPCA + 6 % a.a.**, issued 2026-01-15, valued
    * 2026-04-15, with published monthly IPCA of 0,42 % (Jan), 0,83 % (Feb) and
-   * 0,16 % (Mar). SGS 433 dates each point at the first of the month it
-   * measures, so all three fall inside [15 Jan, 15 Apr].
+   * 0,16 % (Mar).
    *
-   *   IPCA factor = 1,0042 × 1,0083 × 1,0016
-   *     1,0042 × 1,0083 = 1,0042 + 1,0042 × 0,0083 = 1,0042 + 0,00833486
-   *                     = 1,01253486
-   *     × 1,0016        = 1,01253486 + 1,01253486 × 0,0016
-   *                     = 1,01253486 + 0,001620055776
-   *                     = **1,014154915776**   (exact — no truncation reached)
+   * **SGS 433 dates each point at the first of the month it measures**, which
+   * `bcb-sgs.ts` stores verbatim — so January's point is 2026-01-01. The
+   * filter is `point.date >= issueDate`, and 1 January precedes a 15 January
+   * issue, so **January does not apply**: the contract did not exist for the
+   * first half of the month that index measures, and `accrual.ts` applies a
+   * month whole or not at all rather than pro-rating it.
+   *
+   * This fixture previously dated the same three figures one month later,
+   * which slipped every point past the filter and made the test assert a
+   * number the production path could never produce — R$ 86 high on a R$ 20.000
+   * holding, green the whole time.
+   *
+   *   IPCA factor = 1,0083 × 1,0016            (February and March only)
+   *                = 1,0083 + 1,0083 × 0,0016
+   *                = 1,0083 + 0,00161328
+   *                = **1,00991328**            (exact — no truncation reached)
    *
    *   DU [15 Jan, 15 Apr) = 61 business days
    *   spread = 1,06 ^ (61/252) = 1,06 ^ 0,2420634920634920…
@@ -291,18 +300,17 @@ describe('BR-009-10 / AC-8 — IPCA + spread', () => {
    *                     = 1,01420470…
    *     full precision  = 1,014204717055610400986196218283678182234
    *
-   *   factor = 1,014154915776 × 1,014204717055610400986…
-   *          = 1,014154915776 + 1,014154915776 × 0,014204717055610…
-   *          = 1,014154915776 + 0,014405783629…
-   *          = 1,028560699405154476920425413092093358179
+   *   factor = 1,00991328 × 1,014204717055610400986…
+   *          = 1,024258812393103442462084657530465403484…
    *
-   *   value  = 20.000 × factor = 20.571,213988103089…
-   *          → **20.571,21398810**, of which **571,21398810** is the gain.
+   *   value  = 20.000 × factor = 20.485,176247862068849…
+   *          → **20.485,17624786**, of which **485,17624786** is the gain.
    */
+  // Dated exactly as BCB publishes them: the first of the month measured.
   const ipcaPoints = [
-    indexPoint('2026-02-01', '0.42'),
-    indexPoint('2026-03-01', '0.83'),
-    indexPoint('2026-04-01', '0.16'),
+    indexPoint('2026-01-01', '0.42'),
+    indexPoint('2026-02-01', '0.83'),
+    indexPoint('2026-03-01', '0.16'),
   ];
 
   it('applies each published month to principal and accrues the spread on business days', () => {
@@ -322,14 +330,47 @@ describe('BR-009-10 / AC-8 — IPCA + spread', () => {
       averageCost: Money.fromString('20000'),
     });
     expect(valued.basis?.businessDays).toBe(61);
-    expect(to8(valued.value)).toBe('20571.21398810');
-    expect(to8(valued.unrealizedGain)).toBe('571.21398810');
+    expect(to8(valued.value)).toBe('20485.17624786');
+    expect(to8(valued.unrealizedGain)).toBe('485.17624786');
+  });
+
+  /**
+   * BR-009-10's boundary, pinned because it is the part the old fixture hid.
+   * A month counts only when the contract existed for all of it — which, given
+   * SGS dates a point at the first of the month it measures, is exactly
+   * `point.date >= issueDate`. Issuing one day earlier changes the answer by a
+   * whole month of inflation, and nothing else in the suite says so.
+   */
+  it('applies the issue month when the contract existed for all of it, and not otherwise', () => {
+    const valueFor = (issueDate: string) =>
+      to8(
+        valueFixedIncome({
+          ...inputs({
+            contract: aContract(CDB, { indexer: 'ipca_spread', ratePercent: '0', issueDate }),
+            asOf: d('2026-04-15'),
+            ipca: ipcaPoints,
+          }),
+          assetId: CDB,
+          assetClass: 'cdb',
+          quantity: Quantity.fromString('1'),
+          averageCost: Money.fromString('20000'),
+        }).value,
+      );
+
+    // Issued 1 January: January's point is on the issue date, so it counts.
+    // 20.000 × 1,0042 × 1,0083 × 1,0016 = 20.283,09831552
+    expect(valueFor('2026-01-01')).toBe('20283.09831552');
+
+    // Issued 2 January: January's point predates the issue and is dropped.
+    // 20.000 × 1,0083 × 1,0016 = 20.198,26560000
+    expect(valueFor('2026-01-02')).toBe('20198.26560000');
   });
 
   it('ignores IPCA months outside the accrual window', () => {
     // December 2025's IPCA (dated 2025-12-01) precedes the issue date and must
     // not be applied; May 2026's postdates the valuation. Adding both must
-    // leave the figure untouched.
+    // leave the figure untouched. January 2026's is already excluded for the
+    // same reason — see the worked example above.
     const valued = valueFixedIncome({
       ...inputs({
         contract: aContract(CDB, {
@@ -345,7 +386,7 @@ describe('BR-009-10 / AC-8 — IPCA + spread', () => {
       quantity: Quantity.fromString('1'),
       averageCost: Money.fromString('20000'),
     });
-    expect(to8(valued.value)).toBe('20571.21398810');
+    expect(to8(valued.value)).toBe('20485.17624786');
   });
 
   it('with no published IPCA yet, the spread alone still accrues', () => {
