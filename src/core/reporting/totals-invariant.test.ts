@@ -13,7 +13,7 @@ import {
   type ReportPosition,
   type Scope,
 } from '@/core/reporting/ports';
-import { assetIdOf, institutionIdOf, walletIdOf } from '@/core/reporting/test-support';
+import { aPosition, assetIdOf, institutionIdOf, walletIdOf } from '@/core/reporting/test-support';
 
 /**
  * SPEC-011 BR-011-08 / AC-6, DL-011-03, TS-12 — **the highest-value test in
@@ -159,18 +159,20 @@ function generatePortfolio(seed: number): GeneratedPortfolio {
       const quantity = pick(QUANTITIES);
       const unitPrice = pick(UNIT_PRICES);
       heldTotal += quantity;
-      positions.push({
-        assetId,
-        institutionId: institutions[(i + j) % institutions.length] ?? null,
-        quantity: Quantity.fromString(String(quantity)),
-        // value = quantity × unit price, exact decimal arithmetic throughout.
-        value: Money.fromString(unitPrice).times(Quantity.fromString(String(quantity))),
-        costBasis: Money.fromString(unitPrice)
-          .times(Quantity.fromString(String(quantity)))
-          .times('0.8'),
-        // BR-011-15: fixed income is accrued, therefore estimated.
-        estimated: FIXED_INCOME.has(assetClass),
-      });
+      positions.push(
+        aPosition({
+          assetId,
+          institutionId: institutions[(i + j) % institutions.length] ?? null,
+          quantity: Quantity.fromString(String(quantity)),
+          // value = quantity × unit price, exact decimal arithmetic throughout.
+          value: Money.fromString(unitPrice).times(Quantity.fromString(String(quantity))),
+          costBasis: Money.fromString(unitPrice)
+            .times(Quantity.fromString(String(quantity)))
+            .times('0.8'),
+          // BR-011-15: fixed income is accrued, therefore estimated.
+          estimated: FIXED_INCOME.has(assetClass),
+        }),
+      );
     }
 
     // Allocation shape: none, partial, full, or split across several wallets.
@@ -358,14 +360,16 @@ describe('TS-11 — adversarial precision: no drift across hundreds of holdings'
         assetClass: 'stock',
         sector: i % 2 === 0 ? 'Bancos' : null,
       });
-      positions.push({
-        assetId,
-        institutionId: institutionIdOf('1'),
-        quantity: Quantity.fromString('99'),
-        value,
-        costBasis: Money.fromString(`${700 + i}.00000007`),
-        estimated: false,
-      });
+      positions.push(
+        aPosition({
+          assetId,
+          institutionId: institutionIdOf('1'),
+          quantity: Quantity.fromString('99'),
+          value,
+          costBasis: Money.fromString(`${700 + i}.00000007`),
+          estimated: false,
+        }),
+      );
       // 33 + 33 allocated of 99 held, leaving 33 unassigned: three slices,
       // each one third of a value with a 1 in the last stored decimal place.
       allocations.push({ walletId: wallets[0]!, assetId, quantity: Quantity.fromString('33') });
@@ -404,14 +408,13 @@ describe('TS-11 — adversarial precision: no drift across hundreds of holdings'
     const value = Money.fromString('1000.00000001');
     const built = buildHoldingSet({
       positions: [
-        {
+        aPosition({
           assetId,
           institutionId: institutionIdOf('1'),
           quantity: Quantity.fromString('99'),
           value,
           costBasis: Money.zero(),
-          estimated: false,
-        },
+        }),
       ],
       allocations: [
         { walletId: walletIdOf('1'), assetId, quantity: Quantity.fromString('33') },

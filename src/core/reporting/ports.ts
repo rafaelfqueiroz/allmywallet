@@ -2,7 +2,11 @@ import type { BusinessDate } from '@/core/shared/clock';
 import type { AssetId, InstitutionId, WalletId } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { AssetClass } from '@/core/quotes/ports';
-import type { DailyValuationSnapshot } from '@/core/valuation/ports';
+import type {
+  DailyValuationSnapshot,
+  EstimateBasis,
+  NeedsAttentionReason,
+} from '@/core/valuation/ports';
 
 /**
  * SPEC-011 — the reporting framework's domain types and ports.
@@ -19,7 +23,7 @@ import type { DailyValuationSnapshot } from '@/core/valuation/ports';
  * property of the construction — see `base-query.ts`.
  */
 
-export type { AssetClass, DailyValuationSnapshot };
+export type { AssetClass, DailyValuationSnapshot, EstimateBasis, NeedsAttentionReason };
 
 // ---------------------------------------------------------------------------
 // The three controls (BR-011-01, BR-011-02, BR-011-03)
@@ -161,6 +165,35 @@ export interface ReportPosition {
   readonly costBasis: Money;
   /** BR-011-15 / BR-009-11: accrued fixed income is an estimate and is marked. */
   readonly estimated: boolean;
+  /**
+   * SPEC-009 BR-009-03 / AC-3 — the price is real but older than the
+   * valuation date, carried forward across a weekend, a holiday, or a halt.
+   *
+   * **Deliberately not folded into `estimated`.** An estimate is a figure
+   * nobody observed; a carried-forward close is one somebody observed, just
+   * not today. Merging them would mark every weekend's whole portfolio an
+   * estimate and drain the marker of the meaning it exists to carry — which
+   * is `ValuedPosition`'s own reasoning, and this boundary used to discard it.
+   */
+  readonly carriedForward: boolean;
+  /** The date the price actually came from. `null` when no price was used. */
+  readonly priceDate: BusinessDate | null;
+  /**
+   * BR-009-13 / AC-11 — this holding could not be valued properly and is
+   * sitting at cost. `null` when nothing is wrong.
+   */
+  readonly needsAttention: NeedsAttentionReason | null;
+  /**
+   * BR-009-11 / AC-9 — what an accrued figure was computed *from*: the
+   * indexer, its rate, the business days elapsed. `null` for anything priced
+   * by observation.
+   *
+   * The whole reason these four fields are here: `core/valuation` computes
+   * every one of them and this interface used to carry only `estimated`, so
+   * three acceptance criteria had nothing to render from. A field computed and
+   * then dropped at a boundary is indistinguishable from one never computed.
+   */
+  readonly basis: EstimateBasis | null;
 }
 
 /** SPEC-010 DM-2 — one row per `(wallet, asset)`, stored by quantity. */
@@ -207,6 +240,13 @@ export interface ReportHolding {
   readonly value: Money;
   readonly costBasis: Money;
   readonly estimated: boolean;
+  /** SPEC-009 AC-3 — see `ReportPosition.carriedForward`. */
+  readonly carriedForward: boolean;
+  readonly priceDate: BusinessDate | null;
+  /** SPEC-009 AC-11 — the holding is at cost because it could not be priced. */
+  readonly needsAttention: NeedsAttentionReason | null;
+  /** SPEC-009 AC-9 — what an accrued figure was computed from. */
+  readonly basis: EstimateBasis | null;
 }
 
 /**

@@ -357,7 +357,30 @@
       "overview": "Visão geral",
       "patrimonio": "Patrimônio",
       "performance": "Rentabilidade"
-    }
+    },
+    "markers": {
+      "attention": {
+        "badge": "Precisa de atenção",
+        "FIXED_INCOME_CONTRACT_MISSING": "Não encontramos o contrato deste papel, então ele aparece pelo custo de aquisição. Importe o extrato de Posição para trazer as condições.",
+        "FIXED_INCOME_RATE_UNREADABLE": "Não conseguimos ler o indexador ou a taxa deste contrato, então ele aparece pelo custo de aquisição.",
+        "PRICE_UNAVAILABLE": "Nunca conseguimos um preço para este ativo, então ele aparece pelo custo de aquisição."
+      },
+      "estimated": {
+        "badge": "Estimado",
+        "basis": "Calculado por {indexer} a {rate}% ao longo de {days} dias úteis, até {through}. Não é um preço observado no mercado."
+      },
+      "carried": {
+        "badge": "Preço de {date}",
+        "explanation": "Último preço observado no mercado. Pode ser de um fim de semana, feriado ou de um papel sem negócios desde então — é um preço real, só não é de hoje."
+      },
+      "indexer": {
+        "cdi_percent": "% do CDI",
+        "prefixado": "taxa prefixada",
+        "ipca_spread": "IPCA + juros"
+      }
+    },
+    "attentionTitle": "Precisam de atenção",
+    "attentionDescription": "Estes ativos aparecem pelo custo de aquisição porque não conseguimos avaliá-los. Os totais acima os incluem por esse valor."
   },
   "privacy": {
     "title": "Privacidade e dados",

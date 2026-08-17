@@ -7,6 +7,7 @@ import {
   anAsset,
   aPosition,
   assetIdOf,
+  day,
   institutionIdOf,
   money,
   qty,
@@ -463,5 +464,106 @@ describe('aggregate — BR-011-07/08', () => {
     expect(byAsset.groups).toHaveLength(3);
     expect(byAsset.total.value.toString()).toBe('500');
     expect(aggregate(holdings, 'asset_class').total.value.toString()).toBe('500');
+  });
+});
+
+describe('SPEC-009 AC-3/9/11 — valuation metadata survives the reporting boundary', () => {
+  /**
+   * The regression these exist for: `ReportPosition` carried only
+   * `estimated: boolean`, so `carriedForward`, `priceDate`, `needsAttention`
+   * and `basis` were computed by the valuation engine and discarded here.
+   * Three acceptance criteria had nothing to render from, and a stale price
+   * was indistinguishable on screen from a live one.
+   */
+  const descriptor = {
+    assetId: assetIdOf('1'),
+    code: 'PETR4',
+    name: 'Petrobras PN',
+    assetClass: 'stock' as const,
+    sector: null,
+  };
+
+  it('carries a carried-forward close and its price date onto the holding', () => {
+    const built = buildHoldingSet({
+      positions: [
+        aPosition({
+          assetId: assetIdOf('1'),
+          carriedForward: true,
+          priceDate: day('2026-03-10'),
+        }),
+      ],
+      allocations: [],
+      assets: [descriptor],
+    });
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value[0]?.carriedForward).toBe(true);
+    expect(built.value[0]?.priceDate).toBe('2026-03-10');
+  });
+
+  it('carries a needs-attention reason, so AC-11 has something to list', () => {
+    const built = buildHoldingSet({
+      positions: [aPosition({ assetId: assetIdOf('1'), needsAttention: 'PRICE_UNAVAILABLE' })],
+      allocations: [],
+      assets: [descriptor],
+    });
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value[0]?.needsAttention).toBe('PRICE_UNAVAILABLE');
+  });
+
+  it('carries the estimate basis, so AC-9 can show what a figure was computed from', () => {
+    const built = buildHoldingSet({
+      positions: [
+        aPosition({
+          assetId: assetIdOf('1'),
+          estimated: true,
+          basis: {
+            indexer: 'cdi_percent',
+            ratePercent: '110',
+            businessDays: 42,
+            throughDate: day('2026-03-20'),
+            matured: false,
+            missingIndexDays: 0,
+          },
+        }),
+      ],
+      allocations: [],
+      assets: [descriptor],
+    });
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value[0]?.basis?.indexer).toBe('cdi_percent');
+    expect(built.value[0]?.basis?.businessDays).toBe(42);
+  });
+
+  it('repeats the markers on every wallet slice rather than splitting them', () => {
+    // Value and quantity divide between wallets; how the price was obtained
+    // does not. A carried-forward close is equally carried-forward for each
+    // wallet holding a piece of it.
+    const built = buildHoldingSet({
+      positions: [
+        aPosition({
+          assetId: assetIdOf('1'),
+          quantity: qty('100'),
+          carriedForward: true,
+          priceDate: day('2026-03-10'),
+        }),
+      ],
+      allocations: [
+        { walletId: walletIdOf('1'), assetId: assetIdOf('1'), quantity: qty('60') },
+        { walletId: walletIdOf('2'), assetId: assetIdOf('1'), quantity: qty('40') },
+      ],
+      assets: [descriptor],
+    });
+
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.value).toHaveLength(2);
+    expect(built.value.every((holding) => holding.carriedForward)).toBe(true);
+    expect(built.value.every((holding) => holding.priceDate === '2026-03-10')).toBe(true);
   });
 });
