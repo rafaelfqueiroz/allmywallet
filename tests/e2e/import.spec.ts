@@ -124,6 +124,15 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
   );
   expect(Number(leaked?.count ?? '0')).toBe(0);
 
+  // ---- SPEC-010 BR-010-15: the import says what it did to the wallets -----
+  // The tenant has no wallets, so the 150 PETR4 it just imported are entirely
+  // unassigned — which is the case the summary most needs to state, because
+  // nothing else on screen would tell the user their new holding is sitting
+  // in no purpose at all (BR-010-16: never guessed into one).
+  await page.goto(`/import/${batchId}`);
+  await expect(page.getByRole('heading', { name: /o que esta importação mudou/i })).toBeVisible();
+  await expect(page.getByText('PETR4', { exact: false }).first()).toBeVisible();
+
   // ---- Every report renders for a signed-in tenant with real holdings -----
   //
   // Not a smoke test padded onto the end. `screens.spec.ts` checks these

@@ -265,6 +265,16 @@
       "transfer_in": "Transferência de entrada",
       "transfer_out": "Transferência de saída",
       "adjustment": "Ajuste"
+    },
+    "summary": {
+      "title": "O que esta importação mudou nas suas carteiras",
+      "settled": "Tudo o que entrou já tem destino. Nada esperando decisão.",
+      "needsDecisions": "Algumas compras não puderam ser atribuídas automaticamente porque o destino era ambíguo. Resolva abaixo.",
+      "unassigned": "Ainda não atribuído a nenhuma carteira.",
+      "assign": "Atribuir a",
+      "chooseWallet": "Escolha uma carteira",
+      "quantity": "Quantidade",
+      "resolve": "Atribuir"
     }
   },
   "reports": {

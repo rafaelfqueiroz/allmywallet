@@ -5,7 +5,13 @@ import { businessDateInSaoPaulo, SystemClock, type BusinessDate } from '@/core/s
 import type { ImportBatchId, UserId } from '@/core/shared/ids';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { daysSinceImport, isImportStale } from '@/core/ingestion/staleness';
+import {
+  buildPostImportSummary,
+  type PostImportSummary,
+} from '@/core/ingestion/post-import-summary';
+import { listPendingAllocations } from '@/core/wallets/pending';
 import { withIngestionDeps } from '@/app/(app)/import/composition';
+import { withWalletDeps } from '@/app/(app)/wallets/composition';
 
 /**
  * AR-31: Server Components call a use case / repository read in `core/`
@@ -77,13 +83,18 @@ export interface ImportBatchDetail {
   readonly batch: ImportBatch;
   readonly rows: readonly ImportRow[];
   readonly needsAttention: readonly ImportRow[];
+  /**
+   * SPEC-010 BR-010-15 — `null` until the batch is committed. Before that
+   * nothing has been allocated and a summary would be describing a future.
+   */
+  readonly summary: PostImportSummary | null;
 }
 
 export async function loadImportBatchDetail(
   userId: UserId,
   batchId: ImportBatchId,
 ): Promise<ImportBatchDetail | null> {
-  return withIngestionDeps(userId, async (deps) => {
+  const detail = await withIngestionDeps(userId, async (deps) => {
     const batch = await deps.batches.findById(batchId);
     if (batch === null) return null;
     const rows = await deps.rows.listByBatch(batchId);
@@ -95,4 +106,24 @@ export async function loadImportBatchDetail(
       ),
     };
   });
+
+  if (detail === null || detail.batch.status !== 'committed') {
+    return detail === null ? null : { ...detail, summary: null };
+  }
+
+  // A second tenant transaction rather than one: the wallet ports are a
+  // different composition root, and the summary is a read of *current*
+  // allocation state rather than of anything this batch froze — so it does not
+  // need to share the ingestion read's snapshot, and pretending it did would
+  // imply a consistency guarantee that is not the point (see
+  // `post-import-summary.ts` on why current-state is the right answer).
+  const { allocations, pending } = await withWalletDeps(userId, async (deps) => ({
+    allocations: await deps.allocations.listAll(),
+    pending: await listPendingAllocations(deps, userId),
+  }));
+
+  return {
+    ...detail,
+    summary: buildPostImportSummary({ rows: detail.rows, allocations, pending }),
+  };
 }
