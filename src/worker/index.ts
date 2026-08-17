@@ -45,6 +45,20 @@ export async function startWorker(): Promise<PgBoss> {
   const boss = new PgBoss({
     connectionString: env().DATABASE_URL,
     schema: 'pgboss',
+    /**
+     * `0006_pgboss_schema.sql` already creates the `pgboss` schema, as the
+     * migrator, and grants `USAGE, CREATE` on it to `allmywallet_app` so
+     * pg-boss can still build its own tables inside.
+     *
+     * Without this flag pg-boss issues `CREATE SCHEMA IF NOT EXISTS pgboss`
+     * on every start, and PostgreSQL checks `CREATE` **on the database**
+     * before the `IF NOT EXISTS` short-circuits. `allmywallet_app` is
+     * `NOCREATEDB` and holds no database-level `CREATE` by design (AR: the
+     * runtime role is not the table owner), so the statement fails 42501 and
+     * the worker exits before consuming a single job — with the schema sitting
+     * right there, already correct.
+     */
+    createSchema: false,
   });
 
   boss.on('error', (error: unknown) => {

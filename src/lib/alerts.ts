@@ -46,10 +46,38 @@ const alertLogger = childLogger({ component: 'alerts' });
  * structural facts (a queue name, a count, a threshold), never an entity.
  */
 export function raiseAlert(kind: AlertKind, context: AlertContext = {}): void {
+  // The log line goes first and unconditionally. It is the one destination
+  // that cannot fail, and an alert that reached the log but not Sentry is
+  // still an alert; the reverse is not true.
   alertLogger.error({ alertKind: kind, ...context }, `operational alert: ${kind}`);
-  Sentry.captureMessage(`operational alert: ${kind}`, {
-    level: 'error',
-    tags: { alertKind: kind },
-    extra: context,
-  });
+
+  /**
+   * **Raising an alert must never throw.** `@sentry/nextjs` resolves to a
+   * different entry point outside the Next runtime, and in the worker process
+   * `captureMessage` can be absent entirely — which turned every dead-letter
+   * alert into `TypeError: Sentry.captureMessage is not a function`, failing
+   * the very handler whose job is to report that something else already
+   * failed (AR-20's dead-letter consumer). The original error was then lost
+   * behind the reporting error.
+   *
+   * So the Sentry leg is best-effort and its failure is itself logged rather
+   * than propagated. A missing alert is bad; a crash loop in the component
+   * that exists to notice bad things is worse.
+   */
+  try {
+    if (typeof Sentry.captureMessage !== 'function') {
+      alertLogger.warn(
+        { alertKind: kind },
+        'Sentry.captureMessage unavailable in this runtime — alert logged only',
+      );
+      return;
+    }
+    Sentry.captureMessage(`operational alert: ${kind}`, {
+      level: 'error',
+      tags: { alertKind: kind },
+      extra: context,
+    });
+  } catch (error) {
+    alertLogger.error({ alertKind: kind, err: error }, 'failed to forward alert to Sentry');
+  }
 }
