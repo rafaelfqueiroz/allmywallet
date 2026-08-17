@@ -99,6 +99,52 @@ export async function requestAccountDeletion(
   return ok({ requestedAt, purgeAt });
 }
 
+/**
+ * SPEC-004 BR-004-09 — **signing back in cancels a pending deletion.**
+ *
+ * `requestAccountDeletion` revokes sessions and sets `users.deletedAt`, and
+ * for a long time nothing else in the system ever read that column except the
+ * purge sweep. So a user who requested deletion was signed out and could sign
+ * straight back in with Google, use the account normally, and have everything
+ * destroyed under them thirty days later with no further warning. AC-5's
+ * "access is revoked immediately" held for the current session and nothing
+ * more.
+ *
+ * **Cancelling is the right answer rather than blocking.** The published
+ * policy calls the window a *prazo de revisão* — a review period — and
+ * deliberately signing in is the clearest statement a person can make that
+ * they have changed their mind. Blocking would be the stricter reading, but
+ * BR-001-12 rules out account recovery, so a user who mis-clicked would have
+ * no self-service way back and the only remaining channel refuses requests it
+ * cannot attribute. A cancellable request cannot trap anyone; a blocking one
+ * can.
+ *
+ * Audited, because a deletion request appearing and disappearing without a
+ * record is indistinguishable from one that was never made.
+ */
+export async function cancelAccountDeletion(
+  deps: AccountDeletionDependencies,
+  userId: UserId,
+): Promise<Result<{ readonly cancelled: boolean }, DomainError>> {
+  const status = await deps.accountDeletion.findStatus(userId);
+  // Not an error: this runs on every sign-in, and the overwhelmingly common
+  // case is a user who never requested anything.
+  if (!status?.deletionRequestedAt) return ok({ cancelled: false });
+
+  await deps.accountDeletion.clearDeletionRequest(userId);
+
+  await deps.auditLog.record({
+    actor: userId,
+    userId,
+    action: 'account.deletion.cancelled',
+    entityType: 'user',
+    entityKey: userId,
+    previousValue: { requestedAt: status.deletionRequestedAt.toISOString() },
+  });
+
+  return ok({ cancelled: true });
+}
+
 export async function getAccountDeletionStatus(
   deps: AccountDeletionDependencies,
   userId: UserId,

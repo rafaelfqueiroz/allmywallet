@@ -40,6 +40,10 @@ export class DrizzleAccountDeletionRepository implements AccountDeletionPort {
     await this.db.update(users).set({ deletedAt: requestedAt }).where(eq(users.id, userId));
   }
 
+  async clearDeletionRequest(userId: UserId): Promise<void> {
+    await this.db.update(users).set({ deletedAt: null }).where(eq(users.id, userId));
+  }
+
   async findDueForPurge(cutoff: Date): Promise<readonly UserId[]> {
     const rows = await this.db
       .select({ id: users.id })

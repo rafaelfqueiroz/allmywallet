@@ -427,7 +427,7 @@
       "ledger": "Operações, posições e carteiras: mantidas enquanto a conta existir.",
       "deletionWindow": "Após um pedido de exclusão: {days} dias de prazo de revisão, depois apagados definitivamente.",
       "audit": "Registros de auditoria: {months} meses. Sobrevivem à exclusão da conta, sem vínculo com ela, porque são a evidência de que a exclusão foi feita corretamente.",
-      "backups": "Cópias de segurança: os dados apagados desaparecem ao fim do ciclo de retenção das cópias."
+      "backups": "Cópias de segurança: ainda não existem. Enquanto for assim, não há cópia de onde os seus dados possam ressurgir depois de apagados — e também não há de onde recuperá-los se algo der errado. Quando passarem a existir, esta página passará a informar o prazo do ciclo."
     },
     "rights": {
       "title": "Os seus direitos",

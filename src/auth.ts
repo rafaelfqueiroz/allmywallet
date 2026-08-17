@@ -9,6 +9,9 @@ import { provisionTenant } from '@/core/identity/provision-tenant';
 import { UserId } from '@/core/shared/ids';
 import { env } from '@/lib/env';
 import { assertTrustedHostConfigured } from '@/lib/trusted-host';
+import { logger } from '@/lib/logger';
+import { cancelAccountDeletion } from '@/core/privacy/delete-account';
+import { buildAccountDeletionDeps } from '@/app/(settings)/privacy/composition';
 
 /**
  * `session.user.id` is what `requireUserId()` (src/lib/session.ts) reads —
@@ -274,6 +277,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   secret: authEnv.authSecret,
   callbacks: {
+    /**
+     * SPEC-004 BR-004-09 — **signing in cancels a pending deletion request.**
+     *
+     * `requestAccountDeletion` revokes every session and marks
+     * `users.deletedAt`, and nothing outside the purge sweep ever read that
+     * column. So the user was signed out, could sign straight back in, use the
+     * account normally, and have it destroyed under them when the window
+     * elapsed. "Access is revoked immediately" was true of the open session
+     * and of nothing else.
+     *
+     * This is the one place every authentication passes through, which is why
+     * the check belongs here rather than in a route or a layout: a guard that
+     * has to be remembered on each surface is a guard that will be missed on
+     * the next one.
+     *
+     * Failing open is deliberate. If the cancellation write fails, the user
+     * signs in and the request stands — they see the pending-deletion banner
+     * on `/privacy` and can cancel it there. Failing closed would lock a
+     * legitimate user out of an account they are trying to keep, and
+     * BR-001-12 rules out recovery.
+     */
+    async signIn({ user }) {
+      if (!user.id) return true;
+      try {
+        await cancelAccountDeletion(buildAccountDeletionDeps(), UserId.of(user.id));
+      } catch (error) {
+        logger.error(
+          { err: error, component: 'auth' },
+          'SPEC-004 BR-004-09: could not cancel a pending deletion on sign-in',
+        );
+      }
+      return true;
+    },
+
     // The default `session` callback (see @auth/core/lib/init.js) strips the
     // database user down to name/email/image — no `id`. `requireUserId()`
     // (src/lib/session.ts) needs the id on every request, so it is restored

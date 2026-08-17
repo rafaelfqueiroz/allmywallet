@@ -203,6 +203,11 @@ export interface AccountDeletionPort {
   revokeSessions(userId: UserId): Promise<void>;
   markDeletionRequested(userId: UserId, requestedAt: Date): Promise<void>;
   /**
+   * SPEC-004 BR-004-09's review window, taken seriously in both directions.
+   * Clears `users.deletedAt`, so the account leaves `findDueForPurge`'s reach.
+   */
+  clearDeletionRequest(userId: UserId): Promise<void>;
+  /**
    * Every account whose deletion was requested at or before `cutoff` —
    * `purgeDueAccounts` computes `cutoff = asOf - deletionWindowDays` and
    * passes it in already resolved, so the adapter is a single comparison
