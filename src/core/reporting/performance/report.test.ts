@@ -16,6 +16,7 @@ import {
   runPerformanceReport,
   seriesFromSnapshots,
   type PerformanceReport,
+  type PerformanceSeries,
 } from '@/core/reporting/performance/report';
 import { DEFAULT_DIVERGENCE_POINTS } from '@/core/reporting/performance/xirr';
 import {
@@ -159,6 +160,18 @@ function errorCode(result: { ok: true } | { ok: false; error: { code: string } }
 }
 
 /**
+ * `PerformanceReport.series` is nullable because a **wallet** scope has no
+ * series behind it — `daily_valuation_snapshots` is persisted at portfolio
+ * grain. Every assertion in this file that reaches into the series is a
+ * portfolio-scope one, so this narrows and fails loudly rather than letting a
+ * `?.` quietly turn a missing series into a passing expectation.
+ */
+function portfolioSeries(report: { series: PerformanceSeries | null }): PerformanceSeries {
+  if (report.series === null) throw new Error('expected a portfolio-scope series');
+  return report.series;
+}
+
+/**
  * A period whose start is **not** the tenant's first snapshot, so
  * `findSnapshotBefore` has a baseline to return. Everything below shares this
  * runner; `run` above deliberately does not, because its fixture starts on the
@@ -247,10 +260,10 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
       to: '2026-03-31',
     });
 
-    expect(report.series.points[0]?.date).toBe('2026-02-28');
-    expect(report.series.points[0]?.value.toString()).toBe('100000');
+    expect(portfolioSeries(report).points[0]?.date).toBe('2026-02-28');
+    expect(portfolioSeries(report).points[0]?.value.toString()).toBe('100000');
     // 31 March closes plus the February baseline in front of them.
-    expect(report.series.points).toHaveLength(32);
+    expect(portfolioSeries(report).points).toHaveLength(32);
     expect(unwrap(report.twr).returnRate.toString()).toBe('0.05');
 
     // The reported range is still the range the user asked for. Only the
@@ -328,13 +341,15 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
     });
 
     // Exactly one flow, on the user's own date, at its own size.
-    expect(report.series.flows.map((flow) => [flow.date, flow.amount.toString()])).toEqual([
+    expect(
+      portfolioSeries(report).flows.map((flow) => [flow.date, flow.amount.toString()]),
+    ).toEqual([
       ['2026-03-01', '50000'],
       ['2026-03-02', '0'],
     ]);
     expect(unwrap(report.twr).returnRate.toString()).toBe('0.05');
     // `gain` is the money the period actually made — the deposit is not it.
-    expect(report.series.gain.toString()).toBe('5000');
+    expect(portfolioSeries(report).gain.toString()).toBe('5000');
   });
 
   /**
@@ -393,8 +408,10 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
       to: '2027-01-01',
     });
 
-    expect(report.series.points[0]?.date).toBe('2026-01-01');
-    expect(report.series.points).toHaveLength(3);
+    // Portfolio scope, so there is a series — `null` is the wallet-scope case.
+    const series = portfolioSeries(report);
+    expect(series.points[0]?.date).toBe('2026-01-01');
+    expect(series.points).toHaveLength(3);
     // Unchanged from before the baseline existed: 1,10 × 0,990909090909 − 1.
     expect(unwrap(report.twr).returnRate.toString()).toBe('0.09');
 
@@ -419,7 +436,7 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
     });
 
     expect(errorCode(report.twr)).toBe('PERFORMANCE_NO_SERIES');
-    expect(report.series.points).toHaveLength(0);
+    expect(portfolioSeries(report).points).toHaveLength(0);
   });
 
   /**
