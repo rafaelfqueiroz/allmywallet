@@ -43,6 +43,21 @@ export interface CommitBatchOutcome {
   readonly applied: number;
   readonly skippedDuplicates: number;
   readonly invalid: number;
+  /**
+   * SPEC-010 BR-010-10/17/18 — what the caller has to apply to wallet
+   * allocations, in the same transaction.
+   *
+   * Carried rather than re-queried because a second read could not tell this
+   * batch's rows from any other's, and applying a buy twice would allocate it
+   * twice. It is deliberately the domain objects that were just inserted, not
+   * a bespoke summary type: the wallet side needs type, quantity, ratio and
+   * trade date, which is most of a `Transaction` anyway, and a parallel shape
+   * would be one more thing to keep in step.
+   *
+   * `core/ingestion` still knows nothing about wallets — it reports what it
+   * did, and `core/wallets/apply-ledger-effects.ts` decides what that means.
+   */
+  readonly committed: readonly Transaction[];
 }
 
 interface Candidate {
@@ -66,7 +81,9 @@ export async function commitBatch(
   // `committed` is a no-op success, not an error — exactly what a pg-boss
   // retry after a successful-but-unacknowledged first attempt needs.
   if (batch.status === 'committed') {
-    return ok({ batch, applied: 0, skippedDuplicates: 0, invalid: 0 });
+    // AR-19: a no-op success carries no effects either — a retry must not
+    // re-apply wallet allocations for a batch that already applied them.
+    return ok({ batch, applied: 0, skippedDuplicates: 0, invalid: 0, committed: [] });
   }
   if (batch.status !== 'previewed') {
     return err(
@@ -192,6 +209,7 @@ export async function commitBatch(
     applied: toInsert.length,
     skippedDuplicates: duplicates.length,
     invalid: invalidRowIds.length,
+    committed: toInsert,
   });
 }
 

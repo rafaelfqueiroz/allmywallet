@@ -11,6 +11,8 @@ import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { stageBatch } from '@/core/ingestion/stage-batch';
 import { commitBatch } from '@/core/ingestion/commit-batch';
 import { cancelBatch } from '@/core/ingestion/cancel-batch';
+import type { WalletDependencies } from '@/core/wallets/dependencies';
+import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
 import { DrizzleImportRowRepository } from '@/adapters/db/import-row-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
@@ -20,6 +22,12 @@ import {
   DrizzleInstitutionResolver,
 } from '@/adapters/db/ingestion-resolvers';
 import { DrizzleFixedIncomeContractRepository } from '@/adapters/db/fixed-income-contract-repository';
+import {
+  DrizzlePositionQueryRepository,
+  DrizzleWalletAllocationRepository,
+  DrizzleWalletAssetRuleRepository,
+  DrizzleWalletRepository,
+} from '@/adapters/db/wallet-repository';
 import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
 
 /**
@@ -66,6 +74,23 @@ export function buildIngestionDeps(tx: Tx, userId: UserId, clock: Clock): Ingest
     assets: new DrizzleAssetResolver(tx),
     institutions: new DrizzleInstitutionResolver(tx),
     fixedIncomeContracts: new DrizzleFixedIncomeContractRepository(tx, userId),
+    clock,
+  };
+}
+
+/**
+ * SPEC-010 — the wallet ports, built from the **same** `Tx` as the ingestion
+ * ports above so a commit and the allocations it implies share one
+ * transaction. Two `withTenant` calls would let the ledger write commit and
+ * the allocation write roll back, leaving BR-010-05's sum invariant broken
+ * with nothing that would ever repair it.
+ */
+export function buildWalletDeps(tx: Tx, userId: UserId, clock: Clock): WalletDependencies {
+  return {
+    wallets: new DrizzleWalletRepository(tx, userId),
+    allocations: new DrizzleWalletAllocationRepository(tx, userId),
+    assetRules: new DrizzleWalletAssetRuleRepository(tx, userId),
+    positionQuery: new DrizzlePositionQueryRepository(tx),
     clock,
   };
 }
@@ -169,7 +194,28 @@ export async function handleImportCommit(
 
   const result = await withTenant(
     userId,
-    async (tx) => commitBatch(buildIngestionDeps(tx, userId, deps.clock), userId, { batchId }),
+    async (tx) => {
+      const committed = await commitBatch(buildIngestionDeps(tx, userId, deps.clock), userId, {
+        batchId,
+      });
+      if (!committed.ok) return committed;
+
+      /**
+       * SPEC-010 BR-010-10/14/15/17/18 — allocations follow the ledger, in the
+       * same transaction. Returning the error rather than logging and
+       * continuing is deliberate: a commit whose wallet effects failed has a
+       * ledger that no longer agrees with its allocations, and BR-010-05 is an
+       * invariant, not a preference. The rollback is the repair.
+       */
+      const effects = await applyLedgerEffects(
+        buildWalletDeps(tx, userId, deps.clock),
+        userId,
+        committed.value.committed,
+      );
+      if (!effects.ok) return effects;
+
+      return committed;
+    },
     deps.database,
   );
 

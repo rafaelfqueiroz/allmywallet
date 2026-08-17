@@ -7,6 +7,9 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { resetLedger, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
+import { AssetId } from '@/core/shared/ids';
+import { createWallet } from '@/core/wallets/create-wallet';
+import { allocateToWallet } from '@/core/wallets/allocate';
 import * as schema from '@/db/schema';
 import { withTenant } from '@/db/tenant';
 import { FakeClock } from '@/core/shared/clock';
@@ -18,6 +21,7 @@ import {
   buildIngestionDeps,
   handleImportCancel,
   handleImportCommit,
+  buildWalletDeps,
   handleImportStage,
   saveUploadedFile,
 } from '@/worker/handlers/import';
@@ -109,6 +113,93 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     clock,
     ingestion: new XlsxIngestionPort(),
     uploadDir,
+  });
+
+  /**
+   * SPEC-010 BR-010-10/17 — the wiring test.
+   *
+   * `applyBuy` and `applySell` had no caller until
+   * `core/wallets/apply-ledger-effects.ts`, so this is the assertion that was
+   * missing: not "does the use case work" — its own unit tests always passed —
+   * but "does committing an import reach it at all". Reverting the two lines
+   * in `handleImportCommit` fails both halves of this.
+   */
+  it('BR-010-10/17: committing an import moves allocations, and never leaves allocated > held', async () => {
+    // A wallet holding the whole position.
+    const buyBatch = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      buyBatch,
+      await buildMovimentacaoXlsx([
+        {
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '10,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: buyBatch, userId }, handlerDeps());
+    await handleImportCommit({ batchId: buyBatch, userId }, handlerDeps());
+
+    const { rows: assetRows } = await migratorPool.query(
+      "SELECT id FROM assets WHERE code = 'PETR4'",
+    );
+    const assetId = assetRows[0]?.id as string;
+
+    const wallet = await withTenant(
+      userId,
+      async (tx) => {
+        const deps = buildWalletDeps(tx, userId, clock);
+        const created = await createWallet(deps, userId, { name: 'Aposentadoria' });
+        if (!created.ok) throw new Error('wallet setup failed');
+        await allocateToWallet(deps, userId, {
+          walletId: created.value.id,
+          assetId: AssetId.of(assetId),
+        });
+        return created.value;
+      },
+      appDb,
+    );
+
+    const allocatedFor = async (): Promise<string | undefined> => {
+      const { rows } = await migratorPool.query(
+        'SELECT quantity::text AS q FROM wallet_allocations WHERE wallet_id = $1',
+        [wallet.id],
+      );
+      return rows[0]?.q as string | undefined;
+    };
+
+    expect(await allocatedFor()).toBe('100.00000000');
+
+    // Now sell 40 through a second import. Without the wiring the position
+    // drops to 60 and the allocation stays at 100 — BR-010-05 violated.
+    const sellBatch = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      sellBatch,
+      await buildMovimentacaoXlsx([
+        {
+          data: '20/02/2026',
+          movimentacao: 'Venda',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '40',
+          precoUnitario: '12,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: sellBatch, userId }, handlerDeps());
+    await handleImportCommit({ batchId: sellBatch, userId }, handlerDeps());
+
+    const { rows: held } = await migratorPool.query(
+      'SELECT quantity::text AS q FROM positions WHERE user_id = $1 AND asset_id = $2',
+      [userId, assetId],
+    );
+    expect(held[0]?.q).toBe('60.00000000');
+
+    // The whole point: the allocation came down with the position.
+    expect(await allocatedFor()).toBe('60.00000000');
   });
 
   it('BR-005-09..13: stage then commit — the ledger only changes after commit', async () => {
