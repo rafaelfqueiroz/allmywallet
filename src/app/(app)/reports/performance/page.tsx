@@ -15,7 +15,9 @@ import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { tryUserId } from '@/app/(app)/reports/session';
+import { comparisonSeries } from '@/core/reporting/performance/comparison-series';
 import { loadPerformance } from '@/app/(app)/reports/performance/data';
+import { BenchmarkChart } from '@/app/(app)/reports/performance/_components/BenchmarkChart';
 import { PageShell } from '@/components/patterns/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -189,6 +191,32 @@ export default async function PerformancePage({ searchParams }: PageProps) {
               {tr('treatment.hint')}
             </Text>
           </Cluster>
+
+          {/* BR-012-12 / DL-012-04 — the comparison, drawn. Everything on it
+              is also in the table below, which is what BR-016-16 asks for:
+              the chart carries the shape, the table carries the figures. */}
+          {report.value.twr.ok && (
+            <Section title={tr('chart.title')} description={tr('chart.description')}>
+              <BenchmarkChart
+                title={tr('chart.title')}
+                summary={tr('chart.summary')}
+                series={['portfolio', ...report.value.benchmarks.map((b) => b.benchmark)]}
+                points={comparisonSeries(
+                  report.value.twr.value.subPeriods,
+                  report.value.benchmarks.flatMap((outcome) =>
+                    outcome.line.ok ? [outcome.line.value] : [],
+                  ),
+                ).map((row) => ({
+                  date: row.date,
+                  // Plotting coordinates only — see the chart's own header.
+                  portfolio: Number(row.portfolio.toString()),
+                  ...Object.fromEntries(
+                    [...row.benchmarks].map(([key, value]) => [key, Number(value.toString())]),
+                  ),
+                }))}
+              />
+            </Section>
+          )}
 
           {/* BR-012-10..12 — each benchmark, its own return, and what the
               user's own contributions would have been worth at that rate. */}

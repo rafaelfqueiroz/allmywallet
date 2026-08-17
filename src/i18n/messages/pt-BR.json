@@ -582,6 +582,11 @@
       "columnContribution": "Contribuição",
       "columnGain": "Ganho",
       "unavailable": "Não há base suficiente no período para decompor a rentabilidade por grupo."
+    },
+    "chart": {
+      "title": "Sua carteira x os índices",
+      "description": "Todas as linhas começam em 100 no início do período. A distância entre elas é o quanto sua carteira ficou à frente ou atrás.",
+      "summary": "Comparação da rentabilidade acumulada da carteira com a dos índices selecionados. Os números exatos estão na tabela abaixo."
     }
   }
 }
