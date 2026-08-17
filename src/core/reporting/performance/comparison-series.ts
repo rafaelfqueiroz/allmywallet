@@ -45,13 +45,21 @@ export function comparisonSeries(
 ): readonly ComparisonRow[] {
   if (subPeriods.length === 0) return [];
 
-  const byBenchmark = new Map<Benchmark, Map<string, Rate>>(
-    lines.map((line) => [line.benchmark, new Map(line.points.map((p) => [p.date, p.factor]))]),
-  );
-  // Carried forward across dates the index did not publish.
-  const lastFactor = new Map<Benchmark, Quantity>(
-    lines.map((line) => [line.benchmark, Quantity.fromString('1')]),
-  );
+  /**
+   * One entry per benchmark, holding both its published points and its running
+   * factor. Two parallel maps would need a `?? default` on each lookup, and
+   * those defaults are unreachable — both maps are built from the same
+   * `lines`, so a miss is impossible. An unreachable branch is not a safety
+   * net; it is a line no test can justify and a reader has to reason about.
+   */
+  const tracked = lines.map((line) => ({
+    benchmark: line.benchmark,
+    published: new Map<string, Rate>(line.points.map((point) => [point.date, point.factor])),
+    // Carried forward across dates the index did not publish. Starts at 1 so a
+    // benchmark whose series begins after the period does rebase to 100
+    // rather than vanishing.
+    factor: Quantity.fromString('1'),
+  }));
 
   let portfolioFactor = Quantity.fromString('1');
   const rows: ComparisonRow[] = [];
@@ -60,11 +68,9 @@ export function comparisonSeries(
     portfolioFactor = portfolioFactor.times(Quantity.fromString('1').plus(subPeriod.rate));
 
     const benchmarks = new Map<Benchmark, Quantity>();
-    for (const line of lines) {
-      const published = byBenchmark.get(line.benchmark)?.get(subPeriod.range.to);
-      const factor = published ?? lastFactor.get(line.benchmark) ?? Quantity.fromString('1');
-      lastFactor.set(line.benchmark, factor);
-      benchmarks.set(line.benchmark, factor.times(BASE));
+    for (const entry of tracked) {
+      entry.factor = entry.published.get(subPeriod.range.to) ?? entry.factor;
+      benchmarks.set(entry.benchmark, entry.factor.times(BASE));
     }
 
     rows.push({
