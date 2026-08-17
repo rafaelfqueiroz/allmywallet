@@ -158,6 +158,325 @@ function errorCode(result: { ok: true } | { ok: false; error: { code: string } }
   return result.error.code;
 }
 
+/**
+ * A period whose start is **not** the tenant's first snapshot, so
+ * `findSnapshotBefore` has a baseline to return. Everything below shares this
+ * runner; `run` above deliberately does not, because its fixture starts on the
+ * period's own first date and must keep exercising the no-baseline path.
+ */
+async function runRange(options: {
+  snapshots: readonly DailyValuationSnapshot[];
+  from: string;
+  to: string;
+  benchmarks?: readonly Benchmark[];
+  index?: IndexSeriesReaderPort;
+  port?: FakeReportDataPort;
+}): Promise<PerformanceReport> {
+  const result = await runPerformanceReport(
+    {
+      port: options.port ?? buildPort(options.snapshots),
+      indexSeries: options.index ?? new FakeIndexSeries({}),
+    },
+    {
+      period: { kind: 'custom', from: day(options.from), to: day(options.to) },
+      scope: { kind: 'portfolio' },
+      grouping: 'asset_class',
+      today: day(options.to),
+      treatment: EarningsTreatment.WITHOUT_EARNINGS,
+      benchmarks: options.benchmarks ?? [],
+      divergencePoints: DEFAULT_DIVERGENCE_POINTS,
+      earliest: day('2026-02-27'),
+    },
+  );
+  if (!result.ok) throw new Error(`expected a report, got ${result.error.code}`);
+  return result.value;
+}
+
+const MARCH = Array.from(
+  { length: 31 },
+  (_, index) => `2026-03-${String(index + 1).padStart(2, '0')}`,
+);
+
+/**
+ * **The defect this suite exists for.** A portfolio worth R$ 100.000,00 at
+ * February's close gains 5 % on 1 March and does nothing for the rest of the
+ * month. There are no contributions at all, so every flow is zero and the whole
+ * return is price movement on one day.
+ */
+const FIRST_DAY_HISTORY: readonly DailyValuationSnapshot[] = [
+  snapshot('2026-02-28', '100000', '100000', '0'),
+  ...MARCH.map((date) => snapshot(date, '105000', '100000', '0')),
+];
+
+describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not on its own first close', () => {
+  /**
+   * **AC-1 / TS-12 — the first day of the period belongs to the period.**
+   *
+   * A `daily_valuation_snapshots` row dated `d` is the **close** of `d`
+   * (SPEC-009 replays to and including the date), so the row dated 01/03 already
+   * holds the 5 % that day produced. Opening the series on it measures from the
+   * end of the first day and reports the month as flat.
+   *
+   * Hand-computed over the fixture, opening on **28/02**:
+   *
+   *   28/02 → 01/03   F = 100.000 − 100.000 = 0
+   *                   gain = 105.000 − 100.000 − 0 = 5.000
+   *                   base = 100.000            r = 5.000 ÷ 100.000 = **0,05**
+   *   01/03 → 02/03 … 30/03 → 31/03   (30 sub-periods)
+   *                   gain = 105.000 − 105.000 − 0 = 0
+   *                   base = 105.000            r = **0**
+   *
+   *   TWR = 1,05 × 1^30 − 1 = **0,05**
+   *
+   * And that is the same 5 % *Patrimônio* reports for the identical range —
+   * (105.000 − 100.000) ÷ 100.000 — which is the cross-report invariant that was
+   * broken: one screen said +5 % growth while the other said 0,00 % return.
+   */
+  it('AC-1 — a first-day gain is inside the return, and matches Patrimônio for the same range', async () => {
+    const report = await runRange({
+      snapshots: FIRST_DAY_HISTORY,
+      from: '2026-03-01',
+      to: '2026-03-31',
+    });
+
+    expect(report.series.points[0]?.date).toBe('2026-02-28');
+    expect(report.series.points[0]?.value.toString()).toBe('100000');
+    // 31 March closes plus the February baseline in front of them.
+    expect(report.series.points).toHaveLength(32);
+    expect(unwrap(report.twr).returnRate.toString()).toBe('0.05');
+
+    // The reported range is still the range the user asked for. Only the
+    // measurement's starting point moved.
+    expect(report.range).toEqual({ from: '2026-03-01', to: '2026-03-31' });
+  });
+
+  /**
+   * **BR-012-03 — XIRR consumes the same series, so it needed the same
+   * correction and receives it here.**
+   *
+   * `cashFlowsFrom` takes the series' first point as the capital already
+   * committed. Before the baseline existed that was 105.000 on 01/03 against
+   * 105.000 on 31/03, netting to a root of exactly **zero** — the same lie TWR
+   * was telling, in the other measure.
+   *
+   * With the baseline the flows are −100.000 on 28/02 and +105.000 on 31/03,
+   * 31 calendar days apart. Bracketed by hand from
+   * `f(r) = −100.000 + 105.000 × (1+r)^(−31/365)`:
+   *
+   *   f(0,77) = −100.000 + 105.000 ÷ 1,77^0,0849315
+   *           = −100.000 + 105.000 ÷ 1,0496878 = +29,74  → root is above 0,77
+   *   f(0,78) = −100.000 + 105.000 ÷ 1,78^0,0849315
+   *           = −100.000 + 105.000 ÷ 1,0501902 = −18,10  → root is below 0,78
+   *
+   * Five per cent in a month annualises to about 77,6 %, which is exactly what
+   * a money-weighted return is supposed to say about it.
+   */
+  it('BR-012-03 — XIRR measures from the same opening capital, and is no longer zero', async () => {
+    const report = await runRange({
+      snapshots: FIRST_DAY_HISTORY,
+      from: '2026-03-01',
+      to: '2026-03-31',
+    });
+
+    const xirr = unwrap(report.xirr);
+    expect(xirr.rate.toDecimal().greaterThan('0.77')).toBe(true);
+    expect(xirr.rate.toDecimal().lessThan('0.78')).toBe(true);
+  });
+
+  /**
+   * **Cash-flow alignment — the failure mode in the opposite direction.**
+   *
+   * Moving the opening back one close without moving the flows with it would
+   * credit a contribution made on `from` to the portfolio as *performance*. The
+   * flows are differences of the cumulative `net_contributions`, so prepending
+   * the baseline produces the contribution as one flow dated 01/03, inside the
+   * one sub-period that ends there.
+   *
+   *   28/02  value 100.000  contribuições 100.000
+   *   01/03  value 155.000  contribuições 150.000   ← R$ 50.000,00 deposited
+   *   02/03  value 155.000  contribuições 150.000
+   *
+   *   28/02 → 01/03   F    = 150.000 − 100.000 = 50.000
+   *                   gain = 155.000 − 100.000 − 50.000 = 5.000
+   *                   base = 100.000 (w = 0, the opening value)
+   *                   r    = 5.000 ÷ 100.000 = **0,05**
+   *   01/03 → 02/03   gain = 0 → r = **0**
+   *
+   *   TWR = 1,05 − 1 = **0,05**
+   *
+   * Drop that flow and the same numbers read 55.000 ÷ 100.000 = **0,55** — a
+   * deposit rendered as an eleven-fold overstatement of the return. Count it
+   * twice and the numerator turns negative. Neither happens.
+   */
+  it('attributes a contribution dated `from` to the sub-period ending at `from`', async () => {
+    const report = await runRange({
+      snapshots: [
+        snapshot('2026-02-28', '100000', '100000', '0'),
+        snapshot('2026-03-01', '155000', '150000', '0'),
+        snapshot('2026-03-02', '155000', '150000', '0'),
+      ],
+      from: '2026-03-01',
+      to: '2026-03-02',
+    });
+
+    // Exactly one flow, on the user's own date, at its own size.
+    expect(report.series.flows.map((flow) => [flow.date, flow.amount.toString()])).toEqual([
+      ['2026-03-01', '50000'],
+      ['2026-03-02', '0'],
+    ]);
+    expect(unwrap(report.twr).returnRate.toString()).toBe('0.05');
+    // `gain` is the money the period actually made — the deposit is not it.
+    expect(report.series.gain.toString()).toBe('5000');
+  });
+
+  /**
+   * **BR-012-02 — Modified Dietz needed no correction of its own.**
+   *
+   * Its interval is already half-open, `(from, to]`, for exactly the reason the
+   * baseline exists: a flow dated `from` is inside `V_begin` when `from` is a
+   * close. Making the baseline the sub-period's start therefore hands the same
+   * flow to the same interval, and the fallback picks it up unchanged.
+   *
+   * Baseline on **27/02** rather than 28/02, so the first sub-period spans a
+   * gap and takes the fallback:
+   *
+   *   D    = 01/03 − 27/02 = 2 calendar days
+   *   d    = 01/03 − 27/02 = 2          w = (2 − 2) ÷ 2 = 0
+   *   num  = 155.000 − 100.000 − 50.000 = 5.000
+   *   den  = 100.000 + 50.000 × 0       = 100.000
+   *   R    = 5.000 ÷ 100.000            = **0,05**
+   *
+   *   01/03 → 02/03 is a single day and links at r = 0, so TWR = **0,05**.
+   */
+  it('BR-012-02 — the fallback spans the baseline gap and still sees the flow', async () => {
+    const report = await runRange({
+      snapshots: [
+        snapshot('2026-02-27', '100000', '100000', '0'),
+        snapshot('2026-03-01', '155000', '150000', '0'),
+        snapshot('2026-03-02', '155000', '150000', '0'),
+      ],
+      from: '2026-03-01',
+      to: '2026-03-02',
+    });
+
+    const twr = unwrap(report.twr);
+    expect(twr.returnRate.toString()).toBe('0.05');
+    expect(twr.dietzPeriods).toEqual([{ range: { from: '2026-02-27', to: '2026-03-01' }, spanDays: 2 }]);
+  });
+
+  /**
+   * **The no-baseline case is unchanged, and must be.**
+   *
+   * A period starting at or before the tenant's very first snapshot has nothing
+   * before it. `findSnapshotBefore` returns null there — asserted against real
+   * Postgres in `tests/integration/portfolio-value-reads.test.ts` — and the
+   * series legitimately opens on the portfolio's first recorded value. Inventing
+   * a zero baseline instead would report the whole opening *patrimônio* as a
+   * first-day gain.
+   */
+  it('opens on the first in-range snapshot when there is nothing before it', async () => {
+    const port = buildPort(DIVIDEND_HISTORY);
+    const report = await runRange({
+      snapshots: DIVIDEND_HISTORY,
+      port,
+      from: '2026-01-01',
+      to: '2027-01-01',
+    });
+
+    expect(report.series.points[0]?.date).toBe('2026-01-01');
+    expect(report.series.points).toHaveLength(3);
+    // Unchanged from before the baseline existed: 1,10 × 0,990909090909 − 1.
+    expect(unwrap(report.twr).returnRate.toString()).toBe('0.09');
+
+    // BR-011-13 / TS-32: the baseline is a snapshot read, like every other
+    // figure on this page. Nothing here reaches the ledger.
+    expect(port.calls).toContain('findSnapshotBefore:2026-01-01');
+  });
+
+  /**
+   * **A baseline alone is not a series.**
+   *
+   * A range with no snapshot inside it has nothing to measure *to*. Linking the
+   * lone prior point would produce an empty product and publish a confident
+   * 0 % — the misleading zero BR-012-18 exists to forbid, and the one a user
+   * has no way to detect.
+   */
+  it('BR-012-18 — a period with a baseline but no observations is unavailable, not flat', async () => {
+    const report = await runRange({
+      snapshots: [snapshot('2026-02-28', '100000', '100000', '0')],
+      from: '2026-03-01',
+      to: '2026-03-02',
+    });
+
+    expect(errorCode(report.twr)).toBe('PERFORMANCE_NO_SERIES');
+    expect(report.series.points).toHaveLength(0);
+  });
+
+  /**
+   * **BR-012-11/12/13 — the benchmark window follows the series window.**
+   *
+   * `accumulateRateSeries` pins its line to 1 on its own `from` and compounds
+   * `[from, to)`, so its return is the growth of capital present from that
+   * date's open — the close of the day before. Leave it on 01/03 while the
+   * portfolio measures from 28/02 and "% do CDI" divides a two-day portfolio
+   * return by a one-day CDI one, with nothing on screen to say so.
+   *
+   * CDI publishes 0,05 % on 28/02 and 0,10 % on 01/03. Accumulated from 28/02:
+   *
+   *   28/02  factor = 1                        (recorded before the day's rate)
+   *   01/03  factor = 1,0005
+   *   02/03  factor = 1,0005 × 1,001
+   *                 = 1,0005 + 0,0010005 = **1,0015005**
+   *   CDI return = **0,0015005**   (0,001 if the line still began on 01/03)
+   *
+   * The portfolio: 100.000 → 105.000 on 01/03, flat on 02/03 → TWR **0,05**.
+   *
+   *   % do CDI = 0,05 ÷ 0,0015005 × 100
+   *            = 5.000.000 ÷ 1.500,5
+   *            = 10.000.000 ÷ 3.001
+   *            = 3.332 + 668/3.001
+   *            = 3.332,2225924691769…  → **3.332,222592469177** at RATE_SCALE
+   *
+   * And the shadow, which starts from the same baseline value:
+   *
+   *   28/02  100.000,00                        (the opening close, no growth yet)
+   *   01/03  100.000 × 1,0005          = 100.050,00
+   *   02/03  100.050 × 1,001           = **100.150,05**
+   */
+  it('AC-10/AC-11 — the benchmark line and its shadow rebase off the baseline', async () => {
+    const report = await runRange({
+      snapshots: [
+        snapshot('2026-02-28', '100000', '100000', '0'),
+        snapshot('2026-03-01', '105000', '100000', '0'),
+        snapshot('2026-03-02', '105000', '100000', '0'),
+      ],
+      from: '2026-03-01',
+      to: '2026-03-02',
+      benchmarks: ['CDI'],
+      index: new FakeIndexSeries({
+        CDI: [
+          { date: day('2026-02-28'), value: Quantity.fromString('0.05') },
+          { date: day('2026-03-01'), value: Quantity.fromString('0.10') },
+        ],
+      }),
+    });
+
+    const line = unwrap(report.benchmarks[0]!.line);
+    expect(line.points[0]?.date).toBe('2026-02-28');
+    expect(line.points[0]?.factor.toString()).toBe('1');
+    expect(line.points.map((point) => point.factor.toString())).toEqual([
+      '1',
+      '1.0005',
+      '1.0015005',
+    ]);
+    expect(line.returnRate.toString()).toBe('0.0015005');
+
+    expect(unwrap(report.twr).returnRate.toString()).toBe('0.05');
+    expect(unwrap(report.percentOfCdi).toString()).toBe('3332.222592469177');
+    expect(report.benchmarks[0]?.shadow?.finalValue.toString()).toBe('100150.05');
+  });
+});
+
 describe('SPEC-012 BR-012-06..08 — with and without earnings (AC-7, AC-8)', () => {
   /**
    * The flows are the **differences** of the snapshot's cumulative totals, and
