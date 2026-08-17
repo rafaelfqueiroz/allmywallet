@@ -115,6 +115,10 @@ export class FakeAccountDeletionPort implements AccountDeletionPort {
     this.#statuses.set(userId, { userId, deletionRequestedAt: requestedAt });
   }
 
+  async clearDeletionRequest(userId: UserId): Promise<void> {
+    this.#statuses.set(userId, { userId, deletionRequestedAt: null });
+  }
+
   async findDueForPurge(cutoff: Date): Promise<readonly UserId[]> {
     return [...this.#statuses.values()]
       .filter(

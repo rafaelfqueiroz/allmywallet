@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { UserId } from '@/core/shared/ids';
 import {
+  cancelAccountDeletion,
   getAccountDeletionStatus,
   purgeDueAccounts,
   requestAccountDeletion,
@@ -138,5 +139,63 @@ describe('SPEC-004 BR-004-09/10 — purgeDueAccounts', () => {
     const result = await purgeDueAccounts(deps, new Date(), 30);
     expect(result.purged).toHaveLength(0);
     expect(result.failed).toHaveLength(0);
+  });
+});
+
+describe('SPEC-004 BR-004-09 — cancelAccountDeletion, the review window in both directions', () => {
+  /**
+   * The regression this exists for. Before it, `deletedAt` was written by the
+   * request and read only by the purge sweep, so a user could sign back in,
+   * carry on, and lose everything thirty days later with no further warning.
+   */
+  it('AC-5 — a pending request is cleared, so the purge sweep no longer sees the account', async () => {
+    const deps = buildFakeDeps('2026-03-15T12:00:00Z');
+    await requestAccountDeletion(deps, USER, { deletionWindowDays: 30 });
+    expect((await getAccountDeletionStatus(deps, USER))?.deletionRequestedAt).not.toBeNull();
+
+    const result = await cancelAccountDeletion(deps, USER);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cancelled).toBe(true);
+    expect((await getAccountDeletionStatus(deps, USER))?.deletionRequestedAt).toBeNull();
+
+    // The account is past its window and must still not be purged.
+    const purged = await purgeDueAccounts(deps, new Date('2026-05-15T00:00:00Z'), 30);
+    expect(purged.purged).toHaveLength(0);
+    expect(deps.accountDeletion.purgedUserIds).toHaveLength(0);
+  });
+
+  it('is a no-op success for a user who never requested deletion — it runs on every sign-in', async () => {
+    const deps = buildFakeDeps();
+
+    const result = await cancelAccountDeletion(deps, USER);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.cancelled).toBe(false);
+    expect(deps.auditLog.entries).toHaveLength(0);
+  });
+
+  it('records the cancellation, so a request that appears and disappears is not invisible', async () => {
+    const deps = buildFakeDeps('2026-03-15T12:00:00Z');
+    await requestAccountDeletion(deps, USER, { deletionWindowDays: 30 });
+    deps.auditLog.entries.length = 0;
+
+    await cancelAccountDeletion(deps, USER);
+
+    expect(deps.auditLog.entries).toHaveLength(1);
+    expect(deps.auditLog.entries[0]?.action).toBe('account.deletion.cancelled');
+    expect(deps.auditLog.entries[0]?.userId).toBe(USER);
+  });
+
+  it('touches only the cancelling user', async () => {
+    const deps = buildFakeDeps('2026-03-15T12:00:00Z');
+    await requestAccountDeletion(deps, USER, { deletionWindowDays: 30 });
+    await requestAccountDeletion(deps, OTHER_USER, { deletionWindowDays: 30 });
+
+    await cancelAccountDeletion(deps, USER);
+
+    expect((await getAccountDeletionStatus(deps, OTHER_USER))?.deletionRequestedAt).not.toBeNull();
   });
 });
