@@ -107,17 +107,19 @@ export async function Controls({ action, period, scope, grouping, wallets }: Con
               </NativeSelect>
             </Field>
             {/*
-          `scope=wallet` is implied by a non-empty wallet id. Submitting it as a
-          hidden constant would force portfolio scope to carry a contradictory
-          parameter; the parser already treats "scope is not 'wallet'" as
-          portfolio, so an empty selection lands there naturally.
-        */}
-            <input
-              type="hidden"
-              name={PARAM.scope}
-              value={scope.kind === 'wallet' ? 'wallet' : ''}
-            />
+          No hidden `scope` field. It used to be submitted here, with its value
+          derived from the *current* scope rather than from the select above —
+          so from portfolio scope this form posted `wallet=<uuid>&scope=`, and
+          `parseScope` returned portfolio because it tested `scope` before it
+          looked at the id. Choosing a wallet and pressing Aplicar reloaded the
+          whole portfolio, and no link in the app emitted `scope=wallet` either,
+          which left wallet scope reachable only by hand-typing a URL.
 
+          The comment that used to sit here already described the right
+          contract — "`scope=wallet` is implied by a non-empty wallet id" — so
+          the parser now implements it, and the select is the only thing that
+          says which scope this is.
+        */}
             {/* BR-011-03 — grouping. Independent of scope (DL-011-01). */}
             <Field id="report-grouping" label={t('grouping.label')} width="lg">
               <NativeSelect name={PARAM.grouping} defaultValue={grouping}>
