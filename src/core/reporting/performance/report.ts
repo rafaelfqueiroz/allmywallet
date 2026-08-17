@@ -149,19 +149,6 @@ export function seriesFromSnapshots(
 }
 
 /**
- * BR-012-03 — the same period, in the **investor's** sign convention.
- *
- * The inversion happens here and nowhere else. A buy is money the user parted
- * with (negative); a sell or a dividend is money that came back (positive); the
- * opening value is capital they already had committed (negative) and the
- * closing value is what they would have if they stopped today (positive).
- *
- * Both endpoints are required. Without the opening value, a period that starts
- * mid-history would look as though the user began with nothing, and every
- * return over a 12-month window on a ten-year portfolio would be wrong by the
- * whole of its opening *patrimônio*.
- */
-/**
  * SPEC-012 BR-012-01/03 — **the period's baseline, prepended to its
  * observations.**
  *
@@ -202,6 +189,26 @@ export function baselineFor(
   return snapshots.length === 0 ? null : opening;
 }
 
+/**
+ * BR-012-03 — the same period, in the **investor's** sign convention.
+ *
+ * The inversion happens here and nowhere else. A buy is money the user parted
+ * with (negative); a sell or a dividend is money that came back (positive); the
+ * opening value is capital they already had committed (negative) and the
+ * closing value is what they would have if they stopped today (positive).
+ *
+ * Both endpoints are required. Without the opening value, a period that starts
+ * mid-history would look as though the user began with nothing, and every
+ * return over a 12-month window on a ten-year portfolio would be wrong by the
+ * whole of its opening *patrimônio*.
+ *
+ * The first point is the **baseline** where one exists (`baselineFor` above),
+ * so XIRR discounts from the same opening capital TWR measures from. It needed
+ * that correction as much as TWR did — before it, the first flow was the close
+ * of `from`, which already contained both the first day's gain and any
+ * contribution made that day, so the two cancelled and the day vanished from
+ * the money-weighted return too.
+ */
 export function cashFlowsFrom(series: PerformanceSeries): readonly CashFlow[] {
   const first = series.points[0];
   const last = series.points[series.points.length - 1];

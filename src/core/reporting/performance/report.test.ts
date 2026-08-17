@@ -202,8 +202,16 @@ const MARCH = Array.from(
  * February's close gains 5 % on 1 March and does nothing for the rest of the
  * month. There are no contributions at all, so every flow is zero and the whole
  * return is price movement on one day.
+ *
+ * **Two snapshots sit before the period, deliberately.** The baseline is the
+ * *latest* one that precedes it, and a fixture with only one cannot tell a
+ * correct lookup from one that takes whichever row it happens to see first —
+ * the same reason `tests/integration/portfolio-value-reads.test.ts` seeds three
+ * rows to prove `ORDER BY date DESC LIMIT 1`. Taking 27/02's 90.000 instead
+ * would make the period open below where it really did and report 16,67 %.
  */
 const FIRST_DAY_HISTORY: readonly DailyValuationSnapshot[] = [
+  snapshot('2026-02-27', '90000', '100000', '0'),
   snapshot('2026-02-28', '100000', '100000', '0'),
   ...MARCH.map((date) => snapshot(date, '105000', '100000', '0')),
 ];
@@ -361,7 +369,9 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
 
     const twr = unwrap(report.twr);
     expect(twr.returnRate.toString()).toBe('0.05');
-    expect(twr.dietzPeriods).toEqual([{ range: { from: '2026-02-27', to: '2026-03-01' }, spanDays: 2 }]);
+    expect(twr.dietzPeriods).toEqual([
+      { range: { from: '2026-02-27', to: '2026-03-01' }, spanDays: 2 },
+    ]);
   });
 
   /**
