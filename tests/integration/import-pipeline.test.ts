@@ -213,6 +213,103 @@ describe('SPEC-005 — import pipeline (integration)', () => {
   });
 
   /**
+   * SPEC-010 BR-010-05 — a batch carrying a round trip in an allocated asset.
+   *
+   * This is the case that could not commit *at all*. `applyBuy` checked the
+   * sum invariant against the position cache, which by then already reflected
+   * the whole batch, so replaying the buy saw 100 held and 150 claimed and
+   * refused. `handleImportCommit` returned the error, the tenant transaction
+   * rolled back, and pg-boss retried a deterministic failure indefinitely —
+   * one monthly extract containing a buy and a later sell of an asset the user
+   * had filed into a wallet was enough to wedge their imports permanently.
+   *
+   * A single batch, not two: the ordering inside one commit is the whole
+   * point, and splitting it across commits is what made the unit tests pass.
+   */
+  it('BR-010-05: a batch with a buy and a later sell of an allocated asset commits', async () => {
+    const seedBatch = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      seedBatch,
+      await buildMovimentacaoXlsx([
+        {
+          data: '05/01/2026',
+          movimentacao: 'Compra',
+          produto: 'VALE3 - Vale ON',
+          quantidade: '100',
+          precoUnitario: '60,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: seedBatch, userId }, handlerDeps());
+    await handleImportCommit({ batchId: seedBatch, userId }, handlerDeps());
+
+    const { rows: assetRows } = await migratorPool.query(
+      "SELECT id FROM assets WHERE code = 'VALE3'",
+    );
+    const assetId = assetRows[0]?.id as string;
+
+    const wallet = await withTenant(
+      userId,
+      async (tx) => {
+        const deps = buildWalletDeps(tx, userId, clock);
+        const created = await createWallet(deps, userId, { name: 'Longo prazo' });
+        if (!created.ok) throw new Error('wallet setup failed');
+        await allocateToWallet(deps, userId, {
+          walletId: created.value.id,
+          assetId: AssetId.of(assetId),
+        });
+        return created.value;
+      },
+      appDb,
+    );
+
+    // One batch, both legs. Net effect on the position is zero.
+    const roundTrip = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      roundTrip,
+      await buildMovimentacaoXlsx([
+        {
+          data: '02/03/2026',
+          movimentacao: 'Compra',
+          produto: 'VALE3 - Vale ON',
+          quantidade: '50',
+          precoUnitario: '62,00',
+        },
+        {
+          data: '20/03/2026',
+          movimentacao: 'Venda',
+          produto: 'VALE3 - Vale ON',
+          quantidade: '50',
+          precoUnitario: '65,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: roundTrip, userId }, handlerDeps());
+    await handleImportCommit({ batchId: roundTrip, userId }, handlerDeps());
+
+    // The batch committed rather than rolling back forever.
+    const { rows: batchRows } = await migratorPool.query(
+      'SELECT status FROM import_batches WHERE id = $1',
+      [roundTrip],
+    );
+    expect(batchRows[0]?.status).toBe('committed');
+
+    const { rows: held } = await migratorPool.query(
+      'SELECT quantity::text AS q FROM positions WHERE user_id = $1 AND asset_id = $2',
+      [userId, assetId],
+    );
+    expect(held[0]?.q).toBe('100.00000000');
+
+    const { rows: allocated } = await migratorPool.query(
+      'SELECT quantity::text AS q FROM wallet_allocations WHERE wallet_id = $1',
+      [wallet.id],
+    );
+    expect(allocated[0]?.q).toBe('100.00000000');
+  });
+
+  /**
    * SPEC-009 BR-009-18 / AC-15 — the rebuild caller.
    *
    * `SnapshotJobPayload.from` existed and was tested from the handler's side;

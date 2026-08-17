@@ -83,7 +83,16 @@ export async function deleteWalletAction(formData: FormData): Promise<void> {
   revalidatePath('/wallets');
 }
 
-/** BR-010-03/BR-010-13: one action, quantity pre-filled with the full unassigned amount by the form. */
+/**
+ * BR-010-03/BR-010-13: one action, quantity pre-filled with the full
+ * unassigned amount by the form.
+ *
+ * Both forms bound to this action — the "Needs attention" queue on `/wallets`
+ * and the post-import summary on `/import/[batchId]` — are *resolve a pending
+ * item* forms, and the number they submit is the unassigned remainder. That
+ * is `mode: 'add'`; see `allocate.ts` for why passing it as an absolute
+ * target silently destroyed the chosen wallet's existing slice.
+ */
 const AllocateSchema = z.object({
   walletId: z.string(),
   assetId: z.string(),
@@ -99,12 +108,17 @@ export async function allocateAction(formData: FormData): Promise<void> {
   if (!parsed.success) return;
 
   const result = await withWalletDeps(userId, (deps) =>
-    allocateToWallet(deps, userId, {
-      walletId: WalletId.of(parsed.data.walletId),
-      assetId: AssetId.of(parsed.data.assetId),
-      quantity:
-        parsed.data.quantity === undefined ? undefined : Quantity.fromString(parsed.data.quantity),
-    }),
+    parsed.data.quantity === undefined
+      ? allocateToWallet(deps, userId, {
+          walletId: WalletId.of(parsed.data.walletId),
+          assetId: AssetId.of(parsed.data.assetId),
+        })
+      : allocateToWallet(deps, userId, {
+          walletId: WalletId.of(parsed.data.walletId),
+          assetId: AssetId.of(parsed.data.assetId),
+          mode: 'add',
+          quantity: Quantity.fromString(parsed.data.quantity),
+        }),
   );
   if (isErr(result)) return;
   revalidatePath('/wallets');

@@ -13,7 +13,8 @@ import { isErr } from '@/core/shared/result';
 import { TRANSACTION_TYPES, type TransactionType } from '@/core/ledger/transaction';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
 import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
-import { withIngestionDeps } from '@/app/(app)/import/composition';
+import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
+import { withIngestionAndWalletDeps, withIngestionDeps } from '@/app/(app)/import/composition';
 import { handleImportCancel, saveUploadedFile } from '@/worker/handlers/import';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
@@ -141,13 +142,26 @@ export async function acceptAdjustmentAction(formData: FormData): Promise<void> 
   if (!parsed.success) return;
 
   const batchId = ImportBatchId.of(parsed.data.batchId);
-  const result = await withIngestionDeps(userId, (deps) =>
-    acceptReconciliationAdjustment(deps, userId, {
+  const result = await withIngestionAndWalletDeps(userId, async (deps, wallets) => {
+    const accepted = await acceptReconciliationAdjustment(deps, userId, {
       batchId,
       assetId: AssetId.of(parsed.data.assetId),
       institutionId: parsed.data.institutionId ? InstitutionId.of(parsed.data.institutionId) : null,
-    }),
-  );
+    });
+    if (!accepted.ok) return accepted;
+
+    /**
+     * SPEC-010 BR-010-05 — the adjustment is signed, so accepting B3's
+     * *lower* figure removes shares. Allocations that did not follow left
+     * allocated > held, on a user-triggered path with none of the import
+     * commit's wiring behind it. Returning the error rolls the whole thing
+     * back, for the reason `handleImportCommit` states.
+     */
+    const effects = await applyLedgerEffects(wallets, userId, [accepted.value.result.transaction]);
+    if (!effects.ok) return effects;
+
+    return accepted;
+  });
   if (isErr(result)) return;
 
   revalidatePath(`/import/${batchId}`);

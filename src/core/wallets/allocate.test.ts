@@ -29,6 +29,78 @@ describe('SPEC-010 BR-010-03/04/05/06 — allocateToWallet', () => {
     expect(result.value.costBasisAtAllocation?.toString()).toBe('950');
   });
 
+  /**
+   * SPEC-010 AC-10/BR-010-13 — resolving a "Needs attention" item.
+   *
+   * The two are genuinely different questions asked of the same table, and
+   * conflating them destroys allocation:
+   *
+   *  - *absolute* answers "this wallet now holds N", which is what makes
+   *    correcting an earlier 60/40 split into 70/30 a single action.
+   *  - *add* answers "put these N unclaimed shares into this wallet", which
+   *    is the only thing the pending queue ever asks.
+   *
+   * `pending.ts` pre-fills the form with the **unassigned remainder**, so
+   * reading that number as an absolute target silently discards whatever the
+   * chosen wallet already held. `ambiguous_split` items are by definition
+   * assets that are already in at least one wallet, so the queue's primary
+   * flow was the one that lost data.
+   */
+  it('AC-10 — resolving a pending item adds to what the wallet already holds', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const retirement = await walletFor(deps, 'Aposentadoria');
+    const trading = await walletFor(deps, 'Trading');
+
+    await allocateToWallet(deps, USER, {
+      walletId: retirement.id,
+      assetId: ITSA4,
+      quantity: Quantity.fromString('60'),
+    });
+    await allocateToWallet(deps, USER, {
+      walletId: trading.id,
+      assetId: ITSA4,
+      quantity: Quantity.fromString('20'),
+    });
+
+    // The queue offers the 20 nobody has claimed; the user files them into
+    // Aposentadoria, which already holds 60.
+    const result = await allocateToWallet(deps, USER, {
+      walletId: retirement.id,
+      assetId: ITSA4,
+      mode: 'add',
+      quantity: Quantity.fromString('20'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.quantity.toString()).toBe('80');
+
+    // And the 40 that used to vanish are still where the user put them.
+    const unassigned = await computeUnassigned(deps, USER);
+    expect(unassigned).toHaveLength(0);
+  });
+
+  it('AC-10 — adding beyond the held quantity is still refused', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const retirement = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, {
+      walletId: retirement.id,
+      assetId: ITSA4,
+      quantity: Quantity.fromString('60'),
+    });
+
+    const result = await allocateToWallet(deps, USER, {
+      walletId: retirement.id,
+      assetId: ITSA4,
+      mode: 'add',
+      quantity: Quantity.fromString('50'),
+    });
+
+    expect(result.ok).toBe(false);
+  });
+
   it('AC — a position can be split deliberately across two wallets by explicit action', async () => {
     const deps = buildFakeDeps();
     deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
