@@ -171,6 +171,37 @@
     "title": "Importar extratos B3",
     "description": "Envie os extratos exportados da Área do Investidor da B3 — Movimentação, Negociação e Posição — para atualizar sua carteira.",
     "signedOut": "Entre na sua conta para importar extratos.",
+    "guide": {
+      "title": "Como exportar seus extratos da B3",
+      "firstRunLead": "Você ainda não importou nada. São três arquivos, exportados da Área do Investidor da B3 — leva alguns minutos e só precisa ser feito uma vez para começar.",
+      "returningLead": "Os mesmos três arquivos, sempre que quiser atualizar sua carteira.",
+      "steps": {
+        "movimentacao": {
+          "title": "{number}. Movimentação",
+          "path": "Extratos → Movimentação → Exportar para Excel",
+          "why": "Proventos, subscrições, bonificações e transferências. É o que alimenta seus relatórios de proventos."
+        },
+        "negociacao": {
+          "title": "{number}. Negociação",
+          "path": "Extratos → Negociação → Exportar para Excel",
+          "why": "Suas compras e vendas. É o que determina o preço médio de cada ativo."
+        },
+        "posicao": {
+          "title": "{number}. Posição",
+          "path": "Extratos → Posição → Exportar para Excel",
+          "why": "A foto da sua carteira na data. Serve para conferir se o que calculamos bate com o que a B3 diz que você tem."
+        }
+      },
+      "earliestDate": "Escolha sempre a data inicial mais antiga que a B3 oferecer. Uma compra antiga que ficar de fora não aparece como um buraco no gráfico — ela deixa o preço médio daquele ativo errado, e só um novo extrato completo corrige isso.",
+      "anyOrder": "Envie os três em qualquer ordem, um de cada vez. Identificamos o tipo pela estrutura do arquivo.",
+      "openPortal": "Abrir a Área do Investidor da B3"
+    },
+    "staleness": {
+      "neverTitle": "Você ainda não importou nenhum extrato",
+      "staleTitle": "Seu último extrato tem {days} dias",
+      "body": "Os valores continuam corretos para a data em que foram calculados, mas compras, vendas e proventos posteriores ainda não entraram. O aviso aparece depois de {threshold} dias — você pode mudar esse prazo nas preferências.",
+      "seeSteps": "Ver como exportar"
+    },
     "uploadTitle": "Enviar um arquivo",
     "uploadHint": "Envie os arquivos em qualquer ordem, um de cada vez. O tipo é identificado automaticamente pela estrutura do arquivo, não pelo nome.",
     "fileLabel": "Arquivo (.xlsx ou .xls)",
@@ -240,6 +271,7 @@
     "title": "Relatórios",
     "description": "Patrimônio, rentabilidade, proventos e composição da sua carteira.",
     "signedOut": "Entre na sua conta para ver seus relatórios.",
+    "grossOfTax": "Renda fixa: valores brutos. Nenhum tributo é descontado — nem IR, nem IOF.",
     "period": {
       "label": "Período",
       "ytd": "No ano",

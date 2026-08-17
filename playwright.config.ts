@@ -1,4 +1,25 @@
+import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
+
+/*
+ * SPEC-005: `web` writes the uploaded extract and the worker parses it, so the
+ * two have to name the same absolute directory. `IMPORT_UPLOAD_DIR` defaults
+ * to the *relative* `.data/imports` (src/lib/env.ts), and the standalone
+ * server runs from `.next/standalone` while the worker runs from the repo
+ * root — so the default silently gives them two different directories and
+ * every staged import fails with the file missing.
+ *
+ * Set here, at config load, because this module is evaluated before Playwright
+ * spawns the web server and before `globalSetup` spawns the worker, so both
+ * inherit it. `docker-compose.yml` solves the same problem with a shared
+ * volume.
+ *
+ * Derived from the repo root rather than from a temp directory so the config
+ * process, the web server and the worker all compute the *same* path without
+ * one having to pass it to the others.
+ */
+export const E2E_UPLOAD_DIR = path.resolve(process.cwd(), '.data/e2e-imports');
+process.env.IMPORT_UPLOAD_DIR ??= E2E_UPLOAD_DIR;
 
 /**
  * TESTING §6: E2E covers the journeys where a break makes the product
@@ -18,6 +39,14 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests',
+  /*
+   * SPEC-005 BR-005-13 puts staging and commit behind pg-boss queues, so the
+   * import journey needs a consumer running. It cannot be a `webServer` entry
+   * — those are polled until a URL answers and the worker exposes none. See
+   * `tests/e2e/support/worker-process.ts`.
+   */
+  globalSetup: './tests/e2e/global-setup.ts',
+  globalTeardown: './tests/e2e/global-teardown.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

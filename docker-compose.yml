@@ -43,6 +43,15 @@ services:
       # refuse to boot anyway (src/lib/trusted-host.ts); failing here names
       # the actual missing value.
       AUTH_URL: https://${DOMAIN:?DOMAIN is required — Caddy needs it for TLS and Auth.js pins AUTH_URL to it}/api/auth
+      # SPEC-005: `web` receives the uploaded .xlsx and `worker` parses it, so
+      # the two must name the *same directory on the same filesystem*. The
+      # default is the relative `.data/imports` (src/lib/env.ts), which
+      # resolves inside each container separately — web would write a file the
+      # worker cannot see, and every import would fail at staging with the
+      # file simply missing. Absolute path plus the shared volume below.
+      IMPORT_UPLOAD_DIR: /var/lib/allmywallet/imports
+    volumes:
+      - import-uploads:/var/lib/allmywallet/imports
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,6 +80,13 @@ services:
     restart: unless-stopped
     command: ['node', 'dist/worker.js']
     env_file: [.env]
+    environment:
+      # The other half of the pair above. `import.stage` reads the file `web`
+      # wrote; `import.commit` and `import.cancel` delete it (BR-005-14, the
+      # source file never outlives the batch). All three need this path.
+      IMPORT_UPLOAD_DIR: /var/lib/allmywallet/imports
+    volumes:
+      - import-uploads:/var/lib/allmywallet/imports
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,3 +114,8 @@ volumes:
   postgres-data:
   caddy-data:
   caddy-config:
+  # Staged extracts, in transit between `web` and `worker`. Short-lived by
+  # design — SPEC-005 BR-005-14 deletes the source file on both commit and
+  # cancel, and SPEC-004 BR-004-02 is why that is not optional: the file is the
+  # one artefact in the system that still contains a CPF.
+  import-uploads:

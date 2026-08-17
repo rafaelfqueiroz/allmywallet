@@ -8,6 +8,7 @@ import {
   type ReportGroup,
 } from '@/core/reporting/ports';
 import { fromSearchParams } from '@/lib/report-url-state';
+import { hasFixedIncome } from '@/lib/fixed-income';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
@@ -17,6 +18,7 @@ import { PageShell } from '@/components/patterns/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Money } from '@/components/patterns/money';
+import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Badge } from '@/components/ui/badge';
 import { List, ListItem } from '@/components/layout/list';
@@ -161,6 +163,15 @@ export default async function ReportsPage({ searchParams }: PageProps) {
               </TableRow>
             </TableFooter>
           </Table>
+
+          {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
+              this product deducts tax, and the figure above must say so where
+              it is read rather than in a help page nobody opens. */}
+          {hasFixedIncome(
+            result.value.report.groups.flatMap((group: ReportGroup) =>
+              group.holdings.map((holding) => holding.assetClass),
+            ),
+          ) && <Note>{t('grossOfTax')}</Note>}
         </Stack>
       )}
     </PageShell>

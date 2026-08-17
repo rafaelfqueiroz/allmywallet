@@ -162,6 +162,59 @@ export interface ResolveContext {
  * (BR-002-06). `effective.ts` is what shows an operator *why* — this function
  * just returns the number that is actually in effect.
  */
+/**
+ * A user-level config read outside `withTenant`, renamed.
+ *
+ * `config_overrides` is tenant-scoped and its RLS policy casts
+ * `current_setting('app.user_id')` to uuid. With no tenant context that
+ * setting is the empty string, so the policy does **not** fail closed and
+ * return nothing — Postgres raises `22P02 invalid input syntax for type uuid:
+ * ""` and the caller gets a 500 with a Drizzle "Failed query" wrapper and a
+ * digest.
+ *
+ * That error names neither the rule that was broken nor the fix. It cost this
+ * project a full debugging session across two call sites — one of them the
+ * root layout's theme read, which took down **every page for every signed-in
+ * user** and was invisible because no test suite had an authenticated session
+ * to render with. So the error is caught and renamed here rather than left as
+ * a puzzle for whoever hits it next.
+ *
+ * Only the message changes: the original is kept as `cause`, and nothing is
+ * swallowed. A read that cannot be tenant-scoped must still fail.
+ */
+export class ConfigOverrideOutsideTenantError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'A user-level config override was read outside `withTenant` (AR-11). ' +
+        '`config_overrides` is RLS-protected and its policy casts an unset ' +
+        '`app.user_id` to uuid, which raises 22P02. Wrap the read: ' +
+        '`withTenant(userId, (tx) => resolveConfig(key, { db: tx, userId }), db)`.',
+      { cause },
+    );
+    this.name = 'ConfigOverrideOutsideTenantError';
+  }
+}
+
+/** Postgres `invalid_text_representation` — what the unset `app.user_id` cast raises. */
+const INVALID_TEXT_REPRESENTATION = '22P02';
+
+function mentionsInvalidUuidCast(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const candidate = error as { code?: unknown; cause?: unknown };
+  if (candidate.code === INVALID_TEXT_REPRESENTATION) return true;
+  // Drizzle wraps the driver error, so the code is one level down.
+  return candidate.cause !== undefined && mentionsInvalidUuidCast(candidate.cause);
+}
+
+async function assertTenantScoped<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (mentionsInvalidUuidCast(error)) throw new ConfigOverrideOutsideTenantError(error);
+    throw error;
+  }
+}
+
 export async function resolveConfig<K extends ConfigKey>(
   key: K,
   ctx: ResolveContext,
@@ -176,18 +229,21 @@ export async function resolveConfig<K extends ConfigKey>(
   let tenant: unknown;
   let user: unknown;
   if (ctx.userId) {
-    // TODO(#6): `ctx.db` must be the transaction `withTenant` supplies for
-    // this to actually be scoped — see the `Tx` doc comment above.
-    const rows = await ctx.db
-      .select({ level: configOverrides.level, value: configOverrides.value })
-      .from(configOverrides)
-      .where(
-        and(
-          eq(configOverrides.key, key),
-          eq(configOverrides.userId, ctx.userId),
-          inArray(configOverrides.level, ['tenant', 'user']),
+    // AR-11: `ctx.db` must be the transaction `withTenant` supplies. See
+    // `assertTenantScoped` below for what happens when it is not, and why the
+    // failure is worth renaming rather than letting through.
+    const rows = await assertTenantScoped(() =>
+      ctx.db
+        .select({ level: configOverrides.level, value: configOverrides.value })
+        .from(configOverrides)
+        .where(
+          and(
+            eq(configOverrides.key, key),
+            eq(configOverrides.userId, ctx.userId as UserId),
+            inArray(configOverrides.level, ['tenant', 'user']),
+          ),
         ),
-      );
+    );
     tenant = rows.find((r) => r.level === 'tenant')?.value;
     user = rows.find((r) => r.level === 'user')?.value;
   }

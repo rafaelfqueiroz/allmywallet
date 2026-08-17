@@ -239,6 +239,18 @@ What this makes easy, what it makes hard, what it forecloses.
 | **DV-29** | Write an ADR when a choice is hard to reverse, contradicts a guideline here, or is one a future reader would otherwise reopen. |
 | **DV-30** | Never edit a decided ADR. Supersede it with a new one and link both — the history is the value. |
 
+## 9a. Runbooks
+
+`docs/runbooks/` holds the procedures someone follows *while something is going
+wrong*, which is the opposite audience to the rest of this directory: no
+context, no time, and a strong pull towards doing the destructive thing first.
+They are written as ordered steps, they say what not to do, and they state
+their own known gaps rather than implying a readiness the project does not have.
+
+| Runbook | When |
+|---|---|
+| [incident-response.md](../runbooks/incident-response.md) | Any unauthorised access, loss or disclosure of personal data. Carries the ANPD notification path and its 3-business-day deadline (SPEC-004 BR-004-19). |
+
 ## 10. Definition of done
 
 A spec is complete when:

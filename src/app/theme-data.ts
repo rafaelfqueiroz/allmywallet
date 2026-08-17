@@ -1,4 +1,5 @@
 import { db } from '@/db/client';
+import { withTenant } from '@/db/tenant';
 import { getEffectiveConfig } from '@/config/effective';
 import { tryUserId } from '@/lib/session';
 import type { ThemePreference } from '@/components/patterns/theme';
@@ -17,7 +18,19 @@ export async function loadThemePreference(): Promise<ThemePreference | undefined
   const userId = await tryUserId();
   if (!userId) return undefined;
 
-  const effective = await getEffectiveConfig(db, { userId });
+  /**
+   * AR-11. `config_overrides` is tenant-scoped and its RLS policy casts
+   * `current_setting('app.user_id')` to uuid; outside a `withTenant`
+   * transaction that setting is the empty string, so the read does not fail
+   * closed and return nothing — it raises
+   * `22P02 invalid input syntax for type uuid: ""`.
+   *
+   * **This function runs in the root layout, so that error took down every
+   * page for every signed-in user.** It was invisible because nothing in any
+   * suite had an authenticated session to render with: signed out this
+   * returns early on the line above and never touches the table.
+   */
+  const effective = await withTenant(userId, (tx) => getEffectiveConfig(tx, { userId }), db);
   const entry = effective.find((candidate) => candidate.key === 'ui.theme');
 
   return entry ? (entry.value as ThemePreference) : 'system';

@@ -7,6 +7,7 @@ import type {
   ValuePoint,
 } from '@/core/reporting/portfolio-value/ports';
 import { fromSearchParams } from '@/lib/report-url-state';
+import { hasFixedIncome } from '@/lib/fixed-income';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
@@ -20,6 +21,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/components/patterns/money';
+import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
@@ -237,6 +239,16 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
               }}
             />
           </Section>
+
+          {/* SPEC-009 BR-009-12 / AC-10: every fixed-income figure declares
+              itself gross of IR and IOF. It sits at the foot of the report
+              rather than beside one figure because the disclosure is about the
+              whole valuation, not about a single row. */}
+          {hasFixedIncome(
+            query.value.report.groups.flatMap((group) =>
+              group.holdings.map((holding) => holding.assetClass),
+            ),
+          ) && <Note>{t('grossOfTax')}</Note>}
         </Stack>
       )}
     </PageShell>

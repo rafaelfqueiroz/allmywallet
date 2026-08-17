@@ -19,7 +19,24 @@ let starting: Promise<PgBoss> | undefined;
 async function getBoss(): Promise<PgBoss> {
   if (boss) return boss;
   starting ??= (async () => {
-    const instance = new PgBoss({ connectionString: env().DATABASE_URL, schema: 'pgboss' });
+    const instance = new PgBoss({
+      connectionString: env().DATABASE_URL,
+      schema: 'pgboss',
+      /**
+       * Same reason as `src/worker/index.ts`: `0006_pgboss_schema.sql` creates
+       * the schema as the migrator and grants `USAGE, CREATE` on it to
+       * `allmywallet_app`. pg-boss's own `CREATE SCHEMA IF NOT EXISTS` needs
+       * `CREATE` **on the database**, which the runtime role does not have and
+       * must not — so leaving this on fails `permission denied for database`
+       * on the first enqueue against a database where pg-boss has not been
+       * installed yet.
+       *
+       * The web process hits this before the worker does whenever a user
+       * uploads before any cron has fired, which on a fresh deployment is the
+       * normal order of events.
+       */
+      createSchema: false,
+    });
     await instance.start();
     boss = instance;
     return instance;
