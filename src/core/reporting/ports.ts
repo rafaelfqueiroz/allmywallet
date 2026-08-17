@@ -310,6 +310,24 @@ export interface ReportDataPort {
   describeAssets(assetIds: readonly AssetId[]): Promise<readonly AssetDescriptor[]>;
   /** BR-011-13 — the persisted period series every report's chart reads. */
   listSnapshots(from: BusinessDate, to: BusinessDate): Promise<readonly DailyValuationSnapshot[]>;
+  /**
+   * The snapshot immediately **preceding** a date — the period's *baseline*,
+   * which is a different thing from its first observation.
+   *
+   * SPEC-009 values a date by replaying to and including it, so a snapshot
+   * dated `from` is the **close** of `from`. Opening a period's series on it
+   * therefore measures from the end of the first day and silently discards
+   * whatever happened during it — the classic off-by-one, and one that fails
+   * quietly because the figure it produces is still entirely plausible.
+   * SPEC-013 BR-013-02 needs this for growth decomposition and SPEC-012
+   * BR-012-01/03 need it for the return measures, which is why it sits on the
+   * shared port rather than on one report's adapter.
+   *
+   * `null` when the date is at or before the tenant's first snapshot. There is
+   * no baseline then, and inventing a zero one would report the whole opening
+   * *patrimônio* as a first-day gain.
+   */
+  findSnapshotBefore(date: BusinessDate): Promise<DailyValuationSnapshot | null>;
   /** BR-011-02 — used to reject a scope naming a wallet this tenant does not have. */
   findWallet(walletId: WalletId): Promise<ReportWallet | null>;
 }

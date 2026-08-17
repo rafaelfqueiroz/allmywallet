@@ -153,6 +153,24 @@ export class FakeReportDataPort implements ReportDataPort {
     );
   }
 
+  /**
+   * Strictly before `date`, latest first — the same comparison
+   * `DrizzleReportDataPort.findSnapshotBefore` makes in SQL. An inclusive
+   * comparison here would let the fake agree with a broken adapter, which is
+   * the one thing a hand-written fake exists to prevent.
+   */
+  async findSnapshotBefore(date: BusinessDate): Promise<DailyValuationSnapshot | null> {
+    this.calls.push(`findSnapshotBefore:${date}`);
+    const before = this.data.snapshots.filter((snapshot) =>
+      BusinessDate.isBefore(snapshot.date, date),
+    );
+    return (
+      [...before].sort((a, b) => BusinessDate.compare(b.date, a.date))[0] ??
+      // No baseline: the period starts at or before the first snapshot there is.
+      null
+    );
+  }
+
   async findWallet(walletId: WalletId): Promise<ReportWallet | null> {
     this.calls.push(`findWallet:${walletId}`);
     return this.data.wallets.find((wallet) => wallet.walletId === walletId) ?? null;
