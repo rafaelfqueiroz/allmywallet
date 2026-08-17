@@ -38,6 +38,24 @@ export interface EditTransactionInput {
   readonly unitPrice?: Money | undefined;
   readonly fees?: Money | undefined;
   readonly ratio?: Quantity | null | undefined;
+  /**
+   * SPEC-005 BR-005-17 — keep the row's existing natural key instead of
+   * recomputing it from the edited fields.
+   *
+   * BR-006-04 rederives the key when identifying fields change, so that a
+   * re-import cannot match an edited row against a trade it is no longer a
+   * record of. That is right for a *user editing a trade*, and wrong for the
+   * one edit that is not a correction: classifying an `unclassified` import
+   * row (BR-005-20).
+   *
+   * An unclassified row is keyed by `importNaturalKeyFor`, which appends the
+   * raw B3 movement type so two different unmapped movements cannot collide.
+   * Classifying it supplies a type the source row always implied — the row
+   * *in the file* is unchanged. Rederiving the key there produced a key no
+   * re-import can ever compute: the next import of the same file recomputes
+   * the unclassified key, matches nothing, and inserts the row a second time.
+   */
+  readonly preserveNaturalKey?: boolean | undefined;
 }
 
 export interface EditTransactionResult {
@@ -159,7 +177,10 @@ function applyEdit(original: Transaction, input: EditTransactionInput, now: Date
     // edit that changes any of them must change the key too. Leaving the old
     // key in place would make a re-import match this row against a trade it is
     // no longer a record of.
-    naturalKey: naturalKeyFor({ assetId, institutionId, type, tradeDate, quantity, unitPrice }),
+    naturalKey:
+      input.preserveNaturalKey === true
+        ? original.naturalKey
+        : naturalKeyFor({ assetId, institutionId, type, tradeDate, quantity, unitPrice }),
     /**
      * BR-006-16: an edited imported transaction is flagged, and a later
      * re-import must not overwrite the correction. Set unconditionally rather

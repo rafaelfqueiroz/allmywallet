@@ -13,9 +13,10 @@ import { allocateToWallet } from '@/core/wallets/allocate';
 import * as schema from '@/db/schema';
 import { withTenant } from '@/db/tenant';
 import { FakeClock } from '@/core/shared/clock';
-import { ImportBatchId, UserId } from '@/core/shared/ids';
+import { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
 import type { PositionRepository } from '@/core/positions/ports';
 import { commitBatch } from '@/core/ingestion/commit-batch';
+import { classifyImportRow } from '@/core/ingestion/classify-row';
 import type { ImportBatch } from '@/core/ingestion/ports';
 import {
   buildIngestionDeps,
@@ -30,6 +31,7 @@ import { DrizzleFixedIncomeContractReader } from '@/adapters/db/fixed-income-con
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
 import {
   buildMovimentacaoXlsx,
+  buildNegociacaoXlsx,
   buildPosicaoXlsx,
   SYNTHETIC_CPF,
 } from '@/adapters/ingestion/xlsx/test-support/builder';
@@ -479,6 +481,130 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(positionAfterSecond).toHaveLength(1);
     // 120 (first import) + 10 (the one genuinely new row) = 130.
     expect(positionAfterSecond[0]?.quantity).toBe('130.00000000');
+  });
+
+  /**
+   * SPEC-005 BR-005-17 + BR-005-20 — the two rules meeting.
+   *
+   * A row B3 exports with a type the movement map does not know lands as
+   * `unclassified`, keyed by `importNaturalKeyFor`, which appends the raw B3
+   * type so two different unmapped movements cannot collide. Classifying it
+   * used to rederive the key from the *new* type, producing a key the import
+   * path can never compute again — so re-importing the identical file matched
+   * nothing and inserted the row a second time.
+   *
+   * The user's own correction was what made their next import wrong, which is
+   * why this is worth an integration test rather than a unit one: the defect
+   * only exists where classification and staging meet the same row.
+   */
+  it('BR-005-17/20: classifying an unclassified row then re-importing the same file adds nothing', async () => {
+    const file = [
+      {
+        data: '10/01/2026',
+        movimentacao: 'Leilão de Fração',
+        produto: 'ITSA4 - Itausa PN',
+        quantidade: '7',
+        precoUnitario: '9,80',
+      },
+    ];
+
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: first, userId }, handlerDeps());
+    await handleImportCommit({ batchId: first, userId }, handlerDeps());
+
+    const { rows: unclassified } = await migratorPool.query(
+      "SELECT id, transaction_id FROM import_rows WHERE classification = 'unclassified'",
+    );
+    expect(unclassified).toHaveLength(1);
+
+    // BR-005-20: the user says what it was.
+    await withTenant(
+      userId,
+      async (tx) => {
+        const deps = buildIngestionDeps(tx, userId, clock);
+        const classified = await classifyImportRow(deps, {
+          rowId: ImportRowId.of(unclassified[0]?.id as string),
+          type: 'buy',
+        });
+        if (!classified.ok) throw new Error(`classify failed: ${classified.error.code}`);
+      },
+      appDb,
+    );
+
+    // The same export, imported again — nothing in the file changed.
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: second, userId }, handlerDeps());
+    await handleImportCommit({ batchId: second, userId }, handlerDeps());
+
+    const { rows: txCount } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM transactions',
+    );
+    expect(Number(txCount[0]?.n)).toBe(1);
+  });
+
+  /**
+   * SPEC-005 BR-005-01 — the onboarding guide asks for all three extracts,
+   * and B3 records the same purchase in two of them: as `Compra` in
+   * Negociação, and as `Transferência - Liquidação` (the settlement) in
+   * Movimentação.
+   *
+   * While that settlement mapped to `transfer_in` — which
+   * `core/positions/apply-transaction.ts` treats as an acquisition — the two
+   * rows carried different movement types *and* different institutions
+   * (Negociação states none), so BR-005-14's natural key saw two unrelated
+   * trades and BR-005-15 never fired. The user's *patrimônio* doubled, on the
+   * documented happy path, with nothing on screen to suggest it.
+   */
+  it('BR-005-01: a purchase present in both Movimentação and Negociação is held once', async () => {
+    const movimentacao = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      movimentacao,
+      await buildMovimentacaoXlsx([
+        {
+          data: '12/01/2026',
+          movimentacao: 'Transferência - Liquidação',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '38,50',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: movimentacao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: movimentacao, userId }, handlerDeps());
+
+    const negociacao = await newPendingBatch('b3_negociacao');
+    await saveUploadedFile(
+      uploadDir,
+      negociacao,
+      await buildNegociacaoXlsx([
+        {
+          data: '12/01/2026',
+          tipo: 'Compra',
+          codigo: 'PETR4',
+          quantidade: '100',
+          preco: '38,50',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: negociacao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: negociacao, userId }, handlerDeps());
+
+    // The authoritative record is the only one that moved the position.
+    const { rows: positions } = await migratorPool.query(
+      'SELECT quantity::text AS q FROM positions WHERE user_id = $1',
+      [userId],
+    );
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.q).toBe('100.00000000');
+
+    // BR-005-19: the settlement row is stored and surfaced, never discarded.
+    const { rows: unclassified } = await migratorPool.query(
+      "SELECT count(*)::int AS n FROM import_rows WHERE classification = 'unclassified'",
+    );
+    expect(Number(unclassified[0]?.n)).toBe(1);
   });
 
   it('BR-005-16/AC: two genuine identical same-day trades both import; re-importing the same file adds neither again', async () => {

@@ -49,6 +49,10 @@ export async function classifyImportRow(
     type: input.type,
     status: 'active',
     ratio: input.ratio ?? null,
+    // BR-005-17: the B3 row this transaction came from has not changed, so
+    // neither has the key a re-import of that file will compute. See
+    // `EditTransactionInput.preserveNaturalKey`.
+    preserveNaturalKey: true,
   });
   if (!result.ok) return result;
 

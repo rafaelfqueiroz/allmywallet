@@ -21,8 +21,27 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
   });
 
   it('disambiguates a direction-dependent string by the Entrada/Saída column', () => {
-    expect(classifyMovement('Transferência - Liquidação', 'credit')).toBe('transfer_in');
-    expect(classifyMovement('Transferência - Liquidação', 'debit')).toBe('transfer_out');
+    expect(classifyMovement('Transferência', 'credit')).toBe('transfer_in');
+    expect(classifyMovement('Transferência', 'debit')).toBe('transfer_out');
+  });
+
+  /**
+   * SPEC-005 BR-005-01 — Negociação is "the authoritative trade record", and
+   * trades are not among the roles the spec gives Movimentação.
+   *
+   * `Transferência - Liquidação` is a trade settling, not a custody transfer.
+   * While it mapped to `transfer_in`, which `apply-transaction.ts` treats as
+   * an acquisition, a user following the onboarding guide — which asks for
+   * all three extracts — imported every purchase twice, under two different
+   * movement types and two different institutions, so the natural key never
+   * matched and *patrimônio* silently doubled.
+   *
+   * Unmapped, not dropped: BR-005-19 still stores the row and surfaces it in
+   * Needs attention, so a Movimentação-only user can classify it themselves.
+   */
+  it('BR-005-01: a trade settlement in Movimentação is not a transfer', () => {
+    expect(classifyMovement('Transferência - Liquidação', 'credit')).toBeNull();
+    expect(classifyMovement('Transferência - Liquidação', 'debit')).toBeNull();
   });
 
   it('falls back to the first candidate when no direction is supplied', () => {
