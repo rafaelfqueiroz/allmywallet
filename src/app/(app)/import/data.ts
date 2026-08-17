@@ -1,4 +1,5 @@
 import { db } from '@/db/client';
+import { withTenant } from '@/db/tenant';
 import { resolveConfig } from '@/config/resolve';
 import { businessDateInSaoPaulo, SystemClock, type BusinessDate } from '@/core/shared/clock';
 import type { ImportBatchId, UserId } from '@/core/shared/ids';
@@ -39,7 +40,18 @@ export async function loadImportFreshness(
   batches: readonly ImportBatch[],
 ): Promise<ImportFreshness> {
   const today = new SystemClock().today();
-  const thresholdDays = (await resolveConfig('import.staleness_days', { db, userId })).value;
+
+  // AR-11, and not a formality here: `config_overrides` is tenant-scoped, and
+  // its RLS policy casts `current_setting('app.user_id')` to uuid. Outside a
+  // `withTenant` transaction that setting is the empty string, so the policy
+  // does not quietly return nothing — it raises 22P02 and takes the whole page
+  // down with it. Reading a user-level config key is a tenant query like any
+  // other.
+  const thresholdDays = await withTenant(
+    userId,
+    async (tx) => (await resolveConfig('import.staleness_days', { db: tx, userId })).value,
+    db,
+  );
 
   // The most recent *commit*, not the most recent upload: a batch staged and
   // abandoned changed nothing about how current the ledger is, and counting it
