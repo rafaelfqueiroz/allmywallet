@@ -46,9 +46,12 @@ export function parseMovimentacao(
       assetName: name,
       assetClass: guessAssetClass(code),
       institutionName: cellAt(row, structure.columns, 'instituicao'),
-      tradeDate: parseBrDate(dataText),
-      quantity: parseQuantity(quantidadeText),
-      unitPrice: precoText === null || precoText === '' ? Money.zero() : parseMoney(precoText),
+      tradeDate: parseBrDate(dataText, 'data'),
+      quantity: parseQuantity(quantidadeText, 'quantidade'),
+      unitPrice:
+        precoText === null || precoText === ''
+          ? Money.zero()
+          : parseMoney(precoText, 'preco unitario'),
       // Movimentação carries no distinct fee column — see `negociacao.ts` for
       // where B3 actually states fees (BR-005-01's "authoritative trade
       // record"). Corretagem/nota-de-corretagem parsing is explicitly out of

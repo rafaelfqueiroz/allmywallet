@@ -10,6 +10,31 @@ import { Money, Quantity } from '@/core/shared/money';
  * `parseFloat`.
  */
 
+/**
+ * SPEC-005 BR-005-05 (#63) — thrown by `parseBrDate`/`parseBrDecimal` on a
+ * cell that does not match the format its column requires. `index.ts`
+ * catches this at the per-row parse dispatch and turns it into
+ * `IngestionErrorCode.MALFORMED_CELL`, which is what makes the failure a
+ * `DomainError` a caller can act on instead of a `TypeError` that crashes the
+ * `import.stage` job outright.
+ *
+ * Carries the column header and the expected format only — **never** the
+ * cell's own text. BR-004-04/AR-39: a malformed cell's contents could be
+ * anything, including a CPF, and this error is exactly the kind of thing that
+ * gets logged (`import.ts`) and stored (`import_batches.failure_code`'s
+ * sibling context) — so the one thing it must never carry is the value that
+ * failed.
+ */
+export class CellFormatError extends Error {
+  constructor(
+    readonly column: string,
+    readonly expected: string,
+  ) {
+    super(`column "${column}" does not match the expected format (${expected})`);
+    this.name = 'CellFormatError';
+  }
+}
+
 /** A worksheet reduced to text, one row per array — what `detect.ts` operates on. */
 export function sheetToRows(worksheet: ExcelJS.Worksheet): (string | null)[][] {
   const rows: (string | null)[][] = [];
@@ -45,10 +70,14 @@ function formatBrDate(date: Date): string {
   return `${day}/${month}/${year}`;
 }
 
-/** B3 dates are `DD/MM/YYYY`. */
-export function parseBrDate(text: string): BusinessDate {
+/**
+ * B3 dates are `DD/MM/YYYY`. `column` is structural metadata for
+ * `CellFormatError` (BR-005-05) — the header the caller read this cell from,
+ * never the cell's own text.
+ */
+export function parseBrDate(text: string, column: string): BusinessDate {
   const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text.trim());
-  if (!match) throw new TypeError(`parseBrDate: "${text}" is not DD/MM/YYYY`);
+  if (!match) throw new CellFormatError(column, 'DD/MM/YYYY');
   const [, day, month, year] = match;
   return BusinessDate.of(`${year}-${month}-${day}`);
 }
@@ -58,23 +87,25 @@ export function parseBrDate(text: string): BusinessDate {
  * (`1.234,56`) when exported as text, or arrive as a native Excel number.
  * Never `Number(...)`/`parseFloat` (AR-06) — the literal is normalised to a
  * plain decimal string and handed to `Quantity`/`Money`'s own parser.
+ *
+ * `column` — see `parseBrDate`.
  */
-export function parseBrDecimal(text: string): string {
+export function parseBrDecimal(text: string, column: string): string {
   const trimmed = text.trim();
   if (/^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed; // already a plain decimal literal
   const normalized = trimmed.replaceAll('.', '').replace(',', '.');
   if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
-    throw new TypeError(`parseBrDecimal: "${text}" is not a recognisable decimal`);
+    throw new CellFormatError(column, 'decimal number (e.g. 1.234,56 or 1234.56)');
   }
   return normalized;
 }
 
-export function parseQuantity(text: string): Quantity {
-  return Quantity.fromString(parseBrDecimal(text));
+export function parseQuantity(text: string, column: string): Quantity {
+  return Quantity.fromString(parseBrDecimal(text, column));
 }
 
-export function parseMoney(text: string): Money {
-  return Money.fromString(parseBrDecimal(text));
+export function parseMoney(text: string, column: string): Money {
+  return Money.fromString(parseBrDecimal(text, column));
 }
 
 export function cellAt(

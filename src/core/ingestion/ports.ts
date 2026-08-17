@@ -35,8 +35,24 @@ import type { FixedIncomeIndexer } from '@/core/valuation/ports';
 export const EXTRACT_TYPES = ['b3_movimentacao', 'b3_negociacao', 'b3_posicao'] as const;
 export type ExtractType = (typeof EXTRACT_TYPES)[number];
 
-/** BR-005-09/12/13: the batch lifecycle. Matches SPEC-006's existing CHECK. */
-export const IMPORT_BATCH_STATUSES = ['pending', 'previewed', 'committed', 'discarded'] as const;
+/**
+ * BR-005-09/12/13: the batch lifecycle. Matches SPEC-006's existing CHECK.
+ *
+ * `failed` (#63): BR-005-05's "unparseable file" outcome. A parse failure is
+ * deterministic — reparsing the identical bytes fails identically — so it is
+ * a terminal state, not a variant of `pending` that a retry might resolve.
+ * Reaching it also ends the batch's hold on its uploaded file (DL-005-07):
+ * `handleImportStage` deletes the file in the same step that sets this
+ * status, since a CPF-bearing file has no reason left to exist once nothing
+ * can ever be staged from it.
+ */
+export const IMPORT_BATCH_STATUSES = [
+  'pending',
+  'previewed',
+  'committed',
+  'discarded',
+  'failed',
+] as const;
 export type ImportBatchStatus = (typeof IMPORT_BATCH_STATUSES)[number];
 
 /**
@@ -119,6 +135,14 @@ export const IngestionErrorCode = {
   FILE_TOO_LARGE: 'INGESTION_FILE_TOO_LARGE',
   /** Not a workbook `exceljs` can open at all. */
   UNREADABLE_FILE: 'INGESTION_UNREADABLE_FILE',
+  /**
+   * BR-005-05 (#63) — a structurally recognized extract whose structure
+   * detection succeeded, but one cell inside it does not match the format
+   * that structure implies (an unparseable date or decimal). Context carries
+   * the column header and the expected format only — never the cell's text,
+   * which could be anything, including a CPF (BR-004-04/AR-39).
+   */
+  MALFORMED_CELL: 'INGESTION_MALFORMED_CELL',
 } as const;
 export type IngestionErrorCode = (typeof IngestionErrorCode)[keyof typeof IngestionErrorCode];
 
@@ -161,6 +185,14 @@ export interface ImportBatch {
    * dispatch report's Decision log.
    */
   readonly reconciliation: ReconciliationReport | null;
+  /**
+   * SPEC-005 BR-005-05 (#63) — set only when `status` is `failed`; the code
+   * `stage-batch`'s parse step returned, so `src/app/(app)/import/` can
+   * render AC-005-05's specific, actionable message instead of a batch
+   * stalled with no explanation. AR-39: a code only, never the cell text that
+   * caused it.
+   */
+  readonly failureCode: IngestionErrorCode | null;
 }
 
 /**

@@ -42,6 +42,7 @@ async function stagedBatch(
     committedAt: null,
     rowCounts: null,
     reconciliation: null,
+    failureCode: null,
   });
   const staged = await stageBatch(deps, userId, { batchId, extract });
   if (!staged.ok) throw new Error('stage failed in test setup');
@@ -131,6 +132,7 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
       committedAt: null,
       rowCounts: null,
       reconciliation: null,
+      failureCode: null,
     });
 
     const result = await commitBatch(deps, userId, { batchId });

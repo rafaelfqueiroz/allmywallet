@@ -249,7 +249,19 @@
       "pending": "Enviado, processando",
       "previewed": "Aguardando confirmação",
       "committed": "Importado",
-      "discarded": "Cancelado"
+      "discarded": "Cancelado",
+      "failed": "Não foi possível processar"
+    },
+    "failure": {
+      "title": "Não foi possível processar este arquivo",
+      "retry": "Envie o arquivo novamente — de preferência reexportado da Área do Investidor, sem edições.",
+      "reasons": {
+        "INGESTION_UNRECOGNIZED_STRUCTURE": "A estrutura do arquivo não corresponde a nenhum dos três extratos da B3 (Movimentação, Negociação ou Posição). Confira se é o arquivo certo e se ele não foi alterado.",
+        "INGESTION_AMBIGUOUS_STRUCTURE": "A estrutura do arquivo corresponde a mais de um tipo de extrato ao mesmo tempo, então não deu para saber qual é.",
+        "INGESTION_FILE_TOO_LARGE": "O arquivo é maior do que o limite permitido para importação.",
+        "INGESTION_UNREADABLE_FILE": "O arquivo não pôde ser aberto como uma planilha válida. Confira se é um .xlsx ou .xls exportado da B3.",
+        "INGESTION_MALFORMED_CELL": "Uma célula do arquivo não está no formato que a B3 usa (data ou valor numérico). Isso costuma acontecer quando o arquivo é editado antes de ser enviado."
+      }
     },
     "transactionType": {
       "buy": "Compra",

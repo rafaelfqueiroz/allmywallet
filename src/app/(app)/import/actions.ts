@@ -64,6 +64,7 @@ export async function uploadExtractAction(formData: FormData): Promise<void> {
       committedAt: null,
       rowCounts: null,
       reconciliation: null,
+      failureCode: null,
     }),
   );
 

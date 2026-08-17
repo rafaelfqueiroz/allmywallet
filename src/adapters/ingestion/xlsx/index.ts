@@ -3,7 +3,7 @@ import { type DomainError, domainError } from '@/core/shared/domain-error';
 import { type Result, err, ok } from '@/core/shared/result';
 import { IngestionErrorCode, type IngestionPort, type ParsedExtract } from '@/core/ingestion/ports';
 import { detectExtractType } from '@/adapters/ingestion/xlsx/detect';
-import { sheetToRows } from '@/adapters/ingestion/xlsx/common';
+import { CellFormatError, sheetToRows } from '@/adapters/ingestion/xlsx/common';
 import { parseMovimentacao } from '@/adapters/ingestion/xlsx/movimentacao';
 import { parseNegociacao } from '@/adapters/ingestion/xlsx/negociacao';
 import { parsePosicao } from '@/adapters/ingestion/xlsx/posicao';
@@ -52,13 +52,36 @@ export class XlsxIngestionPort implements IngestionPort {
     if (!detected.ok) return detected;
 
     const structure = detected.value;
-    const records =
-      structure.extractType === 'b3_movimentacao'
-        ? parseMovimentacao(rows, structure)
-        : structure.extractType === 'b3_negociacao'
-          ? parseNegociacao(rows, structure)
-          : parsePosicao(rows, structure);
+    try {
+      // BR-005-05 (#63) — a structurally valid extract can still carry a
+      // malformed date or decimal in a data row. Before this `try`, that
+      // threw a raw `TypeError` straight out of `import.stage`, crashing the
+      // job instead of producing the `DomainError` this port promises;
+      // pg-boss then retried a failure that would repeat identically on
+      // every attempt. `CellFormatError` is the only exception this catches
+      // deliberately narrow, so a genuine bug elsewhere in the parser still
+      // surfaces as a real crash rather than a misleading "malformed file".
+      const records =
+        structure.extractType === 'b3_movimentacao'
+          ? parseMovimentacao(rows, structure)
+          : structure.extractType === 'b3_negociacao'
+            ? parseNegociacao(rows, structure)
+            : parsePosicao(rows, structure);
 
-    return ok({ extractType: structure.extractType, records });
+      return ok({ extractType: structure.extractType, records });
+    } catch (error) {
+      if (error instanceof CellFormatError) {
+        // AR-39/BR-004-04: `column` and `expected` are structural metadata —
+        // never the cell's own text, which could be anything, including a CPF.
+        return err(
+          domainError(IngestionErrorCode.MALFORMED_CELL, {
+            extractType: structure.extractType,
+            column: error.column,
+            expected: error.expected,
+          }),
+        );
+      }
+      throw error;
+    }
   }
 }

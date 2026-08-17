@@ -11,6 +11,7 @@ import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { stageBatch } from '@/core/ingestion/stage-batch';
 import { commitBatch } from '@/core/ingestion/commit-batch';
 import { cancelBatch } from '@/core/ingestion/cancel-batch';
+import { failBatch } from '@/core/ingestion/fail-batch';
 import type { Transaction } from '@/core/ledger/transaction';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
@@ -43,9 +44,10 @@ import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
  * `src/lib/env.ts`) before creating the `pending` batch row and enqueuing
  * `import.stage`, named by `batchId` alone (no filename — see
  * `src/db/schema/transactions.ts`). BR-005-12/DL-005-07: the file is deleted
- * after a successful commit *and* after cancel, and never before either, so
- * the one place a raw CPF can exist stops existing the moment the batch no
- * longer needs it.
+ * after a successful commit, after cancel, and after a terminal parse failure
+ * (#63) — and never before any of the three, so the one place a raw CPF can
+ * exist stops existing the moment the batch reaches a state that will never
+ * need it again.
  *
  * **Idempotency (AR-19).** `commitBatch` itself is idempotent — a batch
  * already `committed` is a no-op success (see its own doc comment) — so a
@@ -147,18 +149,58 @@ export async function handleImportStage(
   const fileBytes = await readFile(importFilePath(deps.uploadDir, batchId));
   const parsed = await deps.ingestion.parse(fileBytes);
   if (!parsed.ok) {
-    // BR-005-05: the code and structural context are exactly what AR-38's
-    // i18n layer needs to render a specific, actionable error — logged here
-    // (AR-39: no personal data, only the code/context) because this handler
-    // has no request to return one to. Surfacing it live in the preview UI
-    // is `src/app/(app)/import/`'s job when it next reads the batch; today
-    // that means the batch is left `pending` and visible as stalled rather
-    // than carrying the error inline — a known gap, not a silent one.
+    // BR-005-05 (#63) — an unparseable file is a DETERMINISTIC failure:
+    // reparsing the identical bytes on a pg-boss retry fails identically, so
+    // the retry buys nothing and only prolongs how long the one CPF-bearing
+    // artefact in the system (DL-005-07) sits on disk. This path is
+    // therefore terminal, not transient — `failBatch` moves the batch to
+    // `failed` carrying the code, and this function returns normally
+    // (does NOT throw) so pg-boss marks the job done rather than retrying it.
+    //
+    // Contrast `stageBatch`'s own `!result.ok` below: a database error or a
+    // use-case-level failure there is NOT assumed deterministic, so that path
+    // still throws and still keeps the file — a retry there might succeed.
+    //
+    // The code and structural context are exactly what AR-38's i18n layer
+    // needs to render AC-005-05's specific, actionable error — logged here
+    // (AR-39: no personal data, only the code/context) and now also carried
+    // on the batch itself so `src/app/(app)/import/` can render it inline
+    // instead of a batch stalled with no explanation.
     logger.error(
       { queue: 'import.stage', batchId, code: parsed.error.code, context: parsed.error.context },
       'SPEC-005 BR-005-05: extract could not be parsed',
     );
-    throw new Error(`import.stage: ${parsed.error.code}`);
+
+    const failed = await withTenant(
+      userId,
+      async (tx) =>
+        failBatch(buildIngestionDeps(tx, userId, deps.clock), userId, {
+          batchId,
+          code: parsed.error.code,
+        }),
+      deps.database,
+    );
+
+    if (!failed.ok) {
+      // Not the deterministic case this branch exists for — the batch was
+      // not in the `pending` state `failBatch` requires, which means
+      // something already unexpected happened to it. Treat it like any other
+      // unexpected failure: throw (pg-boss retries) and keep the file, since
+      // deleting it here would be deleting it on a code path that never
+      // actually reached a terminal, file-safe state.
+      logger.error(
+        { queue: 'import.stage', batchId, code: failed.error.code },
+        'SPEC-005: could not record the parse failure on the batch',
+      );
+      throw new Error(`import.stage: ${failed.error.code}`);
+    }
+
+    // Only after the `failed` status is durable — the same
+    // database-then-file ordering `handleImportCommit`/`handleImportCancel`
+    // already use, so a crash between the two never deletes a file whose
+    // batch still (falsely) claims to be `pending`.
+    await deleteUploadedFile(deps.uploadDir, batchId);
+    return;
   }
 
   const result = await withTenant(
