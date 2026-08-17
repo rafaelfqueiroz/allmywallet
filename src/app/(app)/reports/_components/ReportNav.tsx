@@ -22,6 +22,7 @@ export async function ReportNav({ current }: { readonly current: string }) {
   const items = [
     { href: '/reports', label: t('links.overview') },
     { href: '/reports/patrimonio', label: t('links.patrimonio') },
+    { href: '/reports/performance', label: t('links.performance') },
   ] as const;
 
   return (

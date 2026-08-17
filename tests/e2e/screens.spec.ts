@@ -21,6 +21,7 @@ const ROUTES = [
   '/import',
   '/reports',
   '/reports/patrimonio',
+  '/reports/performance',
   '/preferences',
   '/privacy',
   // SPEC-004 BR-004-15: the policy is public and unauthenticated, so it is

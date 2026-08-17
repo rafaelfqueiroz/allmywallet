@@ -19,8 +19,11 @@ describe('registry', () => {
     // a different default grouping inside a wallet and says both are
     // user-configurable, which one key cannot express; plus one design-system
     // addition, `ui.theme` (DL-03/DS-30 — a user preference is a registry key,
-    // so the SPEC-002 screen renders it with no other change).
-    expect(CONFIG_KEYS).toHaveLength(23);
+    // so the SPEC-002 screen renders it with no other change); plus one
+    // SPEC-012 addition, `reports.twr_xirr_divergence_points` — BR-012-04
+    // fires an inline explanation past a threshold, and SPEC-002's whole
+    // premise is that a threshold is configuration rather than a constant.
+    expect(CONFIG_KEYS).toHaveLength(24);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {
@@ -69,6 +72,11 @@ describe('registry', () => {
       // configurable key — "both are user-configurable".
       'reports.default_grouping_wallet_scope',
       'reports.benchmarks',
+      // SPEC-012 BR-012-04: the divergence threshold is user-settable because
+      // "material" is a judgement — an investor who aports monthly sees the
+      // two returns separate routinely and may want a wider band before the
+      // page starts explaining it to them.
+      'reports.twr_xirr_divergence_points',
       // DS-30: the design system's theme toggle is a registry key rather than
       // a bespoke settings control, so the generated preferences screen picks
       // it up with no change of its own.

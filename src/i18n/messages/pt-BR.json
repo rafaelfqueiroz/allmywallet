@@ -265,6 +265,16 @@
       "transfer_in": "Transferência de entrada",
       "transfer_out": "Transferência de saída",
       "adjustment": "Ajuste"
+    },
+    "summary": {
+      "title": "O que esta importação mudou nas suas carteiras",
+      "settled": "Tudo o que entrou já tem destino. Nada esperando decisão.",
+      "needsDecisions": "Algumas compras não puderam ser atribuídas automaticamente porque o destino era ambíguo. Resolva abaixo.",
+      "unassigned": "Ainda não atribuído a nenhuma carteira.",
+      "assign": "Atribuir a",
+      "chooseWallet": "Escolha uma carteira",
+      "quantity": "Quantidade",
+      "resolve": "Atribuir"
     }
   },
   "reports": {
@@ -345,7 +355,8 @@
     "links": {
       "label": "Relatórios",
       "overview": "Visão geral",
-      "patrimonio": "Patrimônio"
+      "patrimonio": "Patrimônio",
+      "performance": "Rentabilidade"
     }
   },
   "privacy": {
@@ -529,6 +540,53 @@
       "basis": "Origem do valor",
       "observed": "Preço observado",
       "estimated": "Estimado"
+    }
+  },
+  "rentabilidade": {
+    "title": "Rentabilidade",
+    "description": "Quanto sua carteira rendeu — e como isso se compara ao CDI, ao IPCA e ao Ibovespa.",
+    "unavailable": "Indisponível",
+    "headline": {
+      "twr": "Rentabilidade da carteira (TWR)",
+      "twrHint": "Ignora o efeito de aportes e retiradas. É a comparação justa com um índice.",
+      "xirr": "Rentabilidade do seu dinheiro (XIRR)",
+      "xirrHint": "Leva em conta quanto você aportou e quando. É o que o seu dinheiro de fato rendeu.",
+      "percentOfCdi": "% do CDI",
+      "percentOfCdiHint": "Sua rentabilidade dividida pela do CDI no mesmo período.",
+      "realReturn": "Ganho real (acima do IPCA)",
+      "realReturnHint": "O que sobrou depois da inflação do período."
+    },
+    "divergence": {
+      "explanation": "As duas rentabilidades acima estão bem diferentes, e isso não é um erro. A TWR mede o desempenho da carteira ignorando quando você aportou; a XIRR mede o que o seu dinheiro rendeu, considerando as datas e os valores de cada aporte. Um aporte grande feito pouco antes de uma alta — ou de uma queda — separa as duas."
+    },
+    "dietz": {
+      "disclosure": "Faltam dados diários em {count, plural, one {um trecho} other {# trechos}} do período. Nesses trechos a rentabilidade foi calculada por Dietz modificado, que é uma aproximação. O resto do período usa o cálculo diário."
+    },
+    "treatment": {
+      "withEarnings": "Com proventos",
+      "withoutEarnings": "Sem proventos",
+      "hint": "Proventos entram como recebimento na data do pagamento. Nada é reinvestido automaticamente."
+    },
+    "benchmarks": {
+      "title": "Comparação com índices",
+      "description": "O que o índice rendeu no período, e quanto os seus aportes valeriam hoje se tivessem seguido esse índice.",
+      "columnName": "Índice",
+      "columnIndexReturn": "Rendimento do índice",
+      "columnShadow": "Seus aportes nesse índice"
+    },
+    "contribution": {
+      "title": "De onde veio a rentabilidade",
+      "description": "Quanto cada grupo pesa na carteira, quanto rendeu por conta própria e quanto disso chegou ao total. As contribuições somam exatamente o total.",
+      "columnWeight": "Peso",
+      "columnOwnReturn": "Rendimento próprio",
+      "columnContribution": "Contribuição",
+      "columnGain": "Ganho",
+      "unavailable": "Não há base suficiente no período para decompor a rentabilidade por grupo."
+    },
+    "chart": {
+      "title": "Sua carteira x os índices",
+      "description": "Todas as linhas começam em 100 no início do período. A distância entre elas é o quanto sua carteira ficou à frente ou atrás.",
+      "summary": "Comparação da rentabilidade acumulada da carteira com a dos índices selecionados. Os números exatos estão na tabela abaixo."
     }
   }
 }

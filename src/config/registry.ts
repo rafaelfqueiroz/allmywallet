@@ -189,6 +189,23 @@ export const REGISTRY = {
     description: 'Benchmark series shown alongside the user’s own return (FR-5.4).',
     range: "non-empty array of: 'CDI', 'IPCA', 'IBOV'",
   },
+  'reports.twr_xirr_divergence_points': {
+    key: 'reports.twr_xirr_divergence_points',
+    schema: z.number().int().min(1).max(5000),
+    // 200 bp = 2 percentage points = `DEFAULT_DIVERGENCE_POINTS` in
+    // `core/reporting/performance/xirr.ts`. Kept identical on purpose: a
+    // registry default that disagreed with the domain default would make the
+    // explanation appear at one threshold in tests and another in the app.
+    default: 200,
+    levels: ['deployment', 'user'],
+    // SPEC-012 BR-012-04 / DL-012-02: how far apart the two returns must be
+    // before the gap is explained inline. A threshold, so it is config rather
+    // than a constant (SPEC-002). Expressed in basis points because the two
+    // figures being compared are rates: 500 bp is five percentage points.
+    description:
+      'Basis points of TWR-vs-XIRR divergence before the inline explanation appears (FR-5.5).',
+    range: 'integer, 1–5000 (basis points)',
+  },
   'ui.theme': {
     key: 'ui.theme',
     schema: z.enum(['system', 'light', 'dark']),
