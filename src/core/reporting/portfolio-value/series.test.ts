@@ -3,7 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { Money } from '@/core/shared/money';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
-import { StackedSeriesUnavailable } from './ports';
+import { HistoryUnavailable } from './ports';
 import {
   granularityFor,
   monthlyContributions,
@@ -271,7 +271,7 @@ describe('stackedSeries (BR-013-05)', () => {
       const result = stackedSeries([snapshot('2026-03-31', '1000')], 'monthly', grouping);
       expect(result.kind).toBe('unavailable');
       if (result.kind !== 'unavailable') return;
-      expect(result.reason).toBe(StackedSeriesUnavailable.NO_HISTORICAL_BREAKDOWN);
+      expect(result.reason).toBe(HistoryUnavailable.NO_HISTORICAL_BREAKDOWN);
       expect(result.grouping).toBe(grouping);
     },
   );

@@ -201,7 +201,7 @@ describe('SPEC-012 performance report (integration)', () => {
 
   it('reads the snapshot series back as exact Decimal money, with no float drift', async () => {
     const report = await run({});
-    expect(report.series.points.map((point) => point.value.toString())).toEqual([
+    expect(report.series!.points.map((point) => point.value.toString())).toEqual([
       '100000.55',
       '110000.605',
       '108900.59895',
@@ -209,7 +209,7 @@ describe('SPEC-012 performance report (integration)', () => {
     // Contributions never changed after the opening balance, so every derived
     // flow is exactly zero — not 1e-11, which is what a float subtraction of
     // 100000.55 from itself would leave behind.
-    expect(report.series.flows.map((flow) => flow.amount.toString())).toEqual(['0', '0']);
+    expect(report.series!.flows.map((flow) => flow.amount.toString())).toEqual(['0', '0']);
   });
 
   /**
@@ -250,14 +250,14 @@ describe('SPEC-012 performance report (integration)', () => {
     const without = await run({ treatment: EarningsTreatment.WITHOUT_EARNINGS });
     const with_ = await run({ treatment: EarningsTreatment.WITH_EARNINGS });
 
-    expect(without.series.gain.toString()).toBe('8900.04895');
-    expect(with_.series.gain.toString()).toBe('9900.04895');
-    expect(with_.series.gain.minus(without.series.gain).toString()).toBe('1000');
-    expect(with_.series.earningsInPeriod.toString()).toBe('1000');
+    expect(without.series!.gain.toString()).toBe('8900.04895');
+    expect(with_.series!.gain.toString()).toBe('9900.04895');
+    expect(with_.series!.gain.minus(without.series!.gain).toString()).toBe('1000');
+    expect(with_.series!.earningsInPeriod.toString()).toBe('1000');
     // AC-8: the dividend arrives as money out on pay date. A reinvestment
     // assumption would appear here as a positive flow — a buy that never
     // happened.
-    expect(with_.series.flows.some((flow) => flow.amount.isPositive())).toBe(false);
+    expect(with_.series!.flows.some((flow) => flow.amount.isPositive())).toBe(false);
   });
 
   /**
@@ -393,13 +393,13 @@ describe('SPEC-012 performance report (integration)', () => {
       [userId, END],
     );
     const stored = Money.fromString(rows[0]!.total_value);
-    const closing = report.series.points[report.series.points.length - 1]!.value;
+    const closing = report.series!.points[report.series!.points.length - 1]!.value;
     expect(closing.equals(stored)).toBe(true);
     expect(report.range).toEqual({ from: START, to: END });
     expect(report.scope.wallet).toBeNull();
     // ...and the mid-period snapshot is in the series it linked, rather than
     // the report having quietly reduced a three-point history to its endpoints.
-    expect(report.series.points.map((point) => point.date)).toEqual([
+    expect(report.series!.points.map((point) => point.date)).toEqual([
       '2026-01-01',
       '2026-07-01',
       '2027-01-01',

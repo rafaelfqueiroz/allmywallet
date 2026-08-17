@@ -89,6 +89,35 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
 
   const { wallets, query, report } = await loadPatrimonio(userId, state);
 
+  /**
+   * SPEC-011 BR-011-02 / ADR-002 — the snapshot-derived half of the report,
+   * narrowed once.
+   *
+   * The domain returns each of these as a `SnapshotDerived` union because at
+   * wallet scope there is no wallet-grain history to compute them from
+   * (`core/reporting/portfolio-value/report.ts` has the arithmetic that used
+   * to come out of pairing them with a scoped total). They are narrowed
+   * together rather than one at a time because they share a single cause, and
+   * one explanation for five missing charts reads better than five copies of
+   * it.
+   */
+  const invested =
+    report !== null && report.headline.invested.kind === 'available'
+      ? report.headline.invested.value
+      : null;
+
+  const history =
+    report !== null &&
+    report.series.kind === 'available' &&
+    report.decomposition.kind === 'available' &&
+    report.monthlyContributions.kind === 'available'
+      ? {
+          series: report.series.value,
+          decomposition: report.decomposition.value,
+          contributions: report.monthlyContributions.value,
+        }
+      : null;
+
   return (
     <PageShell width="wide" title={tp('title')} description={tp('description')}>
       <ReportNav current="/reports/patrimonio" />
@@ -130,115 +159,163 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
             </Text>
           </Cluster>
 
-          {/* BR-013-04 */}
+          {/* BR-013-04. `currentValue` is the scoped holdings total and holds
+              at any scope; the other three come from the snapshot series and
+              do not exist at wallet scope (ADR-002) — so they say
+              *indisponível* rather than quietly reporting the whole
+              portfolio's contributions against one wallet's value. */}
           <Grid cols={4}>
             <StatCard
               label={tp('headline.currentValue')}
               value={<Money value={report.headline.currentValue} />}
-              hint={report.series.at(-1)?.estimated ? tp('estimated.hint') : undefined}
+              hint={history?.series.at(-1)?.estimated ? tp('estimated.hint') : undefined}
             />
             <StatCard
               label={tp('headline.totalInvested')}
-              value={<Money value={report.headline.totalInvested} />}
+              value={
+                invested === null ? (
+                  <Unavailable label={tp('unavailable')} />
+                ) : (
+                  <Money value={invested.totalInvested} />
+                )
+              }
             />
             <StatCard
               label={tp('headline.absoluteGain')}
-              value={<Money value={report.headline.absoluteGain} signed />}
+              value={
+                invested === null ? (
+                  <Unavailable label={tp('unavailable')} />
+                ) : (
+                  <Money value={invested.absoluteGain} signed />
+                )
+              }
             />
             <StatCard
               label={tp('headline.gain')}
               value={
-                report.headline.gainRatio === null ? (
+                invested === null ? (
+                  <Unavailable label={tp('unavailable')} />
+                ) : invested.gainRatio === null ? (
                   // An undefined ratio, not an infinite one. An em dash says
                   // "not applicable"; "∞%" says something false.
                   <Text as="span" size="lg">
                     {tp('headline.notApplicable')}
                   </Text>
                 ) : (
-                  <Money value={report.headline.gainRatio} kind="percent" signed />
+                  <Money value={invested.gainRatio} kind="percent" signed />
                 )
               }
             />
           </Grid>
 
-          <Section title={tp('chart.title')} description={tp(`granularity.${report.granularity}`)}>
-            <Stack gap="md">
-              <ValueChart
+          {history === null ? (
+            /**
+             * SPEC-011 BR-011-16 / SPEC-013 — **the explanation, once, where
+             * five charts used to be.**
+             *
+             * Everything below this point reads `daily_valuation_snapshots`,
+             * which has no wallet dimension (ADR-002). Rendering the
+             * portfolio's series under a wallet's heading is what produced a
+             * −97,5 % ganho on a carteira nobody had withdrawn from; rendering
+             * nothing at all would read as "this carteira has no history",
+             * which is a false statement about the user rather than a true one
+             * about the product. So it says which figures are missing and why,
+             * in one place rather than five times over.
+             */
+            <EmptyState title={tp('walletScope.title')} description={tp('walletScope.body')} />
+          ) : (
+            <>
+              <Section
                 title={tp('chart.title')}
-                summary={<SeriesSummary points={report.series} label={tp('chart.summary')} />}
-                points={report.series.map((point) => ({
-                  date: point.date,
-                  value: plot(point.value),
-                  estimated: point.estimated,
-                }))}
-              />
-              {report.series.some((point) => point.estimated) && (
-                // BR-013-07 / DL-013-04: the marker sits with the chart, not in
-                // a footnote read once and forgotten.
-                <Badge variant="outline">{tp('estimated.badge')}</Badge>
-              )}
-            </Stack>
-          </Section>
+                description={tp(`granularity.${report.granularity}`)}
+              >
+                <Stack gap="md">
+                  <ValueChart
+                    title={tp('chart.title')}
+                    summary={<SeriesSummary points={history.series} label={tp('chart.summary')} />}
+                    points={history.series.map((point) => ({
+                      date: point.date,
+                      value: plot(point.value),
+                      estimated: point.estimated,
+                    }))}
+                  />
+                  {history.series.some((point) => point.estimated) && (
+                    // BR-013-07 / DL-013-04: the marker sits with the chart, not in
+                    // a footnote read once and forgotten.
+                    <Badge variant="outline">{tp('estimated.badge')}</Badge>
+                  )}
+                </Stack>
+              </Section>
 
-          {/* BR-013-02/03 — the report's reason to exist. */}
-          <Section title={tp('decomposition.title')} description={tp('decomposition.description')}>
-            <DecompositionTable
-              decomposition={report.decomposition}
-              labels={{
-                caption: tp('decomposition.title'),
-                driver: tp('decomposition.driver'),
-                amount: tp('decomposition.amount'),
-                opening: tp('decomposition.opening'),
-                contributions: tp('decomposition.contributions'),
-                priceChange: tp('decomposition.priceChange'),
-                earnings: tp('decomposition.earnings'),
-                closing: tp('decomposition.closing'),
-              }}
-            />
-          </Section>
-
-          <Section title={tp('contributions.title')} description={tp('contributions.description')}>
-            <ContributionChart
-              title={tp('contributions.title')}
-              summary={
-                <ContributionSummary
-                  bars={report.monthlyContributions}
-                  label={tp('contributions.summary')}
+              {/* BR-013-02/03 — the report's reason to exist. */}
+              <Section
+                title={tp('decomposition.title')}
+                description={tp('decomposition.description')}
+              >
+                <DecompositionTable
+                  decomposition={history.decomposition}
+                  labels={{
+                    caption: tp('decomposition.title'),
+                    driver: tp('decomposition.driver'),
+                    amount: tp('decomposition.amount'),
+                    opening: tp('decomposition.opening'),
+                    contributions: tp('decomposition.contributions'),
+                    priceChange: tp('decomposition.priceChange'),
+                    earnings: tp('decomposition.earnings'),
+                    closing: tp('decomposition.closing'),
+                  }}
                 />
-              }
-              bars={report.monthlyContributions.map((bar) => ({
-                month: bar.month,
-                amount: plot(bar.amount),
-              }))}
-            />
-          </Section>
+              </Section>
 
-          {report.stacked.kind === 'unavailable' && (
-            // The honest refusal, surfaced. An empty stacked chart would read
-            // as "you held nothing" — false about the portfolio rather than
-            // true about the product.
-            <Section title={tp('stacked.title')}>
-              <Text tone="muted">
-                {tp('stacked.unavailable', { grouping: t(`grouping.${report.stacked.grouping}`) })}
-              </Text>
-            </Section>
+              <Section
+                title={tp('contributions.title')}
+                description={tp('contributions.description')}
+              >
+                <ContributionChart
+                  title={tp('contributions.title')}
+                  summary={
+                    <ContributionSummary
+                      bars={history.contributions}
+                      label={tp('contributions.summary')}
+                    />
+                  }
+                  bars={history.contributions.map((bar) => ({
+                    month: bar.month,
+                    amount: plot(bar.amount),
+                  }))}
+                />
+              </Section>
+
+              {report.stacked.kind === 'unavailable' && (
+                // The honest refusal, surfaced. An empty stacked chart would read
+                // as "you held nothing" — false about the portfolio rather than
+                // true about the product.
+                <Section title={tp('stacked.title')}>
+                  <Text tone="muted">
+                    {tp('stacked.unavailable', {
+                      grouping: t(`grouping.${report.stacked.grouping}`),
+                    })}
+                  </Text>
+                </Section>
+              )}
+
+              {/* SPEC-016 BR-016-16 — the chart, as a table. Not a fallback: the
+                  exact figures are here and only the shape is in the chart. */}
+              <Section title={tp('table.title')}>
+                <SeriesTable
+                  points={history.series}
+                  labels={{
+                    caption: tp('table.title'),
+                    date: tp('table.date'),
+                    value: tp('table.value'),
+                    basis: tp('table.basis'),
+                    observed: tp('table.observed'),
+                    estimated: tp('table.estimated'),
+                  }}
+                />
+              </Section>
+            </>
           )}
-
-          {/* SPEC-016 BR-016-16 — the chart, as a table. Not a fallback: the
-              exact figures are here and only the shape is in the chart. */}
-          <Section title={tp('table.title')}>
-            <SeriesTable
-              points={report.series}
-              labels={{
-                caption: tp('table.title'),
-                date: tp('table.date'),
-                value: tp('table.value'),
-                basis: tp('table.basis'),
-                observed: tp('table.observed'),
-                estimated: tp('table.estimated'),
-              }}
-            />
-          </Section>
 
           {/* SPEC-009 BR-009-12 / AC-10: every fixed-income figure declares
               itself gross of IR and IOF. It sits at the foot of the report
@@ -252,6 +329,19 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
         </Stack>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * A figure the domain refused to produce, in the same words the Rentabilidade
+ * report uses for the same situation (BR-011-06: same semantics everywhere).
+ * Never `R$ 0,00` — a zero is a claim about the money.
+ */
+function Unavailable({ label }: { readonly label: string }) {
+  return (
+    <Text as="span" size="lg">
+      {label}
+    </Text>
   );
 }
 

@@ -661,6 +661,60 @@ describe('SPEC-012 AC-16 — wallet scope reports what it cannot compute', () =>
     expect(errorCode(report.realReturn)).toBe('PERFORMANCE_SCOPE_SERIES_UNAVAILABLE');
   });
 
+  /**
+   * **BR-012-12 — the shadow portfolio is the user's own flows at the index's
+   * rate, so at wallet scope there are none to replay.**
+   *
+   * The refusal above was originally written for TWR and XIRR alone, while
+   * `loadBenchmarks` kept receiving the portfolio's series regardless. Over the
+   * deposit fixture — 100.000 opening, a 500.000 deposit on 1 July, CDI
+   * accruing 0,05 % on 1 January only — the shadow computed, by hand:
+   *
+   *   01/01/2026  100.000                       (the *portfolio's* opening)
+   *   02/01/2026  100.000 × 1,0005 = 100.050
+   *   01/07/2026  100.050 + 500.000 = 600.050   (the *portfolio's* deposit)
+   *   01/01/2027  600.050
+   *
+   * and R$ 600.050 was published on the screen of a wallet holding R$ 12.000,
+   * under "seus aportes nesse índice". Every figure in it real; none of it this
+   * carteira's.
+   *
+   * The **line** is a different matter and is still computed: 0,0005 is what
+   * CDI did over the period, a fact about the index rather than about this
+   * tenant, and it is as true on a wallet's screen as on the portfolio's.
+   */
+  it('replays no shadow portfolio from the portfolio’s flows', async () => {
+    const index = new FakeIndexSeries({
+      CDI: [{ date: START, value: Quantity.fromString('0.05') }],
+    });
+
+    const portfolio = await run({ snapshots: DEPOSIT_HISTORY, benchmarks: ['CDI'], index });
+    expect(portfolio.benchmarks[0]?.shadow?.finalValue.toString()).toBe('600050');
+
+    const scoped = await run({
+      snapshots: DEPOSIT_HISTORY,
+      benchmarks: ['CDI'],
+      index,
+      scope: { kind: 'wallet', walletId: walletIdOf('1') },
+    });
+    expect(scoped.benchmarks[0]?.shadow).toBeNull();
+    // The index's own return survives — it says nothing about this tenant.
+    expect(unwrap(scoped.benchmarks[0]!.line).returnRate.toString()).toBe('0.0005');
+  });
+
+  /**
+   * The series itself is portfolio grain, so it is withheld rather than handed
+   * out under a wallet's name — otherwise the next caller repeats the defect
+   * with a fresh chart instead of a fresh shadow.
+   */
+  it('withholds the portfolio-grain value series', async () => {
+    const scoped = await run({ scope: { kind: 'wallet', walletId: walletIdOf('1') } });
+    expect(scoped.series).toBeNull();
+
+    const portfolio = await run({});
+    expect(portfolio.series?.points).toHaveLength(3);
+  });
+
   it('refuses a scope naming a wallet this tenant does not have', async () => {
     const result = await runPerformanceReport(
       { port: buildPort(DIVIDEND_HISTORY), indexSeries: new FakeIndexSeries({}) },

@@ -1,6 +1,6 @@
 import { Money } from '@/core/shared/money';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
-import type { GrowthDecomposition, HeadlineFigures } from '@/core/reporting/portfolio-value/ports';
+import type { GrowthDecomposition, InvestedFigures } from '@/core/reporting/portfolio-value/ports';
 
 /**
  * SPEC-013 BR-013-02/03 — growth split into net contributions, price change
@@ -86,7 +86,7 @@ export function decomposeGrowth({ opening, closing }: DecompositionInput): Growt
 }
 
 /**
- * BR-013-04 — current value, total invested, and gain in both forms.
+ * BR-013-04 — total invested, and the gain against it in both forms.
  *
  * `currentValue` is passed in rather than taken from the closing snapshot, and
  * that is BR-013-12/DL-013-06 doing its work: the Composition report totals
@@ -98,16 +98,25 @@ export function decomposeGrowth({ opening, closing }: DecompositionInput): Growt
  * `totalInvested` does come from the snapshot, because "what did I put in" is
  * a cumulative ledger fact rather than a valuation, and the snapshot is where
  * that running total lives (BR-013-08).
+ *
+ * **The two arguments must describe the same scope, and only the caller can
+ * know that.** This function subtracts a snapshot figure from a holdings
+ * figure, so handing it a wallet's value and the portfolio's snapshot produces
+ * a gain that is arithmetically flawless and completely meaningless. That is
+ * precisely the defect this file's caller now refuses at wallet scope: a wallet
+ * worth R$ 10.000 inside a R$ 400.000 portfolio reported
+ * `10.000 − 400.000 = −390.000`, a −97,5 % ratio, with every input real. See
+ * `report.ts` and ADR-002. It is a precondition rather than a check because
+ * there is nothing in either argument that reveals its scope.
  */
-export function headlineFigures(
+export function investedFigures(
   currentValue: Money,
   closing: DailyValuationSnapshot | null,
-): HeadlineFigures {
+): InvestedFigures {
   const totalInvested = closing?.netContributions ?? Money.zero();
   const absoluteGain = currentValue.minus(totalInvested);
 
   return {
-    currentValue,
     totalInvested,
     absoluteGain,
     // A ratio against zero (or against a negative, which happens once a user

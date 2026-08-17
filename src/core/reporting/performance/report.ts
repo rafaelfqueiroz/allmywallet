@@ -260,7 +260,16 @@ export interface PerformanceReport {
   readonly scope: ResolvedScope;
   readonly grouping: Grouping;
   readonly treatment: EarningsTreatment;
-  readonly series: PerformanceSeries;
+  /**
+   * `null` at **wallet** scope, for the same reason `twr` and `xirr` are
+   * unavailable there: this series is read straight off
+   * `daily_valuation_snapshots`, which has no wallet dimension, so at wallet
+   * scope the only series available is the whole portfolio's. Exposing it under
+   * a wallet's heading is how a caller ends up drawing one carteira's chart
+   * from the entire *patrimônio* — every point real, every point answering the
+   * wrong question. See `runPerformanceReport` below and ADR-002.
+   */
+  readonly series: PerformanceSeries | null;
   /** BR-012-01/02 — with its Modified Dietz disclosure attached. */
   readonly twr: PerformanceResult<TwrResult>;
   /** BR-012-03/05 — or the reason there is no root. */
@@ -342,6 +351,17 @@ export async function runPerformanceReport(
    * the holding set, which is sliced per wallet by construction (SPEC-011
    * `buildHoldingSet`), so a wallet still gets its own return on cost and its
    * groups still reconcile.
+   *
+   * **`scoped` gates everything the series touches, not only the two
+   * measures.** The refusal was originally written for TWR and XIRR alone,
+   * while `loadBenchmarks` below kept receiving the portfolio's series
+   * regardless — so BR-012-12's shadow portfolio replayed the *portfolio's*
+   * flows and opening value at the benchmark's rate and published the result on
+   * a wallet's screen. A carteira holding R$ 9.000 was shown what R$ 1.000.500
+   * of somebody else's contributions would have earned in CDI, under the
+   * heading "seus aportes nesse índice". The pure index line is unaffected —
+   * what CDI did over a period is a fact about CDI, not about this tenant — so
+   * it is still computed and still shown.
    */
   const scoped = input.scope.kind === 'wallet';
   const twr: PerformanceResult<TwrResult> = scoped
@@ -361,7 +381,15 @@ export async function runPerformanceReport(
       )
     : computeXirr({ flows: cashFlowsFrom(series) });
 
-  const benchmarks = await loadBenchmarks(deps.indexSeries, input, seriesRange, series);
+  // `null` rather than `series`: at wallet scope there is nothing here that is
+  // this wallet's, and the shadow must not be replayed from the portfolio's.
+  const scopedSeries = scoped ? null : series;
+
+  // `seriesRange`, not `base.value.range` — the index line covers the same span
+  // the portfolio is measured over, baseline included, so the two are
+  // comparable at every scope. Only the *shadow* depends on this tenant's own
+  // flows, and that is what `scopedSeries` withholds.
+  const benchmarks = await loadBenchmarks(deps.indexSeries, input, seriesRange, scopedSeries);
   const cdi = benchmarks.find((outcome) => outcome.benchmark === 'CDI');
   const ipca = benchmarks.find((outcome) => outcome.benchmark === 'IPCA');
 
@@ -370,7 +398,7 @@ export async function runPerformanceReport(
     scope: base.value.scope,
     grouping: input.grouping,
     treatment: input.treatment,
-    series,
+    series: scopedSeries,
     twr,
     xirr,
     // BR-012-04: only when both figures exist. Explaining the gap between a
@@ -403,12 +431,20 @@ export async function runPerformanceReport(
   });
 }
 
-/** BR-012-10/14 — each selected benchmark, independently. */
+/**
+ * BR-012-10/14 — each selected benchmark, independently.
+ *
+ * `series` is `null` when the scope has no series of its own (wallet scope).
+ * The **line** is still loaded, because an index's return over a period is
+ * published reference data and says nothing about this tenant; the **shadow**
+ * is not, because it is defined as the user's own flows at that rate and there
+ * are no wallet-grain flows to replay.
+ */
 async function loadBenchmarks(
   indexSeries: IndexSeriesReaderPort,
   input: PerformanceReportInput,
   range: DateRange,
-  series: PerformanceSeries,
+  series: PerformanceSeries | null,
 ): Promise<readonly BenchmarkOutcome[]> {
   const outcomes: BenchmarkOutcome[] = [];
   for (const benchmark of input.benchmarks) {
@@ -418,9 +454,10 @@ async function loadBenchmarks(
       line,
       // BR-012-12: the shadow needs the user's opening value and their real
       // flows. With no series there is nothing to replay them into.
-      shadow: line.ok
-        ? shadowPortfolio(line.value, series.points[0]?.value ?? Money.zero(), series.flows)
-        : null,
+      shadow:
+        series !== null && line.ok
+          ? shadowPortfolio(line.value, series.points[0]?.value ?? Money.zero(), series.flows)
+          : null,
     });
   }
   return outcomes;

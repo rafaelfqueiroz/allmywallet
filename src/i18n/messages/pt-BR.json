@@ -516,12 +516,17 @@
       "lastImport": "Última importação: {date}",
       "neverImported": "Nenhum extrato importado ainda"
     },
+    "unavailable": "Indisponível",
     "headline": {
       "currentValue": "Patrimônio atual",
       "totalInvested": "Total investido",
       "absoluteGain": "Ganho",
       "gain": "Ganho %",
       "notApplicable": "—"
+    },
+    "walletScope": {
+      "title": "Não guardamos histórico separado por carteira",
+      "body": "O histórico diário do seu patrimônio é gravado para a carteira completa, sem separar quanto cabia a cada carteira em cada dia. E como a atribuição de ativos a carteiras não guarda histórico, aplicar a divisão de hoje aos dias passados reescreveria o passado toda vez que você remanejasse um ativo. Por isso o gráfico ao longo do tempo, a origem do crescimento, os aportes por mês, a composição histórica e o total investido não aparecem quando o escopo é uma carteira. Mostrar aqui os números da carteira completa daria um resultado que parece certo e não é. O patrimônio atual acima é só desta carteira e está correto."
     },
     "granularity": {
       "daily": "Um ponto por dia",
@@ -578,6 +583,9 @@
       "percentOfCdiHint": "Sua rentabilidade dividida pela do CDI no mesmo período.",
       "realReturn": "Ganho real (acima do IPCA)",
       "realReturnHint": "O que sobrou depois da inflação do período."
+    },
+    "walletScope": {
+      "explanation": "A rentabilidade no tempo (TWR e XIRR), a comparação com os índices e a simulação dos seus aportes em cada índice só existem para a carteira completa: o histórico diário é gravado sem separar quanto cabia a cada carteira em cada dia, e a atribuição de ativos a carteiras não guarda histórico. Usar aqui os números da carteira completa daria um resultado plausível e errado. A tabela “De onde veio a rentabilidade”, abaixo, é desta carteira e está correta."
     },
     "divergence": {
       "explanation": "As duas rentabilidades acima estão bem diferentes, e isso não é um erro. A TWR mede o desempenho da carteira ignorando quando você aportou; a XIRR mede o que o seu dinheiro rendeu, considerando as datas e os valores de cada aporte. Um aporte grande feito pouco antes de uma alta — ou de uma queda — separa as duas."

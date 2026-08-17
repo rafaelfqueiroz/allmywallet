@@ -3,7 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { Money } from '@/core/shared/money';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
-import { decomposeGrowth, headlineFigures } from './decomposition';
+import { decomposeGrowth, investedFigures } from './decomposition';
 
 /**
  * SPEC-013 BR-013-02/03/04.
@@ -185,21 +185,22 @@ describe('decomposeGrowth (BR-013-02/03)', () => {
   );
 });
 
-describe('headlineFigures (BR-013-04)', () => {
+describe('investedFigures (BR-013-04)', () => {
   /**
    * The current value comes from the **valued holdings**, not from the
    * snapshot — BR-013-12/DL-013-06. The snapshot here deliberately carries a
    * different total (149.000) so a regression that read it instead would show
-   * up as a wrong headline rather than as a passing test.
+   * up as a wrong headline rather than as a passing test. (The value itself is
+   * asserted on the assembled report, in `report.test.ts`; this function is
+   * handed it and returns only what it derives from the snapshot.)
    *
    *   invested = 120.000
    *   gain     = 150.000 − 120.000 = 30.000
    *   %        = 30.000 / 120.000 × 100 = 25
    */
-  it('headlines the holdings total, not the last snapshot', () => {
-    const result = headlineFigures(m('150000'), snapshot('2026-03-31', '149000', '120000', '0'));
+  it('measures the gain against the snapshot’s contributions', () => {
+    const result = investedFigures(m('150000'), snapshot('2026-03-31', '149000', '120000', '0'));
 
-    expect(to8(result.currentValue)).toBe('150000.00000000');
     expect(to8(result.totalInvested)).toBe('120000.00000000');
     expect(to8(result.absoluteGain)).toBe('30000.00000000');
     expect(to8(result.gainRatio!)).toBe('0.25000000');
@@ -207,7 +208,7 @@ describe('headlineFigures (BR-013-04)', () => {
 
   it('reports a loss as a negative gain in both forms', () => {
     // 90.000 − 120.000 = −30.000; −30.000 / 120.000 × 100 = −25
-    const result = headlineFigures(m('90000'), snapshot('2026-03-31', '90000', '120000', '0'));
+    const result = investedFigures(m('90000'), snapshot('2026-03-31', '90000', '120000', '0'));
     expect(to8(result.absoluteGain)).toBe('-30000.00000000');
     expect(to8(result.gainRatio!)).toBe('-0.25000000');
   });
@@ -218,20 +219,20 @@ describe('headlineFigures (BR-013-04)', () => {
    * dash, and `null` is what lets the UI tell the difference.
    */
   it('declines a ratio when nothing is invested', () => {
-    expect(headlineFigures(m('500'), snapshot('2026-03-31', '500', '0', '500')).gainRatio).toBe(
+    expect(investedFigures(m('500'), snapshot('2026-03-31', '500', '0', '500')).gainRatio).toBe(
       null,
     );
   });
 
   it('declines a ratio when more has been withdrawn than was ever put in', () => {
-    const result = headlineFigures(m('4000'), snapshot('2026-03-31', '4000', '-2500', '0'));
+    const result = investedFigures(m('4000'), snapshot('2026-03-31', '4000', '-2500', '0'));
     expect(result.gainRatio).toBe(null);
     // The absolute gain is still meaningful and still reported.
     expect(to8(result.absoluteGain)).toBe('6500.00000000');
   });
 
   it('treats a missing closing snapshot as nothing invested', () => {
-    const result = headlineFigures(m('0'), null);
+    const result = investedFigures(m('0'), null);
     expect(to8(result.totalInvested)).toBe('0.00000000');
     expect(result.gainRatio).toBe(null);
   });
