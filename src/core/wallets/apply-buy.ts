@@ -23,6 +23,23 @@ import type { WalletAllocation } from '@/core/wallets/ports';
 export interface ApplyBuyInput {
   readonly assetId: AssetId;
   readonly purchasedQuantity: Quantity;
+  /**
+   * Where the BR-010-05 sum invariant is enforced for this call.
+   *
+   * `'now'` (the default) compares against the position as it stands, which
+   * is right for a standalone assignment: nothing else is in flight.
+   *
+   * `'deferred'` is for a chronological replay of a whole committed batch
+   * (`apply-ledger-effects.ts`). The position cache there already reflects
+   * **every** transaction in the batch, so checking mid-replay compares an
+   * intermediate allocation against a final position. A round trip — buy 50
+   * on the 2nd, sell 50 on the 20th — reads as a 150-share over-allocation at
+   * the buy even though the batch ends perfectly valid, and because the
+   * failure is deterministic the commit can never succeed on retry. The
+   * invariant is not weakened, only moved: the replay checks it once, at the
+   * end, against the same position — see `assertWithinHoldings` there.
+   */
+  readonly heldCheck?: 'now' | 'deferred' | undefined;
 }
 
 export type BuyAllocationOutcome =
@@ -120,7 +137,10 @@ async function incrementWallet(
       .filter((allocation) => allocation.walletId !== walletId)
       .map((allocation) => allocation.quantity),
   );
-  if (othersTotal.plus(newQuantity).comparedTo(heldQuantity) > 0) {
+  if (
+    input.heldCheck !== 'deferred' &&
+    othersTotal.plus(newQuantity).comparedTo(heldQuantity) > 0
+  ) {
     return err(
       walletError(WalletErrorCode.ALLOCATION_EXCEEDS_HOLDINGS, {
         assetId: input.assetId,

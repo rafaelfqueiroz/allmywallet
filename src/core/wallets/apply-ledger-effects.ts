@@ -1,8 +1,10 @@
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, UserId } from '@/core/shared/ids';
-import { ok, type Result } from '@/core/shared/result';
+import { sumQuantity } from '@/core/shared/money';
+import { err, ok, type Result } from '@/core/shared/result';
 import type { Transaction } from '@/core/ledger/transaction';
 import type { WalletDependencies } from '@/core/wallets/dependencies';
+import { WalletErrorCode, walletError } from '@/core/wallets/errors';
 import { applyBuy, type BuyAllocationOutcome } from '@/core/wallets/apply-buy';
 import { applySell } from '@/core/wallets/apply-sell';
 import { applyCorporateEventToAllocations } from '@/core/wallets/apply-corporate-event';
@@ -48,6 +50,31 @@ import { applyCorporateEventToAllocations } from '@/core/wallets/apply-corporate
  */
 const RATIO_EVENTS = new Set(['split', 'grupamento']);
 
+/**
+ * BR-010-05/BR-010-17 — the types that take shares *away*.
+ *
+ * `sell` was the only one handled, and the other two break the invariant in
+ * exactly the same way: `core/positions/apply-transaction.ts` shrinks the
+ * position for a `transfer_out` (shares left for another custodian) and for a
+ * negative `adjustment` (BR-005-24's reconciliation correction, where the
+ * sign of the quantity carries the direction). Allocations that do not follow
+ * leave allocated > held, and `computeUnassigned` filters to positive
+ * remainders — so the contradiction did not even render as a warning: the
+ * screen showed a wallet holding shares the user no longer owned.
+ *
+ * They share `applySell`'s proportional reduction because they raise the same
+ * question and have the same answer: the event says how many shares left, and
+ * nothing about which purpose they served (DL-010-05).
+ *
+ * The types that *add* quantity — `transfer_in`, `subscription`,
+ * `bonificacao`, a positive `adjustment` — are deliberately not here. They
+ * leave the new shares unallocated, which is BR-010-16's brand-new-holding
+ * behaviour and lands them in the Needs attention queue rather than breaking
+ * an invariant. Auto-following the existing split would be the same guess
+ * BR-010-11 refuses on the buy side. Tracked separately on #13.
+ */
+const REDUCING_TYPES = new Set(['sell', 'transfer_out']);
+
 export interface AllocationMade {
   readonly assetId: AssetId;
   readonly outcome: BuyAllocationOutcome;
@@ -70,6 +97,7 @@ export async function applyLedgerEffects(
   transactions: readonly Transaction[],
 ): Promise<Result<LedgerEffectsSummary, DomainError>> {
   const allocations: AllocationMade[] = [];
+  const touched = new Set<AssetId>();
 
   for (const transaction of inTradeDateOrder(transactions)) {
     // BR-006-03: only `active` rows enter calculations, and an allocation is a
@@ -77,24 +105,40 @@ export async function applyLedgerEffects(
     // stored and deliberately inert (DL-006-06).
     if (transaction.status !== 'active') continue;
 
+    touched.add(transaction.assetId);
+
     if (transaction.type === 'buy') {
       const result = await applyBuy(deps, userId, {
         assetId: transaction.assetId,
         purchasedQuantity: transaction.quantity,
+        heldCheck: 'deferred',
       });
       if (!result.ok) return result;
       allocations.push({ assetId: transaction.assetId, outcome: result.value });
       continue;
     }
 
-    if (transaction.type === 'sell') {
-      // No `walletId`: an imported sell carries no statement of which purpose
-      // it served, and BR-010-17's proportional reduction is the documented
-      // answer for exactly that case. Inferring one from the split would be
-      // the same guess BR-010-11 refuses to make on the buy side.
+    /**
+     * An `adjustment` carries its direction in the **sign** of the quantity
+     * (SPEC-005 BR-005-24), so it is the one type whose effect cannot be read
+     * from `transaction.type` alone. Only the negative half reduces; the
+     * positive half adds shares that stay unallocated, like any other arrival.
+     */
+    const reduction =
+      transaction.type === 'adjustment' && transaction.quantity.isNegative()
+        ? transaction.quantity.negated()
+        : REDUCING_TYPES.has(transaction.type)
+          ? transaction.quantity
+          : null;
+
+    if (reduction !== null) {
+      // No `walletId`: an imported reduction carries no statement of which
+      // purpose it served, and BR-010-17's proportional reduction is the
+      // documented answer for exactly that case. Inferring one from the split
+      // would be the same guess BR-010-11 refuses to make on the buy side.
       const result = await applySell(deps, userId, {
         assetId: transaction.assetId,
-        soldQuantity: transaction.quantity,
+        soldQuantity: reduction,
       });
       if (!result.ok) return result;
       continue;
@@ -117,7 +161,42 @@ export async function applyLedgerEffects(
     }
   }
 
+  const invariant = await assertWithinHoldings(deps, touched);
+  if (!invariant.ok) return invariant;
+
   return ok({ allocations });
+}
+
+/**
+ * BR-010-05, checked once for the whole batch.
+ *
+ * This is the other half of `applyBuy`'s `heldCheck: 'deferred'`. The
+ * position cache reflects every transaction in the batch, so it is the right
+ * thing to compare against exactly once — at the end — and the wrong thing to
+ * compare against at any intermediate step. Verifying per asset rather than
+ * per transaction is also what makes a round trip commit while a genuine
+ * over-allocation still fails.
+ */
+async function assertWithinHoldings(
+  deps: WalletDependencies,
+  assetIds: ReadonlySet<AssetId>,
+): Promise<Result<true, DomainError>> {
+  for (const assetId of assetIds) {
+    const allocated = sumQuantity(
+      (await deps.allocations.listForAsset(assetId)).map((allocation) => allocation.quantity),
+    );
+    const held = await deps.positionQuery.query(assetId);
+    if (allocated.comparedTo(held.quantity) > 0) {
+      return err(
+        walletError(WalletErrorCode.ALLOCATION_EXCEEDS_HOLDINGS, {
+          assetId,
+          held: held.quantity.toString(),
+          requested: allocated.toString(),
+        }),
+      );
+    }
+  }
+  return ok(true);
 }
 
 /**

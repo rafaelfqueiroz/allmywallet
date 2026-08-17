@@ -3,7 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { AssetId, TransactionId, UserId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { Transaction, TransactionType } from '@/core/ledger/transaction';
-import { allocateToWallet } from '@/core/wallets/allocate';
+import { allocateToWallet, computeUnassigned } from '@/core/wallets/allocate';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { setStandingRule } from '@/core/wallets/standing-rule';
@@ -166,6 +166,13 @@ describe('SPEC-010 BR-010-18 — corporate events scale allocations', () => {
     const wallet = await walletFor(deps, 'Aposentadoria');
     await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
 
+    // Post-commit state, as everywhere else in this file: the ledger has
+    // already replayed the split, so the position cache holds the doubled
+    // quantity by the time allocations are adjusted. Seeding the *pre*-split
+    // 100 here described a state that cannot occur, and the BR-010-05 check
+    // at the end of the replay is what surfaced it.
+    deps.positionQuery.set(ITSA4, Quantity.fromString('200'), Money.fromString('5'));
+
     const result = await applyLedgerEffects(deps, USER, [
       tx('split', '100', '2026-03-10', { ratio: Quantity.fromString('2') }),
     ]);
@@ -241,5 +248,102 @@ describe('SPEC-010 — ordering and inertness', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.allocations).toEqual([]);
+  });
+});
+
+describe('SPEC-010 BR-010-05 — the invariant holds across a whole batch, not at each step', () => {
+  /**
+   * A batch is applied against the position the ledger *already* holds — the
+   * post-commit one. Checking "allocated ≤ held" after every individual
+   * transaction therefore compares an intermediate allocation against a final
+   * position, and a batch that ends valid can pass through a state that reads
+   * invalid. A round trip is the ordinary case: buy 50, sell 50, net zero.
+   *
+   * The failure was not a wrong number. `applyBuy` returned
+   * ALLOCATION_EXCEEDS_HOLDINGS, `handleImportCommit` propagated it, the
+   * whole `withTenant` transaction rolled back, and pg-boss retried the same
+   * deterministic failure forever — the batch could never commit at all.
+   */
+  it('a buy and a later sell of a fully-allocated asset commits', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
+
+    // The batch nets to zero, so the cached position is unchanged at 100.
+    const result = await applyLedgerEffects(deps, USER, [
+      tx('buy', '50', '2026-03-02'),
+      tx('sell', '50', '2026-03-20'),
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect((await deps.allocations.listForWallet(wallet.id))[0]?.quantity.toString()).toBe('100');
+  });
+
+  it('a batch that genuinely over-allocates is still refused', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
+
+    // The position cache says 100 held, but the batch claims 60 more bought.
+    const result = await applyLedgerEffects(deps, USER, [tx('buy', '60', '2026-03-02')]);
+
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('SPEC-010 BR-010-05/17 — every type that reduces the position reduces allocations', () => {
+  /**
+   * `sell` was the only reduction the replay knew about. `transfer_out` and a
+   * negative `adjustment` both shrink the position in
+   * `core/positions/apply-transaction.ts`, so leaving allocations untouched
+   * left allocated > held — the exact violation this module was written to
+   * close, still open on two paths.
+   *
+   * `computeUnassigned` filters to positive remainders, so the contradiction
+   * did not even render: the wallets screen showed 100 allocated of an asset
+   * the user no longer held, and Unassigned showed nothing at all.
+   */
+  it('a transfer_out of a fully-allocated asset reduces the allocation', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
+
+    deps.positionQuery.set(ITSA4, Quantity.zero(), Money.fromString('10'));
+    const result = await applyLedgerEffects(deps, USER, [tx('transfer_out', '100', '2026-03-10')]);
+
+    expect(result.ok).toBe(true);
+    expect(await deps.allocations.listForWallet(wallet.id)).toHaveLength(0);
+  });
+
+  it('a negative adjustment reduces allocations by the shares it removed', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
+
+    // BR-005-24's reconciliation correction: B3 says 40 fewer shares.
+    deps.positionQuery.set(ITSA4, Quantity.fromString('60'), Money.fromString('10'));
+    const result = await applyLedgerEffects(deps, USER, [tx('adjustment', '-40', '2026-03-10')]);
+
+    expect(result.ok).toBe(true);
+    expect((await deps.allocations.listForWallet(wallet.id))[0]?.quantity.toString()).toBe('60');
+  });
+
+  it('a positive adjustment adds no allocation — the shares land in Unassigned', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
+
+    deps.positionQuery.set(ITSA4, Quantity.fromString('140'), Money.fromString('10'));
+    const result = await applyLedgerEffects(deps, USER, [tx('adjustment', '40', '2026-03-10')]);
+
+    expect(result.ok).toBe(true);
+    expect((await deps.allocations.listForWallet(wallet.id))[0]?.quantity.toString()).toBe('100');
+    const unassigned = await computeUnassigned(deps, USER);
+    expect(unassigned[0]?.quantity.toString()).toBe('40');
   });
 });

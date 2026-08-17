@@ -18,8 +18,12 @@ import type { AssetPositionQuery } from '@/core/wallets/ports';
  * brand-new holding, or an existing one nobody got around to), or it is
  * deliberately split and a buy landed with nowhere unambiguous to go
  * (`ambiguous_split` — BR-010-11). BR-010-13's "resolve in one action with
- * quantity pre-filled" is exactly `allocateToWallet` called with this item's
- * `unassignedQuantity` as the explicit quantity.
+ * quantity pre-filled" is `allocateToWallet` called with this item's
+ * `unassignedQuantity` and **`mode: 'add'`** — the remainder is a delta to
+ * add to whatever the chosen wallet already holds, never that wallet's new
+ * absolute total. An `ambiguous_split` item is by definition an asset already
+ * held in at least one wallet, so the absolute reading destroyed data on
+ * precisely this queue's primary flow.
  */
 export interface PendingAllocation {
   readonly assetId: AssetPositionQuery['assetId'];

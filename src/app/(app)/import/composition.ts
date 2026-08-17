@@ -1,7 +1,8 @@
 import { SystemClock } from '@/core/shared/clock';
 import type { UserId } from '@/core/shared/ids';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
-import { buildIngestionDeps } from '@/worker/handlers/import';
+import type { WalletDependencies } from '@/core/wallets/dependencies';
+import { buildIngestionDeps, buildWalletDeps } from '@/worker/handlers/import';
 import { db } from '@/db/client';
 import { withTenant } from '@/db/tenant';
 
@@ -18,4 +19,25 @@ export async function withIngestionDeps<T>(
   fn: (deps: IngestionDependencies) => Promise<T>,
 ): Promise<T> {
   return withTenant(userId, (tx) => fn(buildIngestionDeps(tx, userId, clock)), db);
+}
+
+/**
+ * For the one ingestion path that writes a **quantity-moving** transaction
+ * outside the commit queue: accepting a reconciliation figure (BR-005-25).
+ *
+ * `handleImportCommit` adjusts allocations in the same tenant transaction as
+ * the ledger write, for the reason stated there — a ledger that no longer
+ * agrees with its allocations has no retry that repairs it. Accepting an
+ * adjustment creates a signed `adjustment` row with exactly the same power to
+ * break BR-010-05, so it needs the same treatment and the same transaction.
+ */
+export async function withIngestionAndWalletDeps<T>(
+  userId: UserId,
+  fn: (deps: IngestionDependencies, wallets: WalletDependencies) => Promise<T>,
+): Promise<T> {
+  return withTenant(
+    userId,
+    (tx) => fn(buildIngestionDeps(tx, userId, clock), buildWalletDeps(tx, userId, clock)),
+    db,
+  );
 }

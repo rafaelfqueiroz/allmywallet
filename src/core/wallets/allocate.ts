@@ -15,20 +15,37 @@ import type { WalletAllocation } from '@/core/wallets/ports';
  * position can later be split deliberately (100 ITSA4 as 60/40) — splitting
  * is always a second, explicit action with its own quantity, never inferred.
  *
- * `quantity` here is the target **absolute** amount for this
- * `(wallet, asset)` pair, not a delta — assigning is "this wallet now holds
- * N of this asset", which is what makes correcting an earlier split (60/40 →
- * 70/30) the same one action as the first assignment. Omitting it is the
- * one-click default: **the full remaining unassigned quantity**, which for a
- * never-before-allocated asset equals the whole position (BR-010-03 read
- * literally) and for a partially-split one is "everything nobody has claimed
- * yet" — never invented by inferring from a wallet's *other* holdings.
+ * `quantity` is read one of two ways, and the caller has to say which,
+ * because the same number means different things in the two places a user
+ * assigns from:
+ *
+ *  - `'absolute'` (the default) — "this wallet now holds N of this asset".
+ *    This is what makes correcting an earlier split (60/40 → 70/30) the same
+ *    one action as the first assignment. Omitting `quantity` is the one-click
+ *    default: **the full remaining unassigned quantity**, which for a
+ *    never-before-allocated asset equals the whole position (BR-010-03 read
+ *    literally) and for a partially-split one is "everything nobody has
+ *    claimed yet" — never invented by inferring from a wallet's *other*
+ *    holdings.
+ *  - `'add'` — "put these N unclaimed shares into this wallet", on top of
+ *    whatever it already holds. BR-010-13's resolve-in-one-action, whose form
+ *    is pre-filled with the *unassigned remainder* (`pending.ts`).
+ *
+ * Reading a remainder as an absolute target is not a rounding error, it is
+ * data loss: an `ambiguous_split` item is by definition an asset already
+ * sitting in one or more wallets, so resolving 20 unassigned shares into a
+ * wallet holding 60 used to overwrite the 60 and drop 40 back to Unassigned
+ * with nothing said. That is why the two intents are named rather than
+ * inferred — there is no value of `quantity` from which the mode can be
+ * recovered.
  */
-export interface AllocateToWalletInput {
+export type AllocateToWalletInput = {
   readonly walletId: WalletId;
   readonly assetId: AssetId;
-  readonly quantity?: Quantity | undefined;
-}
+} & (
+  | { readonly mode?: 'absolute' | undefined; readonly quantity?: Quantity | undefined }
+  | { readonly mode: 'add'; readonly quantity: Quantity }
+);
 
 export async function allocateToWallet(
   deps: WalletDependencies,
@@ -50,7 +67,14 @@ export async function allocateToWallet(
   const othersTotal = sumQuantity(others.map((allocation) => allocation.quantity));
   const existingForThisWallet = locked.find((allocation) => allocation.walletId === input.walletId);
 
-  const quantity = input.quantity ?? held.quantity.minus(othersTotal);
+  // `'add'` is resolved against this wallet's *own* current slice, inside the
+  // lock — reading it before `lockForAsset` would let two concurrent resolves
+  // both add to the same stale base and overshoot the held quantity.
+  const quantity =
+    input.mode === 'add'
+      ? (existingForThisWallet?.quantity ?? Quantity.zero()).plus(input.quantity)
+      : (input.quantity ?? held.quantity.minus(othersTotal));
+
   if (!quantity.isPositive()) {
     return err(
       walletError(WalletErrorCode.INVALID_ALLOCATION_QUANTITY, {
