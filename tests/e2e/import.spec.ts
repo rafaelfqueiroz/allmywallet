@@ -124,7 +124,18 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
   );
   expect(Number(leaked?.count ?? '0')).toBe(0);
 
-  // ---- The ledger is visible where the user looks for it ------------------
-  await page.goto('/reports');
-  await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+  // ---- Every report renders for a signed-in tenant with real holdings -----
+  //
+  // Not a smoke test padded onto the end. `screens.spec.ts` checks these
+  // routes **signed out**, which is how the root layout's tenant-scoped
+  // config read reached production returning 500 on every authenticated page:
+  // signed out, that read never happens. This is the only place in the suite
+  // where a report renders with a session and with data behind it.
+  for (const route of ['/reports', '/reports/patrimonio', '/reports/performance'] as const) {
+    await page.goto(route);
+    await expect(page.getByRole('heading', { level: 1 }), `${route} should render`).toBeVisible();
+    // A Next error boundary renders its own document; this is what tells a
+    // 500 apart from a page that legitimately has little to show.
+    await expect(page.locator('#__next_error__'), `${route} should not 500`).toHaveCount(0);
+  }
 });
