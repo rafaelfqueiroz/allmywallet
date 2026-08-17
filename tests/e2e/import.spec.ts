@@ -44,6 +44,22 @@ async function queryOne<T extends Record<string, unknown>>(
  */
 test.setTimeout(180_000);
 
+/**
+ * **No retries on this journey**, against the suite-wide `retries: 2`.
+ *
+ * A retry here already hid a real production defect: the first attempt 500'd
+ * with `Queue import.stage does not exist` — the web process enqueuing 412 ms
+ * before the worker finished creating queues — and the second attempt passed,
+ * because by then the worker had created them. CI went green and the check
+ * summary said nothing.
+ *
+ * Retries earn their place where a runner is flaky. They do not earn it on
+ * the one journey the product cannot work without, where "passes the second
+ * time" is itself the symptom worth seeing: every cold-start bug on this path
+ * looks exactly like that.
+ */
+test.describe.configure({ retries: 0 });
+
 test('a signed-in user imports a Negociação extract and sees the transactions land', async ({
   signedIn,
 }) => {
