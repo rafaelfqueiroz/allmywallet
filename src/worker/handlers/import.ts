@@ -264,7 +264,25 @@ export async function handleImportCommit(
    */
   const rebuildFrom = earliestTradeDateOf(result.value.committed);
   if (rebuildFrom !== null) {
-    await deps.enqueueSnapshot({ userId, from: rebuildFrom });
+    /**
+     * A failed enqueue must not fail a committed batch. The ledger is already
+     * correct and durable; only the derived snapshots are behind, and the
+     * nightly sweep still covers them.
+     *
+     * Throwing here would be actively worse than logging. pg-boss would retry
+     * `handleImportCommit`, and a retried commit is an AR-19 no-op that
+     * returns no transactions — so `rebuildFrom` would be `null` on every
+     * subsequent attempt and the rebuild request would be lost for good. The
+     * retry would consume the one chance to make it.
+     */
+    try {
+      await deps.enqueueSnapshot({ userId, from: rebuildFrom });
+    } catch (error) {
+      logger.error(
+        { err: error, queue: 'import.commit', batchId, rebuildFrom },
+        'SPEC-009 BR-009-18: could not request a snapshot rebuild; the nightly sweep will cover it',
+      );
+    }
   }
 
   logger.info(
