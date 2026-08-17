@@ -4,7 +4,14 @@ import { Money, Quantity } from '@/core/shared/money';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import type { ReportQueryResult } from '@/core/reporting/base-query';
-import type { GroupedReport } from '@/core/reporting/ports';
+import type { GroupedReport, Scope } from '@/core/reporting/ports';
+import { walletIdOf } from '@/core/reporting/test-support';
+import {
+  HistoryUnavailable,
+  type MonthlyContribution,
+  type SnapshotDerived,
+  type ValuePoint,
+} from './ports';
 import { buildPortfolioValueReport } from './report';
 
 /**
@@ -17,11 +24,19 @@ import { buildPortfolioValueReport } from './report';
  * product could ship, so the fixtures below give the last snapshot a
  * deliberately *different* figure — a regression that read the snapshot would
  * fail rather than coincidentally agree.
+ *
+ * The second half of the file is the same principle at wallet scope, where the
+ * two figures come from tables with different grain and combining them
+ * produced a number that was arithmetically perfect and completely false.
  */
 
 const d = (value: string): BusinessDate => BusinessDate.of(value);
 const m = (value: string): Money => Money.fromString(value);
 const to8 = (value: Money): string => value.toDecimal().toFixed(8);
+
+const WALLET = walletIdOf('1');
+const PORTFOLIO_SCOPE: Scope = { kind: 'portfolio' };
+const WALLET_SCOPE: Scope = { kind: 'wallet', walletId: WALLET };
 
 function snapshot(
   date: string,
@@ -57,18 +72,41 @@ function groupedReport(total: string, estimated = false): GroupedReport {
 function query(
   snapshots: readonly DailyValuationSnapshot[],
   holdingsTotal: string,
-  options: { from?: string; to?: string; asOf?: string; estimated?: boolean } = {},
+  options: {
+    from?: string;
+    to?: string;
+    asOf?: string;
+    estimated?: boolean;
+    scope?: Scope;
+  } = {},
 ): ReportQueryResult {
   const from = d(options.from ?? '2026-03-01');
   const to = d(options.to ?? '2026-03-31');
+  const scope = options.scope ?? PORTFOLIO_SCOPE;
   return {
     range: { from, to },
     asOf: d(options.asOf ?? '2026-03-31'),
-    scope: { scope: { kind: 'portfolio' }, wallet: null },
+    scope: {
+      scope,
+      wallet: scope.kind === 'wallet' ? { walletId: scope.walletId, name: 'Reserva' } : null,
+    },
     report: groupedReport(holdingsTotal, options.estimated ?? false),
     snapshots,
     empty: snapshots.length === 0,
   };
+}
+
+/** Narrows a `SnapshotDerived`, failing loudly rather than silently skipping. */
+function present<T>(figure: SnapshotDerived<T>): T {
+  if (figure.kind !== 'available') {
+    throw new Error(`expected an available figure, got ${figure.reason}`);
+  }
+  return figure.value;
+}
+
+function absent<T>(figure: SnapshotDerived<T>): HistoryUnavailable {
+  if (figure.kind !== 'unavailable') throw new Error('expected an unavailable figure');
+  return figure.reason;
 }
 
 describe('buildPortfolioValueReport', () => {
@@ -89,7 +127,7 @@ describe('buildPortfolioValueReport', () => {
     });
 
     expect(to8(result.headline.currentValue)).toBe('150000.00000000');
-    expect(to8(result.series.at(-1)!.value)).toBe('150000.00000000');
+    expect(to8(present(result.series).at(-1)!.value)).toBe('150000.00000000');
   });
 
   it('decomposes against the snapshot preceding the range', () => {
@@ -103,8 +141,9 @@ describe('buildPortfolioValueReport', () => {
       lastImportAt: null,
     });
 
-    expect(to8(result.decomposition.netContributions)).toBe('10000.00000000');
-    expect(to8(result.decomposition.priceChange)).toBe('20000.00000000');
+    const decomposition = present(result.decomposition);
+    expect(to8(decomposition.netContributions)).toBe('10000.00000000');
+    expect(to8(decomposition.priceChange)).toBe('20000.00000000');
   });
 
   it('picks granularity from the range, not the snapshot count', () => {
@@ -154,6 +193,11 @@ describe('buildPortfolioValueReport', () => {
       lastImportAt: null,
     });
     expect(result.stacked.kind).toBe('unavailable');
+    if (result.stacked.kind !== 'unavailable') return;
+    // At **portfolio** scope, grouping by wallet fails for the dimension's own
+    // reason — the snapshot decomposes by asset class and nothing else. The
+    // scope-level refusal below is a different absence with a different cause.
+    expect(result.stacked.reason).toBe(HistoryUnavailable.NO_HISTORICAL_BREAKDOWN);
   });
 
   /**
@@ -169,12 +213,12 @@ describe('buildPortfolioValueReport', () => {
       lastImportAt: null,
     });
 
-    expect(to8(result.decomposition.closing)).toBe('0.00000000');
-    expect(result.monthlyContributions).toEqual([]);
-    expect(result.headline.gainRatio).toBe(null);
+    expect(to8(present(result.decomposition).closing)).toBe('0.00000000');
+    expect(present(result.monthlyContributions)).toEqual([]);
+    expect(present(result.headline.invested).gainRatio).toBe(null);
     // The live endpoint still applies: asOf is today, so the series is the
     // single live point rather than nothing at all.
-    expect(result.series).toHaveLength(1);
+    expect(present(result.series)).toHaveLength(1);
   });
 
   it('carries the live estimate flag onto the endpoint', () => {
@@ -185,6 +229,161 @@ describe('buildPortfolioValueReport', () => {
       today,
       lastImportAt: null,
     });
-    expect(result.series.at(-1)!.estimated).toBe(true);
+    expect(present(result.series).at(-1)!.estimated).toBe(true);
+  });
+});
+
+/**
+ * SPEC-011 BR-011-02 / SPEC-013 BR-013-11 — **wallet scope reports what the
+ * snapshot table cannot answer, and shows what it can.**
+ *
+ * ## The report this replaces
+ *
+ * `daily_valuation_snapshots` has one row per user per day and no wallet
+ * column (ADR-002). Before this refusal, a wallet-scoped Patrimônio combined
+ * the *scoped* holding total with the *portfolio's* snapshot series. The
+ * fixture below is the reported case, and the arithmetic it used to produce is
+ * worth writing out because every input in it is a real number about this user:
+ *
+ *   portfolio, every day of March:  total_value 400.000, net_contributions 400.000
+ *   wallet "Reserva", valued today:                      holdings      10.000
+ *
+ *   totalInvested = closing.netContributions       = 400.000
+ *   absoluteGain  = 10.000 − 400.000               = −390.000
+ *   gainRatio     = −390.000 ÷ 400.000             = −0,975   →  **−97,5 %**
+ *
+ *   series        = [30/03 = 400.000, 31/03 = 10.000]
+ *                   ← the portfolio's line for the whole period, then
+ *                     `withLiveEndpoint` splices the wallet's value onto the
+ *                     end and the chart falls off a cliff on the last point
+ *   decomposition = opening 400.000 → closing 400.000, i.e. the portfolio's
+ *   stacked       = the portfolio's bands, under a wallet's heading
+ *
+ * Nothing on that screen looks broken. A user who has never withdrawn anything
+ * is told they have lost 97,5 % of a carteira, and the only way to discover it
+ * is to reconcile against a broker statement.
+ *
+ * ## Why the answer is a refusal rather than a better estimate
+ *
+ * There is no wallet-grain history to compute from and none can be
+ * synthesised: `wallet_allocations` stores only its *current* state, so
+ * applying today's split to past days would rewrite every historical chart on
+ * the next reassignment, and a rebuild would then disagree with the snapshot it
+ * replaced (DM-4). ADR-002 records the decision; effective-dated allocation
+ * history is backlog issue #50.
+ */
+describe('SPEC-013 at wallet scope — snapshot-derived figures are unavailable', () => {
+  const today = d('2026-03-31');
+
+  /** The reported portfolio: 400.000, entirely contributed, flat across March. */
+  const PORTFOLIO_HISTORY = [
+    snapshot('2026-03-30', '400000', '400000'),
+    snapshot('2026-03-31', '400000', '400000'),
+  ];
+
+  const OPENING = snapshot('2026-02-28', '400000', '400000');
+
+  function run(scope: Scope, grouping: 'asset_class' | 'wallet' = 'asset_class') {
+    return buildPortfolioValueReport({
+      // The wallet holds R$ 10.000 of the R$ 400.000 portfolio.
+      query: query(PORTFOLIO_HISTORY, '10000', { scope }),
+      opening: OPENING,
+      grouping,
+      today,
+      lastImportAt: d('2026-03-15'),
+    });
+  }
+
+  it('never produces the −97,5 % gain ratio', () => {
+    const result = run(WALLET_SCOPE);
+    expect(result.headline.invested.kind).toBe('unavailable');
+    // Belt and braces: whatever else changes, this number must not come back.
+    expect(JSON.stringify(result.headline.invested)).not.toContain('0.975');
+  });
+
+  it('refuses the headline’s invested figures, naming the cause', () => {
+    expect(absent(run(WALLET_SCOPE).headline.invested)).toBe(
+      HistoryUnavailable.WALLET_SCOPE_NOT_SNAPSHOTTED,
+    );
+  });
+
+  it('refuses the value series rather than drawing the portfolio’s line', () => {
+    expect(absent(run(WALLET_SCOPE).series)).toBe(HistoryUnavailable.WALLET_SCOPE_NOT_SNAPSHOTTED);
+  });
+
+  it('refuses the growth decomposition', () => {
+    expect(absent(run(WALLET_SCOPE).decomposition)).toBe(
+      HistoryUnavailable.WALLET_SCOPE_NOT_SNAPSHOTTED,
+    );
+  });
+
+  it('refuses the monthly contribution bars', () => {
+    expect(absent(run(WALLET_SCOPE).monthlyContributions)).toBe(
+      HistoryUnavailable.WALLET_SCOPE_NOT_SNAPSHOTTED,
+    );
+  });
+
+  /**
+   * The distinction the two reasons exist for. `asset_class` is the one
+   * dimension the snapshot *does* decompose along, so at portfolio scope it
+   * bands happily — and at wallet scope it must still refuse, for the scope's
+   * reason rather than the dimension's. A single reason code would have made
+   * this case indistinguishable from "we don't store that breakdown", and the
+   * message the user reads would have been about the wrong thing.
+   */
+  it('refuses the stacked bands for the one dimension it can normally band', () => {
+    const walletScoped = run(WALLET_SCOPE, 'asset_class');
+    expect(walletScoped.stacked.kind).toBe('unavailable');
+    if (walletScoped.stacked.kind !== 'unavailable') return;
+    expect(walletScoped.stacked.reason).toBe(HistoryUnavailable.WALLET_SCOPE_NOT_SNAPSHOTTED);
+    expect(walletScoped.stacked.grouping).toBe('asset_class');
+
+    // The same call at portfolio scope still bands, so the refusal is the
+    // scope's and not a regression that broke the feature for everyone.
+    expect(run(PORTFOLIO_SCOPE, 'asset_class').stacked.kind).toBe('available');
+  });
+
+  /**
+   * BR-013-12 — **what survives**, and it is the point of not making this an
+   * error page. `applyScope` sliced the holding set per wallet before it was
+   * folded (SPEC-011 `scope.ts`), so the total is R$ 10.000 — this wallet's
+   * money, the same figure Composition shows for the same scope and date.
+   */
+  it('still headlines the wallet’s own current value', () => {
+    expect(to8(run(WALLET_SCOPE).headline.currentValue)).toBe('10000.00000000');
+  });
+
+  /** Facts about the request, not about the portfolio, so they hold anywhere. */
+  it('still carries granularity and both freshness dates', () => {
+    const result = run(WALLET_SCOPE);
+    expect(result.granularity).toBe('daily');
+    expect(result.freshness.valuationAsOf).toBe('2026-03-31');
+    expect(result.freshness.lastImportAt).toBe('2026-03-15');
+  });
+
+  /**
+   * The same fixture at portfolio scope, asserting the figures the wallet
+   * scope refuses are exactly the ones it used to borrow. Hand-computed:
+   *
+   *   totalInvested = 400.000                       (the closing snapshot)
+   *   absoluteGain  = 10.000 − 400.000 = −390.000
+   *   gainRatio     = −390.000 ÷ 400.000 = −0,975
+   *
+   * A portfolio genuinely worth 10.000 after contributing 400.000 *has* lost
+   * 97,5 %, and this report says so. The defect was never the arithmetic; it
+   * was pairing it with a scope it did not belong to.
+   */
+  it('produces those very figures at portfolio scope, where they are true', () => {
+    const invested = present(run(PORTFOLIO_SCOPE).headline.invested);
+    expect(to8(invested.totalInvested)).toBe('400000.00000000');
+    expect(to8(invested.absoluteGain)).toBe('-390000.00000000');
+    expect(to8(invested.gainRatio!)).toBe('-0.97500000');
+
+    const series: readonly ValuePoint[] = present(run(PORTFOLIO_SCOPE).series);
+    expect(series.map((point) => point.value.toString())).toEqual(['400000', '10000']);
+
+    const bars: readonly MonthlyContribution[] = present(run(PORTFOLIO_SCOPE).monthlyContributions);
+    // 400.000 at the end of March against 400.000 at the end of February.
+    expect(bars.map((bar) => `${bar.month}=${bar.amount.toString()}`)).toEqual(['2026-03=0']);
   });
 });

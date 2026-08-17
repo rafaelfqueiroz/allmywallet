@@ -166,6 +166,26 @@ export default async function PerformancePage({ searchParams }: PageProps) {
             />
           </Grid>
 
+          {/* SPEC-011 BR-011-02 / SPEC-012 AC-16 — **why four of the figures
+              above say *indisponível*.**
+
+              `daily_valuation_snapshots` is portfolio grain (ADR-002), so a
+              wallet has no daily value series and no daily flow series behind
+              it. TWR, XIRR, "% do CDI" and the real return therefore have no
+              wallet-scoped answer, and neither does BR-012-12's shadow
+              portfolio — it is defined as *the user's own contributions at the
+              index's rate*, and the only contributions on hand are the whole
+              portfolio's. Rendered before the benchmark table rather than after
+              it, because the reader meets the blanks first.
+
+              Keyed off the **resolved** scope rather than the parsed URL, for
+              the reason `scope.ts` gives for carrying it: the note must
+              describe the scope the figures were actually computed at, not one
+              held in client state beside them. */}
+          {report.value.scope.scope.kind === 'wallet' && (
+            <Note>{tr('walletScope.explanation')}</Note>
+          )}
+
           {/* BR-012-04 / DL-012-02 — the explanation is the feature. */}
           {report.value.explainDivergence && <Note>{tr('divergence.explanation')}</Note>}
 

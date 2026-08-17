@@ -4,7 +4,7 @@ import type { AssetClass } from '@/core/quotes/ports';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import type { Grouping } from '@/core/reporting/ports';
 import {
-  StackedSeriesUnavailable,
+  HistoryUnavailable,
   type Granularity,
   type MonthlyContribution,
   type StackedBand,
@@ -191,7 +191,7 @@ export function stackedSeries(
     return {
       kind: 'unavailable',
       grouping,
-      reason: StackedSeriesUnavailable.NO_HISTORICAL_BREAKDOWN,
+      reason: HistoryUnavailable.NO_HISTORICAL_BREAKDOWN,
     };
   }
 

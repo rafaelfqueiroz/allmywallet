@@ -16,6 +16,7 @@ import {
   runPerformanceReport,
   seriesFromSnapshots,
   type PerformanceReport,
+  type PerformanceSeries,
 } from '@/core/reporting/performance/report';
 import { DEFAULT_DIVERGENCE_POINTS } from '@/core/reporting/performance/xirr';
 import {
@@ -159,6 +160,18 @@ function errorCode(result: { ok: true } | { ok: false; error: { code: string } }
 }
 
 /**
+ * `PerformanceReport.series` is nullable because a **wallet** scope has no
+ * series behind it — `daily_valuation_snapshots` is persisted at portfolio
+ * grain. Every assertion in this file that reaches into the series is a
+ * portfolio-scope one, so this narrows and fails loudly rather than letting a
+ * `?.` quietly turn a missing series into a passing expectation.
+ */
+function portfolioSeries(report: { series: PerformanceSeries | null }): PerformanceSeries {
+  if (report.series === null) throw new Error('expected a portfolio-scope series');
+  return report.series;
+}
+
+/**
  * A period whose start is **not** the tenant's first snapshot, so
  * `findSnapshotBefore` has a baseline to return. Everything below shares this
  * runner; `run` above deliberately does not, because its fixture starts on the
@@ -247,10 +260,10 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
       to: '2026-03-31',
     });
 
-    expect(report.series.points[0]?.date).toBe('2026-02-28');
-    expect(report.series.points[0]?.value.toString()).toBe('100000');
+    expect(portfolioSeries(report).points[0]?.date).toBe('2026-02-28');
+    expect(portfolioSeries(report).points[0]?.value.toString()).toBe('100000');
     // 31 March closes plus the February baseline in front of them.
-    expect(report.series.points).toHaveLength(32);
+    expect(portfolioSeries(report).points).toHaveLength(32);
     expect(unwrap(report.twr).returnRate.toString()).toBe('0.05');
 
     // The reported range is still the range the user asked for. Only the
@@ -328,13 +341,15 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
     });
 
     // Exactly one flow, on the user's own date, at its own size.
-    expect(report.series.flows.map((flow) => [flow.date, flow.amount.toString()])).toEqual([
+    expect(
+      portfolioSeries(report).flows.map((flow) => [flow.date, flow.amount.toString()]),
+    ).toEqual([
       ['2026-03-01', '50000'],
       ['2026-03-02', '0'],
     ]);
     expect(unwrap(report.twr).returnRate.toString()).toBe('0.05');
     // `gain` is the money the period actually made — the deposit is not it.
-    expect(report.series.gain.toString()).toBe('5000');
+    expect(portfolioSeries(report).gain.toString()).toBe('5000');
   });
 
   /**
@@ -393,8 +408,10 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
       to: '2027-01-01',
     });
 
-    expect(report.series.points[0]?.date).toBe('2026-01-01');
-    expect(report.series.points).toHaveLength(3);
+    // Portfolio scope, so there is a series — `null` is the wallet-scope case.
+    const series = portfolioSeries(report);
+    expect(series.points[0]?.date).toBe('2026-01-01');
+    expect(series.points).toHaveLength(3);
     // Unchanged from before the baseline existed: 1,10 × 0,990909090909 − 1.
     expect(unwrap(report.twr).returnRate.toString()).toBe('0.09');
 
@@ -419,7 +436,7 @@ describe('SPEC-012 BR-012-01/03 — the period opens on the close before it, not
     });
 
     expect(errorCode(report.twr)).toBe('PERFORMANCE_NO_SERIES');
-    expect(report.series.points).toHaveLength(0);
+    expect(portfolioSeries(report).points).toHaveLength(0);
   });
 
   /**
@@ -659,6 +676,60 @@ describe('SPEC-012 AC-16 — wallet scope reports what it cannot compute', () =>
     expect(errorCode(report.xirr)).toBe('PERFORMANCE_SCOPE_SERIES_UNAVAILABLE');
     expect(errorCode(report.percentOfCdi)).toBe('PERFORMANCE_SCOPE_SERIES_UNAVAILABLE');
     expect(errorCode(report.realReturn)).toBe('PERFORMANCE_SCOPE_SERIES_UNAVAILABLE');
+  });
+
+  /**
+   * **BR-012-12 — the shadow portfolio is the user's own flows at the index's
+   * rate, so at wallet scope there are none to replay.**
+   *
+   * The refusal above was originally written for TWR and XIRR alone, while
+   * `loadBenchmarks` kept receiving the portfolio's series regardless. Over the
+   * deposit fixture — 100.000 opening, a 500.000 deposit on 1 July, CDI
+   * accruing 0,05 % on 1 January only — the shadow computed, by hand:
+   *
+   *   01/01/2026  100.000                       (the *portfolio's* opening)
+   *   02/01/2026  100.000 × 1,0005 = 100.050
+   *   01/07/2026  100.050 + 500.000 = 600.050   (the *portfolio's* deposit)
+   *   01/01/2027  600.050
+   *
+   * and R$ 600.050 was published on the screen of a wallet holding R$ 12.000,
+   * under "seus aportes nesse índice". Every figure in it real; none of it this
+   * carteira's.
+   *
+   * The **line** is a different matter and is still computed: 0,0005 is what
+   * CDI did over the period, a fact about the index rather than about this
+   * tenant, and it is as true on a wallet's screen as on the portfolio's.
+   */
+  it('replays no shadow portfolio from the portfolio’s flows', async () => {
+    const index = new FakeIndexSeries({
+      CDI: [{ date: START, value: Quantity.fromString('0.05') }],
+    });
+
+    const portfolio = await run({ snapshots: DEPOSIT_HISTORY, benchmarks: ['CDI'], index });
+    expect(portfolio.benchmarks[0]?.shadow?.finalValue.toString()).toBe('600050');
+
+    const scoped = await run({
+      snapshots: DEPOSIT_HISTORY,
+      benchmarks: ['CDI'],
+      index,
+      scope: { kind: 'wallet', walletId: walletIdOf('1') },
+    });
+    expect(scoped.benchmarks[0]?.shadow).toBeNull();
+    // The index's own return survives — it says nothing about this tenant.
+    expect(unwrap(scoped.benchmarks[0]!.line).returnRate.toString()).toBe('0.0005');
+  });
+
+  /**
+   * The series itself is portfolio grain, so it is withheld rather than handed
+   * out under a wallet's name — otherwise the next caller repeats the defect
+   * with a fresh chart instead of a fresh shadow.
+   */
+  it('withholds the portfolio-grain value series', async () => {
+    const scoped = await run({ scope: { kind: 'wallet', walletId: walletIdOf('1') } });
+    expect(scoped.series).toBeNull();
+
+    const portfolio = await run({});
+    expect(portfolio.series?.points).toHaveLength(3);
   });
 
   it('refuses a scope naming a wallet this tenant does not have', async () => {
