@@ -149,6 +149,47 @@ export function seriesFromSnapshots(
 }
 
 /**
+ * SPEC-012 BR-012-01/03 — **the period's baseline, prepended to its
+ * observations.**
+ *
+ * A `daily_valuation_snapshots` row dated `d` is the **close** of `d`: SPEC-009
+ * values a date by replaying the ledger to and including it. So the snapshots
+ * inside `[from, to]` open on the close of `from`, and a series built from them
+ * alone measures from the *end* of the period's first day — every movement
+ * during `from` itself, price and flow alike, falls outside the return.
+ *
+ * That is the same off-by-one SPEC-013 BR-013-02 already fixes for
+ * *Patrimônio*, which is exactly why it had to be fixed here: the two screens
+ * were reporting the same range from different starting points, and disagreeing
+ * about it. A custom range whose first day gained 5 % showed +5 % growth on
+ * Patrimônio and a TWR of 0,00 % on Rentabilidade.
+ *
+ * Prepending the preceding snapshot makes the first sub-period span
+ * `close(before) → close(from)`, which is the day `from`. **The flow alignment
+ * follows from it rather than needing its own rule**: `seriesFromSnapshots`
+ * derives flows as differences of the cumulative `net_contributions`, so a
+ * contribution made on `from` becomes the difference between the baseline's
+ * total and `from`'s — one flow, dated `from`, inside the one sub-period that
+ * ends there. Neither dropped (as it was before, the first snapshot
+ * contributing no flow) nor counted twice.
+ *
+ * **The baseline is a baseline, not a series.** With no snapshot inside the
+ * period there is nothing to measure *to*, and a lone prior point would link no
+ * sub-periods and publish a confident 0 % — precisely the misleading zero
+ * BR-012-18 forbids. So it is used only alongside real observations.
+ *
+ * `null` when the period starts at or before the tenant's first snapshot. The
+ * period genuinely opens with the portfolio's first recorded value there, and
+ * that behaviour is unchanged.
+ */
+export function baselineFor(
+  opening: DailyValuationSnapshot | null,
+  snapshots: readonly DailyValuationSnapshot[],
+): DailyValuationSnapshot | null {
+  return snapshots.length === 0 ? null : opening;
+}
+
+/**
  * BR-012-03 — the same period, in the **investor's** sign convention.
  *
  * The inversion happens here and nowhere else. A buy is money the user parted
@@ -160,6 +201,13 @@ export function seriesFromSnapshots(
  * mid-history would look as though the user began with nothing, and every
  * return over a 12-month window on a ten-year portfolio would be wrong by the
  * whole of its opening *patrimônio*.
+ *
+ * The first point is the **baseline** where one exists (`baselineFor` above),
+ * so XIRR discounts from the same opening capital TWR measures from. It needed
+ * that correction as much as TWR did — before it, the first flow was the close
+ * of `from`, which already contained both the first day's gain and any
+ * contribution made that day, so the two cancelled and the day vanished from
+ * the money-weighted return too.
  */
 export function cashFlowsFrom(series: PerformanceSeries): readonly CashFlow[] {
   const first = series.points[0];
@@ -246,7 +294,37 @@ export async function runPerformanceReport(
   );
   if (!base.ok) return base;
 
-  const series = seriesFromSnapshots(base.value.snapshots, input.treatment);
+  // SPEC-012 BR-012-01: the period's return runs from the close *before* it, so
+  // the first day belongs to the report rather than to the day before it. Read
+  // only once the range is resolved — the date it needs is `range.from`, which
+  // `resolvePeriod` inside `runReportQuery` is what decides. Same tenant
+  // transaction, same consistent view (AR-11); `patrimonio/data.ts` sequences
+  // the identical read for the identical reason.
+  const baseline = baselineFor(
+    await deps.port.findSnapshotBefore(base.value.range.from),
+    base.value.snapshots,
+  );
+  const series = seriesFromSnapshots(
+    baseline === null ? base.value.snapshots : [baseline, ...base.value.snapshots],
+    input.treatment,
+  );
+
+  /**
+   * SPEC-012 BR-012-12/13 — **the benchmark window is the series window, not
+   * the requested period.**
+   *
+   * `accumulateRateSeries` starts its line at exactly 1 on its `from` and
+   * compounds the published rates over `[from, to)`, so its return is the
+   * growth of capital present from `from`'s open — i.e. from the close of the
+   * day before. That is now precisely where the portfolio's series starts, and
+   * the two must cover the same days or "% do CDI" divides a 32-day portfolio
+   * return by a 31-day CDI one (BR-012-11) and the comparison chart's first row
+   * shows the portfolio moving against a benchmark still pinned at 100.
+   *
+   * With no baseline the window is the period, unchanged.
+   */
+  const seriesRange: DateRange =
+    baseline === null ? base.value.range : { from: baseline.date, to: base.value.range.to };
 
   /**
    * AC-16 — **wallet scope has no series behind it, and that is reported
@@ -283,7 +361,7 @@ export async function runPerformanceReport(
       )
     : computeXirr({ flows: cashFlowsFrom(series) });
 
-  const benchmarks = await loadBenchmarks(deps.indexSeries, input, base.value.range, series);
+  const benchmarks = await loadBenchmarks(deps.indexSeries, input, seriesRange, series);
   const cdi = benchmarks.find((outcome) => outcome.benchmark === 'CDI');
   const ipca = benchmarks.find((outcome) => outcome.benchmark === 'IPCA');
 

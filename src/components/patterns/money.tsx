@@ -1,6 +1,6 @@
 import type * as React from 'react';
 import type { Money as MoneyValue, Quantity } from '@/core/shared/money';
-import { formatCurrency, formatPercent, formatQuantity } from '@/i18n/format';
+import { formatCurrency, formatPercent, formatPercentPoints, formatQuantity } from '@/i18n/format';
 import { cn } from '@/lib/utils';
 
 /**
@@ -21,14 +21,24 @@ import { cn } from '@/lib/utils';
  */
 export type MoneyProps = Omit<React.ComponentProps<'span'>, 'children'> & {
   value: MoneyValue | Quantity;
-  /** `currency` renders R$; `quantity` a bare number; `percent` takes a fraction. */
-  kind?: 'currency' | 'quantity' | 'percent';
+  /**
+   * `currency` renders R$; `quantity` a bare number; `percent` takes a
+   * **fraction** (0,1234 → "12,34%"); `percentPoints` takes a value already
+   * in percentage points (118 → "118,00%").
+   *
+   * The last two are separate kinds rather than one, because `Intl`'s percent
+   * style multiplies by 100 — so the distinction is not cosmetic, and a call
+   * site that guesses wrong is off by two orders of magnitude with no visible
+   * type error. SPEC-012's "% do CDI" is a `Quantity` for that reason.
+   */
+  kind?: 'currency' | 'quantity' | 'percent' | 'percentPoints';
   /** Colour by sign and prefix an explicit +/−. For deltas, never for balances. */
   signed?: boolean;
 };
 
 function format(value: MoneyValue | Quantity, kind: NonNullable<MoneyProps['kind']>): string {
   if (kind === 'percent') return formatPercent(value);
+  if (kind === 'percentPoints') return formatPercentPoints(value);
   if (kind === 'quantity') return formatQuantity(value as Quantity);
   return formatCurrency(value as MoneyValue);
 }

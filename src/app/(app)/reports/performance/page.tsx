@@ -150,7 +150,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
               label={tr('headline.percentOfCdi')}
               value={
                 report.value.percentOfCdi.ok ? (
-                  <Money value={report.value.percentOfCdi.value} kind="percent" />
+                  <Money value={report.value.percentOfCdi.value} kind="percentPoints" />
                 ) : (
                   <Text as="span" size="lg">
                     {tr('unavailable')}

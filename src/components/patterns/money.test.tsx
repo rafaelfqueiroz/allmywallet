@@ -73,6 +73,22 @@ describe('Money', () => {
     expect(container.textContent).toContain('12,34%');
   });
 
+  /**
+   * SPEC-012 AC-10 — "% do CDI" is computed in percentage points, not as a
+   * fraction: `percentOfCdi` returns 118 to mean "118% do CDI", which is why
+   * its domain type is `Quantity` rather than `Rate`.
+   *
+   * Rendered through `kind="percent"`, `Intl`'s percent style multiplied it by
+   * 100 a second time, and a portfolio that had beaten CDI by 18% displayed
+   * `11.800,00%` in the headline stat card. Every other rate on that page
+   * genuinely is a fraction, so the call site read correctly.
+   */
+  it('formats a value already in percentage points without multiplying it again', () => {
+    const { container } = render(<Money value={Quantity.fromString('118')} kind="percentPoints" />);
+    expect(container.textContent).toContain('118,00%');
+    expect(container.textContent).not.toContain('11.800');
+  });
+
   it('has no axe violations', async () => {
     const { container } = render(<Money value={MoneyValue.fromString('1')} signed />);
     expect(await audit(container)).toHaveNoViolations();

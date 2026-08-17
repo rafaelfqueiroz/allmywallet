@@ -40,6 +40,26 @@ export function formatQuantity(value: Quantity): string {
   return quantityFormatter.format(Number(value.toString()));
 }
 
+/**
+ * Takes a value **already expressed in percentage points** — 118 renders as
+ * "118,00%".
+ *
+ * Distinct from `formatPercent` because `Intl`'s `style: 'percent'` multiplies
+ * by 100, so handing it a figure that is already a percentage multiplies
+ * twice. SPEC-012's "% do CDI" is the one measure computed that way (its
+ * domain type is `Quantity`, not `Rate`, precisely because it is not a
+ * fraction), and it reached the screen as `11.800,00%` for a portfolio that
+ * had beaten CDI by 18%.
+ */
+const percentPointsFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+export function formatPercentPoints(points: Money | Quantity): string {
+  return `${percentPointsFormatter.format(Number(points.toString()))}%`;
+}
+
 /** Takes a fraction — 0.1234 renders as "12,34%". */
 export function formatPercent(fraction: Money | Quantity): string {
   return percentFormatter.format(Number(fraction.toString()));
