@@ -54,8 +54,8 @@ export function parsePosicao(
       assetName: produto.trim(),
       assetClass,
       institutionName: cellAt(row, structure.columns, 'instituicao'),
-      quantity: parseQuantity(quantidadeText),
-      asOf: parseBrDate(asOfText),
+      quantity: parseQuantity(quantidadeText, 'quantidade'),
+      asOf: parseBrDate(asOfText, 'data de referencia'),
       fixedIncome: isFixedIncome(assetClass) ? readFixedIncome(row, structure) : null,
     };
 
@@ -124,14 +124,23 @@ function readFixedIncome(
   return {
     indexer,
     ratePercent:
-      taxaText === null || taxaText === '' ? null : Quantity.fromString(parseBrDecimal(taxaText)),
+      taxaText === null || taxaText === ''
+        ? null
+        : Quantity.fromString(parseBrDecimal(taxaText, 'taxa contratada')),
     // BR-009-13: unreadable rather than assumed — `commit-batch.ts` refuses
     // to create a contract with no issue date at all.
-    issueDate: emissaoText === null || emissaoText === '' ? null : parseBrDate(emissaoText),
+    issueDate:
+      emissaoText === null || emissaoText === ''
+        ? null
+        : parseBrDate(emissaoText, 'data de emissao'),
     maturityDate:
-      vencimentoText === null || vencimentoText === '' ? null : parseBrDate(vencimentoText),
+      vencimentoText === null || vencimentoText === ''
+        ? null
+        : parseBrDate(vencimentoText, 'vencimento'),
     principal:
-      valorAplicadoText === null || valorAplicadoText === '' ? null : parseMoney(valorAplicadoText),
+      valorAplicadoText === null || valorAplicadoText === ''
+        ? null
+        : parseMoney(valorAplicadoText, 'valor aplicado'),
   };
 }
 

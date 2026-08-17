@@ -39,6 +39,7 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
       committedAt: null,
       rowCounts: null,
       reconciliation: null,
+      failureCode: null,
     });
     const extract: ParsedExtract = {
       extractType: 'b3_posicao',
@@ -85,6 +86,7 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
         discrepancies: [],
         status: 'reconciled',
       },
+      failureCode: null,
     });
 
     const result = await acceptReconciliationAdjustment(deps, userId, {

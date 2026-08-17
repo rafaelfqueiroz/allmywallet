@@ -97,6 +97,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
           committedAt: null,
           rowCounts: null,
           reconciliation: null,
+          failureCode: null,
         }),
       appDb,
     );
@@ -670,6 +671,72 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     );
     expect(Number(txAfter[0]?.n)).toBe(0);
     await expect(readFile(join(uploadDir, `${batchId}.xlsx`))).rejects.toThrow();
+  });
+
+  /**
+   * #63 / SPEC-005 BR-005-05 — the defect this issue exists to fix.
+   *
+   * Before the fix, `handleImportStage` threw on a parse failure before any
+   * `deleteUploadedFile` call: the batch stayed `pending` forever and the
+   * uploaded `.xlsx` — the one artefact in the system still holding a raw CPF
+   * (DL-005-07) — sat on disk with nothing but a manual cancel able to remove
+   * it. A parse failure is also deterministic (reparsing the identical bytes
+   * fails identically), so pg-boss's one configured retry of `import.stage`
+   * was pure waste on top of the exposure.
+   *
+   * The malformed cell here is a `Data` value in ISO form (`2026-01-10`)
+   * where B3 always writes `DD/MM/YYYY` — structurally a valid Movimentação
+   * file (every header matches), which is exactly the case that used to
+   * escape as a raw `TypeError` from `parseBrDate` rather than the
+   * `DomainError` `IngestionPort.parse` promises.
+   */
+  it('BR-005-05/#63: a malformed cell fails the batch terminally, deletes the file, and leaves nothing retryable', async () => {
+    const batchId = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      batchId,
+      await buildMovimentacaoXlsx([
+        {
+          data: '2026-01-10', // BR-005-04 structure is fine; BR-005-05's format is not.
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '32,15',
+        },
+      ]),
+    );
+
+    // The whole point: this used to throw a raw TypeError. It must now
+    // resolve normally — that is what tells pg-boss the job is done rather
+    // than something to redeliver.
+    await expect(handleImportStage({ batchId, userId }, handlerDeps())).resolves.toBeUndefined();
+
+    const { rows: batchRows } = await migratorPool.query(
+      'SELECT status, failure_code FROM import_batches WHERE id = $1',
+      [batchId],
+    );
+    expect(batchRows[0]?.status).toBe('failed');
+    expect(batchRows[0]?.failure_code).toBe('INGESTION_MALFORMED_CELL');
+
+    // Nothing was staged — the parse never produced a record to stage.
+    const { rows: rowsAfter } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM import_rows WHERE batch_id = $1',
+      [batchId],
+    );
+    expect(Number(rowsAfter[0]?.n)).toBe(0);
+    const { rows: txAfter } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM transactions',
+    );
+    expect(Number(txAfter[0]?.n)).toBe(0);
+
+    // DL-005-07: the CPF-bearing file is gone — deleted in the same step
+    // that recorded the failure, not left for a manual cancel to clean up.
+    await expect(readFile(join(uploadDir, `${batchId}.xlsx`))).rejects.toThrow();
+
+    // "Nothing left retryable": a redelivered `import.stage` (the only way
+    // this could run again) now fails at the file read, not at the parse —
+    // there is no CPF-bearing bytes left anywhere for it to reprocess.
+    await expect(handleImportStage({ batchId, userId }, handlerDeps())).rejects.toThrow();
   });
 
   it('BR-005-13/AC: a commit interrupted mid-way leaves no partial batch', async () => {

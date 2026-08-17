@@ -9,6 +9,7 @@ import type {
   ImportBatchRepository,
   ImportBatchStatus,
   ImportRowCounts,
+  IngestionErrorCode,
 } from '@/core/ingestion/ports';
 import type { Discrepancy, ReconciliationReport } from '@/core/ingestion/reconcile';
 
@@ -49,6 +50,11 @@ export class DrizzleImportBatchRepository implements ImportBatchRepository {
         committedAt: row.committedAt,
         rowCounts: row.rowCounts,
         reconciliation: row.reconciliation,
+        // #63 / BR-005-05: the only writer of this column is `failBatch`, but
+        // `update` is the single write path `ImportBatchRepository` exposes —
+        // omitting it here would silently drop the failure code on the very
+        // call that is supposed to persist it.
+        failureCode: row.failureCode,
         updatedAt: new Date(),
       })
       .where(eq(importBatches.id, batch.id));
@@ -80,6 +86,7 @@ function toRow(batch: ImportBatch, userId: UserId): typeof importBatches.$inferI
     committedAt: batch.committedAt,
     rowCounts: batch.rowCounts as unknown as Record<string, unknown> | null,
     reconciliation: batch.reconciliation as unknown as Record<string, unknown> | null,
+    failureCode: batch.failureCode,
   };
 }
 
@@ -95,6 +102,11 @@ function toDomain(row: Row): ImportBatch {
     rowCounts: row.rowCounts === null ? null : (deserializeRowCounts(row.rowCounts) ?? null),
     reconciliation:
       row.reconciliation === null ? null : (deserializeReconciliation(row.reconciliation) ?? null),
+    // No CHECK constrains this column's values (AR-30 applies to enum-like
+    // *state* columns; a nullable free-form code does not need one) — safe to
+    // widen the cast because the only writer, `failBatch`, only ever assigns a
+    // real `IngestionErrorCode`.
+    failureCode: row.failureCode as IngestionErrorCode | null,
   };
 }
 

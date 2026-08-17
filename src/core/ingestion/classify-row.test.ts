@@ -42,6 +42,7 @@ async function committedUnclassifiedRow(deps: FakeIngestionDeps) {
     committedAt: null,
     rowCounts: null,
     reconciliation: null,
+    failureCode: null,
   });
   const extract: ParsedExtract = { extractType: 'b3_movimentacao', records: [unmapped()] };
   await stageBatch(deps, userId, { batchId, extract });

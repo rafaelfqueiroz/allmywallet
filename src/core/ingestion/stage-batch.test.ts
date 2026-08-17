@@ -43,6 +43,7 @@ async function seedPendingBatch(deps: ReturnType<typeof buildFakeIngestionDeps>)
     committedAt: null,
     rowCounts: null,
     reconciliation: null,
+    failureCode: null,
   });
   return batchId;
 }

@@ -47,9 +47,9 @@ export function parseNegociacao(
       assetName: codigo.trim(),
       assetClass: guessAssetClass(codigo),
       institutionName: null,
-      tradeDate: parseBrDate(dataText),
-      quantity: parseQuantity(quantidadeText),
-      unitPrice: parseMoney(precoText),
+      tradeDate: parseBrDate(dataText, 'data do negocio'),
+      quantity: parseQuantity(quantidadeText, 'quantidade'),
+      unitPrice: parseMoney(precoText, 'preco'),
       fees: Money.zero(),
       ratio: null,
     };

@@ -81,8 +81,27 @@ export default async function ImportBatchDetailPage({
     <PageShell
       title={t(`extractType.${batch.source}`)}
       description={t('uploadedAt', { date: formatDateTime(batch.uploadedAt) })}
-      actions={<Badge variant="secondary">{t(`status.${batch.status}`)}</Badge>}
+      actions={
+        <Badge variant={batch.status === 'failed' ? 'destructive' : 'secondary'}>
+          {t(`status.${batch.status}`)}
+        </Badge>
+      }
     >
+      {/* #63 / BR-005-05: a batch that failed to parse names what went wrong
+          — AC-005-05's "specific, actionable error", rendered here instead of
+          leaving the batch looking merely stalled. Reuses `EmptyState`
+          (`role="status"`) rather than inventing a dedicated error pattern. */}
+      {batch.status === 'failed' && (
+        <EmptyState
+          title={t('failure.title')}
+          description={
+            <>
+              {batch.failureCode && t(`failure.reasons.${batch.failureCode}`)} {t('failure.retry')}
+            </>
+          }
+        />
+      )}
+
       {batch.rowCounts && (
         <Grid cols={4} gap="md">
           <StatCard label={t('countRead')} value={batch.rowCounts.read} />

@@ -136,4 +136,55 @@ describe('SPEC-005 BR-005-01..08 — XlsxIngestionPort', () => {
     if (result.ok) return;
     expect(result.error.code).toBe('INGESTION_UNREADABLE_FILE');
   });
+
+  /**
+   * #63 / SPEC-005 BR-005-05 — before this, a malformed date or decimal in an
+   * otherwise-structurally-valid row escaped `parseBrDate`/`parseBrDecimal`
+   * as a raw `TypeError`, crashing `import.stage` instead of returning the
+   * `DomainError` this port promises. This is the unit-level pin for that;
+   * `tests/integration/import-pipeline.test.ts` covers the worker handler
+   * that used to crash because of it.
+   */
+  it('BR-005-05/#63: a malformed cell in a structurally valid extract produces MALFORMED_CELL, not a crash', async () => {
+    const bytes = await buildMovimentacaoXlsx([
+      {
+        data: 'not-a-date', // structure is fine; BR-005-04's format is not.
+        movimentacao: 'Compra',
+        produto: 'PETR4 - Petrobras PN',
+        quantidade: '100',
+        precoUnitario: '32,15',
+      },
+    ]);
+    const result = await port.parse(bytes);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('INGESTION_MALFORMED_CELL');
+    expect(result.error.context['extractType']).toBe('b3_movimentacao');
+    expect(result.error.context['column']).toBe('data');
+    expect(result.error.context['expected']).toBe('DD/MM/YYYY');
+    // AR-39/BR-004-04: the one thing this error must never carry — the
+    // malformed cell's own text could be anything, including a CPF.
+    for (const value of Object.values(result.error.context)) {
+      expect(String(value)).not.toContain('not-a-date');
+    }
+  });
+
+  it('BR-005-05/#63: a malformed decimal cell also produces MALFORMED_CELL', async () => {
+    const bytes = await buildMovimentacaoXlsx([
+      {
+        data: '10/01/2026',
+        movimentacao: 'Compra',
+        produto: 'PETR4 - Petrobras PN',
+        quantidade: 'not-a-number',
+        precoUnitario: '32,15',
+      },
+    ]);
+    const result = await port.parse(bytes);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('INGESTION_MALFORMED_CELL');
+    expect(result.error.context['column']).toBe('quantidade');
+  });
 });

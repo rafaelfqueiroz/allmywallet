@@ -87,7 +87,9 @@ export default async function ImportPage() {
                     </Text>
                   </span>
                   <Cluster gap="sm">
-                    <Badge variant="secondary">{t(`status.${batch.status}`)}</Badge>
+                    <Badge variant={batch.status === 'failed' ? 'destructive' : 'secondary'}>
+                      {t(`status.${batch.status}`)}
+                    </Badge>
                     <Button asChild variant="link" size="sm">
                       <Link href={`/import/${batch.id}`}>{t('viewDetails')}</Link>
                     </Button>

@@ -172,6 +172,33 @@ describe('SPEC-006/007 — positions and import_batches tenant isolation', () =>
     ).rejects.toMatchObject({ cause: { code: '42501' } });
   });
 
+  it('#63 — a failed batch’s failure_code never crosses the tenant boundary', async () => {
+    // BR-005-05: `failure_code` is a new, additive column on an already
+    // tenant-scoped table (#63) — this pins it under the same policy as
+    // every other column on `import_batches`, rather than assuming the
+    // existing coverage above generalises to a column that did not exist
+    // when it was written.
+    await migratorPool.query(
+      "UPDATE import_batches SET status = 'failed', failure_code = $2 WHERE id = $1",
+      [batchA, 'INGESTION_MALFORMED_CELL'],
+    );
+
+    const asA = await withTenant(userA, async (tx) => tx.select().from(importBatches), appDb);
+    expect(asA).toHaveLength(1);
+    expect(asA[0]?.failureCode).toBe('INGESTION_MALFORMED_CELL');
+
+    const asB = await withTenant(userB, async (tx) => tx.select().from(importBatches), appDb);
+    expect(asB.some((row) => row.failureCode === 'INGESTION_MALFORMED_CELL')).toBe(false);
+    expect(asB.some((row) => row.id === batchA)).toBe(false);
+
+    // Restore batchA to the state the tests above assume, so ordering never
+    // matters between files sharing this database (TS-03).
+    await migratorPool.query(
+      "UPDATE import_batches SET status = 'committed', failure_code = NULL WHERE id = $1",
+      [batchA],
+    );
+  });
+
   it('a query outside withTenant fails rather than returning everything (TS-16)', async () => {
     // `app.user_id` is never set, so `current_setting(...)::uuid` raises rather
     // than matching. Failing closed is the property being asserted.

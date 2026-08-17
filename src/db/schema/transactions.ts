@@ -44,7 +44,13 @@ import { TRANSACTION_STATUSES, TRANSACTION_TYPES } from '@/core/ledger/transacti
  * original filename needs to be retained anywhere.
  */
 const IMPORT_SOURCES = ['b3_movimentacao', 'b3_negociacao', 'b3_posicao', 'manual'] as const;
-const IMPORT_STATUSES = ['pending', 'previewed', 'committed', 'discarded'] as const;
+/**
+ * #63 — `failed` added to BR-005-09/12/13's original four. AR-69: widening a
+ * CHECK's allowed-values list is expand-safe — the previous application
+ * version never writes `'failed'` and its own writes remain valid against the
+ * widened list, so this needs no separate contract step.
+ */
+const IMPORT_STATUSES = ['pending', 'previewed', 'committed', 'discarded', 'failed'] as const;
 
 export const importBatches = pgTable(
   'import_batches',
@@ -70,6 +76,17 @@ export const importBatches = pgTable(
      * Decision log.
      */
     reconciliation: jsonb('reconciliation').$type<Record<string, unknown> | null>(),
+    /**
+     * #63 / BR-005-05 — set only when `status = 'failed'`, the parse error
+     * code (`IngestionErrorCode`) so the UI can render AC-005-05's specific,
+     * actionable message. Nullable and additive: expand-safe against the
+     * previous application version, which never reads or writes this column
+     * (AR-69). Deliberately `text`, not `jsonb` — a code only, matching
+     * AR-39/BR-004-04: the structural context (which column, what format was
+     * expected) is logged, not persisted, so there is no column here that
+     * could ever be tempted to hold a cell's actual text.
+     */
+    failureCode: text('failure_code'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

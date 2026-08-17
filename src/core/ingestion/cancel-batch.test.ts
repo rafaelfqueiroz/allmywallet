@@ -41,6 +41,7 @@ describe('SPEC-005 BR-005-12 — cancelBatch', () => {
       committedAt: null,
       rowCounts: null,
       reconciliation: null,
+      failureCode: null,
     });
     const extract: ParsedExtract = { extractType: 'b3_movimentacao', records: [buy()] };
     await stageBatch(deps, userId, { batchId, extract });
@@ -68,6 +69,7 @@ describe('SPEC-005 BR-005-12 — cancelBatch', () => {
       committedAt: null,
       rowCounts: null,
       reconciliation: null,
+      failureCode: null,
     });
     const extract: ParsedExtract = { extractType: 'b3_movimentacao', records: [buy()] };
     await stageBatch(deps, userId, { batchId, extract });

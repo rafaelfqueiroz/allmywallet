@@ -118,6 +118,7 @@ describe('SPEC-004 — PII log scan across a real import cycle', () => {
           committedAt: null,
           rowCounts: null,
           reconciliation: null,
+          failureCode: null,
         }),
       appDb,
     );
@@ -187,7 +188,13 @@ describe('SPEC-004 — PII log scan across a real import cycle', () => {
       enqueueSnapshot: async () => {},
     });
 
-    await expect(handleImportStage({ batchId, userId }, handlerDeps())).rejects.toThrow();
+    // #63 / BR-005-05: an unparseable file is now a TERMINAL outcome —
+    // `handleImportStage` marks the batch `failed` and resolves normally
+    // rather than throwing, so pg-boss does not retry a failure that would
+    // repeat identically on the same bytes. It used to `rejects.toThrow()`
+    // here; that was the defect (an indefinite `pending` batch and an
+    // undeleted, CPF-bearing file), not a property worth preserving.
+    await expect(handleImportStage({ batchId, userId }, handlerDeps())).resolves.toBeUndefined();
     const output = capturedChunks.join('');
 
     expect(output.length).toBeGreaterThan(0);
