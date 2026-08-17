@@ -88,3 +88,40 @@ export const QUEUE_POLICIES: Readonly<Record<QueueName, QueuePolicy>> = {
   },
   [QUEUE.AUDIT_RETENTION_SWEEP]: { ...DEFAULT_POLICY, retryLimit: 1, expireInSeconds: 1800 },
 };
+
+/**
+ * The exact `createQueue` options for a queue, so the **worker at boot** and
+ * the **web process on a cold start** cannot disagree about them.
+ *
+ * pg-boss's `createQueue` is create-if-not-exists: it does not update the
+ * options of a queue that already exists (v12 has a separate `updateQueue`).
+ * That makes divergence here silent and one-way — whichever process wins the
+ * race sets the policy permanently, and the loser's call is a no-op that
+ * looks like it worked.
+ *
+ * `warningQueueSize` is passed in rather than read here because it is a
+ * config-registry key (SPEC-016 BR-016-13/14, `alerts.queue_backlog_threshold`)
+ * and `core`-adjacent modules do not reach for a database. Both callers read
+ * the same key; neither hardcodes a threshold.
+ */
+export function queueCreateOptions(
+  queue: QueueName,
+  warningQueueSize: number,
+): {
+  retryLimit: number;
+  retryDelay: number;
+  retryBackoff: boolean;
+  deadLetter: string;
+  expireInSeconds: number;
+  warningQueueSize: number;
+} {
+  const policy = QUEUE_POLICIES[queue];
+  return {
+    retryLimit: policy.retryLimit,
+    retryDelay: policy.retryDelaySeconds,
+    retryBackoff: policy.retryBackoff,
+    deadLetter: policy.deadLetter,
+    expireInSeconds: policy.expireInSeconds,
+    warningQueueSize,
+  };
+}

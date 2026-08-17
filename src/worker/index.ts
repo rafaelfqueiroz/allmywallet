@@ -9,7 +9,7 @@ import { resolveConfig } from '@/config/resolve';
 import { baseSentryOptions } from '@/lib/sentry';
 import { raiseAlert } from '@/lib/alerts';
 import { describeDeadLetterFailure, isQueueBacklogWarning } from '@/worker/alerting';
-import { DEAD_LETTER_QUEUE, QUEUE_POLICIES } from '@/worker/queues';
+import { DEAD_LETTER_QUEUE, queueCreateOptions } from '@/worker/queues';
 import { REGISTRATIONS, type JobHandler, type RegisteredWorker } from '@/worker/registrations';
 import { WORKER_HEARTBEAT_ID } from '@/db/schema/observability';
 
@@ -125,15 +125,10 @@ export async function startWorker(): Promise<PgBoss> {
   });
 
   for (const registration of REGISTRATIONS) {
-    const policy = QUEUE_POLICIES[registration.queue];
-    await boss.createQueue(registration.queue, {
-      retryLimit: policy.retryLimit,
-      retryDelay: policy.retryDelaySeconds,
-      retryBackoff: policy.retryBackoff,
-      deadLetter: policy.deadLetter,
-      expireInSeconds: policy.expireInSeconds,
-      warningQueueSize: backlogThreshold,
-    });
+    await boss.createQueue(
+      registration.queue,
+      queueCreateOptions(registration.queue, backlogThreshold),
+    );
 
     await boss.work(registration.queue, async ([job]: Job<object>[]) => {
       if (!job) return;
