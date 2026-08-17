@@ -146,6 +146,9 @@ describe('SPEC-004 — PII log scan across a real import cycle', () => {
       clock,
       ingestion: new XlsxIngestionPort(),
       uploadDir,
+      // This suite has no pg-boss installed, and reaching for a real queue
+      // would make it fail for a reason that has nothing to do with PII.
+      enqueueSnapshot: async () => {},
     });
 
     await handleImportStage({ batchId, userId }, handlerDeps());
@@ -179,6 +182,9 @@ describe('SPEC-004 — PII log scan across a real import cycle', () => {
       clock,
       ingestion: new XlsxIngestionPort(),
       uploadDir,
+      // This suite has no pg-boss installed, and reaching for a real queue
+      // would make it fail for a reason that has nothing to do with PII.
+      enqueueSnapshot: async () => {},
     });
 
     await expect(handleImportStage({ batchId, userId }, handlerDeps())).rejects.toThrow();

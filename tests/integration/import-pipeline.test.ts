@@ -74,6 +74,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     await resetUsers(testDb.migrationUrl);
     await seedUser(testDb.migrationUrl, userId);
     uploadDir = await mkdtemp(join(tmpdir(), 'amw-import-'));
+    snapshotJobs = [];
   });
 
   afterEach(async () => {
@@ -108,11 +109,20 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     return rows[0] as { status: string; row_counts: unknown; reconciliation: unknown } | undefined;
   }
 
+  /**
+   * SPEC-009 BR-009-18: captured rather than enqueued for real, so a test can
+   * assert *that* a rebuild was requested and *from when* without pg-boss.
+   */
+  let snapshotJobs: { userId?: string; from?: string }[] = [];
+
   const handlerDeps = () => ({
     database: appDb,
     clock,
     ingestion: new XlsxIngestionPort(),
     uploadDir,
+    enqueueSnapshot: async (payload: { userId?: string; from?: string }) => {
+      snapshotJobs.push(payload);
+    },
   });
 
   /**
@@ -200,6 +210,76 @@ describe('SPEC-005 — import pipeline (integration)', () => {
 
     // The whole point: the allocation came down with the position.
     expect(await allocatedFor()).toBe('60.00000000');
+  });
+
+  /**
+   * SPEC-009 BR-009-18 / AC-15 — the rebuild caller.
+   *
+   * `SnapshotJobPayload.from` existed and was tested from the handler's side;
+   * nothing in the application ever sent it. The symptom was a chart that kept
+   * last night's shape after a backdated import, until a nightly sweep
+   * rebuilt the tenant's entire history for want of a start date.
+   */
+  it('BR-009-18: committing a batch asks for a rebuild from its earliest trade date', async () => {
+    const batchId = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      batchId,
+      await buildMovimentacaoXlsx([
+        {
+          data: '20/02/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '10',
+          precoUnitario: '30,00',
+        },
+        {
+          // Backdated relative to the row above — this is the date the rebuild
+          // has to start from, not the batch's newest or its upload date.
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '5',
+          precoUnitario: '28,00',
+        },
+      ]),
+    );
+
+    await handleImportStage({ batchId, userId }, handlerDeps());
+    expect(snapshotJobs).toHaveLength(0); // staging invalidates nothing
+
+    await handleImportCommit({ batchId, userId }, handlerDeps());
+
+    expect(snapshotJobs).toHaveLength(1);
+    expect(snapshotJobs[0]?.userId).toBe(userId);
+    expect(snapshotJobs[0]?.from).toBe('2026-01-10');
+  });
+
+  it('BR-009-18: a commit that applied nothing asks for no rebuild', async () => {
+    // A batch of pure duplicates invalidates no snapshot. Enqueueing a
+    // full-history rebuild for it would be the opposite of targeted.
+    const rows = [
+      {
+        data: '10/01/2026',
+        movimentacao: 'Compra',
+        produto: 'PETR4 - Petrobras PN',
+        quantidade: '100',
+        precoUnitario: '32,15',
+      },
+    ];
+
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, await buildMovimentacaoXlsx(rows));
+    await handleImportStage({ batchId: first, userId }, handlerDeps());
+    await handleImportCommit({ batchId: first, userId }, handlerDeps());
+    snapshotJobs = [];
+
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, await buildMovimentacaoXlsx(rows));
+    await handleImportStage({ batchId: second, userId }, handlerDeps());
+    await handleImportCommit({ batchId: second, userId }, handlerDeps());
+
+    expect(snapshotJobs).toHaveLength(0);
   });
 
   it('BR-005-09..13: stage then commit — the ledger only changes after commit', async () => {

@@ -11,6 +11,10 @@ import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { stageBatch } from '@/core/ingestion/stage-batch';
 import { commitBatch } from '@/core/ingestion/commit-batch';
 import { cancelBatch } from '@/core/ingestion/cancel-batch';
+import type { Transaction } from '@/core/ledger/transaction';
+import { enqueue } from '@/lib/queue';
+import { QUEUE } from '@/worker/queues';
+import type { SnapshotJobPayload } from '@/worker/handlers/valuation';
 import type { WalletDependencies } from '@/core/wallets/dependencies';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
@@ -53,6 +57,13 @@ export interface ImportHandlerDeps {
   readonly clock: Clock;
   readonly ingestion: IngestionPort;
   readonly uploadDir: string;
+  /**
+   * SPEC-009 BR-009-18 — how a committed batch asks for the snapshots it
+   * invalidated to be rebuilt. A seam rather than a direct `enqueue` call so
+   * `tests/integration/import-pipeline.test.ts` can assert *that* a rebuild
+   * was requested and *from when*, without standing up pg-boss.
+   */
+  readonly enqueueSnapshot: (payload: SnapshotJobPayload) => Promise<void>;
 }
 
 function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps {
@@ -61,6 +72,9 @@ function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps 
     clock: overrides?.clock ?? new SystemClock(),
     ingestion: overrides?.ingestion ?? new XlsxIngestionPort(),
     uploadDir: overrides?.uploadDir ?? env().IMPORT_UPLOAD_DIR,
+    enqueueSnapshot:
+      overrides?.enqueueSnapshot ??
+      ((payload) => enqueue(QUEUE.VALUATION_SNAPSHOT, payload as Record<string, unknown>)),
   };
 }
 
@@ -229,6 +243,48 @@ export async function handleImportCommit(
 
   await deleteUploadedFile(deps.uploadDir, batchId);
 
+  /**
+   * SPEC-009 BR-009-18 / AC-15 — **rebuild the snapshots this commit
+   * invalidated, from the earliest date it touched.**
+   *
+   * `SnapshotJobPayload.from` was built for exactly this and nothing ever sent
+   * it. The consequence was not a wrong figure but a stale one, and the
+   * expensive kind of stale: a user imports a backdated extract at 10:00, the
+   * ledger and the positions are correct immediately, and the Portfolio Value
+   * chart keeps last night's shape until the nightly sweep — which then
+   * rebuilds the tenant's *entire* history because nobody supplied a start
+   * date.
+   *
+   * Enqueued after the transaction commits, never inside it: a job picked up
+   * by the worker before the transaction lands would read the pre-commit
+   * ledger and cheerfully rebuild the wrong answer. And after
+   * `deleteUploadedFile`, so a failure to enqueue cannot leave the extract on
+   * disk — SPEC-004 BR-004-02 makes that file the one artefact still holding a
+   * CPF.
+   */
+  const rebuildFrom = earliestTradeDateOf(result.value.committed);
+  if (rebuildFrom !== null) {
+    /**
+     * A failed enqueue must not fail a committed batch. The ledger is already
+     * correct and durable; only the derived snapshots are behind, and the
+     * nightly sweep still covers them.
+     *
+     * Throwing here would be actively worse than logging. pg-boss would retry
+     * `handleImportCommit`, and a retried commit is an AR-19 no-op that
+     * returns no transactions — so `rebuildFrom` would be `null` on every
+     * subsequent attempt and the rebuild request would be lost for good. The
+     * retry would consume the one chance to make it.
+     */
+    try {
+      await deps.enqueueSnapshot({ userId, from: rebuildFrom });
+    } catch (error) {
+      logger.error(
+        { err: error, queue: 'import.commit', batchId, rebuildFrom },
+        'SPEC-009 BR-009-18: could not request a snapshot rebuild; the nightly sweep will cover it',
+      );
+    }
+  }
+
   logger.info(
     {
       queue: 'import.commit',
@@ -237,9 +293,25 @@ export async function handleImportCommit(
       skippedDuplicates: result.value.skippedDuplicates,
       invalid: result.value.invalid,
       reconciliationStatus: result.value.batch.reconciliation?.status ?? null,
+      rebuildFrom,
     },
     'SPEC-005 BR-005-13: batch committed',
   );
+}
+
+/**
+ * The earliest trade date the commit wrote, which is the first date whose
+ * snapshot is now wrong. `null` for a commit that applied nothing — a batch of
+ * pure duplicates invalidates no snapshot, and enqueueing a full-history
+ * rebuild for it would be the opposite of targeted.
+ */
+function earliestTradeDateOf(committed: readonly Transaction[]): string | null {
+  let earliest: string | null = null;
+  for (const transaction of committed) {
+    if (transaction.status !== 'active') continue;
+    if (earliest === null || transaction.tradeDate < earliest) earliest = transaction.tradeDate;
+  }
+  return earliest;
 }
 
 /**
