@@ -176,8 +176,15 @@ export default async function PerformancePage({ searchParams }: PageProps) {
               portfolio — it is defined as *the user's own contributions at the
               index's rate*, and the only contributions on hand are the whole
               portfolio's. Rendered before the benchmark table rather than after
-              it, because the reader meets the blanks first. */}
-          {state.scope.kind === 'wallet' && <Note>{tr('walletScope.explanation')}</Note>}
+              it, because the reader meets the blanks first.
+
+              Keyed off the **resolved** scope rather than the parsed URL, for
+              the reason `scope.ts` gives for carrying it: the note must
+              describe the scope the figures were actually computed at, not one
+              held in client state beside them. */}
+          {report.value.scope.scope.kind === 'wallet' && (
+            <Note>{tr('walletScope.explanation')}</Note>
+          )}
 
           {/* BR-012-04 / DL-012-02 — the explanation is the feature. */}
           {report.value.explainDivergence && <Note>{tr('divergence.explanation')}</Note>}
