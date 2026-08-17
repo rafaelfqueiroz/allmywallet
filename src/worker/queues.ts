@@ -125,3 +125,23 @@ export function queueCreateOptions(
     warningQueueSize,
   };
 }
+
+/**
+ * The dead-letter queue's own `createQueue` options.
+ *
+ * It takes no `deadLetter` of its own — a dead-letter queue pointing at
+ * itself is a loop — and no retry policy, because a job that reached here has
+ * already exhausted one. Only the backlog threshold applies, since a growing
+ * dead-letter queue is exactly what BR-016-13 wants an operator to see.
+ *
+ * **It must exist before any queue that names it.** pg-boss validates the
+ * `deadLetter` reference at `createQueue` time, so creating `import.stage`
+ * against a database with no `dead-letter` fails with
+ * `Queue dead-letter does not exist` — which is what a genuine cold start
+ * looks like, and what a probe that deletes only one queue will miss.
+ */
+export function deadLetterCreateOptions(warningQueueSize: number): {
+  warningQueueSize: number;
+} {
+  return { warningQueueSize };
+}

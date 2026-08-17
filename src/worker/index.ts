@@ -9,7 +9,7 @@ import { resolveConfig } from '@/config/resolve';
 import { baseSentryOptions } from '@/lib/sentry';
 import { raiseAlert } from '@/lib/alerts';
 import { describeDeadLetterFailure, isQueueBacklogWarning } from '@/worker/alerting';
-import { DEAD_LETTER_QUEUE, queueCreateOptions } from '@/worker/queues';
+import { DEAD_LETTER_QUEUE, deadLetterCreateOptions, queueCreateOptions } from '@/worker/queues';
 import { REGISTRATIONS, type JobHandler, type RegisteredWorker } from '@/worker/registrations';
 import { WORKER_HEARTBEAT_ID } from '@/db/schema/observability';
 
@@ -103,7 +103,7 @@ export async function startWorker(): Promise<PgBoss> {
   }, heartbeatIntervalSeconds * 1000);
 
   await boss.start();
-  await boss.createQueue(DEAD_LETTER_QUEUE, { warningQueueSize: backlogThreshold });
+  await boss.createQueue(DEAD_LETTER_QUEUE, deadLetterCreateOptions(backlogThreshold));
 
   // AR-20/BR-016-13: every queue below names DEAD_LETTER_QUEUE as its
   // `deadLetter` (queues.ts), so a job that exhausts its retries always lands

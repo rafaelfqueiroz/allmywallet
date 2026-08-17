@@ -2,7 +2,12 @@ import { PgBoss } from 'pg-boss';
 import { env } from '@/lib/env';
 import { db } from '@/db/client';
 import { resolveConfig } from '@/config/resolve';
-import { queueCreateOptions, type QueueName } from '@/worker/queues';
+import {
+  DEAD_LETTER_QUEUE,
+  deadLetterCreateOptions,
+  queueCreateOptions,
+  type QueueName,
+} from '@/worker/queues';
 
 /**
  * AR-16 — "the web process may enqueue (`boss.send`) but never schedules or
@@ -80,6 +85,15 @@ async function ensureQueue(instance: PgBoss, queue: QueueName): Promise<void> {
   // SPEC-016 BR-016-13/14: the same registry key the worker reads at boot —
   // neither process hardcodes a threshold, so neither can drift from the other.
   const backlogThreshold = (await resolveConfig('alerts.queue_backlog_threshold', { db })).value;
+
+  // AR-20: every queue names DEAD_LETTER_QUEUE as its `deadLetter`, and
+  // pg-boss validates that reference when the queue is created — so on a
+  // database where nothing exists yet, creating `import.stage` fails with
+  // `Queue dead-letter does not exist`. The worker creates this one first for
+  // the same reason. Creating it here is still not consuming it: the
+  // dead-letter *handler*, which is what turns a dead job into an alert,
+  // remains the worker's alone.
+  await instance.createQueue(DEAD_LETTER_QUEUE, deadLetterCreateOptions(backlogThreshold));
 
   await instance.createQueue(queue, queueCreateOptions(queue, backlogThreshold));
   ensured.add(queue);
