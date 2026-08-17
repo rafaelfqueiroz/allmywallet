@@ -166,6 +166,13 @@ export class DrizzleReportDataPort implements ReportDataPort {
         // or a position that fell back to cost because nothing could price it.
         // No longer true of every row, which is what made the badge meaningless.
         estimated: position.estimated,
+        // SPEC-009 AC-3/AC-9/AC-11. `valueHoldingsAt` has computed all four
+        // since the engine was written; this mapping used to drop them, so
+        // three acceptance criteria had nothing to render from.
+        carriedForward: position.carriedForward,
+        priceDate: position.priceDate,
+        needsAttention: position.needsAttention,
+        basis: position.basis,
       };
     });
   }

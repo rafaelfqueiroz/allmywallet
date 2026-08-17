@@ -49,6 +49,13 @@ const DEFAULT_HOLDING: ReportHolding = {
   value: Money.fromString('1000'),
   costBasis: Money.fromString('800'),
   estimated: false,
+  // SPEC-009 AC-3/9/11 — the observed-price defaults. A test that cares about
+  // a carried-forward close or a needs-attention holding overrides them
+  // explicitly, which keeps those cases visible in the test that asserts them.
+  carriedForward: false,
+  priceDate: BusinessDate.of('2026-03-20'),
+  needsAttention: null,
+  basis: null,
 };
 
 export function aHolding(overrides: Partial<ReportHolding>): ReportHolding {
@@ -62,6 +69,13 @@ const DEFAULT_POSITION: ReportPosition = {
   value: Money.fromString('1000'),
   costBasis: Money.fromString('800'),
   estimated: false,
+  // SPEC-009 AC-3/9/11 — the observed-price defaults. A test that cares about
+  // a carried-forward close or a needs-attention holding overrides them
+  // explicitly, which keeps those cases visible in the test that asserts them.
+  carriedForward: false,
+  priceDate: BusinessDate.of('2026-03-20'),
+  needsAttention: null,
+  basis: null,
 };
 
 export function aPosition(overrides: Partial<ReportPosition>): ReportPosition {

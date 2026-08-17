@@ -12,9 +12,11 @@ import { hasFixedIncome } from '@/lib/fixed-income';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
+import { HoldingMarkers } from '@/app/(app)/reports/_components/HoldingMarkers';
 import { withReportPort } from '@/app/(app)/reports/data';
 import { tryUserId } from '@/app/(app)/reports/session';
 import { PageShell } from '@/components/patterns/page-shell';
+import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Money } from '@/components/patterns/money';
@@ -164,6 +166,32 @@ export default async function ReportsPage({ searchParams }: PageProps) {
             </TableFooter>
           </Table>
 
+          {/* SPEC-009 BR-009-13 / AC-11 — the holdings that could not be
+              valued, gathered where someone reading valuations will meet
+              them. They are not hidden from the totals above: they are in
+              there at acquisition cost, which is exactly why the totals need
+              this said next to them rather than on a separate screen. */}
+          {(() => {
+            const unpriced = result.value.report.groups.flatMap((group: ReportGroup) =>
+              group.holdings.filter((holding) => holding.needsAttention !== null),
+            );
+            if (unpriced.length === 0) return null;
+            return (
+              <Section title={t('attentionTitle')} description={t('attentionDescription')}>
+                <List gap="sm">
+                  {unpriced.map((holding, index) => (
+                    <ListItem key={`${holding.assetId}-${index}`} separated>
+                      <Cluster justify="between" gap="sm">
+                        <span className="font-medium">{holding.assetCode}</span>
+                        <HoldingMarkers holding={holding} />
+                      </Cluster>
+                    </ListItem>
+                  ))}
+                </List>
+              </Section>
+            );
+          })()}
+
           {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
               this product deducts tax, and the figure above must say so where
               it is read rather than in a help page nobody opens. */}
@@ -219,10 +247,14 @@ async function GroupRow({ group }: { readonly group: ReportGroup }) {
               <ListItem
                 key={`${holding.assetId}-${holding.institutionId ?? NOT_CLASSIFIED_GROUP_ID}-${index}`}
               >
-                <Text as="span" size="xs" tone="muted">
-                  {holding.assetCode} · <Money value={holding.quantity} kind="quantity" /> ·{' '}
-                  <Money value={holding.value} />
-                </Text>
+                <Cluster gap="sm" align="baseline">
+                  <Text as="span" size="xs" tone="muted">
+                    {holding.assetCode} · <Money value={holding.quantity} kind="quantity" /> ·{' '}
+                    <Money value={holding.value} />
+                  </Text>
+                  {/* SPEC-009 AC-3/9/11 — how this row was priced, on the row. */}
+                  <HoldingMarkers holding={holding} />
+                </Cluster>
               </ListItem>
             ))}
           </List>

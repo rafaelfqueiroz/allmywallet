@@ -301,6 +301,16 @@ export function buildHoldingSet(
         value: values.value[index] as Money,
         costBasis: costs.value[index] as Money,
         estimated: position.estimated,
+        /**
+         * Carried onto every slice, not split. Value and quantity divide
+         * between wallets; *how the price was obtained* does not — a
+         * carried-forward close is equally carried-forward for each wallet
+         * holding a piece of it. Splitting these would be a category error.
+         */
+        carriedForward: position.carriedForward,
+        priceDate: position.priceDate,
+        needsAttention: position.needsAttention,
+        basis: position.basis,
       });
     });
   }
