@@ -5,20 +5,25 @@ import type { TransactionType } from '@/core/ledger/transaction';
  * `TransactionType` map.
  *
  * "Versioned" here means what BR-005-18 needs it to mean, not a plugin
- * system: `MOVEMENT_MAP_VERSION` is stamped onto every row this map
- * classifies (`stage-batch.ts`), so a support investigation can tell which
- * table version produced a given classification, and growing the map (a new
- * B3 string observed in the wild) is reviewable as a diff to one object
- * rather than a schema change. BR-005-19/21: a string with no entry is never
- * dropped — `classifyMovement` returns `null` and the caller stores the row
- * as `unclassified`, logging the raw string alone (BR-004-04 — no values).
+ * system: growing the map (a new B3 string observed in the wild) is
+ * reviewable as a diff to one object rather than a schema change.
+ * BR-005-19/21: a string with no entry is never dropped —
+ * `classifyMovement` returns `null` and the caller stores the row as
+ * `unclassified`, logging the raw string alone (BR-004-04 — no values).
+ *
+ * **`MOVEMENT_MAP_VERSION` is not yet stamped on anything.** This comment
+ * previously claimed `stage-batch.ts` wrote it onto every row it classified;
+ * it does not, and never has. Until it does, a support investigation cannot
+ * tell which table version produced a given classification — which matters
+ * now that version 2 classifies `Transferência - Liquidação` differently
+ * from version 1. Tracked on #8.
  *
  * Keys are normalised (case/accent/whitespace-folded) with the same function
  * `adapters/ingestion/xlsx/detect.ts` uses for header matching, because B3's
  * own casing and accenting of these strings is not perfectly consistent
  * across extracts.
  */
-export const MOVEMENT_MAP_VERSION = 1;
+export const MOVEMENT_MAP_VERSION = 2;
 
 function normalize(value: string): string {
   return value
@@ -66,13 +71,30 @@ const MOVEMENT_MAP: ReadonlyMap<string, readonly MappedEntry[]> = new Map(
       ['bonificacao em ativos', [{ type: 'bonificacao', direction: null }]],
       ['direitos de subscricao - exercido', [{ type: 'subscription', direction: null }]],
       ['subscricao', [{ type: 'subscription', direction: null }]],
-      [
-        'transferencia - liquidacao',
-        [
-          { type: 'transfer_in', direction: 'credit' },
-          { type: 'transfer_out', direction: 'debit' },
-        ],
-      ],
+      /**
+       * BR-005-01 — **`Transferência - Liquidação` is deliberately unmapped.**
+       *
+       * It is how a *trade settles* in Movimentação, not a custody transfer.
+       * Mapping it to `transfer_in`/`transfer_out` made Movimentação a second
+       * source of acquisitions, and `core/positions/apply-transaction.ts`
+       * treats `transfer_in` as one — so a user following the onboarding
+       * guide, which asks for all three extracts, imported every purchase
+       * twice: once as Negociação's `Compra`, once as this. The two carry
+       * different movement types and different institutions, so BR-005-14's
+       * natural key sees two unrelated rows and BR-005-15 never fires. The
+       * result is a silently doubled *patrimônio*.
+       *
+       * BR-005-01 assigns the extracts distinct roles, and trades are not
+       * among Movimentação's: it is the source for earnings, splits,
+       * subscriptions, transfers and amortisations, while **Negociação is
+       * "the authoritative trade record"**. Honouring that division is what
+       * makes the overlap impossible rather than merely deduplicated.
+       *
+       * Left unmapped rather than dropped, so BR-005-19 still applies: the
+       * row is stored, surfaces as `unclassified` in Needs attention, and a
+       * user who exported only Movimentação can classify it themselves
+       * (BR-005-20). Nothing is silently discarded.
+       */
       [
         'transferencia',
         [

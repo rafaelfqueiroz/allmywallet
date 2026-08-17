@@ -31,6 +31,7 @@ import { DrizzleFixedIncomeContractReader } from '@/adapters/db/fixed-income-con
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
 import {
   buildMovimentacaoXlsx,
+  buildNegociacaoXlsx,
   buildPosicaoXlsx,
   SYNTHETIC_CPF,
 } from '@/adapters/ingestion/xlsx/test-support/builder';
@@ -444,6 +445,69 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       'SELECT count(*)::int AS n FROM transactions',
     );
     expect(Number(txCount[0]?.n)).toBe(1);
+  });
+
+  /**
+   * SPEC-005 BR-005-01 — the onboarding guide asks for all three extracts,
+   * and B3 records the same purchase in two of them: as `Compra` in
+   * Negociação, and as `Transferência - Liquidação` (the settlement) in
+   * Movimentação.
+   *
+   * While that settlement mapped to `transfer_in` — which
+   * `core/positions/apply-transaction.ts` treats as an acquisition — the two
+   * rows carried different movement types *and* different institutions
+   * (Negociação states none), so BR-005-14's natural key saw two unrelated
+   * trades and BR-005-15 never fired. The user's *patrimônio* doubled, on the
+   * documented happy path, with nothing on screen to suggest it.
+   */
+  it('BR-005-01: a purchase present in both Movimentação and Negociação is held once', async () => {
+    const movimentacao = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      movimentacao,
+      await buildMovimentacaoXlsx([
+        {
+          data: '12/01/2026',
+          movimentacao: 'Transferência - Liquidação',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '38,50',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: movimentacao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: movimentacao, userId }, handlerDeps());
+
+    const negociacao = await newPendingBatch('b3_negociacao');
+    await saveUploadedFile(
+      uploadDir,
+      negociacao,
+      await buildNegociacaoXlsx([
+        {
+          data: '12/01/2026',
+          tipo: 'Compra',
+          codigo: 'PETR4',
+          quantidade: '100',
+          preco: '38,50',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: negociacao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: negociacao, userId }, handlerDeps());
+
+    // The authoritative record is the only one that moved the position.
+    const { rows: positions } = await migratorPool.query(
+      'SELECT quantity::text AS q FROM positions WHERE user_id = $1',
+      [userId],
+    );
+    expect(positions).toHaveLength(1);
+    expect(positions[0]?.q).toBe('100.00000000');
+
+    // BR-005-19: the settlement row is stored and surfaced, never discarded.
+    const { rows: unclassified } = await migratorPool.query(
+      "SELECT count(*)::int AS n FROM import_rows WHERE classification = 'unclassified'",
+    );
+    expect(Number(unclassified[0]?.n)).toBe(1);
   });
 
   it('BR-005-16/AC: two genuine identical same-day trades both import; re-importing the same file adds neither again', async () => {
