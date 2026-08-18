@@ -8,9 +8,11 @@ import {
   aPosition,
   anAsset,
   assetIdOf,
+  institutionIdOf,
+  qty,
   walletIdOf,
 } from '@/core/reporting/test-support';
-import type { Period, Scope } from '@/core/reporting/ports';
+import { GROUPINGS, type Grouping, type Period, type Scope } from '@/core/reporting/ports';
 import {
   cashFlowsFrom,
   runPerformanceReport,
@@ -128,16 +130,18 @@ async function run(options: {
   scope?: Scope;
   benchmarks?: readonly Benchmark[];
   index?: IndexSeriesReaderPort;
+  grouping?: Grouping;
+  port?: FakeReportDataPort;
 }): Promise<PerformanceReport> {
   const result = await runPerformanceReport(
     {
-      port: buildPort(options.snapshots ?? DIVIDEND_HISTORY),
+      port: options.port ?? buildPort(options.snapshots ?? DIVIDEND_HISTORY),
       indexSeries: options.index ?? new FakeIndexSeries({}),
     },
     {
       period: PERIOD,
       scope: options.scope ?? { kind: 'portfolio' },
-      grouping: 'asset_class',
+      grouping: options.grouping ?? 'asset_class',
       today: END,
       treatment: options.treatment ?? EarningsTreatment.WITHOUT_EARNINGS,
       benchmarks: options.benchmarks ?? [],
@@ -941,5 +945,115 @@ describe('SPEC-012 BR-012-18 — an empty period (AC-15)', () => {
     expect(errorCode(result.value.twr)).toBe('PERFORMANCE_NO_SERIES');
     expect(errorCode(result.value.xirr)).toBe('PERFORMANCE_XIRR_INSUFFICIENT_FLOWS');
     expect(errorCode(result.value.contribution)).toBe('PERFORMANCE_NO_CAPITAL_BASE');
+  });
+});
+
+/**
+ * SPEC-012 AC-14 — "the report runs at portfolio and wallet scope, **honouring
+ * all grouping dimensions** (SPEC-011)".
+ *
+ * Every other test in this file runs at `asset_class`, which is the default and
+ * so the one dimension that was never at risk. The grouping machinery itself
+ * belongs to SPEC-011 and is tested there; what is *not* covered there is that
+ * this report's contribution decomposition still reconciles once the partition
+ * changes underneath it — BR-012-16's "contributions sum to the total return"
+ * is a property of the decomposition, not of the grouping, and it has to hold
+ * whichever way the holdings are cut.
+ *
+ * The fixture is deliberately awkward in the ways that break a decomposition:
+ * two asset classes, two wallets with one holding **unassigned**, two
+ * institutions with one holding **unattributed**, and a sector missing on the
+ * fixed-income row. Each of those produces a synthetic bucket, and a bucket
+ * silently dropped rather than grouped is exactly how contributions stop
+ * summing to the total.
+ */
+describe('SPEC-012 AC-14 — every grouping dimension, and the sum still holds', () => {
+  const stock = assetIdOf('1');
+  const fii = assetIdOf('2');
+  const cdb = assetIdOf('3');
+  const retirement = walletIdOf('1');
+  const clear = institutionIdOf('1');
+
+  const port = new FakeReportDataPort({
+    positions: [
+      // 10.000 → 12.000, gain 2.000
+      aPosition({
+        assetId: stock,
+        institutionId: clear,
+        value: money('12000'),
+        costBasis: money('10000'),
+      }),
+      // 5.000 → 5.500, gain 500
+      aPosition({
+        assetId: fii,
+        institutionId: clear,
+        value: money('5500'),
+        costBasis: money('5000'),
+      }),
+      // 5.000 → 4.500, a loss of 500 — a negative contribution has to survive too
+      aPosition({
+        assetId: cdb,
+        institutionId: null,
+        value: money('4500'),
+        costBasis: money('5000'),
+      }),
+    ],
+    // Only the stock is claimed by a wallet; the other two fall to Unassigned.
+    allocations: [{ walletId: retirement, assetId: stock, quantity: qty('100') }],
+    wallets: [{ walletId: retirement, name: 'Aposentadoria' }],
+    institutions: [{ institutionId: clear, name: 'Clear' }],
+    assets: [
+      anAsset({ assetId: stock, code: 'PETR4', assetClass: 'stock', sector: 'Petróleo e Gás' }),
+      anAsset({ assetId: fii, code: 'HGLG11', assetClass: 'fii', sector: 'Logística' }),
+      // BR-011-10: sector is undefined for fixed income — the "Not classified" bucket.
+      anAsset({ assetId: cdb, code: 'CDB BANCO', assetClass: 'cdb', sector: null }),
+    ],
+    snapshots: DIVIDEND_HISTORY,
+  });
+
+  // total gain 2.000 on a 20.000 basis = 0,10
+  const TOTAL_RETURN = '0.1';
+
+  it.each([...GROUPINGS])('reconciles when grouped by %s', async (grouping: Grouping) => {
+    const report = await run({ port, grouping });
+    const contribution = unwrap(report.contribution);
+
+    expect(contribution.totalReturn.toString()).toBe(TOTAL_RETURN);
+
+    // BR-012-16, restated as the identity rather than against hardcoded parts:
+    // whatever the partition, the pieces add back to the whole.
+    const summed = contribution.groups.reduce(
+      (running, group) => running.plus(group.contribution),
+      Quantity.fromString('0'),
+    );
+    expect(summed.toString()).toBe(TOTAL_RETURN);
+  });
+
+  it.each([...GROUPINGS])('weights form a distribution under %s', async (grouping: Grouping) => {
+    const report = await run({ port, grouping });
+    const contribution = unwrap(report.contribution);
+
+    // A refactor guard on the denominator, and deliberately not more than
+    // that. `weight_g = base_g ÷ Σ base` sums over the groups it was *given*,
+    // so a group dropped before this point renormalises the survivors and
+    // still totals 1 — confirmed by probe. The dropped-group case is caught
+    // by the reconciliation above, where the scope's own total does not move.
+    const weight = contribution.groups.reduce(
+      (running, group) => running.plus(group.weight),
+      Quantity.fromString('0'),
+    );
+    expect(weight.toString()).toBe('1');
+    expect(contribution.groups.length).toBeGreaterThan(0);
+  });
+
+  it('groups the unassigned and unattributed holdings rather than dropping them', async () => {
+    // The two dimensions with a synthetic bucket in this fixture. If either
+    // bucket were filtered out instead of grouped, the sums above would still
+    // balance among the survivors — so this asserts the bucket exists.
+    const byWallet = unwrap((await run({ port, grouping: 'wallet' })).contribution);
+    expect(byWallet.groups.filter((group) => group.key.synthetic)).toHaveLength(1);
+
+    const byInstitution = unwrap((await run({ port, grouping: 'institution' })).contribution);
+    expect(byInstitution.groups.filter((group) => group.key.synthetic)).toHaveLength(1);
   });
 });
