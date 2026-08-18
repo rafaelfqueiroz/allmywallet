@@ -30,6 +30,7 @@ import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import type { AssetClass } from '@/core/quotes/ports';
 import { db } from '@/db/client';
 import { assets, institutions } from '@/db/schema/assets';
+import { latestQuotes } from '@/db/schema/market';
 import { positions } from '@/db/schema/positions';
 import { importBatches } from '@/db/schema/transactions';
 import { dailyValuationSnapshots } from '@/db/schema/valuation';
@@ -321,6 +322,38 @@ export class DrizzleReportDataPort implements ReportDataPort {
     return committedAt === undefined || committedAt === null
       ? null
       : businessDateInSaoPaulo(committedAt);
+  }
+
+  /**
+   * SPEC-008 BR-008-04 / SPEC-015 BR-015-13 — the freshest quote instant behind
+   * a set of holdings. `null` when none of them is priced by a live quote,
+   * which is the ordinary case for a fixed-income-only portfolio.
+   *
+   * **An instant, not a date.** BR-008-04 exists so the product never implies
+   * real-time, and a ~30-minute delay is invisible at date resolution — a
+   * figure stamped only "14/08" says nothing about whether it is half an hour
+   * or eight hours behind the market.
+   *
+   * AR-15: `latest_quotes` is shared reference data with no tenant column, so
+   * it takes the pooled handle. It is also **overwritten on every refresh**
+   * (BR-008-10, it never becomes history), which is exactly why the newest row
+   * across the scope is the right thing to show: it is the high-water mark of
+   * how fresh anything on this screen can be.
+   *
+   * Kept off `ReportDataPort` deliberately, alongside `lastImportAt` and
+   * `earliestSnapshotDate`: one report needs it, and widening the shared port
+   * would oblige the other three — and every hand-written fake — to carry a
+   * method they never call.
+   */
+  async latestQuoteAt(assetIds: readonly AssetId[]): Promise<Date | null> {
+    if (assetIds.length === 0) return null;
+    const rows = await db
+      .select({ quotedAt: latestQuotes.quotedAt })
+      .from(latestQuotes)
+      .where(inArray(latestQuotes.assetId, [...assetIds]))
+      .orderBy(desc(latestQuotes.quotedAt))
+      .limit(1);
+    return rows[0]?.quotedAt ?? null;
   }
 
   /** The `all` period's anchor — the first date this tenant has a snapshot for. */

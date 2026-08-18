@@ -375,7 +375,8 @@
       "label": "Relatórios",
       "overview": "Visão geral",
       "patrimonio": "Patrimônio",
-      "performance": "Rentabilidade"
+      "performance": "Rentabilidade",
+      "composicao": "Composição"
     },
     "markers": {
       "attention": {
@@ -724,6 +725,71 @@
       "basis": "Origem do valor",
       "observed": "Preço observado",
       "estimated": "Estimado"
+    }
+  },
+  "composicao": {
+    "title": "Composição",
+    "description": "O que você tem, e como está distribuído.",
+    "freshness": {
+      "valuation": "Valores de {date}",
+      "quotedAt": "Cotação de {timestamp}",
+      "noQuote": "Nenhum destes valores vem de cotação de mercado.",
+      "delay": "Cotações com atraso de cerca de {minutes} minutos. Não são valores em tempo real."
+    },
+    "chart": {
+      "title": "Participação de cada grupo",
+      "summary": "Participação de cada grupo no valor total do escopo selecionado. Os mesmos números estão na tabela abaixo.",
+      "caption": "Participação de cada grupo no valor total",
+      "others": "Outros",
+      "othersSummary": "Os grupos menores estão reunidos em \"Outros\" no gráfico. A tabela abaixo lista todos, um a um."
+    },
+    "groups": {
+      "title": "Distribuição",
+      "description": "Quanto cada grupo representa do valor total, pelo agrupamento selecionado.",
+      "group": "Grupo",
+      "value": "Valor",
+      "share": "Participação",
+      "total": "Total"
+    },
+    "holdings": {
+      "title": "Seus ativos",
+      "description": "Um ativo por linha. Clique no título de uma coluna para ordenar por ela.",
+      "caption": "Ativos do escopo selecionado, com valor, quantidade, preços e ganho não realizado",
+      "code": "Ativo",
+      "assetClass": "Classe",
+      "sector": "Setor",
+      "quantity": "Quantidade",
+      "averagePrice": "Preço médio",
+      "currentPrice": "Preço atual",
+      "value": "Valor",
+      "share": "Participação",
+      "unrealizedGain": "Ganho não realizado",
+      "sortBy": "Ordenar por {column}",
+      "noPrice": "—",
+      "sortField": "Ordenar por",
+      "sortAscending": "Ordem crescente",
+      "sortDescending": "Ordem decrescente"
+    },
+    "concentration": {
+      "badge": "Acima de {threshold}%",
+      "title": "Participações acima do seu limite",
+      "description": "Estes ativos passam de {threshold}% do escopo selecionado — o limite que você configurou. É uma marcação informativa: o AllMyWallet não dá recomendação de investimento e não sugere nenhuma ação sobre estes ativos.",
+      "explanation": "Participação acima do limite de {threshold}% que você configurou. Marcação informativa, sem recomendação.",
+      "none": "Nenhum ativo passa de {threshold}% do escopo selecionado."
+    },
+    "drift": {
+      "title": "Variação da composição no período",
+      "description": "Como a participação de cada classe mudou entre o início e o fim do período. Um ativo pode valer mais e ainda assim perder participação.",
+      "caption": "Participação de cada classe de ativo no início e no fim do período",
+      "group": "Classe de ativo",
+      "opening": "No início",
+      "closing": "Hoje",
+      "change": "Variação",
+      "unavailable": {
+        "WALLET_SCOPE_NOT_SNAPSHOTTED": "O histórico diário é gravado para a carteira completa, sem separar quanto cabia a cada carteira em cada dia. Por isso a variação no período não aparece quando o escopo é uma carteira. As participações acima são só desta carteira e estão corretas.",
+        "NO_HISTORICAL_BREAKDOWN": "O histórico de composição só existe por classe de ativo. Não há histórico guardado por {grouping}, então a variação no período não pode ser montada para o agrupamento selecionado.",
+        "NO_ALLOCATION_TO_COMPARE": "Não há nada registrado antes deste período para comparar. Escolha um período que comece depois do seu primeiro registro."
+      }
     }
   },
   "rentabilidade": {
