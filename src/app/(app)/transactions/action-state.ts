@@ -24,8 +24,23 @@ import { SharedErrorCode } from '@/core/shared/domain-error';
  * reason) — nothing here may ever hold a `Decimal`, which `JSON.stringify`
  * would turn into a float.
  */
+/**
+ * The two bulk operations report what they did rather than redirecting.
+ *
+ * BR-006-17's assignment is the reason: `assignTransactionsToWallet` returns a
+ * `skipped` list — an asset already fully allocated elsewhere, or one whose
+ * selection nets to nothing — and clamping to the unassigned remainder is only
+ * honest if the shortfall is *said*. Discarding that list would make the
+ * clamp silent, which is the thing the use case's own comment refuses.
+ *
+ * It also gives both operations a post-condition. Redirecting to the page the
+ * form is already on changes nothing observable, so nothing could tell "the
+ * action finished" from "the action was never dispatched" — including a test.
+ */
 export type ActionState =
   | { readonly status: 'idle' }
+  | { readonly status: 'assigned'; readonly assigned: number; readonly skipped: number }
+  | { readonly status: 'deleted'; readonly deleted: number }
   | {
       readonly status: 'error';
       readonly code: string;

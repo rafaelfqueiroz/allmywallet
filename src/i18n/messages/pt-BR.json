@@ -520,7 +520,11 @@
       "wallet": "Carteira",
       "walletNone": "— escolha uma carteira —",
       "noWallets": "Crie uma carteira antes de atribuir transações a ela.",
-      "hint": "A exclusão em massa é tudo ou nada: se uma das transações deixar o histórico impossível de recalcular, nenhuma é excluída."
+      "hint": "A exclusão em massa é tudo ou nada: se uma das transações deixar o histórico impossível de recalcular, nenhuma é excluída.",
+      "deleted": "{deleted} transação(ões) excluída(s).",
+      "assigned": "{assigned} ativo(s) atribuído(s) à carteira.",
+      "assignedPartial": "{assigned} ativo(s) atribuído(s). {skipped} não entrou(aram): já estava(m) em outra carteira ou a seleção não deixou cotas livres.",
+      "assignedNone": "Nada foi atribuído: os ativos selecionados já estão em alguma carteira ou a seleção não deixou cotas livres."
     }
   },
   "privacy": {

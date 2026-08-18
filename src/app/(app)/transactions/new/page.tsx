@@ -1,7 +1,11 @@
 import { getTranslations } from 'next-intl/server';
 import { createTransactionAction } from '@/app/(app)/transactions/actions';
 import { withTransactionsDeps } from '@/app/(app)/transactions/composition';
-import { listAssetOptions, listInstitutionOptions } from '@/app/(app)/transactions/data';
+import {
+  ASSET_CLASSES,
+  listAssetOptions,
+  listInstitutionOptions,
+} from '@/app/(app)/transactions/data';
 import { tryUserId } from '@/app/(app)/transactions/session';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
 import { PageShell } from '@/components/patterns/page-shell';
@@ -56,6 +60,7 @@ export default async function NewTransactionPage() {
         }}
         assetOptions={assetOptions}
         institutionOptions={institutionOptions}
+        assetClasses={ASSET_CLASSES}
       />
     </PageShell>
   );

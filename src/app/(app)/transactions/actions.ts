@@ -245,7 +245,13 @@ export async function bulkTransactionsAction(
         walletId: WalletId.of(parsed.data.walletId),
         transactionIds: ids,
       });
-      return assigned.ok ? IDLE : failure(assigned.error);
+      if (!assigned.ok) return failure(assigned.error);
+      const state: ActionState = {
+        status: 'assigned',
+        assigned: assigned.value.assigned.length,
+        skipped: assigned.value.skipped.length,
+      };
+      return state;
     }
 
     // The assets have to be read *before* the rows are gone; after the delete
@@ -258,12 +264,18 @@ export async function bulkTransactionsAction(
 
     const deleted = await bulkDeleteTransactions(deps.ledger, ids);
     if (!deleted.ok) return failure(deleted.error);
-    return reconcile(deps, userId, touched);
+
+    const reconciled = await reconcile(deps, userId, touched);
+    if (reconciled.status === 'error') return reconciled;
+    const state: ActionState = { status: 'deleted', deleted: deleted.value.deletedCount };
+    return state;
   });
 
   if (outcome.status === 'error') return outcome;
+  // No redirect: the form is on `/transactions` already, so revalidating is
+  // what refreshes the list, and the returned state is what says it happened.
   revalidateLedger();
-  redirect('/transactions');
+  return outcome;
 }
 
 /**

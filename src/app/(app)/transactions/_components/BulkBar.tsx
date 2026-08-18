@@ -56,6 +56,24 @@ export function BulkBar({ action, wallets, children }: BulkBarProps) {
           <ErrorState title={tErrors(state.code, messageValues(state.context))} />
         )}
 
+        {/*
+          `role="status"`, not `alert`: this is the result of something the
+          user just asked for, not an interruption. It is also the only place
+          the clamp becomes visible — `assignTransactionsToWallet` reduces a
+          request to what is actually unassigned, and a clamp nobody is told
+          about is a silent change to what was asked for.
+        */}
+        {state.status === 'deleted' && <Note role="status">{t('deleted', state)}</Note>}
+        {state.status === 'assigned' && (
+          <Note role="status">
+            {state.assigned === 0
+              ? t('assignedNone')
+              : state.skipped === 0
+                ? t('assigned', state)
+                : t('assignedPartial', state)}
+          </Note>
+        )}
+
         {children}
 
         <Cluster gap="md" align="end" role="group" aria-label={t('selection')}>

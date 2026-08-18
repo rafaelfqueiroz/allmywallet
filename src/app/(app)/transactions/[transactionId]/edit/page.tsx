@@ -3,7 +3,11 @@ import { getTranslations } from 'next-intl/server';
 import { TransactionId } from '@/core/shared/ids';
 import { editTransactionAction } from '@/app/(app)/transactions/actions';
 import { withTransactionsDeps } from '@/app/(app)/transactions/composition';
-import { listAssetOptions, listInstitutionOptions } from '@/app/(app)/transactions/data';
+import {
+  ASSET_CLASSES,
+  listAssetOptions,
+  listInstitutionOptions,
+} from '@/app/(app)/transactions/data';
 import { tryUserId } from '@/app/(app)/transactions/session';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
 import { PageShell } from '@/components/patterns/page-shell';
@@ -66,6 +70,7 @@ export default async function EditTransactionPage({ params }: PageProps) {
         }}
         assetOptions={loaded.assetOptions}
         institutionOptions={loaded.institutionOptions}
+        assetClasses={ASSET_CLASSES}
       />
     </PageShell>
   );

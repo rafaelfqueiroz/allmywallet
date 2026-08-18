@@ -5,8 +5,6 @@ import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { IDLE, messageValues, type ActionState } from '@/app/(app)/transactions/action-state';
-import type { AssetOption, InstitutionOption } from '@/app/(app)/transactions/data';
-import { ASSET_CLASSES } from '@/app/(app)/transactions/data';
 import { Field } from '@/components/patterns/field';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Section } from '@/components/patterns/section';
@@ -37,6 +35,26 @@ import { NativeSelect } from '@/components/ui/native-select';
  * catalogue and not the other.
  */
 
+/**
+ * The option shapes are declared here, structurally, rather than imported from
+ * `data.ts`. This is a Client Component, and `data.ts` imports `@/db/client` —
+ * so a *value* import of its `ASSET_CLASSES` re-export pulls `pg` into the
+ * browser bundle, which fails the build with `Can't resolve 'util/types'`
+ * rather than with anything that mentions a boundary. `Controls.tsx` may
+ * import the same module because it is a Server Component; this one may not,
+ * and structural props are what keep that true by construction.
+ */
+export interface AssetChoice {
+  readonly assetId: string;
+  readonly code: string;
+  readonly name: string;
+}
+
+export interface InstitutionChoice {
+  readonly institutionId: string;
+  readonly name: string;
+}
+
 export interface TransactionFormValues {
   readonly transactionId?: string;
   readonly assetId: string;
@@ -53,8 +71,10 @@ export interface TransactionFormProps {
   readonly action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   readonly mode: 'create' | 'edit';
   readonly values: TransactionFormValues;
-  readonly assetOptions: readonly AssetOption[];
-  readonly institutionOptions: readonly InstitutionOption[];
+  readonly assetOptions: readonly AssetChoice[];
+  readonly institutionOptions: readonly InstitutionChoice[];
+  /** Passed in for the same reason the types are declared here. */
+  readonly assetClasses: readonly string[];
 }
 
 export function TransactionForm({
@@ -63,6 +83,7 @@ export function TransactionForm({
   values,
   assetOptions,
   institutionOptions,
+  assetClasses,
 }: TransactionFormProps) {
   const t = useTranslations('transactions.form');
   const tErrors = useTranslations('errors');
@@ -122,7 +143,7 @@ export function TransactionForm({
             </Field>
             <Field id="transaction-asset-class" label={t('assetNewClass')} width="md">
               <NativeSelect name="assetClass" defaultValue="stock">
-                {ASSET_CLASSES.map((value) => (
+                {assetClasses.map((value) => (
                   <option key={value} value={value}>
                     {tAssetClass(value)}
                   </option>

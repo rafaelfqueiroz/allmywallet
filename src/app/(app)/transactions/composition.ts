@@ -10,7 +10,12 @@ import type { AssetResolverPort, InstitutionResolverPort } from '@/core/ingestio
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import type { TransactionRepository } from '@/core/ledger/ports';
 import type { AssignTransactionsDependencies } from '@/core/wallets/assign-transactions';
-import { buildWalletDeps } from '@/worker/handlers/import';
+import {
+  DrizzlePositionQueryRepository,
+  DrizzleWalletAllocationRepository,
+  DrizzleWalletAssetRuleRepository,
+  DrizzleWalletRepository,
+} from '@/adapters/db/wallet-repository';
 import { db } from '@/db/client';
 import { withTenant, type Tx } from '@/db/tenant';
 
@@ -77,7 +82,21 @@ export async function withTransactionWriteDeps<T>(
     userId,
     (tx) => {
       const transactions = new DrizzleTransactionRepository(tx, userId);
-      const wallets = buildWalletDeps(tx, userId, clock);
+      /**
+       * The four wallet ports are wired here rather than through
+       * `worker/handlers/import.ts`'s `buildWalletDeps`, which `(app)/import`
+       * reuses: that module also pulls in the xlsx parser and the queue
+       * client, and importing it from this surface put `pg-boss` in the
+       * dependency graph of the CSV export route. Same four adapters as
+       * `(app)/wallets/composition.ts`, which is the shape this follows.
+       */
+      const wallets = {
+        wallets: new DrizzleWalletRepository(tx, userId),
+        allocations: new DrizzleWalletAllocationRepository(tx, userId),
+        assetRules: new DrizzleWalletAssetRuleRepository(tx, userId),
+        positionQuery: new DrizzlePositionQueryRepository(tx),
+        clock,
+      };
       return fn({
         ledger: {
           transactions,
