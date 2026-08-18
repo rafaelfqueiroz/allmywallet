@@ -747,6 +747,7 @@
       "disclosure": "Faltam dados diários em {count, plural, one {um trecho} other {# trechos}} do período. Nesses trechos a rentabilidade foi calculada por Dietz modificado, que é uma aproximação. O resto do período usa o cálculo diário."
     },
     "treatment": {
+      "label": "Tratamento dos proventos",
       "withEarnings": "Com proventos",
       "withoutEarnings": "Sem proventos",
       "hint": "Proventos entram como recebimento na data do pagamento. Nada é reinvestido automaticamente."
