@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
-import { IDLE, messageValues, type ActionState } from '@/app/(app)/transactions/action-state';
+import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';

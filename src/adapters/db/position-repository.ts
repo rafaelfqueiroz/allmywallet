@@ -1,4 +1,5 @@
 import { and, eq, isNull, or, sql } from 'drizzle-orm';
+import { chunked } from '@/adapters/db/chunk';
 import type { SQL } from 'drizzle-orm';
 import { AssetId, InstitutionId, PositionId, type UserId } from '@/core/shared/ids';
 import { makePosition } from '@/core/positions/position-state';
@@ -72,7 +73,12 @@ export class DrizzlePositionRepository implements PositionRepository {
      */
     await this.tx.delete(positions);
     if (snapshots.length === 0) return;
-    await this.tx.insert(positions).values(snapshots.map((s) => toRow(s, this.userId)));
+    // Chunked for the same reason as `import-row-repository.ts`: a tenant with
+    // enough (asset, institution) pairs would otherwise overflow the builder
+    // on the one path that exists to repair them (`pnpm positions:rebuild`).
+    for (const chunk of chunked(snapshots)) {
+      await this.tx.insert(positions).values(chunk.map((s) => toRow(s, this.userId)));
+    }
   }
 }
 

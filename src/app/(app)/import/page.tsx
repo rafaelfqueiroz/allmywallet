@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { formatDateTime } from '@/i18n/format';
+import { UploadForm } from '@/app/(app)/import/_components/UploadForm';
 import { uploadExtractAction } from '@/app/(app)/import/actions';
 import { listImportBatches, loadImportFreshness } from '@/app/(app)/import/data';
 import { tryUserId } from '@/app/(app)/import/session';
@@ -9,10 +10,8 @@ import { StalenessPrompt } from '@/app/(app)/import/_components/StalenessPrompt'
 import { PageShell } from '@/components/patterns/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Field } from '@/components/patterns/field';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { List, ListItem } from '@/components/layout/list';
 import { Text } from '@/components/ui/text';
@@ -62,14 +61,7 @@ export default async function ImportPage() {
       )}
 
       <Section title={t('uploadTitle')} description={t('uploadHint')}>
-        <form action={uploadExtractAction}>
-          <Cluster gap="md" align="end">
-            <Field id="extract-file" label={t('fileLabel')}>
-              <Input type="file" name="file" accept=".xlsx,.xls" required />
-            </Field>
-            <Button type="submit">{t('upload')}</Button>
-          </Cluster>
-        </form>
+        <UploadForm action={uploadExtractAction} />
       </Section>
 
       <Section title={t('historyTitle')}>

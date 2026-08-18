@@ -3,7 +3,7 @@
 import type { ReactNode } from 'react';
 import { useActionState } from 'react';
 import { useTranslations } from 'next-intl';
-import { IDLE, messageValues, type ActionState } from '@/app/(app)/transactions/action-state';
+import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { Field } from '@/components/patterns/field';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Note } from '@/components/patterns/note';

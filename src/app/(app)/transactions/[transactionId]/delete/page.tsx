@@ -3,7 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { TransactionId } from '@/core/shared/ids';
 import { describeDeletionImpact } from '@/core/ledger/delete-transaction';
 import { formatBusinessDate } from '@/i18n/format';
-import { messageValues } from '@/app/(app)/transactions/action-state';
+import { messageValues } from '@/lib/action-state';
 import { deleteTransactionAction } from '@/app/(app)/transactions/actions';
 import { withTransactionWriteDeps } from '@/app/(app)/transactions/composition';
 import { tryUserId } from '@/app/(app)/transactions/session';

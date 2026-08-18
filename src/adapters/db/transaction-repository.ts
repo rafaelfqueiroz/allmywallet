@@ -10,6 +10,7 @@ import type {
   TransactionRepository,
 } from '@/core/ledger/ports';
 import type { Transaction, TransactionStatus, TransactionType } from '@/core/ledger/transaction';
+import { chunked } from '@/adapters/db/chunk';
 import { assets, institutions } from '@/db/schema/assets';
 import { transactions } from '@/db/schema/transactions';
 import { walletAllocations } from '@/db/schema/wallets';
@@ -59,6 +60,13 @@ export class DrizzleTransactionRepository implements TransactionRepository {
         ),
       );
     return rows.map(toDomain);
+  }
+
+  /** Chunked — see `chunk.ts` for why one statement per 10.000 rows is not an option. */
+  async insertMany(rows: readonly Transaction[]): Promise<void> {
+    for (const chunk of chunked(rows)) {
+      await this.tx.insert(transactions).values(chunk.map((row) => toRow(row, this.userId)));
+    }
   }
 
   async listAll(): Promise<readonly Transaction[]> {
