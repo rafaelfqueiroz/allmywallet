@@ -73,6 +73,17 @@ export interface TransactionRepository {
   findById(id: TransactionId): Promise<Transaction | null>;
 
   /**
+   * The commit path's write (SPEC-005 BR-005-13). Separate from `insert`
+   * because a 10.000-row extract is one import, not ten thousand: written one
+   * at a time it is ten thousand sequential round trips, which spent 57 of
+   * BR-005-13's 60-second budget on a developer machine faster than the VPS.
+   *
+   * Atomicity is unchanged — every caller already runs inside one `withTenant`
+   * transaction (AR-11), and this writes within it.
+   */
+  insertMany(transactions: readonly Transaction[]): Promise<void>;
+
+  /**
    * The replay input: every row for one `(asset, institution)` position,
    * whatever its status. Filtering to `active` is the engine's job
    * (BR-007-16) and is done in one place, in `selectForReplay` — a repository

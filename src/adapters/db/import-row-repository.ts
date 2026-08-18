@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { chunked } from '@/adapters/db/chunk';
 import { importRows } from '@/db/schema/import-rows';
 import type { Tx } from '@/db/tenant';
 import { BusinessDate } from '@/core/shared/clock';
@@ -39,9 +40,15 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
     private readonly userId: UserId,
   ) {}
 
+  /**
+   * Chunked — see `chunk.ts`. One statement per 10.000 staged rows overflows
+   * the call stack inside Drizzle's own query builder, which made the largest
+   * import SPEC-005 names the one import that could not be staged.
+   */
   async insertMany(rows: readonly ImportRow[]): Promise<void> {
-    if (rows.length === 0) return;
-    await this.tx.insert(importRows).values(rows.map((row) => toRow(row, this.userId)));
+    for (const chunk of chunked(rows)) {
+      await this.tx.insert(importRows).values(chunk.map((row) => toRow(row, this.userId)));
+    }
   }
 
   async findById(id: ImportRowId): Promise<ImportRow | null> {

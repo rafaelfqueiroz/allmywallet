@@ -90,6 +90,13 @@ export class FakeTransactionRepository implements TransactionRepository {
     this.#rows.push(transaction);
   }
 
+  async insertMany(rows: readonly Transaction[]): Promise<void> {
+    // Counted as one write, because it is one: a test asserting "a refused
+    // commit wrote nothing" cares about statements, not rows.
+    this.insertCount += 1;
+    this.#rows.push(...rows);
+  }
+
   async update(transaction: Transaction): Promise<void> {
     this.updateCount += 1;
     this.#rows = this.#rows.map((row) => (row.id === transaction.id ? transaction : row));

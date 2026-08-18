@@ -156,8 +156,14 @@ export async function commitBatch(
     positionUpserts.push({ ...key, state: replayed.value });
   }
 
-  for (const transaction of toInsert) {
-    await deps.transactions.insert(transaction);
+  // BR-005-13: one write for the whole batch. Written row by row this was
+  // ten thousand sequential round trips and 57 of the rule's 60 seconds.
+  //
+  // Guarded like the two writes below it: a batch that is entirely duplicates
+  // applies nothing, and should issue no statement at all rather than an empty
+  // insert — which `commit-batch.test.ts` asserts by counting writes.
+  if (toInsert.length > 0) {
+    await deps.transactions.insertMany(toInsert);
   }
   if (positionUpserts.length > 0) {
     await deps.positions.upsertMany(positionUpserts);
