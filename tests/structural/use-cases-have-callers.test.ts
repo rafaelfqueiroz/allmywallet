@@ -17,8 +17,12 @@ import { describe, expect, it } from 'vitest';
  *    showing last night's shape until a nightly sweep rebuilt everything.
  *  - The valuation metadata on `ReportPosition` (#12) — a suspended stock
  *    rendered indistinguishably from a live quote.
- *  - `deleteTransaction`, `bulkDeleteTransactions`, `rebuildPositions` and
- *    the two snapshot rebuild entry points — still orphaned, see the baseline.
+ *  - `deleteTransaction`, `bulkDeleteTransactions` and `describeDeletionImpact`
+ *    (#9) — SPEC-006's whole transaction-management surface had no route, so
+ *    BR-006-11..17 held in unit tests and nowhere else. Wired now; the entries
+ *    below came out because the second test insisted.
+ *  - `rebuildPositions` and the two snapshot rebuild entry points — still
+ *    orphaned, see the baseline.
  *
  * Each was found by a human reading code, twice by a full acceptance-criteria
  * sweep. This scan found them in one pass, and found two the sweeps missed.
@@ -84,11 +88,6 @@ const USE_CASE = /export\s+async\s+function\s+(\w+)\s*\(\s*(?:\/\*[\s\S]*?\*\/\s
  * SPEC-006's entire transaction-management surface has no route.
  */
 const KNOWN_ORPHANS: ReadonlyMap<string, string> = new Map([
-  // #9 — SPEC-006's transaction surface: no `src/app/(app)/transactions/`
-  // route exists, so a user cannot list, edit, delete or export their ledger.
-  ['bulkDeleteTransactions', '#9'],
-  ['deleteTransaction', '#9'],
-  ['describeDeletionImpact', '#9'],
   // #10 — DM-4's repair mechanism. Its own progress log says "Full rebuild
   // command" is unticked; the issue was closed anyway and is now reopened.
   ['rebuildPositions', '#10'],

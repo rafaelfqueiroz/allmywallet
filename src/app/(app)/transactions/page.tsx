@@ -11,9 +11,15 @@ import {
   paginationFor,
   toQueryString,
 } from '@/lib/transactions-url-state';
+import { bulkTransactionsAction } from '@/app/(app)/transactions/actions';
+import { BulkBar } from '@/app/(app)/transactions/_components/BulkBar';
 import { Controls } from '@/app/(app)/transactions/_components/Controls';
 import { Pagination } from '@/app/(app)/transactions/_components/Pagination';
-import { listAssetOptions, listInstitutionOptions } from '@/app/(app)/transactions/data';
+import {
+  listAssetOptions,
+  listInstitutionOptions,
+  listWalletChoices,
+} from '@/app/(app)/transactions/data';
 import { withTransactionsDeps } from '@/app/(app)/transactions/composition';
 import { tryUserId } from '@/app/(app)/transactions/session';
 import { PageShell } from '@/components/patterns/page-shell';
@@ -25,6 +31,7 @@ import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Table,
   TableBody,
@@ -38,12 +45,11 @@ import {
 /**
  * SPEC-006 BR-006-07/08/09/10/02/03 — the transaction ledger's own surface.
  *
- * The first of two PRs for #9: list, filters, provenance and CSV export.
- * Manual create/edit/delete/bulk assignment are SPEC-006's other business
- * rules (BR-006-11..18) and ship separately — `core/ledger/{delete,
- * bulk-delete}-transaction.ts` exist and are unit-tested but deliberately not
- * wired here (`tests/structural/use-cases-have-callers.test.ts`'s
- * `KNOWN_ORPHANS` still names them against this same issue).
+ * The list itself, and the entry point to everything that writes to it:
+ * `/transactions/new` (BR-006-11), `/transactions/[id]/edit` (BR-006-12),
+ * `/transactions/[id]/delete` (BR-006-13) and the bulk operations
+ * (BR-006-17), which are a form wrapping this table rather than a separate
+ * screen — see `_components/BulkBar.tsx`.
  *
  * Follows `(app)/reports/page.tsx`'s shape: a `data.ts`/`composition.ts` pair
  * (AR-02), one `withTenant` transaction for the whole render (AR-11), and a
@@ -84,15 +90,16 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   const { filter, page } = fromSearchParams(params);
   const pagination = paginationFor(page);
 
-  const { result, assetOptions, institutionOptions } = await withTransactionsDeps(
+  const { result, assetOptions, institutionOptions, wallets } = await withTransactionsDeps(
     userId,
     async (deps, tx) => {
-      const [result, assetOptions, institutionOptions] = await Promise.all([
+      const [result, assetOptions, institutionOptions, wallets] = await Promise.all([
         listTransactions(deps.transactions, filter, pagination),
         listAssetOptions(tx),
         listInstitutionOptions(),
+        listWalletChoices(tx),
       ]);
-      return { result, assetOptions, institutionOptions };
+      return { result, assetOptions, institutionOptions, wallets };
     },
   );
 
@@ -114,9 +121,15 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
       title={t('title')}
       description={t('description')}
       actions={
-        <Button asChild variant="outline">
-          <a href={exportHref}>{t('export.csv')}</a>
-        </Button>
+        <Cluster gap="sm">
+          <Button asChild variant="outline">
+            <a href={exportHref}>{t('export.csv')}</a>
+          </Button>
+          {/* BR-006-11 — the only way a CDB that no extract carries gets in. */}
+          <Button asChild>
+            <Link href="/transactions/new">{t('new')}</Link>
+          </Button>
+        </Cluster>
       }
     >
       <Controls
@@ -146,33 +159,46 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         />
       ) : (
         <Stack gap="md">
-          <Table>
-            <TableCaption className="sr-only">{t('table.caption')}</TableCaption>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">{t('table.date')}</TableHead>
-                <TableHead scope="col">{t('table.asset')}</TableHead>
-                <TableHead scope="col">{t('table.type')}</TableHead>
-                <TableHead scope="col">{t('table.institution')}</TableHead>
-                <TableHead scope="col" className="text-right">
-                  {t('table.quantity')}
-                </TableHead>
-                <TableHead scope="col" className="text-right">
-                  {t('table.unitPrice')}
-                </TableHead>
-                <TableHead scope="col" className="text-right">
-                  {t('table.total')}
-                </TableHead>
-                <TableHead scope="col">{t('table.status')}</TableHead>
-                <TableHead scope="col">{t('table.provenance')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {result.value.items.map((item) => (
-                <TransactionRow key={item.transaction.id} item={item} />
-              ))}
-            </TableBody>
-          </Table>
+          {/*
+            BR-006-17: the selection lives in the DOM, inside the form the bulk
+            bar renders, so the checkboxes below are submitted natively and no
+            client state can disagree with what is ticked on screen.
+          */}
+          <BulkBar action={bulkTransactionsAction} wallets={wallets}>
+            <Table>
+              <TableCaption className="sr-only">{t('table.caption')}</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">
+                    <span className="sr-only">{t('bulk.select')}</span>
+                  </TableHead>
+                  <TableHead scope="col">{t('table.date')}</TableHead>
+                  <TableHead scope="col">{t('table.asset')}</TableHead>
+                  <TableHead scope="col">{t('table.type')}</TableHead>
+                  <TableHead scope="col">{t('table.institution')}</TableHead>
+                  <TableHead scope="col" className="text-right">
+                    {t('table.quantity')}
+                  </TableHead>
+                  <TableHead scope="col" className="text-right">
+                    {t('table.unitPrice')}
+                  </TableHead>
+                  <TableHead scope="col" className="text-right">
+                    {t('table.total')}
+                  </TableHead>
+                  <TableHead scope="col">{t('table.status')}</TableHead>
+                  <TableHead scope="col">{t('table.provenance')}</TableHead>
+                  <TableHead scope="col">
+                    <span className="sr-only">{t('table.actions')}</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {result.value.items.map((item) => (
+                  <TransactionRow key={item.transaction.id} item={item} />
+                ))}
+              </TableBody>
+            </Table>
+          </BulkBar>
 
           <Pagination
             page={page}
@@ -198,6 +224,9 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
 
   return (
     <TableRow>
+      <TableCell className="py-row">
+        <Checkbox name="selected" value={tx.id} aria-label={t('bulk.select')} />
+      </TableCell>
       <TableCell className="py-row whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</TableCell>
       <TableCell className="py-row">
         <Stack gap="none">
@@ -247,6 +276,22 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
               {t('modified')}
             </Badge>
           )}
+        </Cluster>
+      </TableCell>
+      <TableCell className="py-row whitespace-nowrap">
+        {/*
+          BR-006-12/13 as links rather than buttons: both lead to a page that
+          asks something before it writes — the edit form, and the deletion's
+          mandatory disclosure of what will be recalculated. A link also keeps
+          them out of the bulk form's submission entirely.
+        */}
+        <Cluster gap="xs">
+          <Button asChild variant="ghost" size="sm">
+            <Link href={`/transactions/${tx.id}/edit`}>{t('edit.action')}</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link href={`/transactions/${tx.id}/delete`}>{t('delete.action')}</Link>
+          </Button>
         </Cluster>
       </TableCell>
     </TableRow>

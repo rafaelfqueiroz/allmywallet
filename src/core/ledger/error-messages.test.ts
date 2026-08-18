@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import messages from '@/i18n/messages/pt-BR.json';
 import { LedgerErrorCode } from '@/core/ledger/errors';
 import { PositionErrorCode } from '@/core/positions/errors';
+import { WalletErrorCode } from '@/core/wallets/errors';
 
 /**
  * AR-38 / AR-44: `core/` produces stable error **codes**; the i18n layer turns
@@ -23,6 +24,18 @@ describe('pt-BR catalogue covers every ledger and position error code', () => {
 
   it.each(Object.values(PositionErrorCode))('has a message for %s', (code) => {
     expect(catalogue[code], `missing pt-BR message for ${code}`).toBeTypeOf('string');
+  });
+
+  /**
+   * SPEC-010's codes reach the same surface: SPEC-006's bulk wallet assignment
+   * (BR-006-17) is a wallets use case rendered on `/transactions`, so a
+   * missing entry here shows a user the literal string
+   * `ALLOCATION_EXCEEDS_HOLDINGS`. Five of the six had no message at all until
+   * that surface existed to reveal it.
+   */
+  it.each(Object.values(WalletErrorCode))('has a message for %s', (code) => {
+    expect(catalogue[code], `missing pt-BR message for ${code}`).toBeTypeOf('string');
+    expect(catalogue[code]?.length ?? 0).toBeGreaterThan(0);
   });
 
   it('BR-006-15 — the oversell message names the held quantity, the request and the date', () => {
@@ -52,6 +65,16 @@ describe('pt-BR catalogue covers every ledger and position error code', () => {
       [LedgerErrorCode.FUTURE_TRADE_DATE]: ['tradeDate', 'today'],
       [LedgerErrorCode.EMPTY_SELECTION]: ['operation'],
       [LedgerErrorCode.INVALID_PAGINATION]: ['limit', 'maxLimit', 'offset'],
+      [WalletErrorCode.WALLET_NOT_FOUND]: ['walletId'],
+      [WalletErrorCode.INVALID_NAME]: [],
+      [WalletErrorCode.INVALID_ALLOCATION_QUANTITY]: ['assetId', 'quantity'],
+      [WalletErrorCode.ALLOCATION_EXCEEDS_HOLDINGS]: ['assetId', 'held', 'requested'],
+      [WalletErrorCode.WALLET_ALLOCATION_INSUFFICIENT]: [
+        'walletId',
+        'assetId',
+        'allocated',
+        'requested',
+      ],
     };
 
     for (const [code, keys] of Object.entries(supplied)) {

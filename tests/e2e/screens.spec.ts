@@ -18,6 +18,10 @@ const ROUTES = [
   '/',
   '/signin',
   '/wallets',
+  // SPEC-006 #9 — added when the ledger got a surface. Both render their
+  // signed-out state here, which is the state this suite runs in.
+  '/transactions',
+  '/transactions/new',
   '/import',
   '/reports',
   '/reports/patrimonio',
