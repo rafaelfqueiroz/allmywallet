@@ -31,19 +31,34 @@ export async function GroupLabel({
   readonly names: GroupNames;
 }) {
   const t = await getTranslations('reports');
+  return <>{resolveGroupLabel(groupKey, names, t)}</>;
+}
 
+/**
+ * The same three sources, as a **string**.
+ *
+ * SPEC-015 needs the label where JSX will not go: a chart wedge's name, a
+ * legend entry, a cell serialised into a Client Component. Extracting it here
+ * rather than re-deriving it there is the same argument `resolveGroupNames`
+ * makes one layer down — a second copy of this ordering would eventually
+ * disagree with the first, and the symptom would be one screen labelling a
+ * group correctly while another labels it with a uuid.
+ */
+export function resolveGroupLabel(
+  groupKey: GroupKey,
+  names: GroupNames,
+  t: (key: string) => string,
+): string {
   if (groupKey.synthetic) {
-    return (
-      <>{groupKey.id === UNASSIGNED_GROUP_ID ? t('group.unassigned') : t('group.notClassified')}</>
-    );
+    return groupKey.id === UNASSIGNED_GROUP_ID ? t('group.unassigned') : t('group.notClassified');
   }
 
   // Asset class is the one dimension whose ids are a closed enum rather than
   // tenant data, so its label lives in the message catalogue.
-  if (groupKey.dimension === 'asset_class') return <>{t(`assetClass.${groupKey.id}`)}</>;
+  if (groupKey.dimension === 'asset_class') return t(`assetClass.${groupKey.id}`);
 
   // The id is the last resort, not the first: reaching it means the name map
   // and the holding set disagree, which is a bug rather than a display case.
   // Rendering the id keeps the row readable and keeps the total honest.
-  return <>{names.get(groupNameKey(groupKey)) ?? groupKey.id}</>;
+  return names.get(groupNameKey(groupKey)) ?? groupKey.id;
 }
