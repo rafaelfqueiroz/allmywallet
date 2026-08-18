@@ -5,7 +5,7 @@ import type { GroupNames } from '@/core/reporting/grouping';
 import { GroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
 import { defaultGroupingFor } from '@/core/reporting/grouping';
 import { NOT_CLASSIFIED_GROUP_ID, type ReportGroup } from '@/core/reporting/ports';
-import { fromSearchParams } from '@/lib/report-url-state';
+import { fromSearchParams, toQueryString } from '@/lib/report-url-state';
 import { hasFixedIncome } from '@/lib/fixed-income';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { List, ListItem } from '@/components/layout/list';
 import { Text } from '@/components/ui/text';
 import { Cluster } from '@/components/layout/cluster';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -78,7 +79,13 @@ export default async function ReportsPage({ searchParams }: PageProps) {
   // Parsed twice on purpose: the default grouping depends on the scope
   // (BR-011-04), and the scope is itself one of the parsed values.
   const provisional = fromSearchParams(params, 'asset_class');
-  const state = fromSearchParams(params, defaultGroupingFor(provisional.scope, undefined));
+  // Hoisted, because the export link has to serialise against the *same*
+  // default the state was parsed with. Passing `state.grouping` there would
+  // omit the parameter every time — the two would always compare equal — and
+  // the export would silently fall back to this scope's default grouping,
+  // which is not necessarily what the table on screen is showing.
+  const defaultGrouping = defaultGroupingFor(provisional.scope, undefined);
+  const state = fromSearchParams(params, defaultGrouping);
 
   const { result, wallets } = await withReportPort(userId, async (port) => ({
     wallets: await port.listWallets(),
@@ -105,6 +112,26 @@ export default async function ReportsPage({ searchParams }: PageProps) {
         grouping={state.grouping}
         wallets={wallets.map((wallet) => ({ walletId: wallet.walletId, name: wallet.name }))}
       />
+
+      {/*
+        BR-011-12 / AC-011-11 — the export, reachable. `exportGroupedCsv` was
+        written, tested and referenced by nothing: no route, no control, and
+        `reports.export.csv` unused in the catalogue, so the criterion was
+        ticked on a function a user could not invoke (#61).
+
+        A link rather than a button: the response is a file, the handler is a
+        GET, and carrying the page's own query string is what makes "export
+        what I am looking at" true rather than approximately true.
+      */}
+      {result.ok && !result.value.empty && (
+        <Cluster gap="sm">
+          <Button asChild variant="outline" size="sm">
+            <a href={`/api/reports/export${toQueryString(state, defaultGrouping)}`}>
+              {t('export.csv')}
+            </a>
+          </Button>
+        </Cluster>
+      )}
 
       {!result.ok ? (
         // BR-011-16: a named, explanatory outcome — never a blank page and
