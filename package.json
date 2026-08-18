@@ -16,6 +16,7 @@
     "db:provision-app-role": "tsx scripts/provision-app-role.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed:reference": "tsx src/db/seed-reference.ts",
+    "positions:rebuild": "tsx src/ops/rebuild-positions.ts",
     "dev": "next dev",
     "e2e:server": "bash scripts/e2e-server.sh",
     "format": "prettier --write .",

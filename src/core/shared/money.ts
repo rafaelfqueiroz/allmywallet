@@ -34,6 +34,35 @@ Decimal.set({
   rounding: Decimal.ROUND_DOWN,
 });
 
+/**
+ * The scale `NUMERIC(20,8)` actually keeps.
+ *
+ * `toString()` deliberately emits full precision — AR-09 rounds only at
+ * display, and the surplus digits are what keep an average-cost chain from
+ * drifting. But the column stores eight places, so a value that has just been
+ * computed and the same value read back are *not* the same string, and code
+ * that compares the two has to say which form it means.
+ *
+ * `asStored` is that form. It exists because `verifyPositions` compared the
+ * two directly and reported permanent drift on every position whose replay
+ * produced a repeating decimal — the check was unusable on exactly the
+ * positions worth checking.
+ */
+export const STORED_SCALE = 8;
+
+/**
+ * The string the database would hold for this value.
+ *
+ * `ROUND_HALF_UP` because that is what Postgres does casting to a scaled
+ * numeric — verified, not assumed: `'0.000000005'::numeric(20,8)` is
+ * `0.00000001` and `'-0.000000005'::numeric(20,8)` is `-0.00000001`, which is
+ * half-away-from-zero, decimal.js's `ROUND_HALF_UP`. Truncating instead would
+ * disagree with the column on every value ending in exactly five.
+ */
+export function asStored(value: Money | Quantity): string {
+  return value.toDecimal().toFixed(STORED_SCALE, Decimal.ROUND_HALF_UP);
+}
+
 /** Accepted inputs. Deliberately not `number` — that is the whole point. */
 export type NumericInput = string | Decimal;
 

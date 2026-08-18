@@ -421,8 +421,16 @@ export default tseslint.config(
   },
 
   // Config files at the repo root run in Node and legitimately read process.env.
+  //
+  // `src/ops/**` is there for a different reason: an operator command's stdout
+  // *is* its interface, so `console` is the output channel rather than a
+  // debugging leftover — the structured `logger` runs alongside it for the
+  // machine-readable record. These commands live under `src/` rather than in
+  // `scripts/` on purpose: `tests/structural/use-cases-have-callers.test.ts`
+  // only scans `src/`, so a caller outside it would leave the use case
+  // recorded as unreachable while it is, in fact, reachable.
   {
-    files: ['*.config.ts', '*.config.mts', '*.config.mjs', 'scripts/**/*.ts'],
+    files: ['*.config.ts', '*.config.mts', '*.config.mjs', 'scripts/**/*.ts', 'src/ops/**/*.ts'],
     rules: { 'no-console': 'off' },
   },
 
