@@ -2,12 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
 import {
   MOVIMENTACAO_HEADERS,
+  NEGOCIACAO_HEADERS,
+  POSICAO_HEADERS,
   SYNTHETIC_CPF,
   buildMovimentacaoXlsx,
+  buildMultiSheetXlsx,
   buildNegociacaoXlsx,
   buildPosicaoXlsx,
   buildXlsx,
+  negociacaoRow,
+  posicaoRow,
+  type BuildSheetOptions,
+  type PosicaoRowInput,
 } from '@/adapters/ingestion/xlsx/test-support/builder';
+import { IngestionErrorCode } from '@/core/ingestion/ports';
 import { isValidCpf } from '@/adapters/ingestion/xlsx/strip-cpf';
 
 const port = new XlsxIngestionPort();
@@ -186,5 +194,126 @@ describe('SPEC-005 BR-005-01..08 — XlsxIngestionPort', () => {
     if (result.ok) return;
     expect(result.error.code).toBe('INGESTION_MALFORMED_CELL');
     expect(result.error.context['column']).toBe('quantidade');
+  });
+});
+
+/**
+ * SPEC-005 BR-005-01 / AC-005-06 (#63) — a real B3 Posição export is a
+ * multi-tab workbook, one tab per asset class.
+ *
+ * The port took `worksheets.find(...)`: the first populated sheet won and the
+ * rest of the file was discarded without a word. The case that matters is a
+ * fixed-income tab arriving after an equities tab — BR-005-06 reads contracted
+ * rates only from Posição, so losing that tab loses every CDB *and* every
+ * contract, and the holdings then value at cost with nothing on screen saying
+ * why.
+ */
+describe('a multi-tab workbook (#63)', () => {
+  const posicaoSheet = (rows: readonly PosicaoRowInput[]): BuildSheetOptions => ({
+    headers: [...POSICAO_HEADERS],
+    rows: rows.map(posicaoRow),
+  });
+
+  const equities = posicaoSheet([
+    {
+      produto: 'PETR4 - PETROBRAS PN',
+      categoria: 'Ações',
+      quantidade: '100',
+      dataReferencia: '31/03/2026',
+    },
+  ]);
+
+  const fixedIncome = posicaoSheet([
+    {
+      produto: 'CDB BANCO TESTE',
+      categoria: 'CDB',
+      quantidade: '1',
+      dataReferencia: '31/03/2026',
+      indexador: 'CDI',
+      taxaContratada: '110',
+      dataEmissao: '01/02/2026',
+      vencimento: '01/02/2028',
+      valorAplicado: '10.000,00',
+    },
+  ]);
+
+  it('reads every tab, not only the first', async () => {
+    const bytes = await buildMultiSheetXlsx([equities, fixedIncome], ['Ações', 'Renda Fixa']);
+
+    const parsed = await new XlsxIngestionPort().parse(bytes);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.extractType).toBe('b3_posicao');
+    // Against the old `find(...)` this is 1: the CDB tab never existed.
+    expect(parsed.value.records).toHaveLength(2);
+  });
+
+  it('carries the fixed-income contract off a later tab', async () => {
+    // The reason the count above matters. BR-005-06's contracted rate lives on
+    // the tab that used to be dropped.
+    const bytes = await buildMultiSheetXlsx([equities, fixedIncome]);
+
+    const parsed = await new XlsxIngestionPort().parse(bytes);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // `raw` keys are the normalised header names, not the sheet's own casing.
+    const cdb = parsed.value.records.find((record) => record.raw['categoria'] === 'CDB');
+    expect(cdb).toBeDefined();
+    // The contract itself, not just the row: BR-005-06's indexer and rate are
+    // what SPEC-009 accrues from, and they exist nowhere but this tab.
+    expect(cdb?.record.kind).toBe('position');
+    if (cdb?.record.kind !== 'position') return;
+    expect(cdb.record.fixedIncome).not.toBeNull();
+    expect(cdb.record.fixedIncome?.indexer).toBe('cdi_percent');
+    expect(cdb.record.fixedIncome?.ratePercent?.toString()).toBe('110');
+    expect(cdb.record.fixedIncome?.maturityDate).toBe('2028-02-01');
+  });
+
+  it('skips a tab whose headers match no schema rather than failing the import', async () => {
+    // Exports carry cover and notes tabs. Refusing the whole file over one
+    // would make the feature unusable; the staged row count is what tells the
+    // user what actually came in, before they commit.
+    const cover: BuildSheetOptions = {
+      headers: ['Relatório', 'Gerado em'],
+      rows: [{ Relatório: 'Posição consolidada', 'Gerado em': '31/03/2026' }],
+      metadataRows: [],
+    };
+
+    const parsed = await new XlsxIngestionPort().parse(
+      await buildMultiSheetXlsx([cover, equities, fixedIncome]),
+    );
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.records).toHaveLength(2);
+  });
+
+  it('refuses a workbook holding two different extracts rather than merging them', async () => {
+    // `ParsedExtract` carries one `extractType`. Picking a winner would file
+    // one extract's rows under the other's type.
+    const negociacao: BuildSheetOptions = {
+      headers: [...NEGOCIACAO_HEADERS],
+      rows: [
+        negociacaoRow({
+          data: '02/03/2026',
+          tipo: 'Compra',
+          codigo: 'PETR4',
+          quantidade: '100',
+          preco: '38,42',
+          valor: '3.842,00',
+        }),
+      ],
+    };
+
+    const parsed = await new XlsxIngestionPort().parse(
+      await buildMultiSheetXlsx([equities, negociacao]),
+    );
+
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.error.code).toBe(IngestionErrorCode.UNRECOGNIZED_STRUCTURE);
+    expect(parsed.error.context['expected']).toBe('one extract type per workbook');
   });
 });
