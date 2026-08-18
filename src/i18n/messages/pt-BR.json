@@ -394,6 +394,66 @@
     "attentionTitle": "Precisam de atenção",
     "attentionDescription": "Estes ativos aparecem pelo custo de aquisição porque não conseguimos avaliá-los. Os totais acima os incluem por esse valor."
   },
+  "transactions": {
+    "title": "Transações",
+    "description": "Histórico cronológico de todas as suas transações, em todos os ativos e instituições.",
+    "signedOut": "Entre na sua conta para ver suas transações.",
+    "filters": {
+      "from": "De",
+      "to": "Até",
+      "search": "Buscar",
+      "searchPlaceholder": "Código ou nome do ativo",
+      "asset": "Ativo",
+      "assetAll": "Todos os ativos",
+      "assetClass": "Classe de ativo",
+      "assetClassAll": "Todas as classes",
+      "type": "Tipo",
+      "typeAll": "Todos os tipos",
+      "institution": "Instituição",
+      "institutionAll": "Todas as instituições",
+      "status": "Status",
+      "statusAll": "Todos os status",
+      "apply": "Aplicar"
+    },
+    "status": {
+      "active": "Ativa",
+      "unclassified": "Não classificada",
+      "superseded": "Substituída"
+    },
+    "provenance": {
+      "manual": "Manual",
+      "imported": "Importada"
+    },
+    "modified": "Editada",
+    "modifiedExplanation": "Esta transação foi importada e depois corrigida manualmente. Uma nova importação do mesmo extrato não substitui a correção.",
+    "table": {
+      "caption": "Transações",
+      "date": "Data",
+      "asset": "Ativo",
+      "type": "Tipo",
+      "institution": "Instituição",
+      "quantity": "Quantidade",
+      "unitPrice": "Preço unitário",
+      "total": "Total",
+      "status": "Status",
+      "provenance": "Origem"
+    },
+    "pagination": {
+      "label": "Paginação da lista de transações",
+      "summary": "Página {page} de {pages} · {total} transações",
+      "previous": "Anterior",
+      "next": "Próxima"
+    },
+    "export": {
+      "csv": "Exportar CSV"
+    },
+    "empty": {
+      "ledgerTitle": "Nenhuma transação por aqui ainda",
+      "ledgerBody": "Importe um extrato da B3 para começar a ver seu histórico de transações.",
+      "filteredTitle": "Nada com esses filtros",
+      "filteredBody": "Nenhuma transação corresponde aos filtros escolhidos. Tente ampliar o período ou limpar algum filtro."
+    }
+  },
   "privacy": {
     "title": "Privacidade e dados",
     "description": "Exporte os seus dados, gerencie consentimentos e exclua a sua conta.",

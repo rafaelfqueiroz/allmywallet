@@ -1,4 +1,12 @@
-import { ChartPie, Settings, ShieldCheck, Upload, Wallet, type LucideIcon } from 'lucide-react';
+import {
+  ChartPie,
+  Receipt,
+  Settings,
+  ShieldCheck,
+  Upload,
+  Wallet,
+  type LucideIcon,
+} from 'lucide-react';
 
 /**
  * The application's destinations, in one place, so the sidebar and the mobile
@@ -7,17 +15,22 @@ import { ChartPie, Settings, ShieldCheck, Upload, Wallet, type LucideIcon } from
  * `labelKey` indexes the existing `nav.*` catalogue rather than carrying text —
  * AR-44 applies to a nav item as much as to a button.
  *
- * Only routes that exist are listed. `nav.dashboard` and `nav.transactions`
- * have catalogue entries but no pages yet; linking to them would ship a
- * navigation menu whose items 404, which is worse than a shorter menu.
+ * Only routes that exist are listed. `nav.dashboard` has a catalogue entry but
+ * no page yet; linking to it would ship a navigation menu whose item 404s,
+ * which is worse than a shorter menu. `nav.transactions` graduated out of that
+ * category with #9 (SPEC-006) — a user can now reach their ledger.
  */
 export type NavItem = {
   readonly href: string;
-  readonly labelKey: 'wallets' | 'import' | 'reports' | 'settings' | 'privacy';
+  readonly labelKey: 'transactions' | 'wallets' | 'import' | 'reports' | 'settings' | 'privacy';
   readonly icon: LucideIcon;
 };
 
 export const NAV_ITEMS: readonly NavItem[] = [
+  // BR-006-01: the ledger is the single source of truth everything else is
+  // derived from, which is why it leads the menu rather than sitting after
+  // the views built on top of it.
+  { href: '/transactions', labelKey: 'transactions', icon: Receipt },
   { href: '/wallets', labelKey: 'wallets', icon: Wallet },
   { href: '/import', labelKey: 'import', icon: Upload },
   { href: '/reports', labelKey: 'reports', icon: ChartPie },
