@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
+import { AssetId, UserId } from '@/core/shared/ids';
+import { Money } from '@/core/shared/money';
+import { ASSET_CLASSES } from '@/db/schema/assets';
 import {
+  REFERENCE_ASSET_CLASS_TO_SCHEMA,
   REFERENCE_ASSET_COUNT,
   REFERENCE_AS_OF_DATE,
   REFERENCE_START_DATE,
   REFERENCE_TRANSACTION_COUNT,
+  centsToDecimalString,
   generateReferenceAssets,
   generateReferenceTransactions,
   generateReferenceWorkload,
+  referenceTransactionRows,
 } from '@/db/reference-workload';
 
 /**
@@ -89,5 +95,81 @@ describe('generateReferenceWorkload', () => {
     const workload = generateReferenceWorkload();
     expect(workload.assets).toHaveLength(REFERENCE_ASSET_COUNT);
     expect(workload.transactions).toHaveLength(REFERENCE_TRANSACTION_COUNT);
+  });
+});
+
+describe('centsToDecimalString', () => {
+  it('converts by integer arithmetic, never by dividing (AR-06)', () => {
+    expect(centsToDecimalString(0)).toBe('0.00');
+    expect(centsToDecimalString(5)).toBe('0.05');
+    expect(centsToDecimalString(100)).toBe('1.00');
+    expect(centsToDecimalString(50_000)).toBe('500.00');
+    expect(centsToDecimalString(123_456)).toBe('1234.56');
+  });
+
+  it('keeps the sign on the outside', () => {
+    expect(centsToDecimalString(-5)).toBe('-0.05');
+    expect(centsToDecimalString(-123_456)).toBe('-1234.56');
+  });
+
+  it('produces a literal Money accepts', () => {
+    // The whole point of the string: `Money.fromString` is the only way a
+    // value enters the ledger, and it refuses anything exponential or lossy.
+    for (const cents of [1, 99, 100, 101, 999_999_99]) {
+      expect(Money.fromString(centsToDecimalString(cents)).toString()).toBe(
+        centsToDecimalString(cents).replace(/\.00$/, ''),
+      );
+    }
+  });
+});
+
+describe('referenceTransactionRows', () => {
+  const workload = generateReferenceWorkload();
+  const assetIds = new Map(
+    workload.assets.map((asset, index) => [
+      asset.ticker,
+      AssetId.of(`0192${String(index).padStart(4, '0')}-0000-7000-8000-000000000001`),
+    ]),
+  );
+  const userId = UserId.of('00000000-0000-7000-8000-000000000001');
+
+  it('maps every generated transaction', () => {
+    expect(referenceTransactionRows(workload.transactions, assetIds, userId)).toHaveLength(
+      REFERENCE_TRANSACTION_COUNT,
+    );
+  });
+
+  /**
+   * BR-006-04's constraint is `UNIQUE (user_id, natural_key, occurrence)`, and
+   * the generator can legitimately produce two identical rows for one ticker
+   * on one day. A collision here is not a test failure in the abstract — it is
+   * the nightly seed aborting halfway through, leaving the budgets measured
+   * against a partial workload.
+   */
+  it('produces a natural key per row that no other row shares', () => {
+    const rows = referenceTransactionRows(workload.transactions, assetIds, userId);
+    expect(new Set(rows.map((row) => `${row.naturalKey}|${row.occurrence ?? 1}`)).size).toBe(
+      rows.length,
+    );
+  });
+
+  it('is a pure function of the workload, so a re-seed writes the same keys', () => {
+    // Ids differ (they are generated), but the keys the unique constraint sees
+    // must not — otherwise a re-run is not idempotent in the way the seeder's
+    // count check assumes.
+    const first = referenceTransactionRows(workload.transactions, assetIds, userId);
+    const second = referenceTransactionRows(workload.transactions, assetIds, userId);
+    expect(first.map((row) => row.naturalKey)).toEqual(second.map((row) => row.naturalKey));
+  });
+
+  it('maps every asset class onto one the schema CHECK accepts', () => {
+    for (const value of Object.values(REFERENCE_ASSET_CLASS_TO_SCHEMA)) {
+      expect(ASSET_CLASSES as readonly string[]).toContain(value);
+    }
+    // And covers every class the generator can emit — a missing key would
+    // insert `undefined` and fail the NOT NULL at seed time.
+    for (const asset of workload.assets) {
+      expect(REFERENCE_ASSET_CLASS_TO_SCHEMA[asset.assetClass]).toBeDefined();
+    }
   });
 });
