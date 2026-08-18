@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server';
 import { defaultGroupingFor } from '@/core/reporting/grouping';
-import type { GroupKey } from '@/core/reporting/ports';
+import { GroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
 import {
   EarningsTreatment,
   type Benchmark,
@@ -309,7 +309,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                   {report.value.contribution.value.groups.map((group: GroupPerformance) => (
                     <TableRow key={group.key.id}>
                       <TableCell className="py-row font-medium">
-                        <GroupLabel groupKey={group.key} />
+                        <GroupLabel groupKey={group.key} names={report.value.groupNames} />
                       </TableCell>
                       <TableCell className="py-row text-right">
                         <Money value={group.weight} kind="percent" />
@@ -376,16 +376,6 @@ async function HeadlineRate<T>({
     );
   }
   return <Money value={pick(result.value)} kind="percent" signed />;
-}
-
-/**
- * BR-011-09/10 — the two synthetic buckets get their i18n message; everything
- * else is tenant data the domain deliberately did not name (see `GroupKey`).
- */
-async function GroupLabel({ groupKey }: { readonly groupKey: GroupKey }) {
-  const t = await getTranslations('reports');
-  if (!groupKey.synthetic) return <>{groupKey.id}</>;
-  return <>{t(`group.${groupKey.id === '__unassigned__' ? 'unassigned' : 'notClassified'}`)}</>;
 }
 
 /** The three benchmark names are proper nouns, not translatable copy. */

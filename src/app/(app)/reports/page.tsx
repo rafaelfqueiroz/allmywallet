@@ -1,12 +1,10 @@
 import { getTranslations } from 'next-intl/server';
 import { SystemClock } from '@/core/shared/clock';
 import { runReportQuery } from '@/core/reporting/base-query';
+import type { GroupNames } from '@/core/reporting/grouping';
+import { GroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
 import { defaultGroupingFor } from '@/core/reporting/grouping';
-import {
-  NOT_CLASSIFIED_GROUP_ID,
-  UNASSIGNED_GROUP_ID,
-  type ReportGroup,
-} from '@/core/reporting/ports';
+import { NOT_CLASSIFIED_GROUP_ID, type ReportGroup } from '@/core/reporting/ports';
 import { fromSearchParams } from '@/lib/report-url-state';
 import { hasFixedIncome } from '@/lib/fixed-income';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
@@ -145,7 +143,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
             </TableHeader>
             <TableBody>
               {result.value.report.groups.map((group: ReportGroup) => (
-                <GroupRow key={group.key.id} group={group} />
+                <GroupRow key={group.key.id} group={group} names={result.value.groupNames} />
               ))}
             </TableBody>
             <TableFooter>
@@ -216,17 +214,14 @@ export default async function ReportsPage({ searchParams }: PageProps) {
  * derived differently from the row it expands — which is exactly the class of
  * disagreement this spec exists to prevent.
  */
-async function GroupRow({ group }: { readonly group: ReportGroup }) {
+async function GroupRow({
+  group,
+  names,
+}: {
+  readonly group: ReportGroup;
+  readonly names: GroupNames;
+}) {
   const t = await getTranslations('reports');
-
-  // AR-44: synthetic buckets render an i18n label, never their sentinel id.
-  const label = group.key.synthetic
-    ? group.key.id === UNASSIGNED_GROUP_ID
-      ? t('group.unassigned')
-      : t('group.notClassified')
-    : group.key.dimension === 'asset_class'
-      ? t(`assetClass.${group.key.id}`)
-      : (group.holdings[0]?.assetCode ?? group.key.id);
 
   return (
     <TableRow className="align-top">
@@ -234,7 +229,9 @@ async function GroupRow({ group }: { readonly group: ReportGroup }) {
         <details>
           <summary className="cursor-pointer">
             <Cluster gap="sm" align="baseline">
-              <span>{label}</span>
+              <span>
+                <GroupLabel groupKey={group.key} names={names} />
+              </span>
               {group.totals.estimated ? (
                 <Badge variant="outline" title={t('estimate.explanation')}>
                   {t('estimate.badge')}

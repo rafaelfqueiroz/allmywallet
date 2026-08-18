@@ -3,7 +3,9 @@ import {
   compareGroupKeys,
   defaultGroupingFor,
   groupKeyResolver,
+  groupNameKey,
   isGrouping,
+  resolveGroupNames,
 } from '@/core/reporting/grouping';
 import {
   GROUPINGS,
@@ -209,5 +211,71 @@ describe('compareGroupKeys — deterministic ordering', () => {
       .map((key) => key.id);
     expect(once).toEqual(['a', 'm', 'z', 'b', 'x']);
     expect(twice).toEqual(once);
+  });
+});
+
+/**
+ * SPEC-011 BR-011-06 / #63 — the name behind a group key.
+ *
+ * The defect these pin: every report page rendered `GroupKey.id` directly, so
+ * a wallet group was a bare uuid on the performance table and — worse — was
+ * labelled with `holdings[0].assetCode` on the holdings table, putting a real
+ * ticker in the wallet column where a reader had no way to notice it was the
+ * wrong noun.
+ */
+describe('resolveGroupNames — BR-011-06 / #63', () => {
+  const retirement = walletIdOf('1');
+  const trading = walletIdOf('2');
+  const clear = institutionIdOf('1');
+  const petr = assetIdOf('1');
+
+  const sources = {
+    holdings: [
+      aHolding({ assetId: petr, assetCode: 'PETR4', walletId: retirement, sector: 'Petróleo' }),
+      aHolding({ assetId: assetIdOf('2'), assetCode: 'ITSA4', walletId: trading, sector: null }),
+    ],
+    wallets: [
+      { walletId: retirement, name: 'Aposentadoria' },
+      { walletId: trading, name: 'Trading' },
+    ],
+    institutions: [{ institutionId: clear, name: 'Clear' }],
+  };
+
+  it('names a wallet group with the wallet, not with an asset inside it', () => {
+    const names = resolveGroupNames('wallet', sources);
+    expect(names.get(`wallet:${retirement}`)).toBe('Aposentadoria');
+    // The exact regression: the old fallback would have produced 'PETR4'.
+    expect(names.get(`wallet:${retirement}`)).not.toBe('PETR4');
+  });
+
+  it('names an institution group', () => {
+    expect(resolveGroupNames('institution', sources).get(`institution:${clear}`)).toBe('Clear');
+  });
+
+  it('names an asset group with its ticker', () => {
+    expect(resolveGroupNames('asset', sources).get(`asset:${petr}`)).toBe('PETR4');
+  });
+
+  it('sector names are their own id, and a null sector contributes nothing', () => {
+    const names = resolveGroupNames('sector', sources);
+    expect(names.get('sector:Petróleo')).toBe('Petróleo');
+    // The unsectored holding belongs to the synthetic bucket, whose label is
+    // an i18n key — it must not appear here under any id.
+    expect([...names.keys()]).toEqual(['sector:Petróleo']);
+  });
+
+  it('asset class resolves no names — its labels are i18n keys, not tenant data', () => {
+    expect(resolveGroupNames('asset_class', sources).size).toBe(0);
+  });
+
+  it('keys are namespaced by dimension, so two dimensions cannot collide on an id', () => {
+    // `groupNameKey` is what the UI looks up with; a bare id would let an
+    // asset uuid answer a wallet lookup if the two ever coincided.
+    expect(groupNameKey({ dimension: 'wallet', id: retirement, synthetic: false })).toBe(
+      `wallet:${retirement}`,
+    );
+    expect(groupNameKey({ dimension: 'asset', id: retirement, synthetic: false })).not.toBe(
+      `wallet:${retirement}`,
+    );
   });
 });
