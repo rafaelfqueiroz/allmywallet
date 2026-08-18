@@ -4,7 +4,7 @@ import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
 import { Money as MoneyValue } from '@/core/shared/money';
-import { audit, render, screen, within } from '@/components/test-utils';
+import { audit, render, screen, userEvent, within } from '@/components/test-utils';
 
 type Position = { code: string; cost: MoneyValue };
 
@@ -78,6 +78,103 @@ describe('DataTable', () => {
 
   it('has no axe violations when empty', async () => {
     const { container } = render(<Positions data={[]} />);
+    expect(await audit(container)).toHaveNoViolations();
+  });
+});
+
+/**
+ * SPEC-015 AC-4 — "the table sorts by every column, ascending and descending."
+ *
+ * The affordance lives here rather than in the Composition screen so the next
+ * sortable table cannot re-decide the icon, the button or the `aria-sort`
+ * wiring and get one of the three subtly wrong.
+ */
+describe('DataTable — sorting', () => {
+  function Sortable() {
+    return (
+      <DataTable
+        columns={columns}
+        data={rows}
+        caption="Posições"
+        sortable
+        sortLabel={(column) => `Ordenar por ${column}`}
+      />
+    );
+  }
+
+  it('leaves headers as plain text when sorting is not asked for', () => {
+    render(<Positions />);
+    const table = screen.getByRole('table');
+    expect(within(table).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('turns each header into a control that says what it does', () => {
+    render(<Sortable />);
+    const table = screen.getByRole('table');
+    expect(within(table).getByRole('button', { name: 'Ordenar por Ativo' })).toBeInTheDocument();
+    expect(within(table).getByRole('button', { name: 'Ordenar por Custo' })).toBeInTheDocument();
+  });
+
+  it('sorts ascending, then descending, and says so through aria-sort', async () => {
+    const user = userEvent.setup();
+    render(<Sortable />);
+    const table = screen.getByRole('table');
+
+    const codeOf = () =>
+      within(table)
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => within(row).getAllByRole('cell')[0]?.textContent);
+
+    // Unsorted: the order the data arrived in.
+    expect(codeOf()).toEqual(['PETR4', 'HGLG11']);
+
+    await user.click(within(table).getByRole('button', { name: 'Ordenar por Ativo' }));
+    expect(codeOf()).toEqual(['HGLG11', 'PETR4']);
+    expect(within(table).getByRole('columnheader', { name: /Ativo/ })).toHaveAttribute(
+      'aria-sort',
+      'ascending',
+    );
+
+    await user.click(within(table).getByRole('button', { name: 'Ordenar por Ativo' }));
+    expect(codeOf()).toEqual(['PETR4', 'HGLG11']);
+    expect(within(table).getByRole('columnheader', { name: /Ativo/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+  });
+
+  it('marks only the sorted column, so the others are not announced as unsorted', async () => {
+    const user = userEvent.setup();
+    render(<Sortable />);
+    const table = screen.getByRole('table');
+
+    await user.click(within(table).getByRole('button', { name: 'Ordenar por Ativo' }));
+    expect(within(table).getByRole('columnheader', { name: /Custo/ })).not.toHaveAttribute(
+      'aria-sort',
+    );
+  });
+
+  it('opens on the column it was told to', () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        caption="Posições"
+        sortable
+        initialSorting={[{ id: 'code', desc: true }]}
+        sortLabel={(column) => `Ordenar por ${column}`}
+      />,
+    );
+    const table = screen.getByRole('table');
+    expect(within(table).getByRole('columnheader', { name: /Ativo/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+  });
+
+  it('has no axe violations when sortable', async () => {
+    const { container } = render(<Sortable />);
     expect(await audit(container)).toHaveNoViolations();
   });
 });
