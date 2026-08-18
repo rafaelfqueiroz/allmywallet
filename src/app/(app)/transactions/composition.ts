@@ -1,6 +1,16 @@
+import {
+  DrizzleAssetResolver,
+  DrizzleInstitutionResolver,
+} from '@/adapters/db/ingestion-resolvers';
+import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
+import { SystemClock } from '@/core/shared/clock';
 import type { UserId } from '@/core/shared/ids';
+import type { AssetResolverPort, InstitutionResolverPort } from '@/core/ingestion/ports';
+import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import type { TransactionRepository } from '@/core/ledger/ports';
+import type { AssignTransactionsDependencies } from '@/core/wallets/assign-transactions';
+import { buildWalletDeps } from '@/worker/handlers/import';
 import { db } from '@/db/client';
 import { withTenant, type Tx } from '@/db/tenant';
 
@@ -31,4 +41,54 @@ export async function withTransactionsDeps<T>(
   fn: (deps: TransactionsDeps, tx: Tx) => Promise<T>,
 ): Promise<T> {
   return withTenant(userId, (tx) => fn(buildDeps(tx, userId), tx), db);
+}
+
+/**
+ * The write side of the same surface (BR-006-11..17). One `withTenant`
+ * transaction carries all three port groups on purpose:
+ *
+ *  - `ledger` writes the row and recalculates the position forward;
+ *  - `wallets` follows the position — `applyLedgerEffects` for a row that
+ *    arrived, `reconcileAllocationsToHoldings` for one that changed or left.
+ *    Two transactions would let the ledger write commit while the allocation
+ *    adjustment rolled back, leaving BR-010-05's sum invariant broken with no
+ *    retry that repairs it (the reason `worker/handlers/import.ts` states for
+ *    doing the same);
+ *  - `assets`/`institutions` resolve the free-text code and name a manual
+ *    entry may carry for something no B3 extract has ever mentioned — the
+ *    spec's "a CDB absent from every B3 extract" criterion. They are the
+ *    same resolvers SPEC-005's commit uses, so a manually entered PETR4 and
+ *    an imported one land on one catalogue row rather than two.
+ */
+export interface TransactionWriteDeps {
+  readonly ledger: LedgerDependencies;
+  readonly assign: AssignTransactionsDependencies;
+  readonly assets: AssetResolverPort;
+  readonly institutions: InstitutionResolverPort;
+}
+
+const clock = new SystemClock();
+
+export async function withTransactionWriteDeps<T>(
+  userId: UserId,
+  fn: (deps: TransactionWriteDeps) => Promise<T>,
+): Promise<T> {
+  return withTenant(
+    userId,
+    (tx) => {
+      const transactions = new DrizzleTransactionRepository(tx, userId);
+      const wallets = buildWalletDeps(tx, userId, clock);
+      return fn({
+        ledger: {
+          transactions,
+          positions: new DrizzlePositionRepository(tx, userId),
+          clock,
+        },
+        assign: { ...wallets, transactions },
+        assets: new DrizzleAssetResolver(tx),
+        institutions: new DrizzleInstitutionResolver(tx),
+      });
+    },
+    db,
+  );
 }

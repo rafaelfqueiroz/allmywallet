@@ -3,6 +3,7 @@ import { AssetId, InstitutionId } from '@/core/shared/ids';
 import { db } from '@/db/client';
 import { assets, institutions } from '@/db/schema/assets';
 import { transactions } from '@/db/schema/transactions';
+import { wallets } from '@/db/schema/wallets';
 import type { Tx } from '@/db/tenant';
 
 /**
@@ -62,4 +63,26 @@ export async function listInstitutionOptions(): Promise<readonly InstitutionOpti
     .from(institutions)
     .orderBy(asc(institutions.name));
   return rows.map((row) => ({ institutionId: InstitutionId.of(row.id), name: row.name }));
+}
+
+/**
+ * BR-006-17's assignment target list. Tenant-scoped (`wallets` is
+ * RLS-protected), so this runs inside the page's own `withTenant`
+ * transaction (AR-11) rather than on the pooled `db`.
+ *
+ * Reading it here rather than through `core/wallets`' `listWallets` for the
+ * same reason as the two filter reads above: the bulk bar needs a name and an
+ * id to render a `<select>`, and no business rule decides what goes in it.
+ */
+export interface WalletChoice {
+  readonly walletId: string;
+  readonly name: string;
+}
+
+export async function listWalletChoices(tx: Tx): Promise<readonly WalletChoice[]> {
+  const rows = await tx
+    .select({ id: wallets.id, name: wallets.name })
+    .from(wallets)
+    .orderBy(asc(wallets.name));
+  return rows.map((row) => ({ walletId: row.id, name: row.name }));
 }

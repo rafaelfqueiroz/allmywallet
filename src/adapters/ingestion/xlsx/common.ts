@@ -1,6 +1,7 @@
 import type ExcelJS from 'exceljs';
 import { BusinessDate } from '@/core/shared/clock';
 import { Money, Quantity } from '@/core/shared/money';
+import { normalizeDecimalInput } from '@/lib/decimal-input';
 
 /**
  * Shared plumbing for the three parsers (`movimentacao.ts`, `negociacao.ts`,
@@ -91,10 +92,13 @@ export function parseBrDate(text: string, column: string): BusinessDate {
  * `column` — see `parseBrDate`.
  */
 export function parseBrDecimal(text: string, column: string): string {
-  const trimmed = text.trim();
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return trimmed; // already a plain decimal literal
-  const normalized = trimmed.replaceAll('.', '').replace(',', '.');
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
+  // The normalisation itself lives in `lib/decimal-input.ts`, because the
+  // manual-entry form (SPEC-006 BR-006-11) has to read exactly the same
+  // literals a spreadsheet cell does. Only the failure mode differs: a cell
+  // that will not parse is a malformed extract and raises, while a form field
+  // is a thing a user is still typing and comes back as `null`.
+  const normalized = normalizeDecimalInput(text);
+  if (normalized === null) {
     throw new CellFormatError(column, 'decimal number (e.g. 1.234,56 or 1234.56)');
   }
   return normalized;

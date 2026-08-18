@@ -441,7 +441,8 @@
       "unitPrice": "Preço unitário",
       "total": "Total",
       "status": "Status",
-      "provenance": "Origem"
+      "provenance": "Origem",
+      "actions": "Ações"
     },
     "pagination": {
       "label": "Paginação da lista de transações",
@@ -457,6 +458,69 @@
       "ledgerBody": "Importe um extrato da B3 para começar a ver seu histórico de transações.",
       "filteredTitle": "Nada com esses filtros",
       "filteredBody": "Nenhuma transação corresponde aos filtros escolhidos. Tente ampliar o período ou limpar algum filtro."
+    },
+    "new": "Nova transação",
+    "form": {
+      "createTitle": "Nova transação",
+      "createDescription": "Registre manualmente uma operação que não veio de um extrato da B3 — um CDB do seu banco, por exemplo.",
+      "editTitle": "Editar transação",
+      "editDescription": "Qualquer transação pode ser corrigida, inclusive as importadas. A correção é preservada em novas importações do mesmo extrato.",
+      "assetSection": "Ativo",
+      "assetExisting": "Escolha um ativo já registrado",
+      "assetExistingNone": "— nenhum —",
+      "assetNewCode": "Ou informe um código novo",
+      "assetNewCodeHint": "Preenchido, este código vale no lugar da escolha acima.",
+      "assetNewName": "Nome do ativo",
+      "assetNewClass": "Classe",
+      "institutionSection": "Instituição",
+      "institutionExisting": "Escolha uma instituição",
+      "institutionExistingNone": "— nenhuma —",
+      "institutionNew": "Ou informe uma instituição nova",
+      "detailsSection": "Operação",
+      "type": "Tipo",
+      "tradeDate": "Data da operação",
+      "quantity": "Quantidade",
+      "unitPrice": "Preço unitário",
+      "fees": "Taxas",
+      "ratio": "Proporção",
+      "ratioHint": "Só para desdobramento e grupamento — 2 para um desdobramento de 1:2.",
+      "decimalHint": "Use vírgula para os centavos.",
+      "submitCreate": "Registrar transação",
+      "submitEdit": "Salvar alterações",
+      "submitting": "Salvando…",
+      "cancel": "Cancelar"
+    },
+    "delete": {
+      "title": "Excluir transação",
+      "description": "Veja o que será recalculado antes de confirmar. A exclusão não pode ser desfeita.",
+      "action": "Excluir",
+      "confirm": "Confirmar exclusão",
+      "cancel": "Voltar sem excluir",
+      "impactTitle": "O que muda",
+      "impactFrom": "Tudo que deriva desta posição a partir de {date} será recalculado.",
+      "impactSubsequent": "{count} outra(s) transação(ões) desta posição entram no recálculo.",
+      "impactPosition": "Posição",
+      "impactCurrent": "Hoje",
+      "impactProjected": "Depois da exclusão",
+      "impactQuantity": "Quantidade",
+      "impactAverageCost": "Preço médio",
+      "impactAllocations": "Se alguma carteira ficar com mais cotas do que você passa a ter, o excesso é devolvido proporcionalmente para Não atribuído.",
+      "notFound": "Esta transação não existe mais."
+    },
+    "edit": {
+      "action": "Editar"
+    },
+    "bulk": {
+      "label": "Ações em massa",
+      "select": "Selecionar transação",
+      "selectAll": "Selecionar todas as transações desta página",
+      "selection": "Ações para as transações selecionadas",
+      "delete": "Excluir selecionadas",
+      "assign": "Atribuir à carteira",
+      "wallet": "Carteira",
+      "walletNone": "— escolha uma carteira —",
+      "noWallets": "Crie uma carteira antes de atribuir transações a ela.",
+      "hint": "A exclusão em massa é tudo ou nada: se uma das transações deixar o histórico impossível de recalcular, nenhuma é excluída."
     }
   },
   "privacy": {
