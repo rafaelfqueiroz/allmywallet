@@ -418,7 +418,10 @@
       "institutionAll": "Todas as instituições",
       "status": "Status",
       "statusAll": "Todos os status",
-      "apply": "Aplicar"
+      "apply": "Aplicar",
+      "wallet": "Carteira",
+      "walletAll": "Todas as carteiras",
+      "walletHint": "Mostra as transações dos ativos que a carteira tem hoje."
     },
     "status": {
       "active": "Ativa",
@@ -517,7 +520,7 @@
       "selection": "Ações para as transações selecionadas",
       "delete": "Excluir selecionadas",
       "assign": "Atribuir à carteira",
-      "wallet": "Carteira",
+      "wallet": "Carteira de destino",
       "walletNone": "— escolha uma carteira —",
       "noWallets": "Crie uma carteira antes de atribuir transações a ela.",
       "hint": "A exclusão em massa é tudo ou nada: se uma das transações deixar o histórico impossível de recalcular, nenhuma é excluída.",

@@ -5,6 +5,7 @@ import {
   ASSET_CLASSES,
   type AssetOption,
   type InstitutionOption,
+  type WalletChoice,
 } from '@/app/(app)/transactions/data';
 import { Field } from '@/components/patterns/field';
 import { Cluster } from '@/components/layout/cluster';
@@ -37,9 +38,11 @@ export interface ControlsProps {
   readonly type: string;
   readonly institution: string;
   readonly status: string;
+  readonly wallet: string;
   readonly search: string;
   readonly assetOptions: readonly AssetOption[];
   readonly institutionOptions: readonly InstitutionOption[];
+  readonly walletOptions: readonly WalletChoice[];
 }
 
 export async function Controls({
@@ -50,9 +53,11 @@ export async function Controls({
   type,
   institution,
   status,
+  wallet,
   search,
   assetOptions,
   institutionOptions,
+  walletOptions,
 }: ControlsProps) {
   const t = await getTranslations('transactions');
   const tType = await getTranslations('import.transactionType');
@@ -136,6 +141,37 @@ export async function Controls({
                 ))}
               </NativeSelect>
             </Field>
+
+            {/*
+              BR-006-08's wallet dimension. Hidden entirely when the tenant has
+              no wallets: a control whose only option is "all" asks a question
+              with one answer, and on this surface it would also imply that
+              transactions can belong to a wallet before any wallet exists.
+
+              The hint is not decoration. A transaction has no wallet and
+              cannot have one (`core/ledger/ports.ts` explains why), so this
+              narrows to the *assets a wallet holds today* — which means the
+              same filter over the same ledger returns different rows after a
+              reallocation. Saying so on the control is cheaper than a user
+              discovering it and concluding the history changed.
+            */}
+            {walletOptions.length > 0 && (
+              <Field
+                id="transactions-wallet"
+                label={t('filters.wallet')}
+                hint={t('filters.walletHint')}
+                width="md"
+              >
+                <NativeSelect name={PARAM.wallet} defaultValue={wallet}>
+                  <option value="">{t('filters.walletAll')}</option>
+                  {walletOptions.map((option) => (
+                    <option key={option.walletId} value={option.walletId}>
+                      {option.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
 
             <Button type="submit">{t('filters.apply')}</Button>
           </Cluster>

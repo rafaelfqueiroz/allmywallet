@@ -5,7 +5,7 @@ import * as schema from '@/db/schema';
 import { withTenant } from '@/db/tenant';
 import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
-import { TransactionId, UserId } from '@/core/shared/ids';
+import { TransactionId, UserId, WalletId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
@@ -83,7 +83,12 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
       // once that table exists — cascading here only ever reaches
       // `import_rows` (empty in every test in this file, which never
       // exercises SPEC-005) plus `positions`, already named explicitly.
-      await pool.query('TRUNCATE positions, transactions RESTART IDENTITY CASCADE');
+      // `wallet_allocations` joins the list because BR-006-08's wallet filter
+      // resolves through it: a stale allocation left by one test would silently
+      // widen the next one's filter.
+      await pool.query(
+        'TRUNCATE positions, transactions, wallet_allocations, wallets RESTART IDENTITY CASCADE',
+      );
     } finally {
       await pool.end();
     }
@@ -279,6 +284,111 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
         }
       });
     }
+
+    /**
+     * BR-006-08's wallet dimension. Inserted as the migrator because wallets
+     * and allocations are this file's *fixture*, not its subject — the filter
+     * itself is exercised through `withTenant` like everything else, so the
+     * RLS-scoped subquery is what is actually under test.
+     */
+    async function seedWalletHolding(
+      name: string,
+      assetIds: readonly AssetId[],
+    ): Promise<WalletId> {
+      const pool = new Pool({ connectionString: testDb.migrationUrl, max: 1 });
+      const walletId = WalletId.generate();
+      try {
+        await pool.query('INSERT INTO wallets (id, user_id, name) VALUES ($1, $2, $3)', [
+          walletId,
+          userId,
+          name,
+        ]);
+        for (const assetId of assetIds) {
+          await pool.query(
+            `INSERT INTO wallet_allocations (id, user_id, wallet_id, asset_id, quantity)
+             VALUES (gen_random_uuid(), $1, $2, $3, '1')`,
+            [userId, walletId, assetId],
+          );
+        }
+      } finally {
+        await pool.end();
+      }
+      return walletId;
+    }
+
+    it('BR-006-08 — filters by wallet, through the assets that wallet holds', async () => {
+      await seedHistory();
+      // PETR4 has two rows (Clear and Rico) and HGLG11 one; VALE3 is left out
+      // of the wallet, so its row must not appear.
+      const walletId = await seedWalletHolding('Aposentadoria', [petr4, hglg11]);
+
+      const page = await asTenant((deps) =>
+        listTransactions(deps.transactions, { walletId }, { limit: 50, offset: 0 }),
+      );
+
+      expect(page.ok).toBe(true);
+      if (!page.ok) return;
+      expect(page.value.total).toBe(3);
+      expect(page.value.items.map((item) => item.assetCode).sort()).toEqual([
+        'HGLG11',
+        'PETR4',
+        'PETR4',
+      ]);
+    });
+
+    it('BR-006-08 — the wallet filter narrows in combination with the others', async () => {
+      await seedHistory();
+      const walletId = await seedWalletHolding('Aposentadoria', [petr4, hglg11]);
+
+      const page = await asTenant((deps) =>
+        listTransactions(
+          deps.transactions,
+          { walletId, institutionIds: [clear] },
+          { limit: 50, offset: 0 },
+        ),
+      );
+
+      /**
+       * A real intersection, chosen so neither side can carry the assertion on
+       * its own: the wallet alone matches 3 (both PETR4 rows and HGLG11), Clear
+       * alone matches 3 (PETR4, VALE3, HGLG11), and only together do they
+       * exclude VALE3 — which the wallet does not hold — and the Rico row,
+       * which is not at Clear.
+       */
+      expect(page.ok && page.value.total).toBe(2);
+    });
+
+    it('an empty wallet matches nothing rather than everything', async () => {
+      await seedHistory();
+      const walletId = await seedWalletHolding('Nova', []);
+
+      const page = await asTenant((deps) =>
+        listTransactions(deps.transactions, { walletId }, { limit: 50, offset: 0 }),
+      );
+
+      // The failure mode worth naming: a filter that resolves to an empty set
+      // and is therefore dropped would show the whole ledger under a wallet
+      // that holds nothing.
+      expect(page.ok && page.value.total).toBe(0);
+    });
+
+    it("another tenant's wallet id matches nothing, rather than leaking its assets", async () => {
+      await seedHistory();
+      const strangersWallet = WalletId.generate();
+
+      const page = await asTenant((deps) =>
+        listTransactions(
+          deps.transactions,
+          { walletId: strangersWallet },
+          { limit: 50, offset: 0 },
+        ),
+      );
+
+      // The subquery is RLS-scoped on its own, so an id this tenant cannot see
+      // resolves to no assets — fail-closed, the same way every other
+      // tenant-scoped read behaves (TS-16).
+      expect(page.ok && page.value.total).toBe(0);
+    });
 
     it('paginates deterministically, newest first, with no row shown twice', async () => {
       await seedHistory();
