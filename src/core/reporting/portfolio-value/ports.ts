@@ -1,6 +1,7 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { Money } from '@/core/shared/money';
 import type { Grouping } from '@/core/reporting/ports';
+import type { HistoryUnavailable, SnapshotDerived } from '@/core/reporting/snapshot-derived';
 
 /**
  * SPEC-013 — the Portfolio Value report's domain types.
@@ -125,64 +126,20 @@ export interface StackedBand {
 }
 
 /**
- * **Why a figure derived from `daily_valuation_snapshots` is not being shown.**
+ * SPEC-013's typed absence, **defined once for every report** in
+ * `core/reporting/snapshot-derived.ts` and re-exported here.
  *
- * Both members trace to the same table and to one decision record, ADR-002
- * (`docs/adr/002-historical-breakdown-storage.md`). They are separate constants
- * because they are separate absences and the user is owed the difference: one
- * is a dimension the snapshot does not decompose along, the other is a scope
- * the snapshot does not exist at.
+ * It moved when SPEC-015 needed the same refusal for composition drift. A
+ * second copy under `composition/` would have been a second set of reasons for
+ * the same table's silence, which is the drift DL-011-02 exists to prevent —
+ * and the re-export means no SPEC-013 caller had to change to say so.
  */
-export const HistoryUnavailable = {
-  /**
-   * The snapshot carries a per-asset-class breakdown and nothing else. A
-   * wallet, institution, sector or per-asset band would need a historical
-   * breakdown along that dimension, which is a schema change with rebuild
-   * implications rather than a query.
-   */
-  NO_HISTORICAL_BREAKDOWN: 'NO_HISTORICAL_BREAKDOWN',
-  /**
-   * SPEC-011 BR-011-02 at **wallet** scope. `daily_valuation_snapshots` holds
-   * one row per user per day with no wallet dimension, so there is no wallet
-   * history to read — and none can be synthesised, because `wallet_allocations`
-   * stores only its *current* state (ADR-002, "the distinction that decides the
-   * shape"). Applying today's split backwards would rewrite every past chart
-   * the moment someone reassigns an asset, and a rebuild would then disagree
-   * with the snapshot it replaced, breaking DM-4. Retiring this reason needs
-   * effective-dated allocation history — backlog issue #50.
-   */
-  WALLET_SCOPE_NOT_SNAPSHOTTED: 'WALLET_SCOPE_NOT_SNAPSHOTTED',
-} as const;
-export type HistoryUnavailable = (typeof HistoryUnavailable)[keyof typeof HistoryUnavailable];
-
-/**
- * A figure that exists only where the snapshot series does.
- *
- * **The typed absence is the point.** SPEC-012 set the precedent in
- * `performance/report.ts`: at wallet scope TWR and XIRR return
- * `SCOPE_SERIES_UNAVAILABLE` rather than the portfolio's numbers under a
- * wallet's heading. The substitution is dangerous *because* every figure in it
- * is real — it is the whole *patrimônio* answering a question about one
- * carteira, and nothing on screen says so. This carries the same refusal into
- * SPEC-013.
- *
- * Deliberately **not** `Result<T, DomainError>`: a `Result` means the operation
- * failed, and nothing here failed. The report is complete and correct; one of
- * its figures does not exist at this scope. `StackedSeries` already expressed
- * that with a `kind` union, and this is that shape generalised rather than a
- * second vocabulary beside it.
- */
-export type SnapshotDerived<T> =
-  | { readonly kind: 'available'; readonly value: T }
-  | { readonly kind: 'unavailable'; readonly reason: HistoryUnavailable };
-
-export function available<T>(value: T): SnapshotDerived<T> {
-  return { kind: 'available', value };
-}
-
-export function unavailable<T>(reason: HistoryUnavailable): SnapshotDerived<T> {
-  return { kind: 'unavailable', reason };
-}
+export {
+  HistoryUnavailable,
+  available,
+  unavailable,
+  type SnapshotDerived,
+} from '@/core/reporting/snapshot-derived';
 
 /** BR-013-13 — both dates are shown, because they answer different questions. */
 export interface Freshness {
