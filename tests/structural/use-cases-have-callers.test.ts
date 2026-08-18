@@ -21,8 +21,12 @@ import { describe, expect, it } from 'vitest';
  *    (#9) — SPEC-006's whole transaction-management surface had no route, so
  *    BR-006-11..17 held in unit tests and nowhere else. Wired now; the entries
  *    below came out because the second test insisted.
- *  - `rebuildPositions` and the two snapshot rebuild entry points — still
- *    orphaned, see the baseline.
+ *  - `rebuildPositions` (#10) — DM-4's repair mechanism, unit-tested and
+ *    integration-tested against real Postgres, callable by nobody. DL-006-01's
+ *    bargain is that a calculation bug is fixed by replaying rather than by
+ *    migrating data; that bargain needed a command to be worth anything.
+ *    `src/ops/rebuild-positions.ts` is it.
+ *  - The two snapshot rebuild entry points — still orphaned, see the baseline.
  *
  * Each was found by a human reading code, twice by a full acceptance-criteria
  * sweep. This scan found them in one pass, and found two the sweeps missed.
@@ -88,9 +92,6 @@ const USE_CASE = /export\s+async\s+function\s+(\w+)\s*\(\s*(?:\/\*[\s\S]*?\*\/\s
  * SPEC-006's entire transaction-management surface has no route.
  */
 const KNOWN_ORPHANS: ReadonlyMap<string, string> = new Map([
-  // #10 — DM-4's repair mechanism. Its own progress log says "Full rebuild
-  // command" is unticked; the issue was closed anyway and is now reopened.
-  ['rebuildPositions', '#10'],
   // #12 — the valuation worker uses `computeSnapshots`/`persistSnapshots`
   // instead; these two are dead alternates rather than a missing surface, so
   // the fix may well be deletion rather than wiring.
