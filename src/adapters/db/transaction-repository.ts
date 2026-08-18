@@ -12,6 +12,7 @@ import type {
 import type { Transaction, TransactionStatus, TransactionType } from '@/core/ledger/transaction';
 import { assets, institutions } from '@/db/schema/assets';
 import { transactions } from '@/db/schema/transactions';
+import { walletAllocations } from '@/db/schema/wallets';
 import type { Tx } from '@/db/tenant';
 
 /**
@@ -66,7 +67,7 @@ export class DrizzleTransactionRepository implements TransactionRepository {
   }
 
   async search(filter: TransactionFilter, pagination: Pagination): Promise<TransactionPage> {
-    const where = buildWhere(filter);
+    const where = buildWhere(filter, this.tx);
 
     const rows = await this.baseQuery(where)
       // BR-006-07: newest first, and **fully deterministic** down to the id.
@@ -91,7 +92,7 @@ export class DrizzleTransactionRepository implements TransactionRepository {
     // the list built, so "export what I am looking at" cannot widen to the
     // whole ledger by accident. Ascending here rather than descending: an
     // exported ledger is read chronologically.
-    const rows = await this.baseQuery(buildWhere(filter)).orderBy(
+    const rows = await this.baseQuery(buildWhere(filter, this.tx)).orderBy(
       asc(transactions.tradeDate),
       asc(transactions.createdAt),
       asc(transactions.id),
@@ -197,7 +198,7 @@ export class DrizzleTransactionRepository implements TransactionRepository {
  * predicate in SQL, so "the user cleared the type filter" would otherwise
  * render an empty list instead of everything.
  */
-function buildWhere(filter: TransactionFilter): SQL | undefined {
+function buildWhere(filter: TransactionFilter, tx: Tx): SQL | undefined {
   const clauses: SQL[] = [];
 
   if (filter.from !== undefined) clauses.push(gte(transactions.tradeDate, filter.from));
@@ -216,6 +217,28 @@ function buildWhere(filter: TransactionFilter): SQL | undefined {
   }
   if (filter.statuses !== undefined && filter.statuses.length > 0) {
     clauses.push(inArray(transactions.status, [...filter.statuses]));
+  }
+  if (filter.walletId !== undefined) {
+    /**
+     * BR-006-08's wallet dimension — see `ports.ts` for why it resolves
+     * through allocations rather than through a column on the row.
+     *
+     * A correlated `IN (SELECT ...)` rather than a join: a join against
+     * `wallet_allocations` would multiply rows if the same asset ever gained a
+     * second allocation row for one wallet, and `total` is a `count(*)` over
+     * the same predicate — a duplicated row would inflate the page count as
+     * well as the list. The subquery is also RLS-scoped on its own, so it can
+     * never see another tenant's allocations.
+     */
+    clauses.push(
+      inArray(
+        transactions.assetId,
+        tx
+          .select({ assetId: walletAllocations.assetId })
+          .from(walletAllocations)
+          .where(eq(walletAllocations.walletId, filter.walletId)),
+      ),
+    );
   }
   if (filter.search !== undefined && filter.search.trim() !== '') {
     // BR-006-09: by code **and** by name. `ilike` rather than `like`, because a

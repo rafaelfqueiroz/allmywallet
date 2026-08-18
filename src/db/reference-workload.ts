@@ -1,4 +1,10 @@
 import { BusinessDate } from '@/core/shared/clock';
+import { TransactionId } from '@/core/shared/ids';
+import type { AssetId, UserId } from '@/core/shared/ids';
+import { Money, Quantity } from '@/core/shared/money';
+import { naturalKeyFor } from '@/core/ledger/natural-key';
+import { computeTotalValue } from '@/core/ledger/transaction';
+import type { transactions } from '@/db/schema/transactions';
 
 /**
  * SPEC-016 TS-23 / BR-016-01: the reference workload every performance budget
@@ -8,18 +14,19 @@ import { BusinessDate } from '@/core/shared/clock';
  * `tests/performance/*.bench.ts` and `nightly.yml` produce are comparable
  * run over run rather than noise (TS-23).
  *
- * COUPLING (flagged for the #19 report and the orchestrator to track against
- * #9/#10): SPEC-006 (transactions, #9) and SPEC-007 (positions/average cost,
- * #10) are being built in parallel and own the tables this workload would
- * ultimately be inserted into. Neither exists in this migration set yet, so
- * this module is deliberately split into two halves:
+ * The module stays split in two halves, and the split is still worth having
+ * now that the tables exist:
  *
  *   1. Pure, deterministic *generation* of the 100 assets and 10,000
- *      transactions as plain descriptors — fully testable today, with no
- *      database at all (TS-01).
- *   2. `persistReferenceWorkload`, which seeds what already exists (a fixed
- *      reference user) and stops at the extension point marked below rather
- *      than inventing a schema for tables #9/#10 haven't shipped yet.
+ *      transactions as plain descriptors — fully testable with no database at
+ *      all (TS-01), which is what `tests/performance/reference-workload.test.ts`
+ *      asserts determinism against.
+ *   2. `seed-reference.ts`, the persistence entrypoint, which maps those
+ *      descriptors onto SPEC-006's real `assets` and `transactions` rows.
+ *
+ * The descriptors deliberately remain plain data rather than becoming
+ * `Transaction` values here: generation must stay a pure function of the seed,
+ * and a `Transaction` carries ids and timestamps that persistence owns.
  *
  * Anchored to a fixed date, not `new Date()` — determinism must survive
  * being re-run on a different day, not just with the same seed.
@@ -102,10 +109,9 @@ export function generateReferenceAssets(
 export type ReferenceTransactionKind = 'buy' | 'sell';
 
 /**
- * A structural descriptor, not the real domain `Transaction` (SPEC-006, #9 —
- * not built yet). Deliberately plain data rather than importing a type that
- * does not exist: the extension point below is where a future
- * `toTransaction()` mapping belongs, once #9 defines the shape to map into.
+ * A structural descriptor, not the real domain `Transaction`. See the module
+ * doc: keeping this plain is what keeps generation a pure function of the
+ * seed. `seed-reference.ts` maps it onto the real row.
  */
 export interface ReferenceTransaction {
   readonly ticker: string;
@@ -184,8 +190,107 @@ export interface ReferenceWorkload {
   readonly transactions: readonly ReferenceTransaction[];
 }
 
+/**
+ * The workload's asset classes are the PRD's Portuguese vocabulary; the
+ * `assets.class` CHECK (SPEC-006, `db/schema/assets.ts`) is the English
+ * `ASSET_CLASSES` list. `acao` is the only one that differs, and mapping it
+ * here — rather than renaming either list — keeps the generated fixture stable
+ * across a seed change while letting the schema keep its own vocabulary.
+ */
+export const REFERENCE_ASSET_CLASS_TO_SCHEMA: Readonly<Record<ReferenceAssetClass, string>> = {
+  acao: 'stock',
+  fii: 'fii',
+  bdr: 'bdr',
+  etf: 'etf',
+  tesouro_direto: 'tesouro_direto',
+  cdb: 'cdb',
+  lci: 'lci',
+  lca: 'lca',
+};
+
+/**
+ * Cents to a plain decimal literal, by integer arithmetic only — never
+ * `cents / 100`, which is a float the moment the division happens (AR-06).
+ * The result is a string, which is the only thing `Money.fromString` accepts.
+ */
+export function centsToDecimalString(cents: number): string {
+  const sign = cents < 0 ? '-' : '';
+  const absolute = Math.abs(cents);
+  return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`;
+}
+
 export function generateReferenceWorkload(): ReferenceWorkload {
   const assets = generateReferenceAssets();
   const transactions = generateReferenceTransactions(assets);
   return { assets, transactions };
+}
+
+/**
+ * The descriptors, mapped onto SPEC-006's real `transactions` rows.
+ *
+ * Pure, and here rather than in `seed-reference.ts`, because three callers
+ * need identical rows and only one of them is the seeder: the blocking
+ * pagination test (`tests/integration/transaction-pagination.test.ts`) builds
+ * its 10.000 rows this way so that what CI proves correct is the same shape
+ * the nightly run measures, and the nightly run in turn measures what the
+ * seeder wrote. A second mapping would let "correct at scale" and "fast at
+ * scale" quietly be statements about two different datasets.
+ *
+ * Built through `naturalKeyFor` and `computeTotalValue` rather than by hand,
+ * so a fixture can never disagree with the ledger about what a natural key or
+ * a total value is.
+ */
+export function referenceTransactionRows(
+  referenceTransactions: readonly ReferenceTransaction[],
+  assetIds: ReadonlyMap<string, AssetId>,
+  userId: UserId,
+): (typeof transactions.$inferInsert)[] {
+  return referenceTransactions.map((transaction, index) => {
+    const assetId = assetIds.get(transaction.ticker);
+    if (assetId === undefined) {
+      throw new Error(`referenceTransactionRows: no asset id for ${transaction.ticker}`);
+    }
+
+    const quantity = Quantity.fromString(String(transaction.quantity));
+    const unitPrice = Money.fromString(centsToDecimalString(transaction.unitPriceCents));
+    const fees = Money.zero();
+    const tradeDate = transaction.date;
+
+    return {
+      id: TransactionId.generate(),
+      userId,
+      assetId,
+      // No institution: the workload models scale, not custody, and a null
+      // institution is a legitimate bucket rather than a gap (BR-007-08).
+      institutionId: null,
+      type: transaction.kind,
+      status: 'active',
+      tradeDate,
+      quantity,
+      unitPrice,
+      fees,
+      totalValue: computeTotalValue(transaction.kind, quantity, unitPrice, fees),
+      ratio: null,
+      /**
+       * BR-006-04's key, computed the way the ledger computes it — with the
+       * index appended, because the generator can legitimately produce two
+       * identical rows for one ticker on one day and `(natural_key,
+       * occurrence)` is unique. The index rather than a running duplicate
+       * count keeps the mapping a pure function of position, so a re-run
+       * produces the same keys for the same workload.
+       */
+      naturalKey: `${naturalKeyFor({
+        assetId,
+        institutionId: null,
+        type: transaction.kind,
+        tradeDate,
+        quantity,
+        unitPrice,
+      })}|ref-${index}`,
+      occurrence: 1,
+      importBatchId: null,
+      isManual: false,
+      isUserModified: false,
+    };
+  });
 }

@@ -323,7 +323,9 @@ test.describe('transaction management', () => {
     // BR-010-11 refuses to guess a wallet, so the shares arrive unallocated —
     // which is exactly the state this operation exists to resolve, in bulk.
     await page.getByRole('row').filter({ hasText: 'ITSA4' }).getByRole('checkbox').check();
-    await page.getByLabel('Carteira').selectOption({ label: 'Aposentadoria' });
+    // "Carteira de destino", not "Carteira": the filter bar has a wallet
+    // control of its own now, and the two ask different questions.
+    await page.getByLabel('Carteira de destino').selectOption({ label: 'Aposentadoria' });
     await page.getByRole('button', { name: 'Atribuir à carteira' }).click();
 
     /**
@@ -411,6 +413,60 @@ test.describe('transaction ledger', () => {
     await expect(page.getByLabel('Tipo')).toHaveValue('sell');
     await expect(table.getByText('PETR4')).toHaveCount(1);
     await expect(table.getByText('HGLG11')).toHaveCount(0);
+  });
+
+  /**
+   * BR-006-08's wallet dimension, driven through the browser for the reason
+   * this whole file exists: the SQL is integration-tested, and what that
+   * cannot show is whether the control on the page reaches it. SPEC-011's
+   * scope selector was inert for a milestone with its query layer working
+   * perfectly.
+   */
+  test("filtering by wallet narrows the list to that wallet's assets", async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const walletId = await seedWallet(userId, 'Aposentadoria');
+
+    // Entered through the form so the position exists to be allocated against
+    // — the same reason the bulk-assign journey does it this way.
+    await page.goto('/transactions/new');
+    await page.getByLabel('Ou informe um código novo').fill('ITSA4');
+    await page.getByLabel('Nome do ativo').fill('Itaúsa PN');
+    await page.getByLabel('Data da operação').fill('2026-04-01');
+    await page.getByLabel('Quantidade').fill('100');
+    await page.getByLabel('Preço unitário').fill('10,00');
+    await page.getByRole('button', { name: 'Registrar transação' }).click();
+
+    await page.goto('/transactions/new');
+    await page.getByLabel('Ou informe um código novo').fill('WEGE3');
+    await page.getByLabel('Nome do ativo').fill('WEG ON');
+    await page.getByLabel('Data da operação').fill('2026-04-02');
+    await page.getByLabel('Quantidade').fill('50');
+    await page.getByLabel('Preço unitário').fill('40,00');
+    await page.getByRole('button', { name: 'Registrar transação' }).click();
+
+    const table = page.getByRole('table', { name: 'Transações' });
+    await expect(table.getByText('ITSA4')).toHaveCount(1);
+    await expect(table.getByText('WEGE3')).toHaveCount(1);
+
+    // Only ITSA4 goes into the wallet.
+    await page.getByRole('row').filter({ hasText: 'ITSA4' }).getByRole('checkbox').check();
+    await page.getByLabel('Carteira de destino').selectOption({ label: 'Aposentadoria' });
+    await page.getByRole('button', { name: 'Atribuir à carteira' }).click();
+    await expect(page.getByRole('status')).toContainText('1');
+
+    // The filter bar's own wallet control — a different question from the bulk
+    // bar's destination, which is why they no longer share a label.
+    await page.getByLabel('Carteira', { exact: true }).selectOption({ label: 'Aposentadoria' });
+    await page.getByRole('button', { name: 'Aplicar' }).click();
+
+    await expect(page).toHaveURL(new RegExp(`wallet=${walletId}`));
+    await expect(table.getByText('ITSA4')).toHaveCount(1);
+    await expect(table.getByText('WEGE3')).toHaveCount(0);
+
+    // BR-006-11's URL contract: the filtered view survives a reload.
+    await page.reload();
+    await expect(table.getByText('ITSA4')).toHaveCount(1);
+    await expect(table.getByText('WEGE3')).toHaveCount(0);
   });
 
   test('a filter matching nothing explains itself rather than showing a blank table', async ({

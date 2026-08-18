@@ -140,9 +140,11 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         type={params.get(PARAM.type) ?? ''}
         institution={params.get(PARAM.institution) ?? ''}
         status={params.get(PARAM.status) ?? ''}
+        wallet={params.get(PARAM.wallet) ?? ''}
         search={params.get(PARAM.q) ?? ''}
         assetOptions={assetOptions}
         institutionOptions={institutionOptions}
+        walletOptions={wallets}
       />
 
       {!result.ok ? (

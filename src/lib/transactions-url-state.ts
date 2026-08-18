@@ -1,5 +1,5 @@
 import { BusinessDate } from '@/core/shared/clock';
-import { AssetId, InstitutionId, isUuid } from '@/core/shared/ids';
+import { AssetId, InstitutionId, WalletId, isUuid } from '@/core/shared/ids';
 import {
   TRANSACTION_STATUSES,
   TRANSACTION_TYPES,
@@ -38,6 +38,7 @@ export const PARAM = {
   type: 'type',
   institution: 'institution',
   status: 'status',
+  wallet: 'wallet',
   q: 'q',
   page: 'page',
 } as const;
@@ -105,6 +106,16 @@ function parseInstitution(raw: string | null): readonly InstitutionId[] | undefi
   return [InstitutionId.of(raw)];
 }
 
+/**
+ * BR-006-08's wallet dimension. Same `isUuid` gate as the other two ids and
+ * for the same reason — and the empty string matters here specifically,
+ * because it is what the "todas as carteiras" option posts.
+ */
+function parseWallet(raw: string | null): WalletId | undefined {
+  if (raw === null || !isUuid(raw)) return undefined;
+  return WalletId.of(raw);
+}
+
 function parseAssetClass(raw: string | null): readonly AssetClass[] | undefined {
   if (raw === null || !isAssetClass(raw)) return undefined;
   return [raw];
@@ -144,6 +155,7 @@ export function fromSearchParams(params: ReadableParams): TransactionsUrlState {
       types: parseType(params.get(PARAM.type)),
       institutionIds: parseInstitution(params.get(PARAM.institution)),
       statuses: parseStatus(params.get(PARAM.status)),
+      walletId: parseWallet(params.get(PARAM.wallet)),
       search: parseSearch(params.get(PARAM.q)),
     },
     page: parsePage(params.get(PARAM.page)),

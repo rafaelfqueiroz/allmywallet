@@ -1,5 +1,5 @@
 import type { BusinessDate } from '@/core/shared/clock';
-import type { AssetId, InstitutionId, TransactionId } from '@/core/shared/ids';
+import type { AssetId, InstitutionId, TransactionId, WalletId } from '@/core/shared/ids';
 import type { Transaction, TransactionStatus, TransactionType } from '@/core/ledger/transaction';
 
 /**
@@ -24,6 +24,25 @@ export interface TransactionFilter {
   readonly statuses?: readonly TransactionStatus[] | undefined;
   /** BR-006-09: full-text search on asset **code and name**. */
   readonly search?: string | undefined;
+  /**
+   * BR-006-08's wallet dimension, and the one filter whose meaning had to be
+   * decided rather than read off the column.
+   *
+   * There is no wallet on a transaction and there cannot be one: SPEC-010
+   * allocates *quantity* per `(wallet, asset)` (DM-2), and DL-010-05 is
+   * explicit that a share carries no record of which purpose it served. Two
+   * hundred PETR4 split 120/80 across two wallets are not two sets of trades;
+   * they are one history and a division of the holding it produced.
+   *
+   * So this filter means **the transactions of the assets this wallet
+   * currently holds a slice of** — which is what a user asking "what happened
+   * in my Aposentadoria wallet" can actually be shown. It is a view over
+   * today's allocations, not history: moving an asset between wallets changes
+   * which transactions this returns, because the allocation is the only thing
+   * that ever connected them. `Controls.tsx` says so on the control itself
+   * rather than leaving the user to infer it.
+   */
+  readonly walletId?: WalletId | undefined;
 }
 
 export interface Pagination {

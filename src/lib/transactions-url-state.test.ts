@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
-import { AssetId, InstitutionId } from '@/core/shared/ids';
+import { AssetId, InstitutionId, WalletId } from '@/core/shared/ids';
 import {
   PAGE_SIZE,
   PARAM,
@@ -26,6 +26,7 @@ describe('fromSearchParams', () => {
       types: undefined,
       institutionIds: undefined,
       statuses: undefined,
+      walletId: undefined,
       search: undefined,
     });
   });
@@ -33,8 +34,9 @@ describe('fromSearchParams', () => {
   it('parses a full combination of filters independently', () => {
     const assetId = '01920000-0000-7000-8000-00000000a001';
     const institutionId = '01920000-0000-7000-8000-00000000b001';
+    const walletId = '01920000-0000-7000-8000-00000000c001';
     const state = parse(
-      `from=2026-01-01&to=2026-06-30&asset=${assetId}&assetClass=fii&type=buy&institution=${institutionId}&status=active&q=petr4&page=3`,
+      `from=2026-01-01&to=2026-06-30&asset=${assetId}&assetClass=fii&type=buy&institution=${institutionId}&status=active&wallet=${walletId}&q=petr4&page=3`,
     );
 
     expect(state.filter.from).toBe(BusinessDate.of('2026-01-01'));
@@ -44,6 +46,7 @@ describe('fromSearchParams', () => {
     expect(state.filter.types).toEqual(['buy']);
     expect(state.filter.institutionIds).toEqual([InstitutionId.of(institutionId)]);
     expect(state.filter.statuses).toEqual(['active']);
+    expect(state.filter.walletId).toBe(WalletId.of(walletId));
     expect(state.filter.search).toBe('petr4');
     expect(state.page).toBe(3);
   });
@@ -61,6 +64,11 @@ describe('fromSearchParams', () => {
     ['type', 'not-a-type'],
     ['institution', 'not-a-uuid'],
     ['status', 'not-a-status'],
+    ['wallet', 'not-a-uuid'],
+    // The exact value the "todas as carteiras" option posts. It has to read as
+    // "no constraint" rather than as a wallet whose id is the empty string,
+    // which would filter the list down to nothing.
+    ['wallet', ''],
   ])('falls back to no constraint for a malformed %s', (param, value) => {
     const state = parse(`${param}=${encodeURIComponent(value)}`);
     // Every field resolves to "no constraint" — a malformed value must not

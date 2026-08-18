@@ -4,7 +4,7 @@ import { TransactionId } from '@/core/shared/ids';
 import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { deleteTransaction, describeDeletionImpact } from '@/core/ledger/delete-transaction';
-import type { Transaction } from '@/core/ledger/transaction';
+import { TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
 import {
   FakePositionRepository,
   FakeTransactionRepository,
@@ -30,6 +30,33 @@ function deps(rows: readonly Transaction[]): LedgerDependencies & {
 describe('SPEC-006 BR-006-13 — deleteTransaction', () => {
   beforeEach(() => {
     resetTransactionSequence();
+  });
+
+  /**
+   * The last third of "all thirteen transaction types can be created, edited
+   * and deleted". Each type is deleted from a ledger that also holds an
+   * opening buy, so removing it leaves a *replayable* history — the guard
+   * BR-006-15 applies to a deletion is about what survives, and deleting the
+   * only row of a position would test the empty case thirteen times instead.
+   */
+  it('AC — every one of the thirteen types can be deleted', async () => {
+    for (const type of TRANSACTION_TYPES) {
+      resetTransactionSequence();
+      const opening = aTransaction().buy().on('2026-01-05').quantity('1000').price('10.00').build();
+      const isRatioEvent = type === 'split' || type === 'grupamento';
+      const subject = (
+        isRatioEvent
+          ? aTransaction().split().ratio('2').on('2026-02-05')
+          : aTransaction().buy().on('2026-02-05').quantity('1').price('1.00')
+      ).build();
+      const state = deps([opening, { ...subject, type }]);
+
+      const result = await deleteTransaction(state, subject.id);
+
+      expect(result.ok, `type ${type} must be deletable`).toBe(true);
+      if (!result.ok) continue;
+      expect(result.value.deletedCount).toBe(1);
+    }
   });
 
   it('removes the row and recalculates the position', async () => {

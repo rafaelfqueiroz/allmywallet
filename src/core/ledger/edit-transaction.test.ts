@@ -4,7 +4,7 @@ import { TransactionId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { editTransaction } from '@/core/ledger/edit-transaction';
-import type { Transaction } from '@/core/ledger/transaction';
+import { TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
 import {
   FakePositionRepository,
   FakeTransactionRepository,
@@ -32,6 +32,46 @@ function deps(rows: readonly Transaction[]): LedgerDependencies & {
 describe('SPEC-006 BR-006-12 — editTransaction', () => {
   beforeEach(() => {
     resetTransactionSequence();
+  });
+
+  /**
+   * AC: "All thirteen transaction types can be created, edited and deleted."
+   * `create-transaction.test.ts` covers the create third; this is the edit
+   * third, and it is not a formality — an edit re-runs the whole draft
+   * validation *and* BR-006-15's replay on the way back out, so a type is only
+   * genuinely editable if it survives both. A split whose ratio is dropped by
+   * the edit path would be refused here and nowhere else.
+   *
+   * The opening buy is what makes the reducing types testable at all: a `sell`
+   * or a `transfer_out` edited into a ledger holding nothing is correctly
+   * refused, so a fixture with only the subject row would prove the opposite
+   * of what this claims. That is exactly the shape the first version of this
+   * test had, and it failed on those two types.
+   */
+  it('AC — every one of the thirteen types can be edited', async () => {
+    for (const type of TRANSACTION_TYPES) {
+      resetTransactionSequence();
+      const opening = aTransaction().buy().on('2026-01-05').quantity('1000').price('10.00').build();
+      const isRatioEvent = type === 'split' || type === 'grupamento';
+      const subject = (
+        isRatioEvent
+          ? aTransaction().split().ratio('2').on('2026-02-05')
+          : aTransaction().buy().on('2026-02-05').quantity('1').price('1.00')
+      ).build();
+      const state = deps([opening, { ...subject, type }]);
+
+      const result = await editTransaction(state, subject.id, {
+        // The one field every type shares and every type may change. Kept
+        // after the opening buy, so a reducing type stays legal at its date.
+        tradeDate: BusinessDate.of('2026-03-05'),
+      });
+
+      expect(result.ok, `type ${type} must be editable`).toBe(true);
+      if (!result.ok) continue;
+      expect(result.value.transaction.tradeDate).toBe(BusinessDate.of('2026-03-05'));
+      // BR-006-16: a human decided this value, whatever the type.
+      expect(result.value.transaction.isUserModified).toBe(true);
+    }
   });
 
   it('AC — editing quantity recalculates the position and every dependent figure', async () => {
