@@ -3,7 +3,8 @@ import { AssetId, type UserId, type WalletId } from '@/core/shared/ids';
 import { computeUnassigned, type UnassignedHolding } from '@/core/wallets/allocate';
 import { compareWallets, type WalletComparisonRow } from '@/core/wallets/compare-wallets';
 import { listPendingAllocations, type PendingAllocation } from '@/core/wallets/pending';
-import type { WalletAllocation } from '@/core/wallets/ports';
+import { listStandingRules } from '@/core/wallets/standing-rule';
+import type { StandingRule, WalletAllocation } from '@/core/wallets/ports';
 import type { Wallet } from '@/core/wallets/wallet';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
 import { db } from '@/db/client';
@@ -44,25 +45,37 @@ export interface WalletsPageData {
   readonly comparison: readonly WalletComparisonRow[];
   readonly unassigned: readonly UnassignedHolding[];
   readonly pending: readonly PendingAllocation[];
+  /** BR-010-14 / #61 — visible, and therefore revocable. */
+  readonly standingRules: readonly StandingRule[];
   readonly labels: ReadonlyMap<AssetId, AssetLabel>;
 }
 
 export async function loadWalletsPageData(userId: UserId): Promise<WalletsPageData> {
-  const { comparison, unassigned, pending } = await withWalletDeps(userId, async (deps) => {
-    const [comparisonRows, unassignedRows, pendingRows] = await Promise.all([
-      compareWallets(deps, userId),
-      computeUnassigned(deps, userId),
-      listPendingAllocations(deps, userId),
-    ]);
-    return { comparison: comparisonRows, unassigned: unassignedRows, pending: pendingRows };
-  });
+  const { comparison, unassigned, pending, standingRules } = await withWalletDeps(
+    userId,
+    async (deps) => {
+      const [comparisonRows, unassignedRows, pendingRows, ruleRows] = await Promise.all([
+        compareWallets(deps, userId),
+        computeUnassigned(deps, userId),
+        listPendingAllocations(deps, userId),
+        listStandingRules(deps, userId),
+      ]);
+      return {
+        comparison: comparisonRows,
+        unassigned: unassignedRows,
+        pending: pendingRows,
+        standingRules: ruleRows,
+      };
+    },
+  );
 
   const labels = await resolveAssetLabels([
     ...unassigned.map((holding) => holding.assetId),
     ...pending.map((item) => item.assetId),
+    ...standingRules.map((rule) => rule.assetId),
   ]);
 
-  return { comparison, unassigned, pending, labels };
+  return { comparison, unassigned, pending, standingRules, labels };
 }
 
 export interface WalletDetailData {
