@@ -172,16 +172,37 @@ export function generateReferenceTransactions(
 
   drafts.sort((a, b) => BusinessDate.compare(a.date, b.date));
 
-  const seenTickers = new Set<string>();
+  /**
+   * Kind is decided walking the sorted drafts in date order, tracking the
+   * running quantity per ticker — because the history has to be **replayable**,
+   * not merely plausible.
+   *
+   * "The first row for a ticker is a buy" was the original rule and it is not
+   * enough: it stops a sale before the first purchase and does nothing about
+   * the fourth sale of 90 against a holding of 30. `pnpm positions:rebuild`
+   * on the seeded reference tenant refused with `INSUFFICIENT_QUANTITY`,
+   * which is SPEC-007 correctly declining to replay a ledger that cannot
+   * exist. A performance fixture the position engine rejects is not a
+   * fixture — every budget measured against it would be measuring a dataset
+   * no report could ever be produced from.
+   *
+   * A sale is therefore capped at what is actually held, and a ticker holding
+   * nothing can only buy. Both decisions consume the same RNG stream in the
+   * same order as before, so the workload stays a pure function of the seed.
+   */
+  const held = new Map<string, number>();
   return drafts.map((draft): ReferenceTransaction => {
-    // The first transaction against a given ticker, in date order, is always
-    // a buy — nothing can be sold before it has been bought (mirrors
-    // SPEC-007's own constraint, so the generated history is at least
-    // internally valid).
-    const isFirstForTicker = !seenTickers.has(draft.ticker);
-    seenTickers.add(draft.ticker);
-    const kind: ReferenceTransactionKind = isFirstForTicker || rng() > 0.3 ? 'buy' : 'sell';
-    return { ...draft, kind };
+    const holding = held.get(draft.ticker) ?? 0;
+    const wantsSell = holding > 0 && rng() <= 0.3;
+
+    if (!wantsSell) {
+      held.set(draft.ticker, holding + draft.quantity);
+      return { ...draft, kind: 'buy' };
+    }
+
+    const quantity = Math.min(draft.quantity, holding);
+    held.set(draft.ticker, holding - quantity);
+    return { ...draft, quantity, kind: 'sell' };
   });
 }
 

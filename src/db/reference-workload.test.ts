@@ -3,6 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { AssetId, UserId } from '@/core/shared/ids';
 import { Money } from '@/core/shared/money';
 import { ASSET_CLASSES } from '@/db/schema/assets';
+import { replayPositions } from '@/core/positions/replay';
 import {
   REFERENCE_ASSET_CLASS_TO_SCHEMA,
   REFERENCE_ASSET_COUNT,
@@ -170,6 +171,68 @@ describe('referenceTransactionRows', () => {
     // insert `undefined` and fail the NOT NULL at seed time.
     for (const asset of workload.assets) {
       expect(REFERENCE_ASSET_CLASS_TO_SCHEMA[asset.assetClass]).toBeDefined();
+    }
+  });
+});
+
+/**
+ * The property that was missing, and that let a fixture the position engine
+ * refuses reach `main`.
+ *
+ * `seed-reference.ts` bulk-inserts these rows rather than putting them through
+ * `createTransaction`, because that use case replays the whole position on
+ * every call and seeding 10.000 rows through it would be quadratic. The
+ * justification for skipping it was that the generator provides the same
+ * guarantee structurally — and it did not: "the first row for a ticker is a
+ * buy" says nothing about the fourth sale of 90 against a holding of 30.
+ *
+ * `pnpm positions:rebuild --user <reference> --dry-run` refused with
+ * INSUFFICIENT_QUANTITY, which is exactly the right answer to a ledger that
+ * cannot exist. This test is what makes that answer impossible to reach again
+ * without a red build — and it costs one in-memory replay.
+ */
+describe('the generated ledger is one SPEC-007 can actually replay', () => {
+  it('replays all 10.000 transactions without an impossible sale', () => {
+    const workload = generateReferenceWorkload();
+    const assetIds = new Map(
+      workload.assets.map((asset, index) => [
+        asset.ticker,
+        AssetId.of(`0192${String(index).padStart(4, '0')}-0000-7000-8000-000000000001`),
+      ]),
+    );
+    const rows = referenceTransactionRows(
+      workload.transactions,
+      assetIds,
+      UserId.of('00000000-0000-7000-8000-000000000001'),
+    );
+
+    const replayed = replayPositions(
+      rows.map((row) => ({
+        ...row,
+        ratio: null,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      })) as never,
+    );
+
+    // Named, not just `.ok` — the error code is what says *which* rule the
+    // fixture broke.
+    expect(replayed.ok ? 'replayable' : replayed.error.code).toBe('replayable');
+  });
+
+  it('never lets a ticker be sold below zero', () => {
+    // The same property stated directly, so a failure points at the generator
+    // rather than at the engine.
+    const { transactions } = generateReferenceWorkload();
+    const held = new Map<string, number>();
+    for (const transaction of transactions) {
+      const holding = held.get(transaction.ticker) ?? 0;
+      const next =
+        transaction.kind === 'buy'
+          ? holding + transaction.quantity
+          : holding - transaction.quantity;
+      expect(next, `${transaction.ticker} on ${transaction.date}`).toBeGreaterThanOrEqual(0);
+      held.set(transaction.ticker, next);
     }
   });
 });
