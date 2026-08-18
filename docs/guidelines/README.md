@@ -61,8 +61,18 @@ Recorded here so the specs and the guidelines cannot silently disagree:
 |---|---|---|
 | SPEC-016 | BR-016-07 | Performance budgets moved from per-PR blocking to **nightly advisory**; new BR-016-07a keeps the cheap structural check blocking |
 | SPEC-003 | BR-003-09 | "Managed secret store" made concrete: **root-only `.env` on the VPS** + GitHub Actions secrets |
+| SPEC-012 | AC-14, AC-16 | **Wallet scope is current composition, not history.** TWR, XIRR, "% do CDI", real return and the shadow portfolio are *unavailable* at wallet scope and say so; the contribution table and the pure index lines are correct there. Decided in [#50](https://github.com/rafaelfqueiroz/allmywallet/issues/50) |
+| SPEC-013 | BR-013-05 | Same cause: the stacked series answers `asset_class` only, and names the dimension it cannot decompose along |
 
 SPEC-003 BR-003-04 — isolation tests blocking — stands unchanged.
+
+### Why wallet scope has no history
+
+SPEC-010 BR-010-08 makes wallets **views over a single ledger** — a transaction is never duplicated to belong to one. SPEC-012 and SPEC-013 then ask for per-wallet *returns over time* and *historical composition*, which is a materially stronger claim: it requires the allocation itself to have a history, so a chart can say what the split was on each past day rather than projecting today's split backwards.
+
+Storing that means rows multiplying by the cardinality of every dimension over every day of history, populated by both `valuation.snapshot` and BR-009-18's forward-invalidation rebuild, as an expand/contract migration against a production database with no staging to rehearse against. That is a permanent carrying cost on the rebuild path — the one path that must stay correct, because DL-006-01 makes the ledger authoritative and the rebuild is how that authority is exercised.
+
+So the refusals are the answer, not a gap: each names the missing dimension rather than borrowing the portfolio's series or rendering empty bands. **Reopen #50 if the PRD ever commits to per-wallet performance as a headline capability.**
 
 ## Infrastructure
 
