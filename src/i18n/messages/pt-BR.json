@@ -66,7 +66,12 @@
     "INGESTION_UNRECOGNIZED_STRUCTURE": "Não reconhecemos a estrutura deste arquivo. Confira se é um extrato de Movimentação, Negociação ou Posição exportado da B3.",
     "INGESTION_AMBIGUOUS_STRUCTURE": "Este arquivo corresponde a mais de um tipo de extrato — não foi possível decidir automaticamente.",
     "INGESTION_FILE_TOO_LARGE": "O arquivo excede o tamanho máximo permitido.",
-    "INGESTION_UNREADABLE_FILE": "Não conseguimos abrir este arquivo. Confira se é um .xlsx ou .xls válido."
+    "INGESTION_UNREADABLE_FILE": "Não conseguimos abrir este arquivo. Confira se é um .xlsx ou .xls válido.",
+    "WALLET_NOT_FOUND": "Esta carteira não existe mais. Atualize a página e tente de novo.",
+    "INVALID_NAME": "A carteira precisa de um nome.",
+    "INVALID_ALLOCATION_QUANTITY": "A quantidade {quantity} não pode ser atribuída a uma carteira — informe um número maior que zero.",
+    "ALLOCATION_EXCEEDS_HOLDINGS": "Suas carteiras ficariam com {requested} cota(s) deste ativo, mas você tem {held}. Reduza a quantidade atribuída.",
+    "WALLET_ALLOCATION_INSUFFICIENT": "Esta carteira tem {allocated} cota(s) deste ativo e a operação pede {requested}."
   },
   "vocabulary": {
     "patrimonio": "Patrimônio",
