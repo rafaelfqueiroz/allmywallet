@@ -210,6 +210,28 @@ The variable is separate from the secrets on purpose. While it is unset, a missi
 
 Performance budgets against the seeded reference workload (SPEC-016, amended to advisory). Regressions raise an alert; they do not block merges.
 
+### The minute budget is a real constraint
+
+Actions on a private repository is **2.000 minutes/month**. By 2026-08-18 this project had spent about **1.687** of them, and it is worth knowing what buys what:
+
+| Event | Billable |
+|---|---|
+| Opening a PR, or pushing another commit to one | **~14–20 min** — `ci.yml` fans out to eight parallel jobs |
+| Merging to `main` | that again (CI runs on the push to `main`) plus ~8 min of `deploy.yml` |
+| A nightly run | ~1 min |
+
+**Volume is what spends it, not slow runs.** 150 runs in one week; the heaviest single day cost 635 minutes. `concurrency: cancel-in-progress: true` already stops a superseded push from finishing, so the remaining lever is pushing less: run the gate locally first (§5) and push once, rather than pushing to find out.
+
+**Wall-clock duration is not cost.** A run's elapsed time in the Actions list includes queue wait, which is not billed — one CI run reads as 364 minutes there and cost 14. Anything reasoning about spend must sum the *jobs*, each rounded up to the whole minute.
+
+| Script | Answers |
+|---|---|
+| `scripts/ci-watch.sh <pr> [ceiling]` | polls a PR's checks to completion, prints the result and what it cost, and **cancels** the run past the ceiling (default 20 min) so a hang cannot bill indefinitely |
+| `scripts/ci-minutes.sh <run-id>` | what one run cost |
+| `scripts/actions-usage.sh [YYYY-MM]` | month-to-date against the tier, broken down by workflow, job and day |
+
+The billing REST endpoint needs an OAuth scope `gh` is not configured with here, and `/actions/runs/{id}/timing` reports zero on this repository, so all three reconstruct the figure from the jobs endpoint.
+
 ## 9. ADRs
 
 Spec Decision Logs record **product** decisions. ADRs record **technical** decisions taken during implementation that the specs did not anticipate.
