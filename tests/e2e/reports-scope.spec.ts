@@ -65,3 +65,39 @@ test('selecting a wallet in Escopo scopes the report to it', async ({ signedIn }
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   await expect(page.locator('#__next_error__')).toHaveCount(0);
 });
+
+/**
+ * SPEC-011 BR-011-12 / AC-011-11 — **the grouped export is reachable over
+ * HTTP.**
+ *
+ * `exportGroupedCsv` was written, unit-tested, and referenced by nothing: no
+ * route handler, no control on any page, `reports.export.csv` unused in the
+ * catalogue. The criterion was ticked on a function no user could invoke (#61).
+ *
+ * This asserts the route, not the link. An earlier version drove the page and
+ * looked for the button; it passed while exercising nothing, because the
+ * signed-in fixture holds no positions and the control is only rendered when
+ * there is something to export. Probing it — throwing in the branch it was
+ * silently taking — is what exposed that, and a test that can pass without
+ * reaching its subject is worse than none.
+ *
+ * What is *not* covered here, stated rather than implied: that the control on
+ * `/reports` carries the page's own period, scope and grouping into this URL.
+ * That needs a fixture with holdings, which this suite does not have.
+ */
+test('the grouped report exports as CSV over HTTP', async ({ signedIn }) => {
+  const { page } = signedIn;
+
+  const response = await page.request.get('/api/reports/export?grouping=institution');
+
+  expect(response.status()).toBe(200);
+  expect(response.headers()['content-type']).toContain('text/csv');
+  // BR-011-12's download, not an inline render.
+  expect(response.headers()['content-disposition']).toContain('attachment');
+  expect(response.headers()['content-disposition']).toContain('.csv');
+
+  // The header row at minimum. A zero-byte body would "download successfully"
+  // and say nothing, which a status assertion alone would not catch.
+  const body = await response.text();
+  expect(body.split('\n')[0]).toContain(',');
+});

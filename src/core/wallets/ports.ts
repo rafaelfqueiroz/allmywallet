@@ -75,9 +75,24 @@ export interface WalletAllocationRepository {
   deleteForWallet(walletId: WalletId): Promise<void>;
 }
 
+export interface StandingRule {
+  readonly assetId: AssetId;
+  readonly walletId: WalletId;
+}
+
 export interface WalletAssetRuleRepository {
   /** BR-010-14: opt-in, off by default — `null` is the default state. */
   find(assetId: AssetId): Promise<WalletId | null>;
+  /**
+   * Every rule this tenant has set (#61).
+   *
+   * `find` alone was enough for `apply-buy.ts`, which asks about one asset at
+   * a time — and so a rule, once set, could never be seen or removed: there
+   * was no way to enumerate them, `clearStandingRuleAction` had no caller, and
+   * a standing instruction to route every future purchase of an asset was
+   * permanent by accident.
+   */
+  list(): Promise<readonly StandingRule[]>;
   set(assetId: AssetId, walletId: WalletId): Promise<void>;
   clear(assetId: AssetId): Promise<void>;
   clearForWallet(walletId: WalletId): Promise<void>;

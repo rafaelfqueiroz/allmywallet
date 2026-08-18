@@ -96,8 +96,17 @@ const TransactionFieldsSchema = z.object({
   ratio: optionalDecimal,
 });
 
-const CreateSchema =
-  TransactionFieldsSchema.merge(AssetChoiceSchema).merge(InstitutionChoiceSchema);
+const CreateSchema = TransactionFieldsSchema.merge(AssetChoiceSchema)
+  .merge(InstitutionChoiceSchema)
+  // AC-010-15. Empty means "no statement", which is BR-010-17's proportional
+  // reduction — the default, and the only honest reading of an unanswered
+  // question about which purpose the sold shares served.
+  .extend({
+    soldFromWallet: z
+      .string()
+      .optional()
+      .transform((value) => (value === undefined || value.trim() === '' ? null : value)),
+  });
 
 export async function createTransactionAction(
   _state: ActionState,
@@ -126,9 +135,15 @@ export async function createTransactionAction(
     if (!created.ok) return failure(created.error);
 
     // BR-010-10/16: the new row's effect on allocations — an auto-increment
-    // for a single-wallet asset, nothing at all for a split one, a
-    // proportional reduction for a sale.
-    const effects = await applyLedgerEffects(deps.assign, userId, [created.value.transaction]);
+    // for a single-wallet asset, nothing at all for a split one, and for a
+    // sale either the wallet the user named (BR-010-17 / AC-010-15) or a
+    // proportional reduction across every wallet holding the asset.
+    const effects = await applyLedgerEffects(
+      deps.assign,
+      userId,
+      [created.value.transaction],
+      input.soldFromWallet === null ? {} : { soldFromWallet: WalletId.of(input.soldFromWallet) },
+    );
     if (!effects.ok) return failure(effects.error);
 
     return IDLE;

@@ -5,6 +5,7 @@ import {
   ASSET_CLASSES,
   listAssetOptions,
   listInstitutionOptions,
+  listWalletChoices,
 } from '@/app/(app)/transactions/data';
 import { tryUserId } from '@/app/(app)/transactions/session';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
@@ -35,11 +36,14 @@ export default async function NewTransactionPage() {
     );
   }
 
-  const { assetOptions, institutionOptions } = await withTransactionsDeps(
+  const { assetOptions, institutionOptions, walletOptions } = await withTransactionsDeps(
     userId,
     async (_deps, tx) => ({
       assetOptions: await listAssetOptions(tx),
       institutionOptions: await listInstitutionOptions(),
+      // AC-010-15's "which wallet sold". Tenant-scoped, so it reads inside the
+      // page's own transaction (AR-11) rather than on the pooled `db`.
+      walletOptions: await listWalletChoices(tx),
     }),
   );
 
@@ -61,6 +65,7 @@ export default async function NewTransactionPage() {
         assetOptions={assetOptions}
         institutionOptions={institutionOptions}
         assetClasses={ASSET_CLASSES}
+        walletOptions={walletOptions}
       />
     </PageShell>
   );

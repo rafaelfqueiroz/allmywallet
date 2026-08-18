@@ -4,6 +4,7 @@ import {
   allocateAction,
   createWalletAction,
   deleteWalletAction,
+  clearStandingRuleAction,
   setStandingRuleAction,
 } from '@/app/(app)/wallets/actions';
 import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
@@ -54,7 +55,8 @@ export default async function WalletsPage() {
     );
   }
 
-  const { comparison, unassigned, pending, labels } = await loadWalletsPageData(userId);
+  const { comparison, unassigned, pending, standingRules, labels } =
+    await loadWalletsPageData(userId);
 
   const walletOptions = comparison.map((row) => (
     <option key={row.wallet.id} value={row.wallet.id}>
@@ -221,6 +223,57 @@ export default async function WalletsPage() {
           </List>
         )}
       </Section>
+
+      {/*
+        BR-010-14 / #61 — the rules, visible and revocable.
+
+        `clearStandingRuleAction` existed with no caller and the rule
+        repository could only answer about one asset at a time, so a rule could
+        be set and never seen or removed: a standing instruction routing every
+        future purchase of an asset was permanent by accident. For a feature
+        whose entire justification is that it is **opt-in** (DL-010-04), being
+        unable to opt back out is the defect.
+
+        Rendered only when there is at least one — an empty section explaining
+        a feature nobody has used is noise on the screen that matters most here,
+        which is the allocation queue above.
+      */}
+      {standingRules.length > 0 && (
+        <Section title={t('standingRuleTitle')} description={t('standingRuleDescription')}>
+          <List gap="sm">
+            {standingRules.map((rule) => {
+              const label = labelFor(labels, rule.assetId);
+              const wallet = comparison.find((row) => row.wallet.id === rule.walletId);
+              return (
+                <ListItem key={rule.assetId} separated>
+                  <Cluster justify="between" gap="sm" align="baseline">
+                    <span>
+                      <span className="font-medium">
+                        {label.code} — {label.name}
+                      </span>{' '}
+                      · {t('standingRuleCurrent')}:{' '}
+                      {/*
+                        A wallet deleted since the rule was set takes its
+                        allocations with it (BR-010-07) and `clearForWallet`
+                        removes its rules, so this fallback should be
+                        unreachable — rendering the id rather than crashing
+                        keeps a stale row revocable instead of stranding it.
+                      */}
+                      {wallet?.wallet.name ?? rule.walletId}
+                    </span>
+                    <ActionForm action={clearStandingRuleAction}>
+                      <input type="hidden" name="assetId" value={rule.assetId} />
+                      <Button type="submit" size="sm" variant="outline">
+                        {t('standingRuleClear')}
+                      </Button>
+                    </ActionForm>
+                  </Cluster>
+                </ListItem>
+              );
+            })}
+          </List>
+        </Section>
+      )}
 
       <Section title={t('yourWallets')}>
         {comparison.length === 0 ? (

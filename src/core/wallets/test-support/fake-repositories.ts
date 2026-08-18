@@ -7,6 +7,7 @@ import type {
   WalletAllocationRepository,
   WalletAssetRuleRepository,
   WalletRepository,
+  StandingRule,
 } from '@/core/wallets/ports';
 import type { Wallet } from '@/core/wallets/wallet';
 
@@ -93,6 +94,10 @@ export class FakeWalletAssetRuleRepository implements WalletAssetRuleRepository 
 
   async find(assetId: AssetId): Promise<WalletId | null> {
     return this.#rows.get(assetId) ?? null;
+  }
+
+  async list(): Promise<readonly StandingRule[]> {
+    return [...this.#rows.entries()].map(([assetId, walletId]) => ({ assetId, walletId }));
   }
 
   async set(assetId: AssetId, walletId: WalletId): Promise<void> {

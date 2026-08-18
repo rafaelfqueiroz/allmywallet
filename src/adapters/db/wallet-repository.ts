@@ -9,6 +9,7 @@ import type {
   PositionQueryPort,
   WalletAllocation,
   WalletAllocationRepository,
+  StandingRule,
   WalletAssetRuleRepository,
   WalletRepository,
 } from '@/core/wallets/ports';
@@ -180,6 +181,14 @@ export class DrizzleWalletAssetRuleRepository implements WalletAssetRuleReposito
       .from(walletAssetRules)
       .where(eq(walletAssetRules.assetId, assetId));
     return row ? WalletId.of(row.walletId) : null;
+  }
+
+  async list(): Promise<readonly StandingRule[]> {
+    const rows = await this.tx.select().from(walletAssetRules);
+    return rows.map((row) => ({
+      assetId: AssetId.of(row.assetId),
+      walletId: WalletId.of(row.walletId),
+    }));
   }
 
   async set(assetId: AssetId, walletId: WalletId): Promise<void> {

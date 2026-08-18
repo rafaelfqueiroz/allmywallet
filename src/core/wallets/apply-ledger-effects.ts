@@ -1,5 +1,5 @@
 import type { DomainError } from '@/core/shared/domain-error';
-import type { AssetId, UserId } from '@/core/shared/ids';
+import type { AssetId, UserId, WalletId } from '@/core/shared/ids';
 import { sumQuantity } from '@/core/shared/money';
 import { err, ok, type Result } from '@/core/shared/result';
 import type { Transaction } from '@/core/ledger/transaction';
@@ -80,6 +80,26 @@ export interface AllocationMade {
   readonly outcome: BuyAllocationOutcome;
 }
 
+export interface LedgerEffectsOptions {
+  /**
+   * SPEC-010 BR-010-17 / AC-010-15 — "a sale with a specified wallet reduces
+   * only that wallet".
+   *
+   * `applySell` has taken a `walletId` since it was written and nothing ever
+   * passed one, so the rule held in unit tests and nowhere else. This is the
+   * parameter that carries the user's statement from the manual entry form to
+   * the use case that implements it (#61).
+   *
+   * **It applies to every reducing row in the call**, which is safe only
+   * because the one caller that sets it submits a single transaction. An
+   * imported batch must never set it: a B3 extract says how many shares left
+   * and nothing about which purpose they served, so BR-010-17's proportional
+   * reduction is the documented answer there, and inferring a wallet from the
+   * existing split would be the same guess BR-010-11 refuses on the buy side.
+   */
+  readonly soldFromWallet?: WalletId;
+}
+
 export interface LedgerEffectsSummary {
   /** BR-010-15: every allocation this commit made, and every purchase it left pending. */
   readonly allocations: readonly AllocationMade[];
@@ -95,6 +115,7 @@ export async function applyLedgerEffects(
   deps: WalletDependencies,
   userId: UserId,
   transactions: readonly Transaction[],
+  options: LedgerEffectsOptions = {},
 ): Promise<Result<LedgerEffectsSummary, DomainError>> {
   const allocations: AllocationMade[] = [];
   const touched = new Set<AssetId>();
@@ -132,13 +153,20 @@ export async function applyLedgerEffects(
           : null;
 
     if (reduction !== null) {
-      // No `walletId`: an imported reduction carries no statement of which
-      // purpose it served, and BR-010-17's proportional reduction is the
-      // documented answer for exactly that case. Inferring one from the split
-      // would be the same guess BR-010-11 refuses to make on the buy side.
+      // AC-010-15: `soldFromWallet` when the user said which wallet sold —
+      // manual entry only. Absent, this is an imported reduction, which
+      // carries no statement of which purpose it served; BR-010-17's
+      // proportional reduction is the documented answer for exactly that case,
+      // and inferring one from the split would be the same guess BR-010-11
+      // refuses to make on the buy side.
+      //
+      // Spread rather than passed as `undefined` — `exactOptionalPropertyTypes`
+      // distinguishes "absent" from "present and undefined", and `applySell`
+      // branches on `!== undefined`.
       const result = await applySell(deps, userId, {
         assetId: transaction.assetId,
         soldQuantity: reduction,
+        ...(options.soldFromWallet === undefined ? {} : { walletId: options.soldFromWallet }),
       });
       if (!result.ok) return result;
       continue;

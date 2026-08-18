@@ -2,6 +2,7 @@ import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, UserId, WalletId } from '@/core/shared/ids';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { WalletDependencies } from '@/core/wallets/dependencies';
+import type { StandingRule } from '@/core/wallets/ports';
 import { WalletErrorCode, walletError } from '@/core/wallets/errors';
 
 /**
@@ -34,4 +35,22 @@ export async function clearStandingRule(
 ): Promise<Result<void, DomainError>> {
   await deps.assetRules.clear(assetId);
   return ok(undefined);
+}
+
+/**
+ * BR-010-14 / #61 — every rule this tenant has set, so they can be seen and
+ * removed.
+ *
+ * **A rule with no read side is a permanent one.** `setStandingRule` and
+ * `clearStandingRule` were both written; only the first had a caller, and
+ * nothing could enumerate rules to render, so a standing instruction routing
+ * every future purchase of an asset could be created and never revoked. For a
+ * feature whose whole justification is that it is *opt-in* (DL-010-04), being
+ * unable to opt back out is the defect.
+ */
+export async function listStandingRules(
+  deps: WalletDependencies,
+  _userId: UserId,
+): Promise<readonly StandingRule[]> {
+  return deps.assetRules.list();
 }
