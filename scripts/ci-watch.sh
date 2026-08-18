@@ -52,7 +52,28 @@ while :; do
       echo
       "$(dirname "$0")/ci-minutes.sh" "$run"
     fi
-    grep -qE "	fail|	cancel" <<<"$checks" && exit 1
+    if grep -qE "	fail|	cancel" <<<"$checks"; then
+      # **A red run is not always a red change.** When the Actions quota is
+      # spent, GitHub fails every job in two or three seconds having run
+      # nothing — no steps, no logs — and `gh pr checks` reports that
+      # identically to a test failure. Reading it as "the branch is broken"
+      # sends someone hunting a defect that is not there, so the two are
+      # separated here by the one thing that distinguishes them: a job that
+      # never started has an empty `steps` array.
+      if [[ -n "$run" ]]; then
+        stepless=$(gh api "/repos/${repo}/actions/runs/${run}/jobs" \
+          -q '[.jobs[] | select(.conclusion == "failure" and (.steps | length) == 0)] | length' \
+          2>/dev/null || echo 0)
+        if [[ "$stepless" -gt 0 ]]; then
+          echo >&2
+          echo "${stepless} job(s) failed without running a single step." >&2
+          echo "That is the Actions quota, not this branch. Check with:" >&2
+          echo "  scripts/actions-usage.sh" >&2
+          exit 4
+        fi
+      fi
+      exit 1
+    fi
     exit 0
   fi
 
