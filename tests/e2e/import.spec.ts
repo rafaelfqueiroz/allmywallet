@@ -1,5 +1,9 @@
 import { Pool } from 'pg';
-import { buildNegociacaoXlsx, SYNTHETIC_CPF } from '@/adapters/ingestion/xlsx/test-support/builder';
+import {
+  buildMovimentacaoXlsx,
+  buildNegociacaoXlsx,
+  SYNTHETIC_CPF,
+} from '@/adapters/ingestion/xlsx/test-support/builder';
 import { expect, test } from './support/authenticated';
 
 /**
@@ -163,4 +167,83 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
     // 500 apart from a page that legitimately has little to show.
     await expect(page.locator('#__next_error__'), `${route} should not 500`).toHaveCount(0);
   }
+});
+
+/**
+ * SPEC-005 AC: "Files upload together or individually, **in any order**."
+ *
+ * B3 exports three extracts and a user has no reason to send them one at a
+ * time. Order is deliberately wrong here — Negociação before Movimentação —
+ * because "in any order" is a claim about structure-based detection
+ * (BR-005-03), not about anything the upload arranges, and a test that sends
+ * them in the documented order would never exercise it.
+ */
+test('the three extracts upload together, in whatever order they were picked', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+
+  const negociacao = await buildNegociacaoXlsx([
+    { data: '02/01/2026', tipo: 'Compra', codigo: 'PETR4', quantidade: '100', preco: '38,50' },
+  ]);
+  const movimentacao = await buildMovimentacaoXlsx([
+    {
+      data: '05/01/2026',
+      movimentacao: 'Dividendo',
+      produto: 'PETR4 - PETROBRAS PN',
+      instituicao: 'CLEAR CORRETORA',
+      quantidade: '100',
+      precoUnitario: '0,50',
+      valorOperacao: '50,00',
+    },
+  ]);
+
+  await page.goto('/import');
+  await page.getByLabel(/arquivo/i).setInputFiles([
+    {
+      name: 'negociacao.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from(negociacao),
+    },
+    {
+      name: 'movimentacao.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from(movimentacao),
+    },
+  ]);
+  await page.getByRole('button', { name: /^enviar$/i }).click();
+
+  // Several files have no single batch page to land on, so the history list is
+  // where they go — and both must be there.
+  await expect(page).toHaveURL(/\/import$/);
+
+  await expect
+    .poll(
+      async () => {
+        const row = await queryOne<{ total: string }>(
+          'SELECT count(*)::text AS total FROM import_batches WHERE user_id = $1',
+          [userId],
+        );
+        return row?.total ?? '0';
+      },
+      { timeout: 60_000, message: 'both uploads should have produced a batch' },
+    )
+    .toBe('2');
+
+  // BR-005-03: each is identified from its own bytes, so the pair comes back
+  // as two *different* sources despite being uploaded in one go and in the
+  // wrong order.
+  await expect
+    .poll(
+      async () => {
+        const row = await queryOne<{ sources: string }>(
+          `SELECT string_agg(DISTINCT source, ',' ORDER BY source) AS sources
+             FROM import_batches WHERE user_id = $1 AND status <> 'pending'`,
+          [userId],
+        );
+        return row?.sources ?? '';
+      },
+      { timeout: 120_000, message: 'both extracts should be detected by structure' },
+    )
+    .toBe('b3_movimentacao,b3_negociacao');
 });

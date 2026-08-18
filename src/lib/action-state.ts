@@ -2,7 +2,11 @@ import type { DomainError, ErrorContextValue } from '@/core/shared/domain-error'
 import { SharedErrorCode } from '@/core/shared/domain-error';
 
 /**
- * What a transaction-management server action returns to its form.
+ * What a mutating server action returns to its form.
+ *
+ * Shared by `(app)/transactions` and `(app)/import`, which is why it sits in
+ * `lib/` rather than beside either — the second surface to need it would
+ * otherwise have imported the first's internals.
  *
  * **The wallets actions return `void` and swallow their errors** — `if
  * (isErr(result)) return;` — which is survivable there because every one of

@@ -17,12 +17,7 @@ import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { assignTransactionsToWallet } from '@/core/wallets/assign-transactions';
 import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
-import {
-  IDLE,
-  INVALID_INPUT,
-  failure,
-  type ActionState,
-} from '@/app/(app)/transactions/action-state';
+import { IDLE, INVALID_INPUT, failure, type ActionState } from '@/lib/action-state';
 import {
   withTransactionWriteDeps,
   type TransactionWriteDeps,

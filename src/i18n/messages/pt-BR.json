@@ -65,7 +65,7 @@
     "IMPORT_ROW_NOT_UNCLASSIFIED": "Este item já foi classificado.",
     "INGESTION_UNRECOGNIZED_STRUCTURE": "Não reconhecemos a estrutura deste arquivo. Confira se é um extrato de Movimentação, Negociação ou Posição exportado da B3.",
     "INGESTION_AMBIGUOUS_STRUCTURE": "Este arquivo corresponde a mais de um tipo de extrato — não foi possível decidir automaticamente.",
-    "INGESTION_FILE_TOO_LARGE": "O arquivo excede o tamanho máximo permitido.",
+    "INGESTION_FILE_TOO_LARGE": "Cada arquivo precisa ter no máximo {maxUploadMb} MB. Nenhum dos arquivos foi enviado.",
     "INGESTION_UNREADABLE_FILE": "Não conseguimos abrir este arquivo. Confira se é um .xlsx ou .xls válido.",
     "WALLET_NOT_FOUND": "Esta carteira não existe mais. Atualize a página e tente de novo.",
     "INVALID_NAME": "A carteira precisa de um nome.",
@@ -292,7 +292,9 @@
       "chooseWallet": "Escolha uma carteira",
       "quantity": "Quantidade",
       "resolve": "Atribuir"
-    }
+    },
+    "fileHint": "Você pode enviar os três extratos de uma vez, ou um de cada vez — a ordem não importa.",
+    "uploading": "Enviando…"
   },
   "reports": {
     "title": "Relatórios",
