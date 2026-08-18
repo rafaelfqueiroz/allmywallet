@@ -161,6 +161,20 @@ Worth knowing before proposing anything that contradicts them.
 | UI language | pt-BR through `next-intl`; no string literals in components |
 | Market vocabulary | stays Portuguese — *proventos*, *preço médio*, *patrimônio*, *rentabilidade* |
 
+## Actions minutes are a budget
+
+**2.000/month on a private repo; ~1.687 were spent by 2026-08-18.** Opening a PR or pushing another commit to one costs **14–20 billable minutes** across eight parallel jobs, and a merge to `main` costs that again plus the deploy. Volume is what drains it — 150 runs in one week — not slow runs.
+
+So: **run the gate locally before pushing** ([DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup)) and push once, rather than pushing to find out. After opening a PR or pushing to one, watch it:
+
+```bash
+scripts/ci-watch.sh <pr-number>
+```
+
+It polls to completion, reports pass/fail and what the run cost, and cancels past a 20-minute ceiling so a hung job cannot bill indefinitely. `scripts/actions-usage.sh` answers "how much is left".
+
+**A run's wall-clock time is not its cost** — the Actions list includes queue wait, which is not billed. One CI run reads as 364 minutes there and cost 14. Always sum the jobs. See [DEVELOPMENT §8](docs/guidelines/DEVELOPMENT.md#8-cicd).
+
 ## What blocks a merge
 
 Typecheck · lint (incl. import boundaries) · format · unit and use-case tests · integration tests against real Postgres · **isolation tests for every tenant-scoped table** · coverage (100% branch on calculation modules, 80% overall) · migration applies cleanly to an empty database · E2E journeys · reports read snapshots rather than the ledger.
