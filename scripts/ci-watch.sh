@@ -24,9 +24,27 @@ run=$(gh pr view "$pr" --repo "$repo" --json statusCheckRollup \
 echo "PR #${pr} — polling every ${interval}s, cancelling past ${ceiling} min"
 started=$(date +%s)
 
+appear_deadline="${APPEAR_MINUTES:-3}"
+
 while :; do
   checks=$(gh pr checks "$pr" --repo "$repo" 2>&1 || true)
   elapsed=$(( ($(date +%s) - started) / 60 ))
+
+  # "no checks reported" is NOT success, and treating it as such is how this
+  # script reported PR #79 green when GitHub had dispatched nothing at all —
+  # exactly the failure mode of a check that passes because it never ran. A run
+  # normally registers within seconds; past the deadline, no workflow was
+  # dispatched, which on this repository has meant the Actions quota is spent.
+  if grep -q "no checks reported" <<<"$checks"; then
+    if (( elapsed >= appear_deadline )); then
+      echo "No checks were dispatched for PR #${pr} after ${elapsed} min." >&2
+      echo "Nothing ran — do not read this as passing. Check the Actions quota:" >&2
+      echo "  scripts/actions-usage.sh" >&2
+      exit 3
+    fi
+    sleep "$interval"
+    continue
+  fi
 
   if ! grep -q "pending" <<<"$checks"; then
     echo "$checks"
