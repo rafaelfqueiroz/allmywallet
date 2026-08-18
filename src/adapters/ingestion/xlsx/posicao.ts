@@ -16,13 +16,17 @@ import { sanitizeCells, sanitizeRow } from '@/adapters/ingestion/xlsx/strip-cpf'
  * SPEC-005 BR-005-01/06/22 — Posição: the point-in-time snapshot, and the
  * only source of contracted fixed-income rates.
  *
- * Real B3 Posição exports are a multi-tab workbook (one tab per asset
- * class). This parser reads a **single consolidated sheet** with a
- * `Categoria` column carrying that same information instead — a documented
- * scope cut (see the dispatch report's Decision log), not a fidelity gap
- * this file tries to hide: BR-005-06's contract extraction and BR-005-22's
- * reconciliation input both work identically either way, since neither
- * depends on which physical tab a row came from.
+ * Real B3 Posição exports are a multi-tab workbook, one tab per asset class.
+ * **This parser handles one sheet, and `index.ts` calls it once per populated
+ * sheet** (#63) — so a multi-tab workbook is read whole, and this file stays
+ * unaware that tabs exist at all. Nothing here depends on which physical tab a
+ * row came from: the `Categoria` column carries the asset class, so a
+ * consolidated single sheet and a per-class tab produce identical records,
+ * which is what makes the split above possible.
+ *
+ * Until #63 the port took only the *first* populated sheet, so a fixed-income
+ * tab arriving after an equities tab was discarded in silence, taking
+ * BR-005-06's contracted rates with it.
  */
 export function parsePosicao(
   rows: readonly (string | null)[][],

@@ -9,6 +9,7 @@ import {
 import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { tryUserId } from '@/app/(app)/wallets/session';
 import { PageShell } from '@/components/patterns/page-shell';
+import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
@@ -64,7 +65,7 @@ export default async function WalletsPage() {
   return (
     <PageShell title={t('title')} description={t('description')}>
       <Section title={t('createTitle')}>
-        <form action={createWalletAction}>
+        <ActionForm action={createWalletAction}>
           <Cluster gap="md" align="end">
             <Field id="wallet-name" label={t('nameLabel')} width="lg">
               <Input name="name" required placeholder={t('namePlaceholder')} />
@@ -80,7 +81,7 @@ export default async function WalletsPage() {
             </Field>
             <Button type="submit">{t('create')}</Button>
           </Cluster>
-        </form>
+        </ActionForm>
       </Section>
 
       <Section title={t('comparisonTitle')} description={t('comparisonDescription')}>
@@ -165,7 +166,7 @@ export default async function WalletsPage() {
                       {t(item.reason === 'no_wallet' ? 'reasonNoWallet' : 'reasonAmbiguousSplit')}
                     </Text>
                     <Cluster gap="lg" align="end">
-                      <form action={allocateAction}>
+                      <ActionForm action={allocateAction}>
                         <input type="hidden" name="assetId" value={item.assetId} />
                         <Cluster gap="sm" align="end">
                           <Field
@@ -192,9 +193,9 @@ export default async function WalletsPage() {
                             {t('resolveSubmit')}
                           </Button>
                         </Cluster>
-                      </form>
+                      </ActionForm>
 
-                      <form action={setStandingRuleAction}>
+                      <ActionForm action={setStandingRuleAction}>
                         <input type="hidden" name="assetId" value={item.assetId} />
                         <Cluster gap="sm" align="end">
                           <Field
@@ -211,7 +212,7 @@ export default async function WalletsPage() {
                             {t('standingRuleSet')}
                           </Button>
                         </Cluster>
-                      </form>
+                      </ActionForm>
                     </Cluster>
                   </Stack>
                 </ListItem>
@@ -232,12 +233,12 @@ export default async function WalletsPage() {
                   <Button asChild variant="link">
                     <Link href={`/wallets/${row.wallet.id}`}>{row.wallet.name}</Link>
                   </Button>
-                  <form action={deleteWalletAction}>
+                  <ActionForm action={deleteWalletAction}>
                     <input type="hidden" name="walletId" value={row.wallet.id} />
                     <Button type="submit" variant="destructive" size="sm">
                       {t('delete')}
                     </Button>
-                  </form>
+                  </ActionForm>
                 </Cluster>
               </ListItem>
             ))}

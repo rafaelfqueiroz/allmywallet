@@ -6,6 +6,7 @@ import { deleteWalletAction, updateWalletAction } from '@/app/(app)/wallets/acti
 import { labelFor, loadWalletDetail } from '@/app/(app)/wallets/data';
 import { tryUserId } from '@/app/(app)/wallets/session';
 import { PageShell } from '@/components/patterns/page-shell';
+import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
@@ -61,7 +62,7 @@ export default async function WalletDetailPage({
       }
     >
       <Section title={t('editTitle')}>
-        <form action={updateWalletAction}>
+        <ActionForm action={updateWalletAction}>
           <input type="hidden" name="walletId" value={wallet.id} />
           <Stack gap="md" align="start">
             <Field id="wallet-name" label={t('nameLabel')} width="lg">
@@ -78,7 +79,7 @@ export default async function WalletDetailPage({
             </Field>
             <Button type="submit">{t('save')}</Button>
           </Stack>
-        </form>
+        </ActionForm>
       </Section>
 
       <Section title={t('allocationsTitle')}>
@@ -124,12 +125,12 @@ export default async function WalletDetailPage({
       </Section>
 
       <Section title={t('delete')}>
-        <form action={deleteWalletAction}>
+        <ActionForm action={deleteWalletAction}>
           <input type="hidden" name="walletId" value={wallet.id} />
           <Button type="submit" variant="destructive">
             {t('delete')}
           </Button>
-        </form>
+        </ActionForm>
       </Section>
     </PageShell>
   );

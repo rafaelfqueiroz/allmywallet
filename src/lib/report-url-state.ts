@@ -170,3 +170,37 @@ function parseGrouping(params: ReadableParams, fallback: Grouping): Grouping {
   if (raw === null || !isGrouping(raw)) return fallback;
   return raw;
 }
+
+/**
+ * SPEC-011 BR-011-01 / #63 — the current URL with one parameter changed.
+ *
+ * For a report control that is a *link* rather than a form field: SPEC-012's
+ * earnings treatment is the first, and it exists because the shared GET form
+ * cannot carry a control it does not render.
+ *
+ * **Built from the raw query, not from parsed state.** Reconstructing the URL
+ * from `ReportUrlState` would silently drop any parameter this module does not
+ * model — a link whose job is "the same view, with one thing changed" must not
+ * quietly change anything else. Multi-valued parameters are dropped rather than
+ * guessed at: no report control emits one, and picking a member would be an
+ * invention.
+ *
+ * A `null` value removes the parameter instead of writing a default, so the
+ * canonical URL of a report is the short one — a bookmark taken from the
+ * default view matches a link followed back to it.
+ */
+export function withParam(
+  path: string,
+  raw: Readonly<Record<string, string | readonly string[] | undefined>>,
+  name: string,
+  value: string | null,
+): string {
+  const params = new URLSearchParams();
+  for (const [key, current] of Object.entries(raw)) {
+    if (key === name) continue;
+    if (typeof current === 'string') params.set(key, current);
+  }
+  if (value !== null) params.set(name, value);
+  const query = params.toString();
+  return query === '' ? path : `${path}?${query}`;
+}

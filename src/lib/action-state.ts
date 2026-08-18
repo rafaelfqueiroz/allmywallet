@@ -8,14 +8,19 @@ import { SharedErrorCode } from '@/core/shared/domain-error';
  * `lib/` rather than beside either — the second surface to need it would
  * otherwise have imported the first's internals.
  *
- * **The wallets actions return `void` and swallow their errors** — `if
- * (isErr(result)) return;` — which is survivable there because every one of
- * them is an "assign the whole thing" click with nothing to explain. It is not
- * survivable here: BR-006-15 is explicit that an impossible state is refused
- * "with an explanation of why, **not a silent rejection**", and the headline
- * case is a sale of more than was held, whose message names the held quantity.
- * A form that silently redisplays itself after refusing a sale is precisely
- * the failure that rule forbids.
+ * **Why every mutating action returns this rather than `void`.** BR-006-15 is
+ * explicit that an impossible state is refused "with an explanation of why,
+ * **not a silent rejection**", and the headline case is a sale of more than was
+ * held, whose message names the held quantity. A form that silently redisplays
+ * itself after refusing is precisely the failure that rule forbids.
+ *
+ * This note used to carve out `(app)/wallets`, on the grounds that every wallet
+ * form was "an assign-the-whole-thing click with nothing to explain". That was
+ * wrong on its own terms — the pending-purchase form's quantity is editable —
+ * and #63 pinned the cost: SPEC-010 AC-4's write-time refusal of an
+ * over-allocation had no way to reach the screen, so BR-010-05 was enforced in
+ * the database and invisible everywhere else. The wallets actions return
+ * `ActionState` too, rendered by `components/patterns/action-form.tsx`.
  *
  * So the state carries the domain's **code and context** (AR-37), never a
  * formatted string — `useActionState` in the form component renders it through

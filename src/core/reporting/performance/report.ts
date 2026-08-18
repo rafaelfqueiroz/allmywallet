@@ -5,6 +5,7 @@ import { Money, sumMoney } from '@/core/shared/money';
 import { err, ok, type Result } from '@/core/shared/result';
 import { addCalendarDays } from '@/core/valuation/business-days';
 import { runReportQuery } from '@/core/reporting/base-query';
+import type { GroupNames } from '@/core/reporting/grouping';
 import type { ResolvedScope } from '@/core/reporting/scope';
 import type {
   DailyValuationSnapshot,
@@ -259,6 +260,8 @@ export interface PerformanceReport {
   readonly range: DateRange;
   readonly scope: ResolvedScope;
   readonly grouping: Grouping;
+  /** BR-011-06 / #63 — carried through so the contribution table can name its groups. */
+  readonly groupNames: GroupNames;
   readonly treatment: EarningsTreatment;
   /**
    * `null` at **wallet** scope, for the same reason `twr` and `xirr` are
@@ -397,6 +400,7 @@ export async function runPerformanceReport(
     range: base.value.range,
     scope: base.value.scope,
     grouping: input.grouping,
+    groupNames: base.value.groupNames,
     treatment: input.treatment,
     series: scopedSeries,
     twr,

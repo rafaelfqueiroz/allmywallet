@@ -15,6 +15,7 @@ import { loadWalletOptions, walletName } from '@/app/(app)/import/wallet-options
 import { allocateAction } from '@/app/(app)/wallets/actions';
 import { tryUserId } from '@/app/(app)/import/session';
 import { PageShell } from '@/components/patterns/page-shell';
+import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
@@ -168,7 +169,7 @@ export default async function ImportBatchDetailPage({
                         quantity pre-filled — the same form the wallets screen
                         offers, because it is the same decision. */}
                     {asset.pending !== null && (
-                      <form action={allocateAction}>
+                      <ActionForm action={allocateAction}>
                         <input type="hidden" name="assetId" value={asset.assetId} />
                         <Cluster gap="sm" align="end">
                           <Field
@@ -199,7 +200,7 @@ export default async function ImportBatchDetailPage({
                             {t('summary.resolve')}
                           </Button>
                         </Cluster>
-                      </form>
+                      </ActionForm>
                     )}
                   </Stack>
                 </ListItem>

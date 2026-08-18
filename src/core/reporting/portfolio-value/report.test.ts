@@ -91,6 +91,9 @@ function query(
       wallet: scope.kind === 'wallet' ? { walletId: scope.walletId, name: 'Reserva' } : null,
     },
     report: groupedReport(holdingsTotal, options.estimated ?? false),
+    // Portfolio Value never renders a group name; the fixture only has to
+    // satisfy the type.
+    groupNames: new Map(),
     snapshots,
     empty: snapshots.length === 0,
   };

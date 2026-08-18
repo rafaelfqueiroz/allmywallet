@@ -5,6 +5,8 @@ import {
   type GroupKey,
   type Grouping,
   type ReportHolding,
+  type ReportInstitution,
+  type ReportWallet,
   type Scope,
 } from '@/core/reporting/ports';
 
@@ -132,4 +134,77 @@ export function isGrouping(value: string): value is Grouping {
 export function compareGroupKeys(a: GroupKey, b: GroupKey): number {
   if (a.synthetic !== b.synthetic) return a.synthetic ? 1 : -1;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
+ * BR-011-06 / #63 — the tenant-data name behind each group key.
+ *
+ * **Why this exists at all.** `GroupKey.id` is an *identity*, not a label: a
+ * wallet uuid, an institution uuid, an asset uuid, a sector string, an asset
+ * class enum. Every report page rendered that id directly, so grouping by
+ * wallet produced a table of bare uuids on `/reports/performance`, and on
+ * `/reports` a fallback to `holdings[0].assetCode` labelled a *wallet* with
+ * whichever asset happened to sort first inside it — a real name, attached to
+ * the wrong thing, which is worse than a uuid because it looks right.
+ *
+ * **The names still resolve in the UI** (AR-44, and `compareGroupKeys` above
+ * says so explicitly). This function does not render anything: it hands the UI
+ * the lookup it was missing, built once from the same holding set the groups
+ * came from, so all four reports label a group identically for the same reason
+ * they partition it identically.
+ *
+ * `asset_class` and the two synthetic buckets are deliberately absent — those
+ * labels are i18n keys, not tenant data, and belong in the message catalogue.
+ * A caller that finds no entry renders the i18n label or falls back to the id.
+ */
+export type GroupNames = ReadonlyMap<string, string>;
+
+/** The lookup key: a dimension's ids are only unique within that dimension. */
+export function groupNameKey(key: GroupKey): string {
+  return `${key.dimension}:${key.id}`;
+}
+
+export interface GroupNameSources {
+  readonly holdings: readonly ReportHolding[];
+  readonly wallets: readonly ReportWallet[];
+  readonly institutions: readonly ReportInstitution[];
+}
+
+export function resolveGroupNames(grouping: Grouping, sources: GroupNameSources): GroupNames {
+  const names = new Map<string, string>();
+
+  switch (grouping) {
+    case 'wallet':
+      for (const wallet of sources.wallets) {
+        names.set(`wallet:${wallet.walletId}`, wallet.name);
+      }
+      return names;
+
+    case 'institution':
+      for (const institution of sources.institutions) {
+        names.set(`institution:${institution.institutionId}`, institution.name);
+      }
+      return names;
+
+    case 'asset':
+      // The ticker, not the long name: it is what the user typed, what the
+      // broker prints, and what every other table on the site shows.
+      for (const holding of sources.holdings) {
+        names.set(`asset:${holding.assetId}`, holding.assetCode);
+      }
+      return names;
+
+    case 'sector':
+      // The id *is* the sector name (`groupKeyResolver` above keys on
+      // `holding.sector`), so the map is an identity — built anyway so the
+      // caller has one uniform path rather than a special case per dimension.
+      for (const holding of sources.holdings) {
+        if (holding.sector !== null) names.set(`sector:${holding.sector}`, holding.sector);
+      }
+      return names;
+
+    case 'asset_class':
+      // An i18n key (`reports.assetClass.*`), never tenant data.
+      return names;
+  }
 }

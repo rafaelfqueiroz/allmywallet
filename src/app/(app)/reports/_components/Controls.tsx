@@ -44,15 +44,37 @@ export interface ControlsProps {
   readonly period: Period;
   readonly scope: Scope;
   readonly grouping: Grouping;
+  /**
+   * Report-specific state this shared form must carry across a submit — today
+   * only SPEC-012's `earnings` (#63). Rendered as hidden inputs.
+   *
+   * **This is not the hidden `scope` field the comment below warns about.**
+   * That one derived its value from the *current* scope while the user was
+   * changing it in the select beside it, so the form contradicted itself. A
+   * value here belongs to a control this form does not render, so carrying the
+   * current value forward is the only correct thing it can do — without it,
+   * changing the period silently reverts "sem proventos" to "com proventos".
+   */
+  readonly hidden?: Readonly<Record<string, string>>;
   /** The tenant's wallets, for the scope selector (BR-011-02). */
   readonly wallets: readonly { readonly walletId: string; readonly name: string }[];
 }
 
-export async function Controls({ action, period, scope, grouping, wallets }: ControlsProps) {
+export async function Controls({
+  action,
+  period,
+  scope,
+  grouping,
+  wallets,
+  hidden,
+}: ControlsProps) {
   const t = await getTranslations('reports');
 
   return (
     <form method="get" action={action} aria-label={t('title')}>
+      {Object.entries(hidden ?? {}).map(([name, value]) => (
+        <input key={name} type="hidden" name={name} value={value} />
+      ))}
       <Card>
         <CardContent>
           <Cluster gap="md" align="end">

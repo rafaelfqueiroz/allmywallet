@@ -36,22 +36,42 @@ export function defaultMetadataRows(): readonly string[] {
 }
 
 export async function buildXlsx(options: BuildSheetOptions): Promise<Uint8Array> {
+  return buildMultiSheetXlsx([options]);
+}
+
+/**
+ * A workbook with one tab per entry — B3's real Posição shape (#63).
+ *
+ * TS-19/DV-24: generated, never a captured export. Every tab is built from the
+ * same synthetic rows the single-sheet builder uses, so a multi-tab fixture
+ * carries no more real data than a single-tab one does — which is none.
+ *
+ * `names` is deliberately positional rather than part of `BuildSheetOptions`:
+ * nothing in the parser reads a sheet name (detection is structural, BR-005-03),
+ * so a name is a fixture-readability affordance and not a behaviour under test.
+ */
+export async function buildMultiSheetXlsx(
+  sheets: readonly BuildSheetOptions[],
+  names: readonly string[] = [],
+): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet('Extrato');
 
-  for (const line of options.metadataRows ?? defaultMetadataRows()) {
-    sheet.addRow([line]);
-  }
+  sheets.forEach((options, index) => {
+    const sheet = workbook.addWorksheet(names[index] ?? `Extrato ${index + 1}`);
 
-  const headerOrder = options.headerOrder ?? options.headers;
-  sheet.addRow([...headerOrder]);
+    for (const line of options.metadataRows ?? defaultMetadataRows()) {
+      sheet.addRow([line]);
+    }
 
-  for (const row of options.rows) {
-    sheet.addRow(headerOrder.map((header) => row[header] ?? ''));
-  }
+    const headerOrder = options.headerOrder ?? options.headers;
+    sheet.addRow([...headerOrder]);
 
-  const buffer = await workbook.xlsx.writeBuffer();
-  return new Uint8Array(buffer);
+    for (const row of options.rows) {
+      sheet.addRow(headerOrder.map((header) => row[header] ?? ''));
+    }
+  });
+
+  return workbook.xlsx.writeBuffer().then((buffer) => new Uint8Array(buffer));
 }
 
 export const MOVIMENTACAO_HEADERS = [

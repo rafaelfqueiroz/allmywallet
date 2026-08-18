@@ -1,6 +1,7 @@
 import { getTranslations } from 'next-intl/server';
+import Link from 'next/link';
 import { defaultGroupingFor } from '@/core/reporting/grouping';
-import type { GroupKey } from '@/core/reporting/ports';
+import { GroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
 import {
   EarningsTreatment,
   type Benchmark,
@@ -10,7 +11,7 @@ import {
   type TwrResult,
   type XirrResult,
 } from '@/core/reporting/performance/ports';
-import { fromSearchParams } from '@/lib/report-url-state';
+import { fromSearchParams, withParam } from '@/lib/report-url-state';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
@@ -24,11 +25,11 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/components/patterns/money';
+import { Button } from '@/components/ui/button';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
 import { Cluster } from '@/components/layout/cluster';
-import { Badge } from '@/components/ui/badge';
 import { Text } from '@/components/ui/text';
 import {
   Table,
@@ -119,6 +120,12 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         scope={state.scope}
         grouping={state.grouping}
         wallets={wallets.map((wallet) => ({ walletId: wallet.walletId, name: wallet.name }))}
+        // #63: without this, changing the period reverts "sem proventos" to
+        // "com proventos" — the control below would set a value the very next
+        // submit threw away. Omitted at the default so URLs stay clean.
+        {...(treatment === EarningsTreatment.WITHOUT_EARNINGS
+          ? { hidden: { earnings: 'without' } }
+          : {})}
       />
 
       {!report.ok ? (
@@ -196,21 +203,51 @@ export default async function PerformancePage({ searchParams }: PageProps) {
             </Note>
           )}
 
-          {/* BR-012-06/07 — the two views, as links so the state stays in the URL. */}
-          <Cluster gap="sm">
-            <Badge
-              variant={treatment === EarningsTreatment.WITH_EARNINGS ? 'secondary' : 'outline'}
-            >
-              {tr(
-                treatment === EarningsTreatment.WITH_EARNINGS
-                  ? 'treatment.withEarnings'
-                  : 'treatment.withoutEarnings',
-              )}
-            </Badge>
-            <Text tone="muted" size="xs">
-              {tr('treatment.hint')}
-            </Text>
-          </Cluster>
+          {/*
+            BR-012-09 / #63 — the two views, actually selectable.
+
+            What stood here was a single `Badge` naming the *current* view, and
+            the only reader of `?earnings=without` was the parser above. No
+            control emitted the parameter and the shared GET form dropped it, so
+            "sem proventos" was reachable only by hand-typing a URL and was lost
+            on the next submit. BR-012-09 asks for both views at every scope,
+            period and grouping; only the domain was delivering that.
+
+            Links rather than a second form: this is navigation between two
+            views of the same report, the state belongs in the URL so a bookmark
+            reproduces it, and every other control on the page already lives
+            there.
+          */}
+          <nav aria-label={tr('treatment.label')}>
+            <Cluster gap="sm" align="baseline">
+              {(
+                [
+                  [EarningsTreatment.WITH_EARNINGS, 'treatment.withEarnings'],
+                  [EarningsTreatment.WITHOUT_EARNINGS, 'treatment.withoutEarnings'],
+                ] as const
+              ).map(([option, key]) => {
+                const current = option === treatment;
+                return (
+                  <Button key={option} asChild size="sm" variant={current ? 'secondary' : 'ghost'}>
+                    <Link
+                      href={withParam(
+                        '/reports/performance',
+                        raw,
+                        'earnings',
+                        option === EarningsTreatment.WITHOUT_EARNINGS ? 'without' : null,
+                      )}
+                      aria-current={current ? 'true' : undefined}
+                    >
+                      {tr(key)}
+                    </Link>
+                  </Button>
+                );
+              })}
+              <Text tone="muted" size="xs">
+                {tr('treatment.hint')}
+              </Text>
+            </Cluster>
+          </nav>
 
           {/* BR-012-12 / DL-012-04 — the comparison, drawn. Everything on it
               is also in the table below, which is what BR-016-16 asks for:
@@ -220,7 +257,19 @@ export default async function PerformancePage({ searchParams }: PageProps) {
               <BenchmarkChart
                 title={tr('chart.title')}
                 summary={tr('chart.summary')}
-                series={['portfolio', ...report.value.benchmarks.map((b) => b.benchmark)]}
+                /*
+                  #63 — only benchmarks whose line actually resolved. `series`
+                  used to name every *selected* benchmark while `points` below
+                  carried only the resolved ones, so an unsynced IPCA put its
+                  name in the legend with no line under it — a reader sees a
+                  series that appears to sit flat at zero, while the table
+                  beneath the chart says "Indisponível" about the same
+                  benchmark. The two now derive from the same filter.
+                */
+                series={[
+                  'portfolio',
+                  ...report.value.benchmarks.filter((b) => b.line.ok).map((b) => b.benchmark),
+                ]}
                 points={comparisonSeries(
                   report.value.twr.value.subPeriods,
                   report.value.benchmarks.flatMap((outcome) =>
@@ -309,7 +358,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                   {report.value.contribution.value.groups.map((group: GroupPerformance) => (
                     <TableRow key={group.key.id}>
                       <TableCell className="py-row font-medium">
-                        <GroupLabel groupKey={group.key} />
+                        <GroupLabel groupKey={group.key} names={report.value.groupNames} />
                       </TableCell>
                       <TableCell className="py-row text-right">
                         <Money value={group.weight} kind="percent" />
@@ -376,16 +425,6 @@ async function HeadlineRate<T>({
     );
   }
   return <Money value={pick(result.value)} kind="percent" signed />;
-}
-
-/**
- * BR-011-09/10 — the two synthetic buckets get their i18n message; everything
- * else is tenant data the domain deliberately did not name (see `GroupKey`).
- */
-async function GroupLabel({ groupKey }: { readonly groupKey: GroupKey }) {
-  const t = await getTranslations('reports');
-  if (!groupKey.synthetic) return <>{groupKey.id}</>;
-  return <>{t(`group.${groupKey.id === '__unassigned__' ? 'unassigned' : 'notClassified'}`)}</>;
 }
 
 /** The three benchmark names are proper nouns, not translatable copy. */

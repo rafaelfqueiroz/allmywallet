@@ -4,7 +4,12 @@ import { domainError, type DomainError } from '@/core/shared/domain-error';
 import type { AssetId, WalletId } from '@/core/shared/ids';
 import { Money, Quantity, sumMoney, sumQuantity } from '@/core/shared/money';
 import { err, ok, type Result } from '@/core/shared/result';
-import { compareGroupKeys, groupKeyResolver } from '@/core/reporting/grouping';
+import {
+  compareGroupKeys,
+  groupKeyResolver,
+  resolveGroupNames,
+  type GroupNames,
+} from '@/core/reporting/grouping';
 import { asOfFor, resolvePeriod } from '@/core/reporting/period';
 import { applyScope, isEmptyScope, resolveScope, type ResolvedScope } from '@/core/reporting/scope';
 import {
@@ -452,6 +457,11 @@ export interface ReportQueryResult {
   readonly asOf: BusinessDate;
   readonly scope: ResolvedScope;
   readonly report: GroupedReport;
+  /**
+   * BR-011-06 / #63 — the tenant-data name behind each group key, for the UI
+   * to render (AR-44). Empty for `asset_class`, whose labels are i18n keys.
+   */
+  readonly groupNames: GroupNames;
   /** BR-011-13 — the `DailyValuationSnapshot` rows covering the period. */
   readonly snapshots: readonly DailyValuationSnapshot[];
   /** BR-011-16 / AC-14 — render the explanatory empty state, not a zero. */
@@ -505,11 +515,25 @@ export async function runReportQuery(
   if (!holdings.ok) return holdings;
 
   const scoped = applyScope(holdings.value, input.scope);
+
+  // Only the dimension actually grouped by is looked up. Fetching wallets and
+  // institutions unconditionally would add two queries to every asset-class
+  // render — the default at portfolio scope, and so the common case.
+  const [wallets, institutions] = await Promise.all([
+    input.grouping === 'wallet' ? port.listWallets() : Promise.resolve([]),
+    input.grouping === 'institution' ? port.listInstitutions() : Promise.resolve([]),
+  ]);
+
   return ok({
     range: range.value,
     asOf,
     scope: scope.value,
     report: aggregate(scoped, input.grouping),
+    groupNames: resolveGroupNames(input.grouping, {
+      holdings: scoped,
+      wallets,
+      institutions,
+    }),
     snapshots,
     empty: isEmptyScope(scoped),
   });

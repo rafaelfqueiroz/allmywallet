@@ -25,10 +25,13 @@ export interface ExtractSchema {
 
 /**
  * BR-005-01: each extract's column set. Order-independent (BR-005-04 — B3
- * changing column order must not break the parser) and, deliberately, a
- * flattened single-sheet Posição layout rather than modelling B3's real
- * multi-tab workbook — see the dispatch report's Decision log for why that
- * scope cut was made and what it costs.
+ * changing column order must not break the parser).
+ *
+ * One schema set covers both a flattened single-sheet Posição and B3's real
+ * multi-tab workbook, because detection runs **per sheet** (`index.ts`, #63)
+ * and every Posição tab carries the same column set. A workbook's tabs are
+ * therefore detected independently, and one that matches no schema — a cover
+ * or notes tab — is skipped rather than failing the whole import.
  */
 export const EXTRACT_SCHEMAS: readonly ExtractSchema[] = [
   {

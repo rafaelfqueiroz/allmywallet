@@ -38,8 +38,29 @@ export class XlsxIngestionPort implements IngestionPort {
       return err(domainError(IngestionErrorCode.UNREADABLE_FILE));
     }
 
-    const worksheet = workbook.worksheets.find((sheet) => sheet.rowCount > 0);
-    if (worksheet === undefined) {
+    /**
+     * BR-005-01 / AC-005-06 (#63) — **every** populated sheet, not the first.
+     *
+     * A real B3 Posição export is a multi-tab workbook, one tab per asset
+     * class, and this took `worksheets.find(...)`: the first populated sheet
+     * won and the rest of the file was discarded in silence. A user importing
+     * a Posição with a fixed-income tab got their equities and none of their
+     * CDBs — and, because BR-005-06 reads contracted rates from that tab, no
+     * fixed-income contracts either, so every bank paper they held would later
+     * value at cost and sit in "Needs attention" with no visible cause.
+     *
+     * A sheet whose headers do not match any known schema is skipped rather
+     * than failing the import: exports carry cover and notes tabs, and refusing
+     * the whole file over one would make the feature unusable. The backstop is
+     * that staging reports its row counts *before* the user commits (BR-005-11)
+     * — a tab that failed to parse shows up as a count lower than the file, at
+     * the one moment the user is looking at exactly that number.
+     */
+    const sheets = workbook.worksheets
+      .filter((sheet) => sheet.rowCount > 0)
+      .map((sheet) => sheetToRows(sheet));
+
+    if (sheets.length === 0) {
       return err(
         domainError(IngestionErrorCode.UNRECOGNIZED_STRUCTURE, {
           expected: 'at least one populated sheet',
@@ -47,11 +68,35 @@ export class XlsxIngestionPort implements IngestionPort {
       );
     }
 
-    const rows = sheetToRows(worksheet);
-    const detected = detectExtractType(rows);
-    if (!detected.ok) return detected;
+    const recognized = sheets.flatMap((rows) => {
+      const detected = detectExtractType(rows);
+      return detected.ok ? [{ rows, structure: detected.value }] : [];
+    });
 
-    const structure = detected.value;
+    const first = recognized[0];
+    if (first === undefined) {
+      // Report the first sheet's own detection failure rather than a generic
+      // one: for the single-sheet case — still the common one — this is
+      // exactly the error the caller used to get, naming the headers it wanted.
+      const firstSheet = sheets[0];
+      const detected = firstSheet === undefined ? undefined : detectExtractType(firstSheet);
+      if (detected !== undefined && !detected.ok) return detected;
+      return err(domainError(IngestionErrorCode.UNRECOGNIZED_STRUCTURE, {}));
+    }
+
+    const structure = first.structure;
+
+    // Two different extracts in one workbook is a mistake worth naming, not
+    // something to merge: `ParsedExtract` carries a single `extractType`, and
+    // guessing which one wins would attribute one extract's rows to the other.
+    if (recognized.some((sheet) => sheet.structure.extractType !== structure.extractType)) {
+      return err(
+        domainError(IngestionErrorCode.UNRECOGNIZED_STRUCTURE, {
+          expected: 'one extract type per workbook',
+        }),
+      );
+    }
+
     try {
       // BR-005-05 (#63) — a structurally valid extract can still carry a
       // malformed date or decimal in a data row. Before this `try`, that
@@ -61,12 +106,17 @@ export class XlsxIngestionPort implements IngestionPort {
       // every attempt. `CellFormatError` is the only exception this catches
       // deliberately narrow, so a genuine bug elsewhere in the parser still
       // surfaces as a real crash rather than a misleading "malformed file".
-      const records =
-        structure.extractType === 'b3_movimentacao'
-          ? parseMovimentacao(rows, structure)
-          : structure.extractType === 'b3_negociacao'
-            ? parseNegociacao(rows, structure)
-            : parsePosicao(rows, structure);
+      // Each sheet keeps its own `structure`: the header row index differs per
+      // tab (metadata blocks are not identical across them) and BR-005-04 lets
+      // column order differ too, so reusing the first sheet's offsets would
+      // read the wrong columns on every tab after it.
+      const records = recognized.flatMap((sheet) =>
+        sheet.structure.extractType === 'b3_movimentacao'
+          ? parseMovimentacao(sheet.rows, sheet.structure)
+          : sheet.structure.extractType === 'b3_negociacao'
+            ? parseNegociacao(sheet.rows, sheet.structure)
+            : parsePosicao(sheet.rows, sheet.structure),
+      );
 
       return ok({ extractType: structure.extractType, records });
     } catch (error) {

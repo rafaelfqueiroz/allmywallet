@@ -6,6 +6,7 @@ import {
   fromSearchParams,
   toQueryString,
   toSearchParams,
+  withParam,
   type ReportUrlState,
 } from '@/lib/report-url-state';
 
@@ -205,5 +206,58 @@ describe('parsing is total — a hand-edited URL never breaks the report', () =>
     // ReadableParams seam.
     const stub = { get: (name: string) => (name === 'grouping' ? 'wallet' : null) };
     expect(fromSearchParams(stub, 'asset_class').grouping).toBe('wallet');
+  });
+});
+
+/**
+ * SPEC-012 BR-012-09 / #63 — the link that made "sem proventos" reachable.
+ *
+ * Before this, `?earnings=without` had a parser and no emitter: no control
+ * produced it and the shared GET form dropped it, so the view existed in the
+ * domain and could be reached only by typing a URL — and was lost on the next
+ * submit.
+ */
+describe('withParam — BR-011-01 / #63', () => {
+  it('changes one parameter and preserves the rest', () => {
+    const href = withParam(
+      '/reports/performance',
+      { period: 'ytd', scope: 'wallet', wallet: 'w-1', grouping: 'asset' },
+      'earnings',
+      'without',
+    );
+    const query = new URLSearchParams(href.split('?')[1] ?? '');
+    expect(query.get('earnings')).toBe('without');
+    expect(query.get('period')).toBe('ytd');
+    expect(query.get('scope')).toBe('wallet');
+    expect(query.get('wallet')).toBe('w-1');
+    expect(query.get('grouping')).toBe('asset');
+  });
+
+  it('a null value removes the parameter rather than writing a default', () => {
+    expect(withParam('/reports/performance', { earnings: 'without' }, 'earnings', null)).toBe(
+      '/reports/performance',
+    );
+  });
+
+  it('replaces an existing value rather than appending a second one', () => {
+    const href = withParam('/r', { earnings: 'without' }, 'earnings', 'without');
+    expect(href).toBe('/r?earnings=without');
+    expect(new URLSearchParams(href.split('?')[1]).getAll('earnings')).toEqual(['without']);
+  });
+
+  it('carries a parameter this module does not model', () => {
+    // The whole reason it reads the raw query: a link that reconstructed the
+    // URL from parsed state would drop anything the parser ignores.
+    const href = withParam('/r', { unmodelled: 'kept' }, 'earnings', 'without');
+    expect(new URLSearchParams(href.split('?')[1]).get('unmodelled')).toBe('kept');
+  });
+
+  it('drops a multi-valued parameter rather than guessing which member survives', () => {
+    const href = withParam('/r', { period: ['ytd', '1y'] }, 'earnings', 'without');
+    expect(new URLSearchParams(href.split('?')[1]).has('period')).toBe(false);
+  });
+
+  it('omits the query string entirely when nothing is left', () => {
+    expect(withParam('/reports/performance', {}, 'earnings', null)).toBe('/reports/performance');
   });
 });
