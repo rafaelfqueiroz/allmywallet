@@ -161,19 +161,21 @@ Closes #NN  <!-- the spec's board task; omit if this PR only partly satisfies it
 
 ### On every PR — `ci.yml`
 
-| Step | Blocking |
-|---|---|
-| Install (frozen lockfile) | ✅ |
-| Typecheck | ✅ |
-| Lint (incl. import-boundary rules, AR-05) | ✅ |
-| Format check | ✅ |
-| Unit tests | ✅ |
-| Integration tests (Testcontainers Postgres) | ✅ |
-| **Isolation tests** | ✅ (SPEC-003 BR-003-04) |
-| Coverage: 100% calc modules, 80% overall | ✅ |
-| Migration check — applies cleanly to an empty database | ✅ |
-| Build | ✅ |
-| E2E (Playwright) | ✅ |
+A **pull request runs everything below**. A push to `main` runs only typecheck/lint/format, unit tests and the dependency audit — see [the minute budget](#the-minute-budget-is-a-real-constraint) for why, and for what that trades away.
+
+| Step | Blocking | Also on `main` |
+|---|---|---|
+| Install (frozen lockfile) | ✅ | ✅ |
+| Typecheck | ✅ | ✅ |
+| Lint (incl. import-boundary rules, AR-05) | ✅ | ✅ |
+| Format check | ✅ | ✅ |
+| Unit tests | ✅ | ✅ |
+| Integration tests (Testcontainers Postgres) | ✅ | — |
+| **Isolation tests** | ✅ (SPEC-003 BR-003-04) | — |
+| Coverage: 100% calc modules, 80% overall | ✅ | ✅ |
+| Migration check — applies cleanly to an empty database | ✅ | — |
+| Build | ✅ | — (`deploy.yml` builds the image) |
+| E2E (Playwright) | ✅ | — |
 
 ### On merge to `main` — `deploy.yml`
 
@@ -221,6 +223,8 @@ Actions on a private repository is **2.000 minutes/month**. By 2026-08-18 this p
 | A nightly run | ~1 min |
 
 **Volume is what spends it, not slow runs.** 150 runs in one week; the heaviest single day cost 635 minutes. `concurrency: cancel-in-progress: true` already stops a superseded push from finishing, so the remaining lever is pushing less: run the gate locally first (§5) and push once, rather than pushing to find out.
+
+**The `main` trigger is narrowed for the same reason.** A push to `main` runs `static`, `unit` and `audit` — about 7 minutes — rather than the full 20. Running on `main` exists to catch what a PR cannot: two branches, each green against an older `main`, merged in sequence, where the second was never tested against the first. Typecheck catches the dominant form of that (a renamed symbol the other branch still calls) and unit tests catch it where the contract rather than the signature moved. The four container and browser suites would catch a *runtime* conflict that typechecks cleanly; dropping them is a real gap, accepted because it needs two PRs in flight at once and this is a single-developer project merging in sequence. `build` is dropped on stronger grounds — `deploy.yml` runs `pnpm build` inside the Dockerfile on the same push, so it was duplicated work rather than lost coverage. **If concurrent merges become normal, undo this first.**
 
 **Wall-clock duration is not cost.** A run's elapsed time in the Actions list includes queue wait, which is not billed — one CI run reads as 364 minutes there and cost 14. Anything reasoning about spend must sum the *jobs*, each rounded up to the whole minute.
 

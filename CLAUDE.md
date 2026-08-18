@@ -173,7 +173,9 @@ scripts/ci-watch.sh <pr-number>
 
 It polls to completion, reports pass/fail and what the run cost, and cancels past a 20-minute ceiling so a hung job cannot bill indefinitely. `scripts/actions-usage.sh` answers "how much is left".
 
-**A run's wall-clock time is not its cost** — the Actions list includes queue wait, which is not billed. One CI run reads as 364 minutes there and cost 14. Always sum the jobs. See [DEVELOPMENT §8](docs/guidelines/DEVELOPMENT.md#8-cicd).
+**A run's wall-clock time is not its cost** — the Actions list includes queue wait, which is not billed. One CI run reads as 364 minutes there and cost 14. Always sum the jobs.
+
+A **PR runs the full gate; a push to `main` runs only typecheck/lint/format, unit tests and the audit.** The container and browser suites are skipped there deliberately, which leaves one real gap — a runtime conflict between two PRs merged in sequence that typechecks cleanly. See [DEVELOPMENT §8](docs/guidelines/DEVELOPMENT.md#8-cicd).
 
 ## What blocks a merge
 

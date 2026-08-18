@@ -9,6 +9,36 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# ---------------------------------------------------------------------------
+# WHAT RUNS WHERE, AND WHY IT IS NOT THE SAME
+#
+# A pull request runs everything. A push to `main` runs only `static`, `unit`
+# and `audit`.
+#
+# The full gate costs 20 billable minutes across eight parallel jobs, and it ran
+# once already on the PR whose merge produced this commit. Re-running all of it
+# on `main` was costing that again per merge against a 2.000-minute monthly tier
+# the project has come within 300 minutes of (DEVELOPMENT §8).
+#
+# **What running on `main` is actually for** is the one thing a PR cannot check:
+# two branches, each green against an older `main`, merged in sequence — the
+# second was never tested against the first. The dominant form of that is a
+# symbol one branch renamed and the other still calls, which `static` catches by
+# typechecking, and `unit` catches where the contract rather than the signature
+# moved. Those two are kept for exactly that reason.
+#
+# **What is dropped, and the honest cost.** `integration`, `isolation`, `e2e`
+# and `visual` would catch a *runtime* conflict between two merges that
+# typechecks cleanly. That is a real gap, accepted deliberately: it needs two
+# PRs in flight at once, this is a single-developer project merging in sequence,
+# and the four suites are 11 of the 20 minutes. `build` is dropped for a
+# stronger reason — `deploy.yml`'s `build-image` runs `pnpm build` inside the
+# Dockerfile on this same push, so on `main` it was duplicated work rather than
+# reduced coverage.
+#
+# If concurrent merges ever become normal here, this is the first thing to undo.
+# ---------------------------------------------------------------------------
+
 env:
   NODE_VERSION: '22'
 
@@ -83,6 +113,8 @@ jobs:
   integration:
     name: Integration · migrations
     runs-on: ubuntu-latest
+    # Pull requests only — see "What runs where" above.
+    if: github.event_name == 'pull_request'
     services:
       postgres:
         image: postgres:17
@@ -114,6 +146,8 @@ jobs:
   isolation:
     name: Tenant isolation (blocking)
     runs-on: ubuntu-latest
+    # Pull requests only — see "What runs where" above.
+    if: github.event_name == 'pull_request'
     services:
       postgres:
         image: postgres:17
@@ -146,6 +180,8 @@ jobs:
   e2e:
     name: E2E journeys (blocking)
     runs-on: ubuntu-latest
+    # Pull requests only — see "What runs where" above.
+    if: github.event_name == 'pull_request'
     # DL-27: this gate was listed as blocking in DEVELOPMENT.md and in #33's
     # test plan long before it existed. `tests/e2e/` and this job are what make
     # the claim true.
@@ -205,6 +241,8 @@ jobs:
   visual:
     name: Visual baselines (blocking)
     runs-on: ubuntu-latest
+    # Pull requests only — see "What runs where" above.
+    if: github.event_name == 'pull_request'
     # DL-C2: baselines are recorded in the pinned Playwright image and verified
     # in the same one. This job runs the container's browser directly — the
     # image the `test:visual:docker` script pulls locally is this same
@@ -251,6 +289,8 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    # Pull requests only — see "What runs where" above.
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
