@@ -1,9 +1,11 @@
 import { getTranslations } from 'next-intl/server';
 import { defaultGroupingFor } from '@/core/reporting/grouping';
-import type { Money as MoneyValue } from '@/core/shared/money';
+import { chartColorAt } from '@/components/charts/palette';
+import { Money as MoneyValue } from '@/core/shared/money';
 import type {
   GrowthDecomposition,
   MonthlyContribution,
+  StackedBand,
   ValuePoint,
 } from '@/core/reporting/portfolio-value/ports';
 import { fromSearchParams } from '@/lib/report-url-state';
@@ -15,6 +17,7 @@ import { tryUserId } from '@/app/(app)/reports/session';
 import { loadPatrimonio } from '@/app/(app)/reports/patrimonio/data';
 import { ValueChart } from '@/app/(app)/reports/patrimonio/_components/ValueChart';
 import { ContributionChart } from '@/app/(app)/reports/patrimonio/_components/ContributionChart';
+import { StackedChart } from '@/app/(app)/reports/patrimonio/_components/StackedChart';
 import { PageShell } from '@/components/patterns/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -286,6 +289,27 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                 />
               </Section>
 
+              {report.stacked.kind === 'available' && (
+                // BR-013-05 / #63 — the composition bands. Previously computed
+                // by `stackedSeries` and rendered by nothing, so the one
+                // grouping that *can* be answered drew no chart while the other
+                // four at least explained themselves.
+                <Section title={tp('stacked.title')} description={tp('stacked.description')}>
+                  <StackedComposition
+                    bands={report.stacked.bands}
+                    labels={{
+                      title: tp('stacked.title'),
+                      summary: tp('stacked.summary'),
+                      caption: tp('stacked.caption'),
+                      date: tp('table.date'),
+                      total: tp('table.value'),
+                      band: t(`grouping.${report.stacked.grouping}`),
+                    }}
+                    nameOf={(key) => t(`assetClass.${key}`)}
+                  />
+                </Section>
+              )}
+
               {report.stacked.kind === 'unavailable' && (
                 // The honest refusal, surfaced. An empty stacked chart would read
                 // as "you held nothing" — false about the portfolio rather than
@@ -473,5 +497,86 @@ function SeriesTable({
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+/**
+ * SPEC-013 BR-013-05 / SPEC-016 BR-016-16 — the composition bands, as a chart
+ * and as the table that carries the same figures.
+ *
+ * **The date union is the whole job here.** `stackedSeries` emits one band per
+ * asset class, and a band only carries points for the dates on which that class
+ * had a value — a portfolio that bought its first FII in March has a `fii` band
+ * starting in March. Recharts stacks by row, so every row must carry a key for
+ * every band; a missing key leaves a hole in the stack and the bands stop
+ * summing to the total, which is the one claim a composition chart makes.
+ * Absent means zero here, and zero is the truth: the class was not held.
+ */
+function StackedComposition({
+  bands,
+  labels,
+  nameOf,
+}: {
+  readonly bands: readonly StackedBand[];
+  readonly labels: Record<'title' | 'summary' | 'caption' | 'date' | 'total' | 'band', string>;
+  readonly nameOf: (key: string) => string;
+}) {
+  const dates = [
+    ...new Set(bands.flatMap((band) => band.points.map((point) => point.date))),
+  ].sort();
+
+  const valueAt = new Map(
+    bands.map((band) => [band.key, new Map(band.points.map((point) => [point.date, point.value]))]),
+  );
+
+  const rows = dates.map((date) => {
+    const row: Record<string, string | number> = { date };
+    for (const band of bands) {
+      const value = valueAt.get(band.key)?.get(date);
+      row[band.key] = value === undefined ? 0 : plot(value);
+    }
+    return row;
+  });
+
+  const legend = bands.map((band, index) => ({
+    key: band.key,
+    label: nameOf(band.key),
+    color: chartColorAt(index),
+  }));
+
+  return (
+    <Stack gap="md">
+      <StackedChart rows={rows} bands={legend} title={labels.title} summary={labels.summary} />
+      <Table>
+        <TableCaption className="sr-only">{labels.caption}</TableCaption>
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col">{labels.date}</TableHead>
+            {legend.map((band) => (
+              <TableHead key={band.key} scope="col" className="text-right">
+                {band.label}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {dates.map((date) => (
+            <TableRow key={date}>
+              <TableHead scope="row" className="text-left font-normal">
+                {date}
+              </TableHead>
+              {bands.map((band) => (
+                <TableCell key={band.key} className="text-right">
+                  {/* Zero rather than an em dash: a class absent from a day's
+                      snapshot was not held that day, which is a figure, not a
+                      gap. It also keeps each row addable to the total. */}
+                  <Money value={valueAt.get(band.key)?.get(date) ?? MoneyValue.zero()} />
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Stack>
   );
 }

@@ -709,6 +709,9 @@
     },
     "stacked": {
       "title": "Composição ao longo do tempo",
+      "description": "Quanto de cada classe de ativo compunha o seu patrimônio em cada data. As faixas somam o total da linha acima.",
+      "summary": "Área empilhada: o valor de cada classe de ativo ao longo do período, somando o patrimônio total em cada data.",
+      "caption": "Composição do patrimônio por classe de ativo, por data",
       "unavailable": "A composição histórica só existe por classe de ativo. Não há histórico guardado por {grouping}, então esta visão não pode ser montada para o agrupamento selecionado."
     },
     "table": {
