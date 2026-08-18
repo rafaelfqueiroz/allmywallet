@@ -36,27 +36,44 @@ interface SeededLedger {
  */
 async function seedLedger(userId: string): Promise<SeededLedger> {
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
-  const petr4 = randomUUID();
-  const hglg11 = randomUUID();
-  const clear = randomUUID();
+  let petr4: string = randomUUID();
+  let hglg11: string = randomUUID();
+  let clear: string = randomUUID();
   const batchId = randomUUID();
 
   try {
-    await pool.query(
-      `INSERT INTO assets (id, code, name, class) VALUES ($1, 'PETR4', 'Petróleo Brasileiro PN', 'stock')
-       ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name`,
-      [petr4],
-    );
-    await pool.query(
-      `INSERT INTO assets (id, code, name, class) VALUES ($1, 'HGLG11', 'CSHG Logística FII', 'fii')
-       ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name`,
-      [hglg11],
-    );
-    await pool.query(
-      `INSERT INTO institutions (id, name) VALUES ($1, 'Clear')
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name`,
-      [clear],
-    );
+    /**
+     * `RETURNING id` rather than trusting the generated uuid: `assets` and
+     * `institutions` are shared reference data, so a previous run — or the
+     * import journey, which creates PETR4 itself — may already hold the row.
+     * `ON CONFLICT DO UPDATE` then keeps the **existing** id, and the uuid
+     * generated here dangles, which surfaces as an FK violation on the
+     * transactions insert rather than as anything about assets.
+     */
+    petr4 = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO assets (id, code, name, class) VALUES ($1, 'PETR4', 'Petróleo Brasileiro PN', 'stock')
+         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [petr4],
+      )
+    ).rows[0]!.id;
+    hglg11 = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO assets (id, code, name, class) VALUES ($1, 'HGLG11', 'CSHG Logística FII', 'fii')
+         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [hglg11],
+      )
+    ).rows[0]!.id;
+    clear = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO institutions (id, name) VALUES ($1, 'Clear')
+         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [clear],
+      )
+    ).rows[0]!.id;
     await pool.query(
       `INSERT INTO import_batches (id, user_id, source, status, committed_at)
        VALUES ($1, $2, 'b3_negociacao', 'committed', now())`,
@@ -151,12 +168,14 @@ test.describe('transaction ledger', () => {
     await expect(table).toBeVisible();
 
     // BR-006-07: all assets and institutions in one chronological list.
-    await expect(page.getByText('PETR4')).toHaveCount(2);
-    await expect(page.getByText('HGLG11')).toHaveCount(1);
+    // Scoped to the table: the asset filter's `<select>` lists every ticker
+    // too, so an unscoped text match counts the dropdown option as a row.
+    await expect(table.getByText('PETR4')).toHaveCount(2);
+    await expect(table.getByText('HGLG11')).toHaveCount(1);
 
     // BR-006-02: provenance is visible on the row, not merely stored.
-    await expect(page.getByText('Importada')).toHaveCount(2);
-    await expect(page.getByText('Manual')).toHaveCount(1);
+    await expect(table.getByText('Importada')).toHaveCount(2);
+    await expect(table.getByText('Manual')).toHaveCount(1);
   });
 
   test('filtering by type narrows the list, and the filter survives a reload', async ({
@@ -166,23 +185,24 @@ test.describe('transaction ledger', () => {
     await seedLedger(userId);
 
     await page.goto('/transactions');
-    await expect(page.getByText('PETR4')).toHaveCount(2);
+    const table = page.getByRole('table', { name: 'Transações' });
+    await expect(table.getByText('PETR4')).toHaveCount(2);
 
     // BR-006-08 — a plain GET form, so this is a real navigation.
     await page.getByLabel('Tipo').selectOption('sell');
     await page.getByRole('button', { name: 'Aplicar' }).click();
 
     await expect(page).toHaveURL(/type=sell/);
-    await expect(page.getByText('PETR4')).toHaveCount(1);
-    await expect(page.getByText('HGLG11')).toHaveCount(0);
+    await expect(table.getByText('PETR4')).toHaveCount(1);
+    await expect(table.getByText('HGLG11')).toHaveCount(0);
 
     // The whole point of URL-held state (DL-011-06, applied here): a reload
     // must reproduce the exact filtered view, not fall back to the full list.
     await page.reload();
     await expect(page).toHaveURL(/type=sell/);
     await expect(page.getByLabel('Tipo')).toHaveValue('sell');
-    await expect(page.getByText('PETR4')).toHaveCount(1);
-    await expect(page.getByText('HGLG11')).toHaveCount(0);
+    await expect(table.getByText('PETR4')).toHaveCount(1);
+    await expect(table.getByText('HGLG11')).toHaveCount(0);
   });
 
   test('a filter matching nothing explains itself rather than showing a blank table', async ({
