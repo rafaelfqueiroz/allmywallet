@@ -65,6 +65,12 @@ export interface TransactionFormValues {
   readonly unitPrice: string;
   readonly fees: string;
   readonly ratio: string;
+  readonly soldFromWallet?: string;
+}
+
+export interface WalletChoiceView {
+  readonly walletId: string;
+  readonly name: string;
 }
 
 export interface TransactionFormProps {
@@ -75,6 +81,8 @@ export interface TransactionFormProps {
   readonly institutionOptions: readonly InstitutionChoice[];
   /** Passed in for the same reason the types are declared here. */
   readonly assetClasses: readonly string[];
+  /** SPEC-010 AC-010-15 — the tenant's wallets, for "which wallet sold". */
+  readonly walletOptions: readonly WalletChoiceView[];
 }
 
 export function TransactionForm({
@@ -84,6 +92,7 @@ export function TransactionForm({
   assetOptions,
   institutionOptions,
   assetClasses,
+  walletOptions,
 }: TransactionFormProps) {
   const t = useTranslations('transactions.form');
   const tErrors = useTranslations('errors');
@@ -214,6 +223,36 @@ export function TransactionForm({
             <Field id="transaction-ratio" label={t('ratio')} hint={t('ratioHint')} width="md">
               <Input name="ratio" inputMode="decimal" defaultValue={values.ratio} />
             </Field>
+            {/*
+              SPEC-010 BR-010-17 / AC-010-15 — "a sale with a specified wallet
+              reduces only that wallet". `applySell` has accepted a wallet
+              since it was written and nothing ever passed one, so the rule
+              held in unit tests and nowhere else (#61).
+
+              Always rendered rather than revealed for reducing types only,
+              matching `ratio` above: the form degrades without JavaScript, and
+              the hint says when it applies. Left empty it means "no statement",
+              which is BR-010-17's proportional reduction across every wallet
+              holding the asset — the default, and the only honest reading of
+              an unanswered question.
+            */}
+            {walletOptions.length > 0 && (
+              <Field
+                id="transaction-sold-from"
+                label={t('soldFromWallet')}
+                hint={t('soldFromWalletHint')}
+                width="md"
+              >
+                <NativeSelect name="soldFromWallet" defaultValue={values.soldFromWallet ?? ''}>
+                  <option value="">{t('soldFromWalletProportional')}</option>
+                  {walletOptions.map((wallet) => (
+                    <option key={wallet.walletId} value={wallet.walletId}>
+                      {wallet.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
           </Cluster>
         </Section>
 

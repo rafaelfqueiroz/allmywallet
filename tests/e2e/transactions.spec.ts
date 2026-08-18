@@ -343,6 +343,75 @@ test.describe('transaction management', () => {
     await expect(page.getByRole('table')).toContainText('100');
   });
 
+  /**
+   * SPEC-010 AC-010-15 — "a sale with a specified wallet reduces only that
+   * wallet".
+   *
+   * The unit tests for this branch existed before anything could reach it
+   * (#61), so the end-to-end path is the assertion that matters: a control on
+   * the form, a value that survives the server action, and two wallets whose
+   * quantities disagree afterwards in exactly the way the user asked for.
+   *
+   * A 60/40 split is the only shape that can tell the two behaviours apart —
+   * under BR-010-17's proportional default the same sale would take 12 from
+   * Aposentadoria, and this test would fail on the last assertion rather than
+   * pass by coincidence.
+   */
+  test('a sale can name the wallet it came out of', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const retirement = await seedWallet(userId, 'Aposentadoria');
+    const trading = await seedWallet(userId, 'Trading');
+
+    await page.goto('/transactions/new');
+    await page.getByLabel('Ou informe um código novo').fill('ITSA4');
+    await page.getByLabel('Nome do ativo').fill('Itaúsa PN');
+    await page.getByLabel('Tipo').selectOption('buy');
+    await page.getByLabel('Data da operação').fill('2026-04-01');
+    await page.getByLabel('Quantidade').fill('100');
+    await page.getByLabel('Preço unitário').fill('10,00');
+    await page.getByRole('button', { name: 'Registrar transação' }).click();
+    await expect(page).toHaveURL(/\/transactions$/);
+
+    /*
+      BR-010-04's deliberate split, made through the UI that makes it — the
+      "Needs attention" queue, where the buy lands because BR-010-11 refuses to
+      guess a wallet. The row stays in the queue after the first assignment
+      because 40 are still unallocated, which is what lets the second run of
+      this loop find it.
+    */
+    for (const [walletName, quantity] of [
+      ['Aposentadoria', '60'],
+      ['Trading', '40'],
+    ] as const) {
+      await page.goto('/wallets');
+      await page.getByLabel('Quantidade').first().fill(quantity);
+      await page.getByLabel('Atribuir a').first().selectOption({ label: walletName });
+      await page.getByRole('button', { name: 'Atribuir', exact: true }).first().click();
+      await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
+    }
+
+    await page.goto('/transactions/new');
+    // The full label: "Ativo" alone also matches "Nome do ativo". The option
+    // text is "<code> — <name>", so that has to be exact too.
+    await page
+      .getByLabel('Escolha um ativo já registrado')
+      .selectOption({ label: 'ITSA4 — Itaúsa PN' });
+    await page.getByLabel('Tipo').selectOption('sell');
+    await page.getByLabel('Data da operação').fill('2026-04-10');
+    await page.getByLabel('Quantidade').fill('20');
+    await page.getByLabel('Preço unitário').fill('12,00');
+    await page.getByLabel('Vendeu de qual carteira?').selectOption({ label: 'Trading' });
+    await page.getByRole('button', { name: 'Registrar transação' }).click();
+    await expect(page).toHaveURL(/\/transactions$/);
+
+    await page.goto(`/wallets/${trading}`);
+    await expect(page.getByRole('table')).toContainText('20');
+
+    // The assertion the proportional default would fail: untouched at 60.
+    await page.goto(`/wallets/${retirement}`);
+    await expect(page.getByRole('table')).toContainText('60');
+  });
+
   test('bulk delete removes a whole selection at once', async ({ signedIn }) => {
     const { page, userId } = signedIn;
     await seedLedger(userId);

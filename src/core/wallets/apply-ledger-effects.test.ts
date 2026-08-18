@@ -347,3 +347,104 @@ describe('SPEC-010 BR-010-05/17 — every type that reduces the position reduces
     expect(unassigned[0]?.quantity.toString()).toBe('40');
   });
 });
+
+/**
+ * SPEC-010 BR-010-17 / AC-010-15 — "a sale with a specified wallet reduces
+ * only that wallet".
+ *
+ * `applySell` has accepted a `walletId` since it was written, and every caller
+ * passed none — so the branch was unit-tested in `apply-sell.test.ts` and
+ * unreachable in the running product (#61). The rule was ticked as done on the
+ * strength of a test for code nothing could invoke, which is the same pattern
+ * `use-cases-have-callers.test.ts` exists to stop.
+ */
+describe('SPEC-010 AC-010-15 — a sale from a named wallet', () => {
+  async function twoWallets() {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    const retirement = await walletFor(deps, 'Aposentadoria');
+    const trading = await walletFor(deps, 'Trading');
+    // A deliberate 60/40 split (BR-010-04), which is the only case where
+    // "which wallet sold" and "proportionally" give different answers.
+    await allocateToWallet(deps, USER, {
+      walletId: retirement.id,
+      assetId: ITSA4,
+      quantity: Quantity.fromString('60'),
+    });
+    await allocateToWallet(deps, USER, {
+      walletId: trading.id,
+      assetId: ITSA4,
+      quantity: Quantity.fromString('40'),
+    });
+    return { deps, retirement, trading };
+  }
+
+  async function quantityIn(
+    deps: ReturnType<typeof buildFakeDeps>,
+    walletId: Parameters<typeof deps.allocations.listForWallet>[0],
+  ) {
+    const rows = await deps.allocations.listForWallet(walletId);
+    return rows[0]?.quantity.toString() ?? '0';
+  }
+
+  it('reduces only the named wallet, leaving the other untouched', async () => {
+    const { deps, retirement, trading } = await twoWallets();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('80'), Money.fromString('10'));
+
+    const result = await applyLedgerEffects(deps, USER, [tx('sell', '20', '2026-03-10')], {
+      soldFromWallet: trading.id,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await quantityIn(deps, trading.id)).toBe('20');
+    // The whole point: proportional would have taken 12 from here.
+    expect(await quantityIn(deps, retirement.id)).toBe('60');
+  });
+
+  it('without a named wallet, the same sale reduces both proportionally', async () => {
+    // The control. Identical setup and sale, no statement — so any difference
+    // above is the option and not the fixture.
+    const { deps, retirement, trading } = await twoWallets();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('80'), Money.fromString('10'));
+
+    const result = await applyLedgerEffects(deps, USER, [tx('sell', '20', '2026-03-10')]);
+
+    expect(result.ok).toBe(true);
+    expect(await quantityIn(deps, retirement.id)).toBe('48');
+    expect(await quantityIn(deps, trading.id)).toBe('32');
+  });
+
+  it('refuses a sale larger than the named wallet holds, rather than spilling into the others', async () => {
+    // BR-010-17's refusal, and the reason it is a refusal: taking the excess
+    // from another wallet would silently contradict the statement the user
+    // just made about which shares were sold.
+    const { deps, retirement, trading } = await twoWallets();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('50'), Money.fromString('10'));
+
+    const result = await applyLedgerEffects(deps, USER, [tx('sell', '50', '2026-03-10')], {
+      soldFromWallet: trading.id,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('WALLET_ALLOCATION_INSUFFICIENT');
+    // Nothing was written on the way to the refusal.
+    expect(await quantityIn(deps, retirement.id)).toBe('60');
+    expect(await quantityIn(deps, trading.id)).toBe('40');
+  });
+
+  it('applies to a transfer_out as well as a sell', async () => {
+    // Both are reductions that carry the same question; `REDUCING_TYPES`
+    // routes them through the same call, so the statement has to reach both.
+    const { deps, retirement, trading } = await twoWallets();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('90'), Money.fromString('10'));
+
+    const result = await applyLedgerEffects(deps, USER, [tx('transfer_out', '10', '2026-03-10')], {
+      soldFromWallet: retirement.id,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await quantityIn(deps, retirement.id)).toBe('50');
+    expect(await quantityIn(deps, trading.id)).toBe('40');
+  });
+});

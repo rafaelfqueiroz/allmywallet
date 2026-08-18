@@ -71,6 +71,15 @@ export default async function EditTransactionPage({ params }: PageProps) {
         assetOptions={loaded.assetOptions}
         institutionOptions={loaded.institutionOptions}
         assetClasses={ASSET_CLASSES}
+        /*
+          Empty on purpose, so AC-010-15's "which wallet sold" does not render
+          here. An edit does not go through `applyLedgerEffects`: BR-006-14
+          recalculates the position and `reconcile` brings allocations back
+          under the sum invariant wholesale, so a per-edit wallet statement has
+          nowhere to land. Offering the control and silently ignoring it would
+          be worse than not offering it.
+        */
+        walletOptions={[]}
       />
     </PageShell>
   );
