@@ -61,7 +61,14 @@ export async function reconcileAllocationsToHoldings(
     const excess = allocated.minus(held.quantity);
     if (!excess.isPositive()) continue;
 
-    const result = await applySell(deps, userId, { assetId, soldQuantity: excess });
+    // Dated today, and correctly so: a reconciliation is not a trade that
+    // happened in the past, it is this system noticing now that an allocation
+    // exceeds what is held. Backdating it would invent a movement.
+    const result = await applySell(deps, userId, {
+      assetId,
+      soldQuantity: excess,
+      effectiveOn: deps.clock.today(),
+    });
     if (!result.ok) return result;
     reductions.push({ assetId, excess: excess.toString() });
   }

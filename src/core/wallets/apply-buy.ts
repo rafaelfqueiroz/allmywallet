@@ -1,3 +1,4 @@
+import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, UserId, WalletId } from '@/core/shared/ids';
 import { Money, Quantity, sumQuantity } from '@/core/shared/money';
@@ -40,6 +41,14 @@ export interface ApplyBuyInput {
    * end, against the same position — see `assertWithinHoldings` there.
    */
   readonly heldCheck?: 'now' | 'deferred' | undefined;
+  /**
+   * SPEC-014 BR-014-12 — the **trade date** of the buy that caused this
+   * allocation, not today. An import of four years of extracts runs this
+   * hundreds of times in an afternoon; dating those events by the clock would
+   * tell the earnings report that every one of those wallets was empty when
+   * its proventos were paid.
+   */
+  readonly effectiveOn: BusinessDate;
 }
 
 export type BuyAllocationOutcome =
@@ -160,6 +169,6 @@ async function incrementWallet(
     allocatedAt: existing?.allocatedAt ?? deps.clock.now(),
   };
 
-  await deps.allocations.upsert(allocation);
+  await deps.allocations.upsert(allocation, { effectiveOn: input.effectiveOn, cause: 'buy' });
   return ok({ kind, walletId, allocation });
 }

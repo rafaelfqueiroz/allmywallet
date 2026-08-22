@@ -1,3 +1,4 @@
+import type { BusinessDate } from '@/core/shared/clock';
 import type { AssetId, UserId, WalletId } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { Wallet } from '@/core/wallets/wallet';
@@ -60,6 +61,35 @@ export interface WalletAllocation {
  * caller that reads `listForAsset` and writes without going through
  * `lockForAsset` first has reintroduced the race.
  */
+/**
+ * SPEC-014 BR-014-12 — why an allocation write carries a date and a reason.
+ *
+ * `wallet_allocations` is current state: it cannot say what a wallet held on
+ * the day a provento was paid, and attributing last year's income with today's
+ * split would rewrite a wallet's income history whenever a holding is
+ * reassigned (DL-014-05). So every change appends to
+ * `wallet_allocation_events`, and the caller supplies the two things the
+ * repository cannot know.
+ *
+ * **`effectiveOn` is the trade date, not today.** A user importing four years
+ * of B3 extracts creates four years of allocation history in one afternoon;
+ * stamping those with the clock would leave every past provento attributed to
+ * a wallet that, as far as the log knew, held nothing at the time. AR-29
+ * applies here as everywhere: the date the movement happened.
+ *
+ * It is a required argument rather than an option with a default for one
+ * reason: a default would be silently wrong on the import path, which is the
+ * path that matters most. Making it required turns "which date is this?" into
+ * a compile error at every call site.
+ */
+export type AllocationChangeCause =
+  'assignment' | 'buy' | 'sale' | 'corporate_event' | 'wallet_deleted';
+
+export interface AllocationChange {
+  readonly effectiveOn: BusinessDate;
+  readonly cause: AllocationChangeCause;
+}
+
 export interface WalletAllocationRepository {
   /** Unlocked read, for display paths that do not write. */
   listForAsset(assetId: AssetId): Promise<readonly WalletAllocation[]>;
@@ -68,11 +98,11 @@ export interface WalletAllocationRepository {
   listAll(): Promise<readonly WalletAllocation[]>;
   /** `SELECT ... FOR UPDATE` — see the invariant note above. Must run inside `withTenant`. */
   lockForAsset(assetId: AssetId): Promise<readonly WalletAllocation[]>;
-  /** Insert or replace the `(wallet, asset)` row. */
-  upsert(allocation: WalletAllocation): Promise<void>;
-  delete(walletId: WalletId, assetId: AssetId): Promise<void>;
+  /** Insert or replace the `(wallet, asset)` row, and record the change. */
+  upsert(allocation: WalletAllocation, change: AllocationChange): Promise<void>;
+  delete(walletId: WalletId, assetId: AssetId, change: AllocationChange): Promise<void>;
   /** BR-010-07: a deleted wallet's allocations disappear, which is what "returns to Unassigned" means for an implicit bucket. */
-  deleteForWallet(walletId: WalletId): Promise<void>;
+  deleteForWallet(walletId: WalletId, change: AllocationChange): Promise<void>;
 }
 
 export interface StandingRule {

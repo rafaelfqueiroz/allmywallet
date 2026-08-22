@@ -74,12 +74,24 @@ export async function resetLedger(migrationUrl: string): Promise<void> {
 }
 
 /**
- * SPEC-010's three tables. `wallet_allocations` and `wallet_asset_rules`
- * cascade from `wallets` (and from `users` via `resetUsers`), but truncating
- * them explicitly lets a suite reset wallets alone without disturbing another
- * file's ledger fixtures on the shared CI database (TS-03).
+ * SPEC-010's three tables, plus SPEC-014's allocation event log.
+ * `wallet_allocations` and `wallet_asset_rules` cascade from `wallets` (and
+ * from `users` via `resetUsers`), but truncating them explicitly lets a suite
+ * reset wallets alone without disturbing another file's ledger fixtures on the
+ * shared CI database (TS-03).
+ *
+ * `wallet_allocation_events` is listed **because it does not cascade from
+ * `wallets`** — deleting a wallet must not erase the record that it once held
+ * something (SPEC-014 BR-014-12). That is correct for production and makes it
+ * the one table here that a `wallets` truncation would leave behind, which on
+ * the shared database is a later file's wallet income appearing from nowhere.
  */
-const WALLET_TABLES = ['wallet_allocations', 'wallet_asset_rules', 'wallets'] as const;
+const WALLET_TABLES = [
+  'wallet_allocation_events',
+  'wallet_allocations',
+  'wallet_asset_rules',
+  'wallets',
+] as const;
 
 export async function resetWallets(migrationUrl: string): Promise<void> {
   const pool = new Pool({ connectionString: migrationUrl, max: 1 });

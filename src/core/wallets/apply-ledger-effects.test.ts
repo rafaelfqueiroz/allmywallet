@@ -448,3 +448,86 @@ describe('SPEC-010 AC-010-15 — a sale from a named wallet', () => {
     expect(await quantityIn(deps, trading.id)).toBe('40');
   });
 });
+
+/**
+ * SPEC-014 BR-014-12 — **the allocation event log is dated by the trade, not
+ * by the import.**
+ *
+ * This is the path where getting it wrong is invisible and total. A user's
+ * first import carries four years of history and runs in one afternoon; if
+ * these events were stamped with the clock, every provento paid before today
+ * would be attributed to a wallet that the log says held nothing at the time,
+ * and the Earnings report's wallet breakdown would read zero for every past
+ * period — plausibly, and wrongly.
+ */
+describe('SPEC-014 BR-014-12 — allocation history follows the ledger, not the clock', () => {
+  it('dates each event by the transaction that caused it', async () => {
+    const deps = buildFakeDeps();
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await setStandingRule(deps, USER, ITSA4, wallet.id);
+
+    deps.positionQuery.set(ITSA4, Quantity.fromString('150'), Money.fromString('10'));
+
+    const result = await applyLedgerEffects(deps, USER, [
+      tx('buy', '100', '2024-02-05'),
+      tx('buy', '50', '2025-07-11'),
+    ]);
+    expect(result.ok).toBe(true);
+
+    expect(deps.allocations.events.map((event) => event.effectiveOn)).toEqual([
+      '2024-02-05',
+      '2025-07-11',
+    ]);
+    expect(deps.allocations.events.every((event) => event.cause === 'buy')).toBe(true);
+  });
+
+  it('records the running quantity after each change, which is what the fold reads', async () => {
+    const deps = buildFakeDeps();
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await setStandingRule(deps, USER, ITSA4, wallet.id);
+
+    deps.positionQuery.set(ITSA4, Quantity.fromString('150'), Money.fromString('10'));
+
+    await applyLedgerEffects(deps, USER, [
+      tx('buy', '100', '2024-02-05'),
+      tx('buy', '50', '2025-07-11'),
+    ]);
+
+    // Absolute state, not deltas: 100 then 150. A delta log would need the
+    // previous quantity read under lock at every write, and one missed event
+    // would corrupt every later answer rather than one of them.
+    expect(deps.allocations.events.map((event) => event.quantity)).toEqual(['100', '150']);
+  });
+
+  it('records a sale that empties an allocation as zero, never as silence', async () => {
+    const deps = buildFakeDeps();
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await setStandingRule(deps, USER, ITSA4, wallet.id);
+
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+    await applyLedgerEffects(deps, USER, [tx('buy', '100', '2024-02-05')]);
+
+    deps.positionQuery.set(ITSA4, Quantity.zero(), Money.zero());
+    await applyLedgerEffects(deps, USER, [tx('sell', '100', '2026-01-20')]);
+
+    const last = deps.allocations.events.at(-1);
+    expect(last?.quantity).toBe('0');
+    expect(last?.effectiveOn).toBe('2026-01-20');
+    expect(last?.cause).toBe('sale');
+  });
+
+  it('leaves no event for an unclassified row, which is inert everywhere else too', async () => {
+    const deps = buildFakeDeps();
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await setStandingRule(deps, USER, ITSA4, wallet.id);
+
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));
+
+    // BR-006-03 / DL-006-06: stored, and deliberately inert.
+    await applyLedgerEffects(deps, USER, [
+      tx('buy', '100', '2024-02-05', { status: 'unclassified' }),
+    ]);
+
+    expect(deps.allocations.events).toEqual([]);
+  });
+});

@@ -5,6 +5,7 @@ import { Money, Quantity } from '@/core/shared/money';
 import { aggregateAcrossInstitutions } from '@/core/positions/aggregate';
 import type { PositionSnapshot } from '@/core/positions/replay';
 import type {
+  AllocationChange,
   AssetPositionQuery,
   PositionQueryPort,
   WalletAllocation,
@@ -15,7 +16,12 @@ import type {
 } from '@/core/wallets/ports';
 import type { Wallet } from '@/core/wallets/wallet';
 import { positions } from '@/db/schema/positions';
-import { walletAllocations, walletAssetRules, wallets } from '@/db/schema/wallets';
+import {
+  walletAllocationEvents,
+  walletAllocations,
+  walletAssetRules,
+  wallets,
+} from '@/db/schema/wallets';
 import type { Tx } from '@/db/tenant';
 
 /**
@@ -142,7 +148,20 @@ export class DrizzleWalletAllocationRepository implements WalletAllocationReposi
     return rows.map(toAllocationDomain);
   }
 
-  async upsert(allocation: WalletAllocation): Promise<void> {
+  /**
+   * SPEC-014 BR-014-12 — the allocation and its history are written together,
+   * in the caller's transaction.
+   *
+   * Appending here rather than at each use case is deliberate: this is the one
+   * place every allocation change passes through — an auto-increment on a buy,
+   * a proportional reduction on a sale, a corporate-event scaling, a manual
+   * assignment. A caller cannot forget to record an event, because recording
+   * one is not something the caller does.
+   *
+   * Both statements run inside the same `withTenant` transaction (AR-11), so
+   * the state and the log cannot diverge: either both land or neither does.
+   */
+  async upsert(allocation: WalletAllocation, change: AllocationChange): Promise<void> {
     const row = toAllocationRow(allocation, this.userId);
     await this.tx
       .insert(walletAllocations)
@@ -156,16 +175,58 @@ export class DrizzleWalletAllocationRepository implements WalletAllocationReposi
           updatedAt: new Date(),
         },
       });
+
+    await this.recordEvent(allocation.walletId, allocation.assetId, allocation.quantity, change);
   }
 
-  async delete(walletId: WalletId, assetId: AssetId): Promise<void> {
+  async delete(walletId: WalletId, assetId: AssetId, change: AllocationChange): Promise<void> {
     await this.tx
       .delete(walletAllocations)
       .where(and(eq(walletAllocations.walletId, walletId), eq(walletAllocations.assetId, assetId)));
+
+    // Zero, not silence. The fold reads the latest event at or before a date;
+    // with no row the last positive quantity would stand for every later date,
+    // and a sold-out position would keep earning income it never received.
+    await this.recordEvent(walletId, assetId, Quantity.zero(), change);
   }
 
-  async deleteForWallet(walletId: WalletId): Promise<void> {
+  async deleteForWallet(walletId: WalletId, change: AllocationChange): Promise<void> {
+    // Read before delete: the log needs one zero per asset the wallet held,
+    // and after the DELETE there is nothing left to enumerate. Same
+    // transaction, so no other writer can slip between the two.
+    const held = await this.tx
+      .select({ assetId: walletAllocations.assetId })
+      .from(walletAllocations)
+      .where(eq(walletAllocations.walletId, walletId));
+
     await this.tx.delete(walletAllocations).where(eq(walletAllocations.walletId, walletId));
+
+    for (const row of held) {
+      await this.recordEvent(walletId, AssetId.of(row.assetId), Quantity.zero(), change);
+    }
+  }
+
+  /**
+   * One row per change, carrying the quantity **after** it. A log of states
+   * rather than of deltas: the fold that answers "what did this wallet hold on
+   * that date" is then a last-value-per-key lookup with no arithmetic, and a
+   * missed row costs one answer rather than every later one.
+   */
+  private async recordEvent(
+    walletId: WalletId,
+    assetId: AssetId,
+    quantity: Quantity,
+    change: AllocationChange,
+  ): Promise<void> {
+    await this.tx.insert(walletAllocationEvents).values({
+      id: uuidv7(),
+      userId: this.userId,
+      walletId,
+      assetId,
+      quantity,
+      effectiveOn: change.effectiveOn,
+      cause: change.cause,
+    });
   }
 }
 
