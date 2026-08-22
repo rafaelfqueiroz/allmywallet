@@ -20,12 +20,19 @@ const key = (id: string, synthetic = false): GroupKey => ({
   synthetic,
 });
 
-function group(id: string, beginValue: string, endValue: string, flow = '0'): GroupPeriodFigures {
+function group(
+  id: string,
+  beginValue: string,
+  endValue: string,
+  flow = '0',
+  estimated = false,
+): GroupPeriodFigures {
   return {
     key: key(id),
     beginValue: money(beginValue),
     endValue: money(endValue),
     flow: money(flow),
+    estimated,
   };
 }
 
@@ -176,12 +183,14 @@ describe('SPEC-012 BR-012-15/16 — group return and contribution (AC-13)', () =
           beginValue: money('2000'),
           endValue: money('2100'),
           flow: Money.zero(),
+          estimated: false,
         },
         {
           key: { dimension: 'sector', id: 'Petróleo e Gás', synthetic: false },
           beginValue: money('8000'),
           endValue: money('8800'),
           flow: Money.zero(),
+          estimated: false,
         },
       ]),
     );
@@ -245,5 +254,51 @@ describe('TS-11 — contributions sum to the total exactly, not nearly', () => {
     const last = report.groups[report.groups.length - 1]!;
     const even = report.groups[0]!.contribution;
     expect(last.contribution.minus(even).toDecimal().abs().lessThan('0.000000001')).toBe(true);
+  });
+});
+
+/**
+ * SPEC-011 BR-011-15 / AC-15 — "estimated values are visually distinguished on
+ * every report that shows them", and Rentabilidade shows them.
+ *
+ * SPEC-012 never mentions estimates, which is exactly why this belongs to the
+ * framework rather than to the report: accrued fixed income is a large share
+ * of a Brazilian portfolio, and a contribution table that presents a computed
+ * gain in the same ink as an observed one overstates the precision the product
+ * actually has (SPEC-009 BR-009-11). The flag has to travel with the figures —
+ * the page holds performance, not the holdings behind it.
+ */
+describe('BR-011-15 — an accrued group is marked as one', () => {
+  it('carries the estimate flag onto the group it belongs to, and only that one', () => {
+    const report = unwrap(
+      decomposeContributions('asset_class', [
+        group('cdb', '2000', '2100', '0', true),
+        group('stock', '8000', '8800'),
+      ]),
+    );
+
+    const byId = new Map(report.groups.map((entry) => [entry.key.id, entry.estimated]));
+    expect(byId.get('cdb')).toBe(true);
+    expect(byId.get('stock')).toBe(false);
+  });
+
+  it('marks the whole table estimated when any single group is', () => {
+    const mixed = unwrap(
+      decomposeContributions('asset_class', [
+        group('cdb', '2000', '2100', '0', true),
+        group('stock', '8000', '8800'),
+      ]),
+    );
+    expect(mixed.estimated).toBe(true);
+  });
+
+  it('leaves a wholly observed table unmarked', () => {
+    const observed = unwrap(
+      decomposeContributions('asset_class', [
+        group('stock', '8000', '8800'),
+        group('fii', '2000', '2100'),
+      ]),
+    );
+    expect(observed.estimated).toBe(false);
   });
 });

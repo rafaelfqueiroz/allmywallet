@@ -126,10 +126,18 @@ export function decomposeContributions(
       gain,
       base,
       weight: quantizeRate(ratio(base, totalBase)),
+      estimated: group.estimated,
     });
   });
 
-  return ok({ grouping, groups: performances, totalReturn, totalGain, totalBase });
+  return ok({
+    grouping,
+    groups: performances,
+    totalReturn,
+    totalGain,
+    totalBase,
+    estimated: performances.some((group) => group.estimated),
+  });
 }
 
 /** The capital committed to a group over the period. */
