@@ -4,7 +4,9 @@ import { Money, Quantity } from '@/core/shared/money';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { Scope } from '@/core/reporting/ports';
 import type {
+  AllocationEvent,
   AssetDescriptor,
+  EarningRecord,
   DailyValuationSnapshot,
   ReportAllocation,
   ReportDataPort,
@@ -98,6 +100,10 @@ export function anAsset(overrides: Partial<AssetDescriptor>): AssetDescriptor {
 
 export interface FakeReportData {
   positions: readonly ReportPosition[];
+  /** SPEC-014. Optional: only the earnings suites care, and an absent list is an empty one. */
+  earnings?: readonly EarningRecord[];
+  /** SPEC-014 BR-014-12 — the allocation history the wallet attribution folds. */
+  allocationEvents?: readonly AllocationEvent[];
   allocations: readonly ReportAllocation[];
   wallets: readonly ReportWallet[];
   institutions: readonly ReportInstitution[];
@@ -170,6 +176,21 @@ export class FakeReportDataPort implements ReportDataPort {
       [...before].sort((a, b) => BusinessDate.compare(b.date, a.date))[0] ??
       // No baseline: the period starts at or before the first snapshot there is.
       null
+    );
+  }
+
+  async listEarnings(from: BusinessDate, to: BusinessDate): Promise<readonly EarningRecord[]> {
+    this.calls.push(`listEarnings:${from}:${to}`);
+    return (this.data.earnings ?? []).filter(
+      (earning) =>
+        !BusinessDate.isBefore(earning.payDate, from) && !BusinessDate.isAfter(earning.payDate, to),
+    );
+  }
+
+  async listAllocationEvents(upTo: BusinessDate): Promise<readonly AllocationEvent[]> {
+    this.calls.push(`listAllocationEvents:${upTo}`);
+    return (this.data.allocationEvents ?? []).filter(
+      (event) => !BusinessDate.isAfter(event.effectiveOn, upTo),
     );
   }
 

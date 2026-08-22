@@ -149,6 +149,12 @@ export default defineConfig({
         // The render/audit harness the component tests import. Test
         // infrastructure, not a subject.
         'src/components/test-utils.tsx',
+        // Test scaffolding, held to the same rule as `test-utils.tsx` above:
+        // hand-written fakes and generators exist to exercise product code,
+        // and measuring them pulls the 100 %-branch gate on
+        // `core/reporting/**` onto a fake port's convenience defaults rather
+        // than onto the calculations the gate is there for.
+        'src/core/reporting/test-support.ts',
         'src/worker/index.ts',
         'src/i18n/request.ts',
         // SPEC-001: Auth.js configuration and provider wiring — the decisions

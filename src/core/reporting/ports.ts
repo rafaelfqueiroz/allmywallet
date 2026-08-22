@@ -328,8 +328,87 @@ export interface ReportDataPort {
    * *patrimônio* as a first-day gain.
    */
   findSnapshotBefore(date: BusinessDate): Promise<DailyValuationSnapshot | null>;
+  /**
+   * SPEC-014 BR-014-01/08/11 — the proventos received in a period.
+   *
+   * A **projection** of the ledger, not a replay of it: the earning types are
+   * filtered by index and summed, where DL-011-07's prohibition is about
+   * rebuilding positions from five years of transactions on every request.
+   * There is no snapshot to read instead — `earnings_to_date` is a cumulative
+   * total with no type, no asset and no month in it, and SPEC-014 needs all
+   * three.
+   */
+  listEarnings(from: BusinessDate, to: BusinessDate): Promise<readonly EarningRecord[]>;
+  /**
+   * SPEC-014 BR-014-12 — every allocation change up to and including `upTo`,
+   * oldest first, for reconstructing what each wallet held when a provento was
+   * paid. Bounded by the period's end because nothing after it can affect what
+   * was true during it.
+   */
+  listAllocationEvents(upTo: BusinessDate): Promise<readonly AllocationEvent[]>;
   /** BR-011-02 — used to reject a scope naming a wallet this tenant does not have. */
   findWallet(walletId: WalletId): Promise<ReportWallet | null>;
+}
+
+// ---------------------------------------------------------------------------
+// SPEC-014 — earnings and allocation history
+// ---------------------------------------------------------------------------
+
+/**
+ * BR-014-01/02 — the four provento types, reported apart.
+ *
+ * JCP is not folded into dividends: Brazil withholds tax at source on one and
+ * currently exempts the other, so a combined figure cannot answer the question
+ * every user eventually asks (DL-014-02).
+ */
+export const EARNING_TYPES = ['dividend', 'jcp', 'rendimento', 'amortization'] as const;
+export type EarningType = (typeof EARNING_TYPES)[number];
+
+/**
+ * One provento, as the report reads it.
+ *
+ * Deliberately not `Transaction`: `core/reporting/` defines its own read
+ * shapes (as it does for positions and allocations) so a change to the ledger's
+ * row type cannot silently change what a report means, and so the structural
+ * check that reporting never imports the ledger stays true.
+ */
+export interface EarningRecord {
+  readonly assetId: AssetId;
+  /** BR-011-03: institution is a grouping dimension, and income groups by it too. */
+  readonly institutionId: InstitutionId | null;
+  readonly type: EarningType;
+  /**
+   * BR-014-08 / DL-014-04 — the **pay date**: when the money arrived, which is
+   * what the B3 Movimentação extract records and what matches the user's bank
+   * statement. Ex-date recognition would show income they have not received.
+   */
+  readonly payDate: BusinessDate;
+  /** The amount received, gross (SPEC-009 BR-009-12 — no tax is modelled). */
+  readonly amount: Money;
+  /**
+   * The quantity that generated the payment, as B3 states it on the row.
+   *
+   * This is what makes wallet attribution possible without a position replay:
+   * it *is* the held quantity on the pay date, so the share not covered by any
+   * wallet allocation is the Unassigned remainder (BR-011-09). Zero on a
+   * hand-entered provento that named no quantity, which the attribution treats
+   * as "allocations are all there is to go on".
+   */
+  readonly quantity: Quantity;
+}
+
+/**
+ * SPEC-014 BR-014-12 — one recorded allocation state.
+ *
+ * `quantity` is what the wallet held **after** the change, and zero means it
+ * holds none. Folding these by `(wallet, asset)`, taking the last at or before
+ * a date, reconstructs the split as it stood then.
+ */
+export interface AllocationEvent {
+  readonly walletId: WalletId;
+  readonly assetId: AssetId;
+  readonly quantity: Quantity;
+  readonly effectiveOn: BusinessDate;
 }
 
 // ---------------------------------------------------------------------------
