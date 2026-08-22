@@ -1,6 +1,8 @@
 import { BusinessDate } from '@/core/shared/clock';
 import { AssetId, InstitutionId, WalletId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
+import type { AssetClass } from '@/core/quotes/ports';
+import type { Scope } from '@/core/reporting/ports';
 import type {
   AssetDescriptor,
   DailyValuationSnapshot,
@@ -176,3 +178,195 @@ export class FakeReportDataPort implements ReportDataPort {
     return this.data.wallets.find((wallet) => wallet.walletId === walletId) ?? null;
   }
 }
+
+/* -------------------------------------------------------------------------
+ * A GENERATED PORTFOLIO, SHARED BY EVERY CROSS-CUTTING REPORTING TEST
+ *
+ * Written for `totals-invariant.test.ts` and moved here when the cross-report
+ * equality test (SPEC-013 BR-013-12) needed the same portfolios. Two copies
+ * would be two definitions of "an awkward portfolio", and the weaker one would
+ * quietly become the one a new invariant was written against — the same
+ * argument DL-011-02 makes for one reporting framework rather than four.
+ *
+ * Determinism (TS-23): a local PRNG seeded per case, never `Math.random`, so a
+ * failure is reproducible from the seed printed in the test name.
+ * ---------------------------------------------------------------------- */
+/** mulberry32 — a small, fast, fully deterministic PRNG. */
+export function prng(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state |= 0;
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const ASSET_CLASSES: readonly AssetClass[] = [
+  'stock',
+  'fii',
+  'bdr',
+  'etf',
+  'tesouro_direto',
+  'cdb',
+  'lci',
+  'lca',
+];
+
+/** BR-011-10: fixed income and Tesouro have no sector — the "Not classified" driver. */
+const FIXED_INCOME: ReadonlySet<AssetClass> = new Set<AssetClass>([
+  'cdb',
+  'lci',
+  'lca',
+  'tesouro_direto',
+]);
+
+const SECTORS = ['Bancos', 'Energia', 'Petróleo e Gás', 'Consumo'] as const;
+
+/**
+ * Unit prices chosen to force **non-terminating division** through the
+ * pro-rata split. A price like 12.345678 over a prime quantity such as 997,
+ * apportioned three ways, produces a repeating decimal in every share — which
+ * is precisely where a naive proportional split silently loses value.
+ */
+const UNIT_PRICES = ['12.345678', '3.33', '107.07', '0.87', '1234.5678', '19.999999'] as const;
+
+/** Prime-ish quantities, so nothing divides evenly by accident. */
+const QUANTITIES = [997, 101, 37, 13, 7, 3, 1, 499, 251, 61] as const;
+
+export interface GeneratedPortfolio {
+  readonly positions: readonly ReportPosition[];
+  readonly allocations: readonly ReportAllocation[];
+  readonly assets: readonly AssetDescriptor[];
+  readonly walletIds: readonly WalletId[];
+}
+
+/**
+ * A portfolio built to stress every path the invariant can break on, rather
+ * than an average one. Each seed varies the mix; every seed contains at least
+ * one of each awkward case.
+ */
+export function generatePortfolio(seed: number): GeneratedPortfolio {
+  const random = prng(seed);
+  const pick = <T>(values: readonly T[]): T => values[Math.floor(random() * values.length)] as T;
+
+  // Four wallets. The fourth is deliberately never allocated anything — an
+  // empty wallet must still scope cleanly and total zero.
+  const walletIds: readonly WalletId[] = [1, 2, 3, 4].map((n) => walletIdOf(String(n)));
+  const institutions: readonly (InstitutionId | null)[] = [
+    institutionIdOf('1'),
+    institutionIdOf('2'),
+    // BR-011-10: a position with no institution recorded → "Not classified".
+    null,
+  ];
+
+  const assets: AssetDescriptor[] = [];
+  const positions: ReportPosition[] = [];
+  const allocations: ReportAllocation[] = [];
+
+  const ASSET_COUNT = 14;
+  for (let i = 0; i < ASSET_COUNT; i += 1) {
+    const assetId = assetIdOf(String(i + 1));
+    const assetClass =
+      i < ASSET_CLASSES.length ? (ASSET_CLASSES[i] as AssetClass) : pick(ASSET_CLASSES);
+    const sector = FIXED_INCOME.has(assetClass)
+      ? null
+      : // Some equities also lack sector data — the catalog has no sector
+        // column at all today (PRD Q5), so null is the common case, not a rare one.
+        random() < 0.4
+        ? null
+        : pick(SECTORS);
+
+    assets.push({
+      assetId,
+      code: `AST${String(i + 1).padStart(2, '0')}`,
+      name: `Ativo ${i + 1}`,
+      assetClass,
+      sector,
+    });
+
+    // Every fifth asset is CLOSED TO ZERO: no position at all, but a stale
+    // allocation row left behind. It must contribute nothing to any total.
+    if (i % 5 === 4) {
+      allocations.push({
+        walletId: pick(walletIds),
+        assetId,
+        quantity: Quantity.fromString('50'),
+      });
+      continue;
+    }
+
+    // One or two institutions for this asset.
+    const institutionCount = random() < 0.5 ? 2 : 1;
+    let heldTotal = 0;
+    for (let j = 0; j < institutionCount; j += 1) {
+      const quantity = pick(QUANTITIES);
+      const unitPrice = pick(UNIT_PRICES);
+      heldTotal += quantity;
+      positions.push(
+        aPosition({
+          assetId,
+          institutionId: institutions[(i + j) % institutions.length] ?? null,
+          quantity: Quantity.fromString(String(quantity)),
+          // value = quantity × unit price, exact decimal arithmetic throughout.
+          value: Money.fromString(unitPrice).times(Quantity.fromString(String(quantity))),
+          costBasis: Money.fromString(unitPrice)
+            .times(Quantity.fromString(String(quantity)))
+            .times('0.8'),
+          // BR-011-15: fixed income is accrued, therefore estimated.
+          estimated: FIXED_INCOME.has(assetClass),
+        }),
+      );
+    }
+
+    // Allocation shape: none, partial, full, or split across several wallets.
+    // Integer quantities, as a real allocation would be, and never exceeding
+    // what is held (SPEC-010 BR-010-05).
+    const shape = Math.floor(random() * 4);
+    if (shape === 0) {
+      // Wholly unassigned — the Unassigned bucket must carry all of it.
+    } else if (shape === 1) {
+      allocations.push({
+        walletId: walletIds[0] as WalletId,
+        assetId,
+        quantity: Quantity.fromString(String(heldTotal)),
+      });
+    } else if (shape === 2) {
+      // Partial: a third, leaving a remainder for Unassigned.
+      const part = Math.floor(heldTotal / 3);
+      if (part > 0) {
+        allocations.push({
+          walletId: walletIds[1] as WalletId,
+          assetId,
+          quantity: Quantity.fromString(String(part)),
+        });
+      }
+    } else {
+      // Split across three wallets, leaving a remainder.
+      const a = Math.floor(heldTotal / 3);
+      const b = Math.floor(heldTotal / 5);
+      const c = Math.floor(heldTotal / 7);
+      for (const [index, part] of [a, b, c].entries()) {
+        if (part > 0) {
+          allocations.push({
+            walletId: walletIds[index] as WalletId,
+            assetId,
+            quantity: Quantity.fromString(String(part)),
+          });
+        }
+      }
+    }
+  }
+
+  return { positions, allocations, assets, walletIds };
+}
+
+export function scopesFor(walletIds: readonly WalletId[]): readonly Scope[] {
+  return [
+    { kind: 'portfolio' },
+    ...walletIds.map((walletId): Scope => ({ kind: 'wallet', walletId })),
+  ];
+}
+
+export const SEEDS = [1, 2, 3, 7, 11, 42, 99, 1234, 20260814, 987654321];

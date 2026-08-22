@@ -429,6 +429,10 @@ export async function runPerformanceReport(
         beginValue: group.totals.costBasis,
         endValue: group.totals.value,
         flow: Money.zero(),
+        // BR-011-15: the framework already knows which groups rest on an
+        // accrued figure; this is the only place that knowledge can reach the
+        // contribution table.
+        estimated: group.totals.estimated,
       })),
     ),
     empty: base.value.empty,

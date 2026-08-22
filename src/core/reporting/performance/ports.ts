@@ -405,6 +405,17 @@ export interface GroupPeriodFigures {
   readonly beginValue: Money;
   readonly endValue: Money;
   readonly flow: Money;
+  /**
+   * SPEC-011 BR-011-15 / AC-15 — whether any holding behind these figures is
+   * an accrued fixed-income estimate rather than an observed price.
+   *
+   * Carried through the decomposition rather than recovered by the page: the
+   * page has group *performance*, not the holdings it came from, so without
+   * this the only honest option on screen is to say nothing — which is how a
+   * table of computed figures ends up indistinguishable from a table of
+   * observed ones.
+   */
+  readonly estimated: boolean;
 }
 
 export interface GroupPerformance {
@@ -421,6 +432,8 @@ export interface GroupPerformance {
    * group is described, so every group has a weight even when it has no return.
    */
   readonly weight: Rate;
+  /** BR-011-15: this group's figures rest on at least one accrued estimate. */
+  readonly estimated: boolean;
 }
 
 export interface ContributionReport {
@@ -430,4 +443,12 @@ export interface ContributionReport {
   readonly totalReturn: Rate;
   readonly totalGain: Money;
   readonly totalBase: Money;
+  /**
+   * BR-011-15 at the foot of the table: true when *any* group is estimated.
+   * OR-ed rather than AND-ed for the same reason a monthly bucket is
+   * (`portfolio-value/series.ts`) — a total containing one computed figure is
+   * a computed total, and marking only the all-estimated case would understate
+   * every mixed portfolio, which is most of them.
+   */
+  readonly estimated: boolean;
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { expect, test } from './support/authenticated';
+import { seedHoldings } from './support/holdings';
 
 /**
  * SPEC-011 AC-011-05 / BR-011-02 — **choosing a wallet in Escopo actually
@@ -81,9 +82,9 @@ test('selecting a wallet in Escopo scopes the report to it', async ({ signedIn }
  * silently taking — is what exposed that, and a test that can pass without
  * reaching its subject is worse than none.
  *
- * What is *not* covered here, stated rather than implied: that the control on
- * `/reports` carries the page's own period, scope and grouping into this URL.
- * That needs a fixture with holdings, which this suite does not have.
+ * This asserts the *route*. That the control on `/reports` carries the page's
+ * own period, scope and grouping into the URL is the other half, and it needed
+ * a tenant with holdings — it is the last test in this file.
  */
 test('the grouped report exports as CSV over HTTP', async ({ signedIn }) => {
   const { page } = signedIn;
@@ -100,4 +101,67 @@ test('the grouped report exports as CSV over HTTP', async ({ signedIn }) => {
   // and say nothing, which a status assertion alone would not catch.
   const body = await response.text();
   expect(body.split('\n')[0]).toContain(',');
+});
+
+/**
+ * SPEC-011 BR-011-07 / AC-9 — **"a group row drills down to its constituent
+ * assets without leaving the report."**
+ *
+ * The last word is the assertion that matters. `GroupRow` uses `<details>`
+ * precisely so the constituents travel with the group and need no second
+ * query, and the failure this guards against is someone replacing it with a
+ * link to a filtered view: the user would still see the assets, the criterion
+ * would look satisfied, and the drill-down would have become a navigation.
+ *
+ * Seeded, because a group has to exist to expand. An empty tenant renders the
+ * empty state and this test would pass by asserting nothing.
+ */
+test('expanding a group reveals its assets in place, without leaving the report', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+  const [first] = await seedHoldings(userId, [
+    { code: 'PETRD', quantity: '100', averageCost: '30', price: '40' },
+  ]);
+  expect(first).toBeDefined();
+
+  await page.goto('/reports');
+  const url = page.url();
+
+  // The default grouping at portfolio scope is asset class (BR-011-04), so the
+  // seeded stock lands in one group and the ticker is its constituent.
+  const constituent = page.getByText(String(first), { exact: false });
+  await expect(constituent).toBeHidden();
+
+  await page.locator('details summary').first().click();
+
+  await expect(constituent.first()).toBeVisible();
+  // In place: same URL, no navigation, nothing re-fetched.
+  expect(page.url()).toBe(url);
+});
+
+/**
+ * SPEC-011 BR-011-12 / AC-11, the half the CSV test above names as uncovered:
+ * **the control carries the page's own period, scope and grouping into the
+ * export.**
+ *
+ * "Exports exactly what is on screen" is the property that makes a grouped
+ * export worth having, and it breaks silently — a link built from defaults
+ * rather than from the resolved state downloads a file that is a plausible
+ * report of the wrong view. It needed a tenant with holdings, which is why it
+ * waited for one.
+ */
+test('the export control carries the view on screen into the download', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  await seedHoldings(userId, [{ code: 'ITSAD', quantity: '100', averageCost: '10', price: '10' }]);
+
+  await page.goto('/reports');
+
+  await page.getByLabel(/agrupar por/i).selectOption('institution');
+  await page.getByRole('button', { name: /aplicar/i }).click();
+  await expect(page).toHaveURL(/grouping=institution/);
+
+  const href = await page.getByRole('link', { name: 'Exportar CSV' }).getAttribute('href');
+  expect(href).toContain('/api/reports/export');
+  expect(href).toContain('grouping=institution');
 });

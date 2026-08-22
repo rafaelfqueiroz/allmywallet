@@ -25,6 +25,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/components/patterns/money';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
@@ -358,7 +359,21 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                   {report.value.contribution.value.groups.map((group: GroupPerformance) => (
                     <TableRow key={group.key.id}>
                       <TableCell className="py-row font-medium">
-                        <GroupLabel groupKey={group.key} names={report.value.groupNames} />
+                        {/* SPEC-011 BR-011-15 / AC-15 — an accrued group is
+                            marked here as it is everywhere else, with the same
+                            badge and the same explanation. A computed gain
+                            printed in the same ink as an observed one claims a
+                            precision this product does not have. */}
+                        <Cluster gap="sm" align="baseline">
+                          <span>
+                            <GroupLabel groupKey={group.key} names={report.value.groupNames} />
+                          </span>
+                          {group.estimated ? (
+                            <Badge variant="outline" title={t('estimate.explanation')}>
+                              {t('estimate.badge')}
+                            </Badge>
+                          ) : null}
+                        </Cluster>
                       </TableCell>
                       <TableCell className="py-row text-right">
                         <Money value={group.weight} kind="percent" />
@@ -378,7 +393,14 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                 <TableFooter>
                   <TableRow>
                     <TableHead scope="row" className="py-row text-left">
-                      {t('table.total')}
+                      <Cluster gap="sm" align="baseline">
+                        <span>{t('table.total')}</span>
+                        {report.value.contribution.value.estimated ? (
+                          <Badge variant="outline" title={t('estimate.explanation')}>
+                            {t('estimate.badge')}
+                          </Badge>
+                        ) : null}
+                      </Cluster>
                     </TableHead>
                     <TableCell className="py-row" />
                     <TableCell className="py-row" />
