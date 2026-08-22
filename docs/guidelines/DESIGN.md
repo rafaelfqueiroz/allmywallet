@@ -165,9 +165,15 @@ Two caveats carried forward:
 
 **DS-38 — A titled region within a page is a `Section`.** `h2` under `PageShell`'s `h1`. Nesting deeper is a signal the page is doing too much, not a reason to add a level prop.
 
-**DS-39 — Pages outside the application frame use `AuthShell`.** Sign-in and the landing placeholder are viewport-centred cards with no navigation, which is a different shape from `PageShell`'s top-aligned document. Collapsing them would produce a component whose props contradict each other half the time.
+**DS-39 — Pages outside the application frame use `AuthShell`.** Sign-in is a viewport-centred card with no navigation, which is a different shape from `PageShell`'s top-aligned document. Collapsing them would produce a component whose props contradict each other half the time. The public landing page is a third shape again and uses `MarketingShell` (DS-43).
 
 **DS-40 — Never read the session in the root layout.** A cookie read there opts *every* route into dynamic rendering — it silently turned `/` and `/signin` from prerendered into server-rendered. Per-account state belongs in a route-group layout; `src/app/authenticated-frame.tsx` is where `AppShell` and the theme reconciliation live.
+
+**DS-43 — Marketing sections live in `src/components/marketing/`, and consume the system rather than extending it.** The landing page is a different product from the application: unauthenticated, conversion-shaped, and built from sections — hero, feature grid, trust points, closing call to action — that no other screen will ever render. Those sections are not `ui/` primitives and not `patterns/`; a pattern with exactly one caller is a page filed in the wrong directory.
+
+What they *may not* do is invent. Colour, spacing, type and the primitives all come from the system, and a treatment the system lacks is added to the system — `CardTitle`'s `asChild`, which turns a card title into a real heading, came from this page needing a navigable outline and is now available everywhere. The one sanctioned local override is the hero's oversized call to action, commented where it happens: a landing page's primary action has no competition on the screen, and sizing it from the toolbar scale is what makes marketing look like a settings panel.
+
+**DS-44 — `/` is prerendered, and stays that way.** It is the only page in the product written for someone who has not signed in, so it is the only one whose speed and indexability are load-bearing. Nothing in it reads the session, the cookies or the database. The signed-in visitor is redirected by `src/middleware.ts` *before* the page is looked up — a cookie-presence check, never an authorisation decision, on a matcher covering `/` and nothing else (#37).
 
 ## 11. Testing
 
@@ -187,7 +193,7 @@ Note that the `components` project matches both `.test.ts` and `.test.tsx` under
 
 **DS-42 — `tests/visual/` baselines are recorded and verified in the pinned Playwright container, never natively.** macOS and Linux rasterise fonts differently, so a baseline captured on a laptop fails in CI forever — and fails in a way that reads as a real regression. `pnpm test:visual:docker` is the only sanctioned way to record them; `--update` re-records after an intended change.
 
-The subject is `/primitives`, a kitchen-sink route rendering every primitive in every variant in one document, so four images (light/dark × desktop/mobile) cover the system. The route is gated behind `ALLOW_DEV_ROUTES`, **not** `NODE_ENV`: the standalone server the visual suite runs against *is* a production build, so a `NODE_ENV` guard 404s the very page the screenshots are of.
+The subjects are `/primitives` — a kitchen-sink route rendering every primitive in every variant in one document, so four images (light/dark × desktop/mobile) cover the system — and `/`, the one page whose composition a visitor judges the product by. The route is gated behind `ALLOW_DEV_ROUTES`, **not** `NODE_ENV`: the standalone server the visual suite runs against *is* a production build, so a `NODE_ENV` guard 404s the very page the screenshots are of.
 
 **DS-22 — No raw colour or spacing literal outside `src/components/`.** Enforced by ESLint on `src/app/**/*.tsx`, landed in the same commit as the retrofit so there was never a window in which fresh duplication could be added. This is the rule that stops the whole problem from restarting: without it, the system is built once and the next screen begins recreating it by hand.
 

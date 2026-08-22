@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Slot } from 'radix-ui';
 
 import { cn } from '@/lib/utils';
 
@@ -33,9 +34,26 @@ function CardHeader({ className, ...props }: React.ComponentProps<'div'>) {
   );
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<'div'>) {
+/**
+ * `asChild` renders the title's styling onto whatever element the caller
+ * passes, which in practice means a real heading. A card sitting *inside* a
+ * page's content is correct as a `div` — it is a label, not a section. A card
+ * that *is* a section of the document (the landing page's feature grid, #37)
+ * needs an `h2`/`h3`, or the page reads to a screen reader as one heading
+ * followed by an undifferentiated wall.
+ *
+ * Cloning rather than a `level` prop: the caller already knows what depth it
+ * sits at, and a prop would let two cards on one page disagree.
+ */
+function CardTitle({
+  className,
+  asChild = false,
+  ...props
+}: React.ComponentProps<'div'> & { asChild?: boolean }) {
+  const Comp = asChild ? Slot.Root : 'div';
+
   return (
-    <div
+    <Comp
       data-slot="card-title"
       className={cn(
         'font-heading text-base leading-snug font-medium group-data-[size=sm]/card:text-sm',
