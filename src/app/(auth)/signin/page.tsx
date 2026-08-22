@@ -19,7 +19,13 @@ export default function SignInPage() {
     'use server';
     // SPEC-001 BR-001-02: scope is pinned in src/auth.ts's provider config,
     // not here — this call never widens it.
-    await signIn('google', { redirectTo: '/' });
+    //
+    // The ledger, not `/`: since #37 the root is a marketing page, and landing
+    // a user who has just signed in on the pitch that persuaded them to is a
+    // dead end. `/transactions` is BR-006-01's single source of truth and the
+    // first item in the navigation; SPEC-013's dashboard takes this spot when
+    // it exists.
+    await signIn('google', { redirectTo: '/transactions' });
   }
 
   return (

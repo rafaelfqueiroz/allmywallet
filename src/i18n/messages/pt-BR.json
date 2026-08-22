@@ -3,6 +3,68 @@
     "name": "AllMyWallet",
     "tagline": "Seus investimentos, em um só lugar"
   },
+  "marketing": {
+    "meta": {
+      "title": "AllMyWallet — seus investimentos da B3 em um só lugar",
+      "description": "Consolide ações, FIIs, BDRs, ETFs, Tesouro Direto, CDB, LCI e LCA em um único histórico, agrupe suas posições por objetivo e acompanhe patrimônio, rentabilidade e composição. Sem senha de banco, de corretora ou de home broker."
+    },
+    "header": {
+      "label": "Navegação principal",
+      "signIn": "Entrar"
+    },
+    "hero": {
+      "title": "Todos os seus investimentos, em um só lugar",
+      "description": "Ações, fundos imobiliários e renda fixa em um histórico único, com preço médio calculado a cada operação e relatórios que respondem quanto você tem, quanto rendeu e onde está concentrado.",
+      "cta": "Começar agora",
+      "note": "A entrada é pela sua conta Google. Nenhuma senha de banco, de corretora ou de home broker é pedida em momento algum."
+    },
+    "features": {
+      "title": "O que o AllMyWallet faz",
+      "consolidation": {
+        "title": "Um histórico só",
+        "description": "Ações, FIIs, BDRs, ETFs, Tesouro Direto, CDB, LCI e LCA no mesmo lugar. O preço médio é recalculado a cada operação, pela regra brasileira."
+      },
+      "wallets": {
+        "title": "Carteiras por objetivo",
+        "description": "Reserva, aposentadoria, renda: agrupe as mesmas posições por propósito. Uma carteira é um recorte do histórico — nenhuma transação é duplicada."
+      },
+      "reports": {
+        "title": "Relatórios que respondem",
+        "description": "Patrimônio, rentabilidade — com ou sem proventos, comparada ao CDI, ao IPCA e ao Ibovespa — e composição, por período e por carteira."
+      },
+      "import": {
+        "title": "Importação do extrato da B3",
+        "description": "Você exporta o arquivo da Área do Investidor e envia. O sistema mostra o que é novo, o que é repetido e o que precisa de atenção antes de você confirmar."
+      }
+    },
+    "trust": {
+      "title": "Como seus dados são tratados",
+      "description": "Nada aqui depende de boa vontade: as três afirmações abaixo são consequências de como o produto foi construído, não promessas de política.",
+      "credentials": {
+        "title": "Nenhuma credencial, nunca",
+        "description": "O AllMyWallet não pede — e não tem onde guardar — senha de banco, de corretora ou de home broker. Os dados chegam pelo extrato que você mesmo exporta da B3."
+      },
+      "cpf": {
+        "title": "Seu CPF não é guardado",
+        "description": "Ele é descartado durante a leitura do arquivo, antes de qualquer gravação: não vai para o histórico, nem para o registro da importação, nem para os logs."
+      },
+      "portability": {
+        "title": "Seus dados saem quando você quiser",
+        "description": "Exportar tudo em CSV ou JSON e apagar a conta são ações que você mesmo executa, sem pedir a ninguém."
+      },
+      "policyLink": "Leia a política de privacidade"
+    },
+    "cta": {
+      "title": "Comece pelo seu último extrato",
+      "description": "Importe o arquivo da B3 e veja sua carteira consolidada em minutos.",
+      "button": "Entrar com o Google"
+    },
+    "footer": {
+      "label": "Rodapé",
+      "privacyPolicy": "Política de privacidade",
+      "signIn": "Entrar"
+    }
+  },
   "auth": {
     "signIn": {
       "title": "Entrar no AllMyWallet",

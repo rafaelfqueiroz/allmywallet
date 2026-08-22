@@ -41,4 +41,19 @@ describe('Card', () => {
     const { container } = render(<Patrimonio />);
     expect(await audit(container)).toHaveNoViolations();
   });
+
+  // #37: a card that *is* a section of the document needs a real heading, or
+  // the page has one h1 and nothing else to navigate by. Default stays a div —
+  // a card inside content is a label, not an outline entry.
+  it('renders its title as a plain div by default and as the given element with asChild', () => {
+    const { rerender } = render(<CardTitle>Composição</CardTitle>);
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+
+    rerender(
+      <CardTitle asChild>
+        <h3>Composição</h3>
+      </CardTitle>,
+    );
+    expect(screen.getByRole('heading', { level: 3, name: 'Composição' })).toBeInTheDocument();
+  });
 });
