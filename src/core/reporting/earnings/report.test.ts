@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Money, Quantity } from '@/core/shared/money';
+import { Money } from '@/core/shared/money';
 import type { AssetId, WalletId } from '@/core/shared/ids';
 import { runReportQuery, type ReportQueryResult } from '@/core/reporting/base-query';
 import type {

@@ -1,5 +1,5 @@
 import { Money, sumMoney } from '@/core/shared/money';
-import { EARNING_TYPES, type EarningRecord, type EarningType } from '@/core/reporting/ports';
+import { EARNING_TYPES, type EarningRecord } from '@/core/reporting/ports';
 import type { MonthlyIncome, TypeTotal, YearOverYear } from '@/core/reporting/earnings/ports';
 
 /**

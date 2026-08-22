@@ -1,10 +1,8 @@
 import type { BusinessDate } from '@/core/shared/clock';
-import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, WalletId } from '@/core/shared/ids';
-import { Money, Quantity, sumQuantity } from '@/core/shared/money';
-import { ok, type Result } from '@/core/shared/result';
+import { Quantity, sumQuantity, type Money } from '@/core/shared/money';
 import { distributeExact } from '@/core/reporting/base-query';
-import type { AllocationEvent, EarningRecord, ReportingErrorCode } from '@/core/reporting/ports';
+import type { AllocationEvent, EarningRecord } from '@/core/reporting/ports';
 
 /**
  * SPEC-014 BR-014-12 / DL-014-05 — **income belongs to the wallet that held
