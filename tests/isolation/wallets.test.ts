@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/node-postgres';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
@@ -8,15 +8,21 @@ import { resetLedger, resetUsers, resetWallets } from '../support/reset';
 import { seedUser } from '../support/users';
 import { seedAsset } from '../support/ledger-fixtures';
 import * as schema from '@/db/schema';
-import { wallets, walletAllocations, walletAssetRules } from '@/db/schema/wallets';
+import {
+  wallets,
+  walletAllocations,
+  walletAllocationEvents,
+  walletAssetRules,
+} from '@/db/schema/wallets';
 import { withTenant } from '@/db/tenant';
 import type { AssetId } from '@/core/shared/ids';
 import { UserId, WalletId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 
 /**
- * TS-13/TS-15 — `wallets`, `wallet_allocations` and `wallet_asset_rules`
- * (SPEC-010, #13) are tenant-scoped tables; the enumeration gate
+ * TS-13/TS-15 — `wallets`, `wallet_allocations`, `wallet_asset_rules`
+ * (SPEC-010, #13) and `wallet_allocation_events` (SPEC-014, #17) are
+ * tenant-scoped tables; the enumeration gate
  * (`tests/isolation/enumeration.test.ts`) blocks a merge until each is named
  * by an isolation test with its own coverage. This is that test.
  *
@@ -25,7 +31,7 @@ import { Money, Quantity } from '@/core/shared/money';
  * sensitive as `positions` (SPEC-006/007's isolation test makes the same
  * point) and worth the same "no shortcuts" treatment.
  */
-describe('SPEC-010 — wallets, wallet_allocations and wallet_asset_rules tenant isolation', () => {
+describe('SPEC-010/014 — the wallet tables and the allocation event log, isolated', () => {
   let testDb: TestDatabase;
   let appPool: Pool;
   let migratorPool: Pool;
@@ -81,6 +87,15 @@ describe('SPEC-010 — wallets, wallet_allocations and wallet_asset_rules tenant
         await tx
           .insert(walletAssetRules)
           .values({ userId: userA, assetId: petr, walletId: walletA });
+        await tx.insert(walletAllocationEvents).values({
+          id: randomUUID(),
+          userId: userA,
+          walletId: walletA,
+          assetId: petr,
+          quantity: Quantity.fromString('60'),
+          effectiveOn: '2026-03-02',
+          cause: 'assignment',
+        });
       },
       appDb,
     );
@@ -108,6 +123,15 @@ describe('SPEC-010 — wallets, wallet_allocations and wallet_asset_rules tenant
         await tx
           .insert(walletAssetRules)
           .values({ userId: userB, assetId: petr, walletId: walletB });
+        await tx.insert(walletAllocationEvents).values({
+          id: randomUUID(),
+          userId: userB,
+          walletId: walletB,
+          assetId: petr,
+          quantity: Quantity.fromString('7'),
+          effectiveOn: '2026-03-02',
+          cause: 'assignment',
+        });
       },
       appDb,
     );
@@ -204,17 +228,108 @@ describe('SPEC-010 — wallets, wallet_allocations and wallet_asset_rules tenant
     ).rejects.toMatchObject({ cause: { code: '42501' } });
   });
 
+  /**
+   * SPEC-014 BR-014-12. An event states which wallet held how much of what,
+   * and when — the history behind every wallet-scoped income figure. Reading
+   * across the boundary here would expose one person's earmarked holdings as
+   * surely as `wallet_allocations` does, with a time dimension attached.
+   */
+  it('as tenant A, an unfiltered wallet_allocation_events read returns only A’s events', async () => {
+    const rows = await withTenant(
+      userA,
+      async (tx) => tx.select().from(walletAllocationEvents),
+      appDb,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.walletId).toBe(walletA);
+    expect(rows[0]?.quantity.toString()).toBe('60');
+    expect(rows.some((row) => row.quantity.toString() === '7')).toBe(false);
+  });
+
+  it('tenant A cannot insert an allocation event attributed to tenant B', async () => {
+    await expect(
+      withTenant(
+        userA,
+        async (tx) =>
+          tx.insert(walletAllocationEvents).values({
+            id: randomUUID(),
+            userId: userB,
+            walletId: walletA,
+            assetId: petr,
+            quantity: Quantity.fromString('1'),
+            effectiveOn: '2026-03-03',
+            cause: 'assignment',
+          }),
+        appDb,
+      ),
+    ).rejects.toMatchObject({ cause: { code: '42501' } });
+  });
+
+  /**
+   * The deliberate **non**-cascade, asserted so nobody adds one later thinking
+   * it was an oversight. Deleting a wallet must not delete the record that it
+   * once held something: last year's income did not stop having been earned,
+   * and an income history that empties itself when a wallet is tidied away is
+   * exactly the retroactive rewrite BR-014-12 exists to prevent.
+   */
+  it('deleting a wallet leaves its allocation history standing (BR-014-12)', async () => {
+    const doomedWallet = WalletId.generate();
+    await withTenant(
+      userA,
+      async (tx) => {
+        await tx.insert(wallets).values({
+          id: doomedWallet,
+          userId: userA,
+          name: 'Encerrada',
+          description: null,
+          goal: null,
+          color: null,
+        });
+        await tx.insert(walletAllocationEvents).values({
+          id: randomUUID(),
+          userId: userA,
+          walletId: doomedWallet,
+          assetId: petr,
+          quantity: Quantity.fromString('5'),
+          effectiveOn: '2026-03-04',
+          cause: 'assignment',
+        });
+      },
+      appDb,
+    );
+
+    await withTenant(
+      userA,
+      async (tx) => tx.delete(wallets).where(eq(wallets.id, doomedWallet)),
+      appDb,
+    );
+
+    const surviving = await withTenant(
+      userA,
+      async (tx) =>
+        tx
+          .select()
+          .from(walletAllocationEvents)
+          .where(eq(walletAllocationEvents.walletId, doomedWallet)),
+      appDb,
+    );
+    expect(surviving).toHaveLength(1);
+    expect(surviving[0]?.quantity.toString()).toBe('5');
+  });
+
   it('a query outside withTenant fails rather than returning everything (TS-16)', async () => {
     await expect(appDb.select().from(wallets)).rejects.toThrow();
     await expect(appDb.select().from(walletAllocations)).rejects.toThrow();
     await expect(appDb.select().from(walletAssetRules)).rejects.toThrow();
+    await expect(appDb.select().from(walletAllocationEvents)).rejects.toThrow();
   });
 
-  it('all three tables have ENABLE and FORCE row level security', async () => {
+  it('all four tables have ENABLE and FORCE row level security', async () => {
     const result = await migratorDb.execute(
       sql`SELECT relname, relrowsecurity, relforcerowsecurity
             FROM pg_class
-           WHERE relname IN ('wallets', 'wallet_allocations', 'wallet_asset_rules')
+           WHERE relname IN ('wallets', 'wallet_allocations', 'wallet_asset_rules',
+                             'wallet_allocation_events')
              AND relnamespace = 'public'::regnamespace
            ORDER BY relname`,
     );
@@ -223,14 +338,14 @@ describe('SPEC-010 — wallets, wallet_allocations and wallet_asset_rules tenant
       relrowsecurity: boolean;
       relforcerowsecurity: boolean;
     }>;
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     for (const row of rows) {
       expect(row.relrowsecurity, row.relname).toBe(true);
       expect(row.relforcerowsecurity, row.relname).toBe(true);
     }
   });
 
-  it('deleting the tenant root removes all three, so account deletion is complete (AR-27)', async () => {
+  it('deleting the tenant root removes all four, so account deletion is complete (AR-27)', async () => {
     const doomed = UserId.generate();
     await seedUser(testDb.migrationUrl, doomed);
     const doomedWallet = WalletId.generate();
@@ -258,6 +373,15 @@ describe('SPEC-010 — wallets, wallet_allocations and wallet_asset_rules tenant
         await tx
           .insert(walletAssetRules)
           .values({ userId: doomed, assetId: petr, walletId: doomedWallet });
+        await tx.insert(walletAllocationEvents).values({
+          id: randomUUID(),
+          userId: doomed,
+          walletId: doomedWallet,
+          assetId: petr,
+          quantity: Quantity.fromString('1'),
+          effectiveOn: '2026-03-05',
+          cause: 'assignment',
+        });
       },
       appDb,
     );
@@ -279,5 +403,13 @@ describe('SPEC-010 — wallets, wallet_allocations and wallet_asset_rules tenant
       [doomed],
     );
     expect(Number(rules.rows[0]?.n)).toBe(0);
+    // The event log survives a *wallet* deletion and not a *tenant* one: the
+    // cascade is from `users`, which is what makes account deletion complete
+    // (AR-27 / SPEC-004 BR-004-09).
+    const events = await migratorPool.query<{ n: string }>(
+      'SELECT count(*)::int AS n FROM wallet_allocation_events WHERE user_id = $1',
+      [doomed],
+    );
+    expect(Number(events.rows[0]?.n)).toBe(0);
   });
 });

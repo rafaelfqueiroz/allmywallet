@@ -1,5 +1,6 @@
 import {
   check,
+  date,
   index,
   pgTable,
   primaryKey,
@@ -143,5 +144,84 @@ export const walletAssetRules = pgTable(
     primaryKey({ columns: [table.userId, table.assetId] }),
     index('wallet_asset_rules_user_id_idx').on(table.userId),
     index('wallet_asset_rules_wallet_id_idx').on(table.walletId),
+  ],
+);
+
+/**
+ * SPEC-014 BR-014-12 — **what each wallet held, on the day each provento was
+ * paid.**
+ *
+ * `wallet_allocations` cannot answer that. It carries one mutable row per
+ * `(wallet, asset)`: a buy increments it, a sale reduces it, a corporate event
+ * scales it, an assignment moves it, and no prior state survives. Attributing
+ * last year's income with today's split would rewrite years of a wallet's
+ * income history the moment someone reassigns a holding — a number that
+ * changes when nothing about the past did, which is exactly what BR-014-12
+ * forbids and what DL-014-05 explains.
+ *
+ * **A log of states, not of deltas.** Each row records the allocation's
+ * quantity *after* the change, so "what did this wallet hold on date D" is the
+ * latest row at or before D for each `(wallet, asset)` — a fold with no
+ * arithmetic in it. A delta log would need the previous quantity read under a
+ * lock at every write, and any missed or double-written event would corrupt
+ * every later answer rather than one of them. A removal is a row with
+ * quantity zero, for the same reason: absence has to be recorded, not
+ * inferred from a gap.
+ *
+ * **This is not the per-day dimension #50 declined.** That was
+ * `daily_valuation_snapshots` gaining a breakdown column per dimension — rows
+ * multiplying by cardinality over every day of history, on the rebuild path.
+ * This grows with allocation *changes*, of which a real portfolio has a
+ * handful per asset per year, and nothing rebuilds it: it is append-only,
+ * written where the allocation is written.
+ *
+ * **`effective_on` is the trade date, not the clock.** A user importing four
+ * years of B3 extracts today creates four years of allocation history in one
+ * afternoon; stamping those events with `now()` would attribute every past
+ * provento to a wallet that, as far as this log knew, held nothing at the
+ * time. Hence AR-29 applies here as it does to every other business date: the
+ * date the movement happened, never the instant the row was written.
+ */
+export const walletAllocationEvents = pgTable(
+  'wallet_allocation_events',
+  {
+    id: uuid('id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * No `ON DELETE cascade` to `wallets`, unlike `wallet_allocations`.
+     * Deleting a wallet must not delete the record that it once held
+     * something — last year's income did not stop having been earned. The
+     * wallet's *name* goes with the row it belonged to, so a report over a
+     * period containing a deleted wallet labels the group by id; that is a
+     * display concern, and losing the attribution would be a correctness one.
+     */
+    walletId: uuid('wallet_id').notNull(),
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => assets.id),
+    /** The allocated quantity **after** this change. Zero means "no longer allocated". */
+    quantity: quantity('quantity').notNull(),
+    /** AR-29: the business date the change takes effect, never a timestamp. */
+    effectiveOn: date('effective_on').notNull(),
+    /**
+     * Why the allocation moved. Not used in the fold — kept because an
+     * attribution a user disputes is answered by "a sale on this date reduced
+     * it", and reconstructing that from the ledger afterwards is guesswork.
+     */
+    cause: text('cause').notNull(),
+    /** Tie-breaker for two changes on the same business date, and nothing else. */
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    // The fold's access path: every event for one tenant up to a date, in order.
+    index('wallet_allocation_events_user_id_effective_on_idx').on(table.userId, table.effectiveOn),
+    index('wallet_allocation_events_user_id_asset_id_idx').on(table.userId, table.assetId),
+    check('wallet_allocation_events_quantity_not_negative_check', sql`${table.quantity} >= 0`),
+    check(
+      'wallet_allocation_events_cause_check',
+      sql`${table.cause} IN ('assignment', 'buy', 'sale', 'corporate_event', 'wallet_deleted', 'backfill')`,
+    ),
   ],
 );

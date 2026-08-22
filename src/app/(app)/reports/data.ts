@@ -7,8 +7,12 @@ import {
 } from '@/core/shared/clock';
 import { AssetId, InstitutionId, WalletId, type UserId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
+import { EARNING_TYPES } from '@/core/reporting/ports';
 import type {
+  AllocationEvent,
   AssetDescriptor,
+  EarningRecord,
+  EarningType,
   DailyValuationSnapshot,
   ReportAllocation,
   ReportDataPort,
@@ -32,9 +36,9 @@ import { db } from '@/db/client';
 import { assets, institutions } from '@/db/schema/assets';
 import { latestQuotes } from '@/db/schema/market';
 import { positions } from '@/db/schema/positions';
-import { importBatches } from '@/db/schema/transactions';
+import { importBatches, transactions } from '@/db/schema/transactions';
 import { dailyValuationSnapshots } from '@/db/schema/valuation';
-import { walletAllocations, wallets } from '@/db/schema/wallets';
+import { walletAllocationEvents, walletAllocations, wallets } from '@/db/schema/wallets';
 import { withTenant, type Tx } from '@/db/tenant';
 
 /**
@@ -269,6 +273,83 @@ export class DrizzleReportDataPort implements ReportDataPort {
       earningsToDate: Money.fromString(String(row.earningsToDate)),
       byAssetClass: deserializeAssetClassBreakdown(row.byAssetClass),
       hasEstimates: row.hasEstimates,
+    }));
+  }
+
+  /**
+   * SPEC-014 BR-014-01/08/11 — the proventos paid inside the period.
+   *
+   * A filtered index scan over four transaction types in a date range, not the
+   * five-year replay DL-011-07 forbids: `transactions_user_id_trade_date_idx`
+   * covers it, and the result is a few hundred rows for a real portfolio.
+   * There is no snapshot to read instead — `earnings_to_date` is one
+   * cumulative number with no type, no asset and no month in it.
+   *
+   * BR-014-11: `active` only. An `unclassified` row is stored and inert
+   * everywhere else (DL-006-06) and must not reach an income total either;
+   * classifying one is what makes it count.
+   *
+   * `trade_date` **is** the pay date for a provento: the B3 Movimentação
+   * extract dates each row by when the money moved, which is what BR-014-08
+   * and DL-014-04 ask for and what matches the user's bank statement.
+   */
+  async listEarnings(from: BusinessDate, to: BusinessDate): Promise<readonly EarningRecord[]> {
+    const rows = await this.tx
+      .select({
+        assetId: transactions.assetId,
+        institutionId: transactions.institutionId,
+        type: transactions.type,
+        tradeDate: transactions.tradeDate,
+        totalValue: transactions.totalValue,
+        quantity: transactions.quantity,
+      })
+      .from(transactions)
+      .where(
+        and(
+          inArray(transactions.type, [...EARNING_TYPES]),
+          eq(transactions.status, 'active'),
+          sql`${transactions.tradeDate} >= ${from}`,
+          sql`${transactions.tradeDate} <= ${to}`,
+        ),
+      )
+      .orderBy(asc(transactions.tradeDate));
+
+    return rows.map((row) => ({
+      assetId: AssetId.of(row.assetId),
+      institutionId: row.institutionId === null ? null : InstitutionId.of(row.institutionId),
+      type: row.type as EarningType,
+      payDate: row.tradeDate as BusinessDate,
+      amount: row.totalValue,
+      quantity: row.quantity,
+    }));
+  }
+
+  /**
+   * SPEC-014 BR-014-12 — the allocation history, oldest first.
+   *
+   * Everything up to the period's end rather than only inside it: a wallet
+   * filled in 2023 and untouched since has no event *within* a 2026 period,
+   * and reading only the window would report it as holding nothing. The fold
+   * needs the last state at or before each pay date, which means carrying the
+   * whole history forward.
+   */
+  async listAllocationEvents(upTo: BusinessDate): Promise<readonly AllocationEvent[]> {
+    const rows = await this.tx
+      .select({
+        walletId: walletAllocationEvents.walletId,
+        assetId: walletAllocationEvents.assetId,
+        quantity: walletAllocationEvents.quantity,
+        effectiveOn: walletAllocationEvents.effectiveOn,
+      })
+      .from(walletAllocationEvents)
+      .where(sql`${walletAllocationEvents.effectiveOn} <= ${upTo}`)
+      .orderBy(asc(walletAllocationEvents.effectiveOn), asc(walletAllocationEvents.createdAt));
+
+    return rows.map((row) => ({
+      walletId: WalletId.of(row.walletId),
+      assetId: AssetId.of(row.assetId),
+      quantity: row.quantity,
+      effectiveOn: row.effectiveOn as BusinessDate,
     }));
   }
 

@@ -5,6 +5,10 @@ import { allocateToWallet } from '@/core/wallets/allocate';
 import { applyCorporateEventToAllocations } from '@/core/wallets/apply-corporate-event';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { buildFakeDeps } from '@/core/wallets/test-support/build-deps';
+import { BusinessDate } from '@/core/shared/clock';
+
+/** SPEC-014 BR-014-12: the scaling is dated by the event, not by the clock. */
+const EVENT_DATE = BusinessDate.of('2026-03-10');
 
 const USER = UserId.generate();
 const ITSA4 = AssetId.generate();
@@ -37,6 +41,7 @@ describe('SPEC-010 BR-010-18/DL-010-08 — applyCorporateEventToAllocations', ()
       USER,
       ITSA4,
       Quantity.fromString('2'),
+      EVENT_DATE,
     );
 
     expect(result.ok).toBe(true);
@@ -65,6 +70,7 @@ describe('SPEC-010 BR-010-18/DL-010-08 — applyCorporateEventToAllocations', ()
       USER,
       ITSA4,
       Quantity.fromString('0.1'),
+      EVENT_DATE,
     );
     expect(result.ok).toBe(true);
     const alloc = (await deps.allocations.listForWallet(wallet.id))[0];
@@ -73,7 +79,13 @@ describe('SPEC-010 BR-010-18/DL-010-08 — applyCorporateEventToAllocations', ()
 
   it('refuses a zero or negative ratio', async () => {
     const deps = buildFakeDeps();
-    const result = await applyCorporateEventToAllocations(deps, USER, ITSA4, Quantity.zero());
+    const result = await applyCorporateEventToAllocations(
+      deps,
+      USER,
+      ITSA4,
+      Quantity.zero(),
+      EVENT_DATE,
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('INVALID_RATIO');
@@ -86,6 +98,7 @@ describe('SPEC-010 BR-010-18/DL-010-08 — applyCorporateEventToAllocations', ()
       USER,
       ITSA4,
       Quantity.fromString('2'),
+      EVENT_DATE,
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;

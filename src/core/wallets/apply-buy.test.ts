@@ -7,6 +7,10 @@ import { createWallet } from '@/core/wallets/create-wallet';
 import { listPendingAllocations } from '@/core/wallets/pending';
 import { setStandingRule } from '@/core/wallets/standing-rule';
 import { buildFakeDeps } from '@/core/wallets/test-support/build-deps';
+import { BusinessDate } from '@/core/shared/clock';
+
+/** SPEC-014 BR-014-12: every allocation write is dated; these cases do not vary it. */
+const TRADE_DATE = BusinessDate.of('2026-03-10');
 
 const USER = UserId.generate();
 const ITSA4 = AssetId.generate();
@@ -31,6 +35,7 @@ describe('SPEC-010 BR-010-10 — applyBuy, single-wallet asset', () => {
     const result = await applyBuy(deps, USER, {
       assetId: ITSA4,
       purchasedQuantity: Quantity.fromString('20'),
+      effectiveOn: TRADE_DATE,
     });
 
     expect(result.ok).toBe(true);
@@ -67,6 +72,7 @@ describe('SPEC-010 BR-010-11/DL-010-03 — applyBuy, split asset', () => {
     const result = await applyBuy(deps, USER, {
       assetId: ITSA4,
       purchasedQuantity: Quantity.fromString('20'),
+      effectiveOn: TRADE_DATE,
     });
 
     expect(result.ok).toBe(true);
@@ -95,6 +101,7 @@ describe('SPEC-010 BR-010-16 — applyBuy, brand-new asset', () => {
     const result = await applyBuy(deps, USER, {
       assetId: ITSA4,
       purchasedQuantity: Quantity.fromString('10'),
+      effectiveOn: TRADE_DATE,
     });
 
     expect(result.ok).toBe(true);
@@ -126,6 +133,7 @@ describe('SPEC-010 BR-010-14/DL-010-04 — applyBuy, standing rule', () => {
     const result = await applyBuy(deps, USER, {
       assetId: ITSA4,
       purchasedQuantity: Quantity.fromString('20'),
+      effectiveOn: TRADE_DATE,
     });
 
     expect(result.ok).toBe(true);
@@ -152,6 +160,7 @@ describe('applyBuy — validation', () => {
     const result = await applyBuy(deps, USER, {
       assetId: ITSA4,
       purchasedQuantity: Quantity.zero(),
+      effectiveOn: TRADE_DATE,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;

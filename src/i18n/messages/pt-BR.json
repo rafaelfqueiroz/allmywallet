@@ -30,7 +30,7 @@
       },
       "reports": {
         "title": "Relatórios que respondem",
-        "description": "Patrimônio, rentabilidade — com ou sem proventos, comparada ao CDI, ao IPCA e ao Ibovespa — e composição, por período e por carteira."
+        "description": "Patrimônio, proventos, rentabilidade — comparada ao CDI, ao IPCA e ao Ibovespa — e composição, por período e por carteira."
       },
       "import": {
         "title": "Importação do extrato da B3",
@@ -438,7 +438,8 @@
       "overview": "Visão geral",
       "patrimonio": "Patrimônio",
       "performance": "Rentabilidade",
-      "composicao": "Composição"
+      "composicao": "Composição",
+      "proventos": "Proventos"
     },
     "markers": {
       "attention": {
@@ -903,6 +904,67 @@
       "title": "Sua carteira x os índices",
       "description": "Todas as linhas começam em 100 no início do período. A distância entre elas é o quanto sua carteira ficou à frente ou atrás.",
       "summary": "Comparação da rentabilidade acumulada da carteira com a dos índices selecionados. Os números exatos estão na tabela abaixo."
+    }
+  },
+  "proventos": {
+    "title": "Proventos",
+    "description": "Quanto sua carteira paga — e se isso está crescendo.",
+    "headline": {
+      "total": "Recebido no período",
+      "totalHint": "Soma de dividendos, JCP, rendimentos e amortizações, na data em que o dinheiro entrou.",
+      "yieldOnCost": "Yield on cost",
+      "yieldOnCostHint": "O que os proventos do período representam sobre o custo da carteira — quanto o seu dinheiro rende, não quanto renderia para quem comprasse hoje.",
+      "growth": "Variação sobre o período anterior",
+      "growthHint": "Comparação com o período de mesma duração imediatamente anterior.",
+      "growthUnavailable": "Sem período anterior com proventos para comparar.",
+      "unavailable": "Indisponível"
+    },
+    "byType": {
+      "title": "Por tipo",
+      "description": "JCP aparece separado dos dividendos: a tributação é diferente e a soma dos dois não responde à pergunta do imposto.",
+      "dividend": "Dividendos",
+      "jcp": "JCP",
+      "rendimento": "Rendimentos",
+      "amortization": "Amortizações"
+    },
+    "monthly": {
+      "title": "Mês a mês",
+      "description": "As barras são o que entrou em cada mês; a linha é a média dos últimos 12 meses, que é onde a tendência aparece.",
+      "caption": "Proventos por mês, com média móvel de 12 meses",
+      "columnMonth": "Mês",
+      "columnAmount": "Recebido",
+      "columnAverage": "Média 12 meses",
+      "noAverage": "—",
+      "chartLabel": "Proventos mês a mês",
+      "chartSummary": "Total de {total} em {months} meses; média dos últimos 12 meses em {average}.",
+      "bars": "Recebido no mês",
+      "average": "Média de 12 meses"
+    },
+    "breakdown": {
+      "title": "De onde vem",
+      "description": "A renda do período, dividida pelo agrupamento escolhido.",
+      "columnGroup": "Grupo",
+      "columnAmount": "Recebido",
+      "columnShare": "Participação",
+      "caption": "Proventos por grupo"
+    },
+    "perAsset": {
+      "title": "Por ativo",
+      "description": "Yield on cost é sobre o que você pagou; dividend yield é sobre o preço de hoje. Os dois respondem perguntas diferentes e nunca são somados.",
+      "columnAsset": "Ativo",
+      "columnAmount": "Recebido",
+      "columnYieldOnCost": "Yield on cost",
+      "columnCurrentYield": "Dividend yield (12m)",
+      "caption": "Proventos por ativo, com os dois indicadores de rendimento",
+      "notHeld": "Não faz mais parte da carteira",
+      "unavailable": "—"
+    },
+    "upcoming": {
+      "title": "Proventos anunciados",
+      "unavailable": "Não temos fonte de proventos anunciados: a cotação gratuita não traz dados de dividendos e a API de Eventos Provisionados da B3 é só para empresas. Isto não quer dizer que não há proventos a receber — quer dizer que não sabemos."
+    },
+    "walletScope": {
+      "explanation": "Nesta carteira, cada provento é atribuído conforme o que ela tinha do ativo na data do pagamento. Remanejar um ativo hoje não muda a renda dos meses anteriores."
     }
   }
 }

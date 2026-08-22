@@ -1,3 +1,4 @@
+import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, UserId } from '@/core/shared/ids';
 import type { Quantity } from '@/core/shared/money';
@@ -39,6 +40,8 @@ export async function applyCorporateEventToAllocations(
   userId: UserId,
   assetId: AssetId,
   ratio: Quantity,
+  /** SPEC-014 BR-014-12 — the event's own trade date, for the allocation log. */
+  effectiveOn: BusinessDate,
 ): Promise<Result<readonly WalletAllocation[], DomainError>> {
   if (!ratio.isPositive()) {
     return err(walletError(WalletErrorCode.INVALID_RATIO, { assetId, ratio: ratio.toString() }));
@@ -58,7 +61,7 @@ export async function applyCorporateEventToAllocations(
       userId,
       quantity: allocation.quantity.times(ratio),
     };
-    await deps.allocations.upsert(scaled);
+    await deps.allocations.upsert(scaled, { effectiveOn, cause: 'corporate_event' });
     updated.push(scaled);
   }
   return ok(updated);

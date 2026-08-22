@@ -1,3 +1,4 @@
+import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, UserId, WalletId } from '@/core/shared/ids';
 import { Quantity, sumQuantity } from '@/core/shared/money';
@@ -19,6 +20,8 @@ export interface ApplySellInput {
   readonly soldQuantity: Quantity;
   /** BR-010-17: "unless the user specifies which wallet sold." */
   readonly walletId?: WalletId | undefined;
+  /** SPEC-014 BR-014-12 — the sale's trade date, for the allocation event log. */
+  readonly effectiveOn: BusinessDate;
 }
 
 export async function applySell(
@@ -64,7 +67,7 @@ async function applySpecifiedWalletSell(
   }
 
   const updated = reduceAllocation(existing, input.soldQuantity);
-  await persist(deps, userId, updated);
+  await persist(deps, userId, updated, input.effectiveOn);
   return ok([updated]);
 }
 
@@ -113,7 +116,7 @@ async function applyProportionalSell(
   }
 
   for (const updated of results) {
-    await persist(deps, userId, updated);
+    await persist(deps, userId, updated, input.effectiveOn);
   }
   return ok(results);
 }
@@ -137,10 +140,18 @@ async function persist(
   deps: WalletDependencies,
   userId: UserId,
   allocation: WalletAllocation,
+  effectiveOn: BusinessDate,
 ): Promise<void> {
+  // Either branch records the same event shape: a sale that empties an
+  // allocation is "this wallet now holds zero of this asset on that date", not
+  // an absence of information. The fold reads it as the former only because
+  // the row is written.
   if (allocation.quantity.isZero()) {
-    await deps.allocations.delete(allocation.walletId, allocation.assetId);
+    await deps.allocations.delete(allocation.walletId, allocation.assetId, {
+      effectiveOn,
+      cause: 'sale',
+    });
     return;
   }
-  await deps.allocations.upsert({ ...allocation, userId });
+  await deps.allocations.upsert({ ...allocation, userId }, { effectiveOn, cause: 'sale' });
 }

@@ -5,6 +5,10 @@ import { allocateToWallet } from '@/core/wallets/allocate';
 import { applySell } from '@/core/wallets/apply-sell';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { buildFakeDeps } from '@/core/wallets/test-support/build-deps';
+import { BusinessDate } from '@/core/shared/clock';
+
+/** SPEC-014 BR-014-12: every allocation write is dated; these cases do not vary it. */
+const TRADE_DATE = BusinessDate.of('2026-03-10');
 
 const USER = UserId.generate();
 const ITSA4 = AssetId.generate();
@@ -36,6 +40,7 @@ describe('SPEC-010 BR-010-17/DL-010-05 — applySell, proportional', () => {
     const result = await applySell(deps, USER, {
       assetId: ITSA4,
       soldQuantity: Quantity.fromString('10'),
+      effectiveOn: TRADE_DATE,
     });
 
     expect(result.ok).toBe(true);
@@ -61,6 +66,7 @@ describe('SPEC-010 BR-010-17/DL-010-05 — applySell, proportional', () => {
     const result = await applySell(deps, USER, {
       assetId: ITSA4,
       soldQuantity: Quantity.fromString('50'),
+      effectiveOn: TRADE_DATE,
     });
     expect(result.ok).toBe(true);
     expect(await deps.allocations.listForWallet(wallet.id)).toHaveLength(0);
@@ -75,6 +81,7 @@ describe('SPEC-010 BR-010-17/DL-010-05 — applySell, proportional', () => {
     const result = await applySell(deps, USER, {
       assetId: ITSA4,
       soldQuantity: Quantity.fromString('30'),
+      effectiveOn: TRADE_DATE,
     });
     expect(result.ok).toBe(true);
     expect(await deps.allocations.listForWallet(wallet.id)).toHaveLength(0);
@@ -85,6 +92,7 @@ describe('SPEC-010 BR-010-17/DL-010-05 — applySell, proportional', () => {
     const result = await applySell(deps, USER, {
       assetId: ITSA4,
       soldQuantity: Quantity.fromString('5'),
+      effectiveOn: TRADE_DATE,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -112,6 +120,7 @@ describe('SPEC-010 BR-010-17 — applySell, specified wallet', () => {
     const result = await applySell(deps, USER, {
       assetId: ITSA4,
       soldQuantity: Quantity.fromString('15'),
+      effectiveOn: TRADE_DATE,
       walletId: trading.id,
     });
 
@@ -135,6 +144,7 @@ describe('SPEC-010 BR-010-17 — applySell, specified wallet', () => {
     const result = await applySell(deps, USER, {
       assetId: ITSA4,
       soldQuantity: Quantity.fromString('31'),
+      effectiveOn: TRADE_DATE,
       walletId: wallet.id,
     });
 
@@ -156,6 +166,7 @@ describe('SPEC-010 BR-010-17 — applySell, specified wallet', () => {
     await applySell(deps, USER, {
       assetId: ITSA4,
       soldQuantity: Quantity.fromString('30'),
+      effectiveOn: TRADE_DATE,
       walletId: wallet.id,
     });
     expect(await deps.allocations.listForWallet(wallet.id)).toHaveLength(0);
@@ -165,7 +176,11 @@ describe('SPEC-010 BR-010-17 — applySell, specified wallet', () => {
 describe('applySell — validation', () => {
   it('refuses a zero or negative sold quantity', async () => {
     const deps = buildFakeDeps();
-    const result = await applySell(deps, USER, { assetId: ITSA4, soldQuantity: Quantity.zero() });
+    const result = await applySell(deps, USER, {
+      assetId: ITSA4,
+      soldQuantity: Quantity.zero(),
+      effectiveOn: TRADE_DATE,
+    });
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('INVALID_ALLOCATION_QUANTITY');

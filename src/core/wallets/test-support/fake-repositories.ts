@@ -1,6 +1,8 @@
 import type { AssetId, WalletId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type {
+  AllocationChange,
+  AllocationChangeCause,
   AssetPositionQuery,
   PositionQueryPort,
   WalletAllocation,
@@ -69,17 +71,60 @@ export class FakeWalletAllocationRepository implements WalletAllocationRepositor
     return this.listForAsset(assetId);
   }
 
-  async upsert(allocation: WalletAllocation): Promise<void> {
+  /**
+   * SPEC-014 BR-014-12 — every allocation change, in order, as the real
+   * repository appends them to `wallet_allocation_events`.
+   *
+   * Recorded by the fake rather than left to the integration suite because
+   * the thing most likely to be wrong is the **date**, and the date is chosen
+   * in `core/` — `applyBuy` gets the trade date, a manual assignment gets
+   * today. A use-case test can assert that here; a database test would only
+   * see whatever core decided.
+   */
+  readonly events: {
+    walletId: WalletId;
+    assetId: AssetId;
+    quantity: string;
+    effectiveOn: string;
+    cause: AllocationChangeCause;
+  }[] = [];
+
+  async upsert(allocation: WalletAllocation, change: AllocationChange): Promise<void> {
     this.#rows.set(key(allocation.walletId, allocation.assetId), allocation);
+    this.events.push({
+      walletId: allocation.walletId,
+      assetId: allocation.assetId,
+      quantity: allocation.quantity.toString(),
+      effectiveOn: change.effectiveOn,
+      cause: change.cause,
+    });
   }
 
-  async delete(walletId: WalletId, assetId: AssetId): Promise<void> {
+  async delete(walletId: WalletId, assetId: AssetId, change: AllocationChange): Promise<void> {
     this.#rows.delete(key(walletId, assetId));
+    // Zero, not absent: "this wallet holds none of this asset from here" is
+    // the fact the fold needs. A missing row would leave the last positive
+    // quantity standing for every later date.
+    this.events.push({
+      walletId,
+      assetId,
+      quantity: '0',
+      effectiveOn: change.effectiveOn,
+      cause: change.cause,
+    });
   }
 
-  async deleteForWallet(walletId: WalletId): Promise<void> {
+  async deleteForWallet(walletId: WalletId, change: AllocationChange): Promise<void> {
     for (const row of this.#rows.values()) {
-      if (row.walletId === walletId) this.#rows.delete(key(row.walletId, row.assetId));
+      if (row.walletId !== walletId) continue;
+      this.#rows.delete(key(row.walletId, row.assetId));
+      this.events.push({
+        walletId,
+        assetId: row.assetId,
+        quantity: '0',
+        effectiveOn: change.effectiveOn,
+        cause: change.cause,
+      });
     }
   }
 

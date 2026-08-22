@@ -133,6 +133,10 @@ export async function applyLedgerEffects(
         assetId: transaction.assetId,
         purchasedQuantity: transaction.quantity,
         heldCheck: 'deferred',
+        // SPEC-014 BR-014-12: the allocation event is dated by the trade, not
+        // by the import. This replay is exactly the path that would otherwise
+        // stamp four years of history with today.
+        effectiveOn: transaction.tradeDate,
       });
       if (!result.ok) return result;
       allocations.push({ assetId: transaction.assetId, outcome: result.value });
@@ -166,6 +170,7 @@ export async function applyLedgerEffects(
       const result = await applySell(deps, userId, {
         assetId: transaction.assetId,
         soldQuantity: reduction,
+        effectiveOn: transaction.tradeDate,
         ...(options.soldFromWallet === undefined ? {} : { walletId: options.soldFromWallet }),
       });
       if (!result.ok) return result;
@@ -184,6 +189,7 @@ export async function applyLedgerEffects(
         userId,
         transaction.assetId,
         ratio,
+        transaction.tradeDate,
       );
       if (!result.ok) return result;
     }

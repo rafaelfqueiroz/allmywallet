@@ -26,7 +26,15 @@ export async function deleteWallet(
     return err(walletError(WalletErrorCode.WALLET_NOT_FOUND, { walletId }));
   }
 
-  await deps.allocations.deleteForWallet(walletId);
+  // BR-010-07: the allocations disappear and the holdings return to
+  // Unassigned. The *history* does not — SPEC-014 BR-014-12: this wallet did
+  // hold those assets, and last year's income did not stop having been earned
+  // because the wallet was tidied away today. The repository records a
+  // zero-quantity event per asset rather than deleting the log.
+  await deps.allocations.deleteForWallet(walletId, {
+    effectiveOn: deps.clock.today(),
+    cause: 'wallet_deleted',
+  });
   await deps.assetRules.clearForWallet(walletId);
   await deps.wallets.delete(walletId);
 

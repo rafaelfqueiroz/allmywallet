@@ -107,7 +107,14 @@ export async function allocateToWallet(
     allocatedAt: existingForThisWallet?.allocatedAt ?? deps.clock.now(),
   };
 
-  await deps.allocations.upsert(allocation);
+  // A manual assignment happens now: the user is stating where a holding
+  // belongs from today, not amending what it was last year. Backdating it to
+  // the position's first purchase would be the retroactive rewrite BR-014-12
+  // exists to prevent, applied in the other direction.
+  await deps.allocations.upsert(allocation, {
+    effectiveOn: deps.clock.today(),
+    cause: 'assignment',
+  });
   return ok(allocation);
 }
 
