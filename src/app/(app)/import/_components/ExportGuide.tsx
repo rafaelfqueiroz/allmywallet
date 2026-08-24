@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { getTranslations } from 'next-intl/server';
 import { Section } from '@/components/patterns/section';
 import { Stack } from '@/components/layout/stack';
@@ -27,16 +28,28 @@ import { Note } from '@/components/patterns/note';
  * user still holds. Hence the emphasis here rather than a footnote.
  *
  * ---------------------------------------------------------------------------
- * NO SCREENSHOTS. SPEC-005's acceptance criterion asks for them and they are
- * deliberately absent: investidor.b3.com.br is behind a login and every view of
- * it shows a real CPF and real holdings. DV-24 / TS-19 keep real extracts out
- * of this repository for exactly that reason, and a screenshot is the same
- * data in a different file format. Capturing them needs a throwaway account
- * with fabricated holdings, which is an operational task, not a code one.
+ * THE SCREENSHOTS, AND WHAT IS DELIBERATELY NOT IN THEM
+ *
+ * AC-1 asks for screenshots, and the reason they took so long is DV-24 /
+ * TS-19: investidor.b3.com.br is behind a login and a full-page capture shows
+ * the account holder's name, their institution and every position they hold
+ * with its quantity and value — the same data a real extract carries, in a
+ * different file format, and just as unwelcome in this repository.
+ *
+ * So each image is cropped to the **chrome band**: the tab bar, the period
+ * selector and the download button. That is the whole instructional payload —
+ * which tab, and which button — and it carries no holdings, no totals, no
+ * institution and no name. The originals are not in this repository in any
+ * form; these were produced from them and the crop is the artefact, not a
+ * redaction layered over a full image.
  * ---------------------------------------------------------------------------
  */
 
 const B3_PORTAL_URL = 'https://investidor.b3.com.br';
+
+/** The pixel size the files actually are, so nothing reflows while they load. */
+const SCREENSHOT_WIDTH = 1600;
+const SCREENSHOT_HEIGHT = 125;
 
 /** The three extracts, in the order the guide walks through them. */
 const EXTRACT_STEPS = ['movimentacao', 'negociacao', 'posicao'] as const;
@@ -56,6 +69,21 @@ export async function ExportGuide({ firstRun }: { readonly firstRun: boolean }) 
                   {t(`steps.${step}.path`)}
                 </Text>
                 <Text size="sm">{t(`steps.${step}.why`)}</Text>
+                {/*
+                  AC-1's screenshot. `alt` describes the *action* rather than
+                  the picture — a screen reader user needs "the Movimentação
+                  tab, and Baixar on the right", not "a screenshot of a web
+                  page". The intrinsic size is declared so the step does not
+                  reflow as the image arrives.
+                */}
+                <Image
+                  src={`/guia-b3/${step}.png`}
+                  alt={t(`steps.${step}.screenshotAlt`)}
+                  width={SCREENSHOT_WIDTH}
+                  height={SCREENSHOT_HEIGHT}
+                  className="rounded-md border"
+                  sizes="(min-width: 768px) 42rem, 100vw"
+                />
               </Stack>
             </ListItem>
           ))}
@@ -66,6 +94,15 @@ export async function ExportGuide({ firstRun }: { readonly firstRun: boolean }) 
 
         <Text size="sm" tone="muted">
           {t('anyOrder')}
+        </Text>
+
+        {/*
+          Said out loud rather than left to be noticed: a reader looking at a
+          cropped screenshot of their own broker deserves to know the crop is
+          the point, not an accident of capture.
+        */}
+        <Text size="xs" tone="muted">
+          {t('screenshotNote')}
         </Text>
 
         <div>

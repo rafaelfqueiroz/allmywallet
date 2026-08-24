@@ -245,23 +245,27 @@
       "steps": {
         "movimentacao": {
           "title": "{number}. Movimentação",
-          "path": "Extratos → Movimentação → Exportar para Excel",
-          "why": "Proventos, subscrições, bonificações e transferências. É o que alimenta seus relatórios de proventos."
+          "path": "Extratos → Movimentação → Baixar",
+          "why": "Proventos, subscrições, bonificações e transferências. É o que alimenta seus relatórios de proventos.",
+          "screenshotAlt": "A aba Movimentação aberta em Extratos, com o período exibido à esquerda e o botão Baixar à direita."
         },
         "negociacao": {
           "title": "{number}. Negociação",
-          "path": "Extratos → Negociação → Exportar para Excel",
-          "why": "Suas compras e vendas. É o que determina o preço médio de cada ativo."
+          "path": "Extratos → Negociação → Baixar",
+          "why": "Suas compras e vendas. É o que determina o preço médio de cada ativo.",
+          "screenshotAlt": "A aba Negociação aberta em Extratos, com o período exibido à esquerda e o botão Baixar à direita."
         },
         "posicao": {
           "title": "{number}. Posição",
-          "path": "Extratos → Posição → Exportar para Excel",
-          "why": "A foto da sua carteira na data. Serve para conferir se o que calculamos bate com o que a B3 diz que você tem."
+          "path": "Minha carteira → Investimentos → Posição → Baixar",
+          "why": "A foto da sua carteira na data. Serve para conferir se o que calculamos bate com o que a B3 diz que você tem.",
+          "screenshotAlt": "A aba Posição aberta em Investimentos, com a data exibida à esquerda e o botão Baixar à direita."
         }
       },
       "earliestDate": "Escolha sempre a data inicial mais antiga que a B3 oferecer. Uma compra antiga que ficar de fora não aparece como um buraco no gráfico — ela deixa o preço médio daquele ativo errado, e só um novo extrato completo corrige isso.",
       "anyOrder": "Envie os três em qualquer ordem, um de cada vez. Identificamos o tipo pela estrutura do arquivo.",
-      "openPortal": "Abrir a Área do Investidor da B3"
+      "openPortal": "Abrir a Área do Investidor da B3",
+      "screenshotNote": "As imagens mostram só a barra de navegação e o botão de download da Área do Investidor — nenhuma posição, nenhum valor, nenhum dado de conta."
     },
     "staleness": {
       "neverTitle": "Você ainda não importou nenhum extrato",

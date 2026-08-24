@@ -247,3 +247,31 @@ test('the three extracts upload together, in whatever order they were picked', a
     )
     .toBe('b3_movimentacao,b3_negociacao');
 });
+
+/**
+ * SPEC-005 AC-1 — "guided onboarding walks a first-run user through exporting
+ * all three files, **with screenshots**".
+ *
+ * The screenshots were the last thing outstanding on #8 and the reason is
+ * DV-24: a full capture of investidor.b3.com.br carries the account holder's
+ * name and every position they hold. What ships is the chrome band — the tab,
+ * the period selector and the download button — and this asserts all three are
+ * actually reachable, because a broken path or a missing file renders as a
+ * silent gap in the one screen that has to teach.
+ */
+test('the export guide shows a screenshot for each of the three extracts', async ({ signedIn }) => {
+  const { page } = signedIn;
+
+  await page.goto('/import');
+  await expect(page.getByRole('heading', { name: /como exportar/i })).toBeVisible();
+
+  for (const step of ['Movimentação', 'Negociação', 'Posição']) {
+    const image = page.getByRole('img', { name: new RegExp(`aba ${step}`, 'i') });
+    await expect(image).toBeVisible();
+
+    // Rendered, not merely present: a 404 leaves an <img> in the DOM with no
+    // pixels, which `toBeVisible` alone would accept.
+    const width = await image.evaluate((node) => (node as HTMLImageElement).naturalWidth);
+    expect(width).toBeGreaterThan(0);
+  }
+});
