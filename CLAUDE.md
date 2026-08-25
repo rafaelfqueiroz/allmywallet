@@ -6,7 +6,7 @@ Loaded at the start of every session. Orientation and the rules that are expensi
 
 **AllMyWallet** — a web app for Brazilian retail investors to consolidate stocks, FIIs, BDRs, ETFs, Tesouro Direto, CDB, LCI and LCA into one ledger, group holdings into purpose-driven wallets, and report on performance, portfolio value, earnings and composition.
 
-**Current state: pre-implementation.** The PRD, 16 specs and the engineering guidelines are complete. **No application code exists yet** — no `package.json`, no `src/`. The first implementation task is [#4](https://github.com/rafaelfqueiroz/allmywallet/issues/4) (M0 foundations). Commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) describe the intended setup; they do not run yet.
+**Current state: M0–M6 built.** All sixteen original spec tasks (#4–#19) are closed — auth, config, isolation, LGPD, import, ledger, cost basis, market data, valuation, wallets, the reporting framework and all four reports. The next milestone is **M7**: wallet balancing, buy/sell opportunity and wallet goals ([SPEC-017](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-017-Wallet-Balancing), [018](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-018-Buy-Sell-Opportunity), [019](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-019-Wallet-Goals)). Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written.
 
 ## Where the artifacts live
 
@@ -14,15 +14,15 @@ Three surfaces, each with one job. **Do not duplicate content between them** —
 
 | Surface | Holds | Source of truth for |
 |---|---|---|
-| **[Wiki](https://github.com/rafaelfqueiroz/allmywallet/wiki)** | [PRD](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD), [16 specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs), [Spec-Template](https://github.com/rafaelfqueiroz/allmywallet/wiki/Spec-Template) | *What* to build and why |
-| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | 19 issues — #1–#3 deferred infra, #4–#19 one implementation task per spec | *What is being built now* |
+| **[Wiki](https://github.com/rafaelfqueiroz/allmywallet/wiki)** | [PRD](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD), [19 specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs), [Spec-Template](https://github.com/rafaelfqueiroz/allmywallet/wiki/Spec-Template) | *What* to build and why |
+| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | #1–#3 deferred infra; #4–#19 the original spec tasks, all closed; #20+ defects and follow-ups; M7 tasks for SPEC-017/018/019 | *What is being built now* |
 | **This repo** | [`docs/guidelines/`](docs/guidelines/README.md) — architecture, development, testing | *How* to build it |
 
 Product documents are **edited in the wiki**, never mirrored here. Guidelines are edited here and reviewed in PRs.
 
 ## Working a task
 
-Each board issue #4–#19 follows a fixed five-section shape: **Description · Spec · Implementation plan · Progress log · Decision log**. That structure exists so work can be carried over between sessions or agents.
+Each spec implementation task follows a fixed five-section shape: **Description · Spec · Implementation plan · Progress log · Decision log**. That structure exists so work can be carried over between sessions or agents.
 
 1. **Read the linked spec page first.** The issue's implementation plan is a first-read plan, not the requirement. The spec's business rules and acceptance criteria are what must actually hold.
 2. **Tick the progress log as you go**, in the issue itself. An issue is complete when every item is checked, including the final "all N spec acceptance criteria verified".
@@ -141,7 +141,7 @@ The full set is [70 `AR-`, 30 `DV-`, 34 `TS-` rules](docs/guidelines/README.md).
 Worth knowing before proposing anything that contradicts them.
 
 - **B3's Área do Investidor APIs are B2B-only** — *"Não oferecemos acesso direto às APIs para pessoas físicas."* So v1 custody data comes from user-exported `.xlsx` extracts; only market data syncs automatically. An `IngestionPort` keeps the Open Finance aggregator path open as a v2 adapter. [PRD §4](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD#4-data-sourcing-strategy).
-- **The quote tier is free**: 15,000 requests/month, one ticker per call, ~30 min delay, **no dividend data**. That is a ceiling of roughly 42 distinct assets at a 30-minute cadence. Forward-looking earnings ship degraded and say so.
+- **The quote tier is free**: 15,000 requests/month, one ticker per call, ~30 min delay, **no dividend data**. That is a ceiling of roughly 51 distinct assets at a 30-minute cadence (PRD R5). Forward-looking earnings ship degraded and say so.
 - **Transactions are the single append-only source of truth.** Positions, valuations and every report figure derive from them and must always be rebuildable. Wallets are views over the ledger; they never duplicate transactions.
 - **"Patrimônio" is *Portfolio Value* in English**, never "Net Worth" — net worth is assets minus liabilities, and this product tracks no liabilities.
 - **Production only, no staging, none planned** ([BL-003](https://github.com/rafaelfqueiroz/allmywallet/issues/3)). This makes expand/contract migrations mandatory (AR-69), not a preference.
@@ -185,7 +185,7 @@ Performance budgets are **nightly and advisory**, not blocking — but the cheap
 
 ## Notes for agents
 
-- **Ask before creating a new spec or PRD section.** The PRD is traceability-checked — 181 requirements mapped to 16 specs, with no orphans. Adding requirements without updating [PRD §12](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD) breaks that.
+- **Ask before creating a new spec or PRD section.** The PRD is traceability-checked — 256 requirements mapped to 19 specs, with no orphans. Adding requirements without updating [PRD §12](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD) breaks that.
 - **`gh` is authenticated as `rafaelfqueiroz`** with the `project` scope. Board and wiki edits go through it.
 - **The wiki is a separate git repository** — `allmywallet.wiki.git`, cloned separately from the code repo.
 - **This machine runs bash 3.2.57**, which mis-parses heredocs nested inside `$( )` and `bash -n` does not catch it. Use `--body-file` with a top-level heredoc when writing issue or PR bodies.
