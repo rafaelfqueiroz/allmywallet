@@ -8,6 +8,7 @@ import type {
   ConsentRecord,
   ConsentRepository,
   ExportedAllocation,
+  ExportedWalletGoal,
   ExportedFixedIncomeContract,
   ExportedPreference,
   ExportedProfile,
@@ -66,6 +67,7 @@ export class FakePersonalDataExportPort implements PersonalDataExportPort {
   transactions: ExportedTransaction[] = [];
   wallets: ExportedWallet[] = [];
   allocations: ExportedAllocation[] = [];
+  walletGoals: ExportedWalletGoal[] = [];
   fixedIncomeContracts: ExportedFixedIncomeContract[] = [];
   preferences: ExportedPreference[] = [];
 
@@ -83,6 +85,10 @@ export class FakePersonalDataExportPort implements PersonalDataExportPort {
 
   async loadAllocations(_userId: UserId): Promise<readonly ExportedAllocation[]> {
     return this.allocations;
+  }
+
+  async loadWalletGoals(_userId: UserId): Promise<readonly ExportedWalletGoal[]> {
+    return this.walletGoals;
   }
 
   async loadFixedIncomeContracts(_userId: UserId): Promise<readonly ExportedFixedIncomeContract[]> {

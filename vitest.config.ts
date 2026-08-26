@@ -187,6 +187,10 @@ export default defineConfig({
         'src/core/positions/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
         'src/core/valuation/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
         'src/core/reporting/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
+        // SPEC-019 — a goal's progress is a figure a user reads to decide
+        // whether a plan is working. Wrong is worse than missing, so it joins
+        // the engine's gate rather than the 80 % floor.
+        'src/core/goals/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

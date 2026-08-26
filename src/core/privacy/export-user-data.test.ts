@@ -58,6 +58,19 @@ function seedFullExport(deps: ReturnType<typeof buildFakeDeps>): void {
       principal: Money.fromString('5000'),
     },
   ];
+  // SPEC-019 — a goal is tenant-scoped personal data: the name is the user's
+  // own words, the amount a target for their money.
+  deps.exportData.walletGoals = [
+    {
+      walletId: 'wallet-1',
+      name: 'Independência financeira',
+      kind: 'growth',
+      amount: Money.fromString('500000'),
+      basis: 'current_value',
+      period: null,
+      achievedOn: null,
+    },
+  ];
   deps.exportData.preferences = [{ key: 'reports.default_grouping', value: 'asset_class' }];
 }
 
@@ -159,6 +172,12 @@ describe('exportUserDataAsCsv — AC', () => {
     expect(csv).toContain('# wallets');
     expect(csv).toContain('Aposentadoria');
     expect(csv).toContain('# wallet_allocations');
+    // BR-004-11 covers *every* tenant-scoped entity. A new personal-data table
+    // shipping without an export section is how that promise quietly stops
+    // being true — SPEC-017's `wallet_targets` is already missing this way.
+    expect(csv).toContain('# wallet_goals');
+    expect(csv).toContain('Independência financeira');
+    expect(csv).toContain('500000');
     expect(csv).toContain('# fixed_income_contracts');
     expect(csv).toContain('# consents');
     expect(csv).toContain('product_analytics');

@@ -18,6 +18,7 @@ type Branded<T, B extends string> = T & { readonly [brand]: B };
 export type UserId = Branded<string, 'UserId'>;
 export type AssetId = Branded<string, 'AssetId'>;
 export type WalletId = Branded<string, 'WalletId'>;
+export type WalletGoalId = Branded<string, 'WalletGoalId'>;
 export type TransactionId = Branded<string, 'TransactionId'>;
 export type PositionId = Branded<string, 'PositionId'>;
 export type ImportBatchId = Branded<string, 'ImportBatchId'>;
@@ -56,6 +57,11 @@ export const AssetId = {
 export const WalletId = {
   of: (value: string): WalletId => brandId<WalletId>(value, 'WalletId'),
   generate: (): WalletId => uuidv7() as WalletId,
+};
+
+export const WalletGoalId = {
+  of: (value: string): WalletGoalId => brandId<WalletGoalId>(value, 'WalletGoalId'),
+  generate: (): WalletGoalId => uuidv7() as WalletGoalId,
 };
 
 export const TransactionId = {

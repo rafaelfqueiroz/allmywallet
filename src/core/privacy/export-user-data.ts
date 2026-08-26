@@ -29,15 +29,23 @@ export async function exportUserData(
   const profile = await deps.exportData.loadProfile(userId);
   if (profile === null) return null;
 
-  const [transactions, wallets, allocations, fixedIncomeContracts, preferences, consentRecords] =
-    await Promise.all([
-      deps.exportData.loadTransactions(userId),
-      deps.exportData.loadWallets(userId),
-      deps.exportData.loadAllocations(userId),
-      deps.exportData.loadFixedIncomeContracts(userId),
-      deps.exportData.loadPreferences(userId),
-      deps.consents.listForUser(userId),
-    ]);
+  const [
+    transactions,
+    wallets,
+    allocations,
+    walletGoals,
+    fixedIncomeContracts,
+    preferences,
+    consentRecords,
+  ] = await Promise.all([
+    deps.exportData.loadTransactions(userId),
+    deps.exportData.loadWallets(userId),
+    deps.exportData.loadAllocations(userId),
+    deps.exportData.loadWalletGoals(userId),
+    deps.exportData.loadFixedIncomeContracts(userId),
+    deps.exportData.loadPreferences(userId),
+    deps.consents.listForUser(userId),
+  ]);
 
   const consents: readonly ExportedConsent[] = consentRecords.map((record) => ({
     purpose: record.purpose,
@@ -64,6 +72,7 @@ export async function exportUserData(
     transactions,
     wallets,
     allocations,
+    walletGoals,
     fixedIncomeContracts,
     consents,
     preferences,
@@ -156,6 +165,26 @@ export function exportUserDataAsCsv(data: PersonalDataExport): string {
         a.assetCode,
         a.quantity.toString(),
         moneyOrEmpty(a.costBasisAtAllocation),
+      ]),
+    ),
+  );
+
+  sections.push(
+    ...section(
+      // SPEC-019. A goal's name is the user's own words and its amount is a
+      // target for their money — BR-004-05's "every tenant-scoped entity"
+      // covers it, and a new personal-data table shipping without an export
+      // section is how that promise quietly stops being true.
+      'wallet_goals',
+      ['wallet_id', 'name', 'kind', 'amount', 'basis', 'period', 'achieved_on'],
+      data.walletGoals.map((g) => [
+        g.walletId,
+        g.name,
+        g.kind,
+        g.amount.toString(),
+        g.basis ?? '',
+        g.period ?? '',
+        g.achievedOn ?? '',
       ]),
     ),
   );

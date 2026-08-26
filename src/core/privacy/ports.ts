@@ -125,6 +125,25 @@ export interface ExportedWallet {
 /** Branded only within this file's export shape — the real `WalletId` is what every other module uses; this alias just documents the field's origin at the call site. */
 export type WalletExportId = string;
 
+/**
+ * SPEC-019's `wallet_goals`. BR-004-05's export is "every tenant-scoped
+ * entity", and a goal is squarely that: `name` is text the user wrote and
+ * `amount` is a financial target for their own money.
+ *
+ * `achievedOn` is included because it is a fact about them the product
+ * recorded — the date it decided they had got there — and an export that
+ * omitted it would be an incomplete answer to "what do you hold about me".
+ */
+export interface ExportedWalletGoal {
+  readonly walletId: WalletExportId;
+  readonly name: string;
+  readonly kind: string;
+  readonly amount: Money;
+  readonly basis: string | null;
+  readonly period: string | null;
+  readonly achievedOn: BusinessDate | null;
+}
+
 export interface ExportedAllocation {
   readonly walletId: WalletExportId;
   readonly assetId: AssetId;
@@ -166,6 +185,7 @@ export interface PersonalDataExport {
   readonly transactions: readonly ExportedTransaction[];
   readonly wallets: readonly ExportedWallet[];
   readonly allocations: readonly ExportedAllocation[];
+  readonly walletGoals: readonly ExportedWalletGoal[];
   readonly fixedIncomeContracts: readonly ExportedFixedIncomeContract[];
   readonly consents: readonly ExportedConsent[];
   readonly preferences: readonly ExportedPreference[];
@@ -176,6 +196,7 @@ export interface PersonalDataExportPort {
   loadTransactions(userId: UserId): Promise<readonly ExportedTransaction[]>;
   loadWallets(userId: UserId): Promise<readonly ExportedWallet[]>;
   loadAllocations(userId: UserId): Promise<readonly ExportedAllocation[]>;
+  loadWalletGoals(userId: UserId): Promise<readonly ExportedWalletGoal[]>;
   loadFixedIncomeContracts(userId: UserId): Promise<readonly ExportedFixedIncomeContract[]>;
   loadPreferences(userId: UserId): Promise<readonly ExportedPreference[]>;
 }
