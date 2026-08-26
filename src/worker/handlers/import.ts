@@ -26,11 +26,13 @@ import {
   DrizzleAssetResolver,
   DrizzleInstitutionResolver,
 } from '@/adapters/db/ingestion-resolvers';
+import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleFixedIncomeContractRepository } from '@/adapters/db/fixed-income-contract-repository';
 import {
   DrizzlePositionQueryRepository,
   DrizzleWalletAllocationRepository,
   DrizzleWalletAssetRuleRepository,
+  DrizzleWalletTargetRepository,
   DrizzleWalletRepository,
 } from '@/adapters/db/wallet-repository';
 import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
@@ -106,7 +108,12 @@ export function buildWalletDeps(tx: Tx, userId: UserId, clock: Clock): WalletDep
     wallets: new DrizzleWalletRepository(tx, userId),
     allocations: new DrizzleWalletAllocationRepository(tx, userId),
     assetRules: new DrizzleWalletAssetRuleRepository(tx, userId),
+    targets: new DrizzleWalletTargetRepository(tx, userId),
     positionQuery: new DrizzlePositionQueryRepository(tx),
+    // AR-15: `assets` is shared reference data with no tenant column, so the
+    // catalog reads through the same handle everywhere; `tx` is a valid one and
+    // keeps this builder's signature free of a second database parameter.
+    assetCatalog: new DrizzleAssetCatalogRepository(tx),
     clock,
   };
 }

@@ -5,10 +5,12 @@ import type {
   AllocationChangeCause,
   AssetPositionQuery,
   PositionQueryPort,
+  StoredWalletTarget,
   WalletAllocation,
   WalletAllocationRepository,
   WalletAssetRuleRepository,
   WalletRepository,
+  WalletTargetRepository,
   StandingRule,
 } from '@/core/wallets/ports';
 import type { Wallet } from '@/core/wallets/wallet';
@@ -157,6 +159,51 @@ export class FakeWalletAssetRuleRepository implements WalletAssetRuleRepository 
     for (const [assetId, wallet] of this.#rows.entries()) {
       if (wallet === walletId) this.#rows.delete(assetId);
     }
+  }
+}
+
+/**
+ * SPEC-017 — the target set, in memory.
+ *
+ * `lockCount` mirrors `FakeWalletAllocationRepository.lockCount`: BR-017-04's
+ * 100 % invariant is only safe if every write path reads under the lock first,
+ * and that is a property of `core/`'s control flow, not of the SQL. A use-case
+ * test can assert it here; the real `SELECT ... FOR UPDATE` is proven against
+ * concurrent Postgres in `tests/integration/wallet-target-invariant.test.ts`.
+ */
+export class FakeWalletTargetRepository implements WalletTargetRepository {
+  #rows = new Map<string, StoredWalletTarget>();
+
+  lockCount = 0;
+
+  async listForWallet(walletId: WalletId): Promise<readonly StoredWalletTarget[]> {
+    return [...this.#rows.values()].filter((row) => row.walletId === walletId);
+  }
+
+  async listAll(): Promise<readonly StoredWalletTarget[]> {
+    return [...this.#rows.values()];
+  }
+
+  async lockForWallet(walletId: WalletId): Promise<readonly StoredWalletTarget[]> {
+    this.lockCount += 1;
+    return this.listForWallet(walletId);
+  }
+
+  async replaceForWallet(
+    walletId: WalletId,
+    targets: readonly StoredWalletTarget[],
+  ): Promise<void> {
+    for (const row of [...this.#rows.values()]) {
+      if (row.walletId === walletId) this.#rows.delete(key(row.walletId, row.assetId));
+    }
+    for (const target of targets) {
+      this.#rows.set(key(target.walletId, target.assetId), target);
+    }
+  }
+
+  /** Test setup helper — seeds rows without going through a use case. */
+  seed(...targets: readonly StoredWalletTarget[]): void {
+    for (const target of targets) this.#rows.set(key(target.walletId, target.assetId), target);
   }
 }
 

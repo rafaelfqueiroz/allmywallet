@@ -11,8 +11,10 @@ import {
   DrizzlePositionQueryRepository,
   DrizzleWalletAllocationRepository,
   DrizzleWalletAssetRuleRepository,
+  DrizzleWalletTargetRepository,
   DrizzleWalletRepository,
 } from '@/adapters/db/wallet-repository';
+import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import { allocateToWallet, computeUnassigned } from '@/core/wallets/allocate';
 import { createWallet } from '@/core/wallets/create-wallet';
@@ -98,7 +100,9 @@ describe('SPEC-010 — wallet allocation (integration)', () => {
       wallets: new DrizzleWalletRepository(tx, userId),
       allocations: new DrizzleWalletAllocationRepository(tx, userId),
       assetRules: new DrizzleWalletAssetRuleRepository(tx, userId),
+      targets: new DrizzleWalletTargetRepository(tx, userId),
       positionQuery: new DrizzlePositionQueryRepository(tx),
+      assetCatalog: new DrizzleAssetCatalogRepository(tx),
       clock,
     };
   }

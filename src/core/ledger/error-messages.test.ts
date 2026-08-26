@@ -48,6 +48,42 @@ describe('pt-BR catalogue covers every ledger and position error code', () => {
     expect(message).toContain('{date}');
   });
 
+  it('SPEC-017 AC-4 — the 100 % refusal names the shortfall or the excess', () => {
+    // "rejected at write time with the shortfall or excess named". A message
+    // that said only "as metas precisam somar 100%" would leave the user to
+    // add up their own form.
+    const message = catalogue[WalletErrorCode.TARGETS_MUST_TOTAL_100] ?? '';
+    expect(message).toContain('{total}');
+    expect(message).toContain('{difference}');
+  });
+
+  it('SPEC-017 AC-12 — no error message recommends an action', () => {
+    /**
+     * BR-017-19 / SPEC-015 BR-015-06: the feature adds arithmetic, not
+     * opinion. The human review AC-12 requires is recorded in the PR, but the
+     * refusals are the strings most likely to slip — an error is where a
+     * well-meaning "venda X para voltar à meta" reads as helpful.
+     *
+     * Scoped to SPEC-017's own codes: `INSUFFICIENT_QUANTITY` legitimately
+     * says "registre a compra que está faltando", which is about the ledger
+     * being incomplete rather than about a trade to place.
+     */
+    const advisory =
+      /\b(compre|venda|vender|comprar|aporte|aportar|rebalance|rebalancear|reduza|aumente|recomend)/i;
+    const spec017 = [
+      WalletErrorCode.TARGETS_MUST_TOTAL_100,
+      WalletErrorCode.INVALID_TARGET_PCT,
+      WalletErrorCode.DUPLICATE_TARGET_ASSET,
+      WalletErrorCode.TARGET_ASSET_NOT_TARGETABLE,
+      WalletErrorCode.TARGET_ASSET_MISSING,
+      WalletErrorCode.WALLET_HAS_NO_TARGETABLE_ASSETS,
+      WalletErrorCode.TARGET_DISCARD_NOT_CONFIRMED,
+    ];
+    for (const code of spec017) {
+      expect(advisory.test(catalogue[code] ?? ''), `${code} reads as advice`).toBe(false);
+    }
+  });
+
   it('uses no placeholder the domain does not supply', () => {
     // A placeholder with no matching context key renders as a literal
     // `{whatever}` in front of the user.
@@ -75,6 +111,16 @@ describe('pt-BR catalogue covers every ledger and position error code', () => {
         'allocated',
         'requested',
       ],
+      // SPEC-017. `TARGETS_MUST_TOTAL_100` is the one that has to interpolate:
+      // AC-4 requires the shortfall or excess to be **named**, and the domain
+      // emits it as the signed `difference` alongside the total.
+      [WalletErrorCode.TARGETS_MUST_TOTAL_100]: ['total', 'difference'],
+      [WalletErrorCode.INVALID_TARGET_PCT]: ['assetId', 'targetPct'],
+      [WalletErrorCode.DUPLICATE_TARGET_ASSET]: ['assetId'],
+      [WalletErrorCode.TARGET_ASSET_NOT_TARGETABLE]: ['walletId', 'assetId'],
+      [WalletErrorCode.TARGET_ASSET_MISSING]: ['walletId', 'assetId', 'missingCount'],
+      [WalletErrorCode.WALLET_HAS_NO_TARGETABLE_ASSETS]: ['walletId'],
+      [WalletErrorCode.TARGET_DISCARD_NOT_CONFIRMED]: ['walletId', 'discardedCount'],
     };
 
     for (const [code, keys] of Object.entries(supplied)) {

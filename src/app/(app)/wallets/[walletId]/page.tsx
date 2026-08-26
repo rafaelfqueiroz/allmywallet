@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
 import { Field } from '@/components/patterns/field';
 import { Stack } from '@/components/layout/stack';
+import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -56,9 +57,15 @@ export default async function WalletDetailPage({
       width="narrow"
       title={wallet.name}
       actions={
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/wallets">{t('walletDetailBack')}</Link>
-        </Button>
+        <Cluster gap="sm">
+          {/* SPEC-017 — the wallet's targets and the drift against them. */}
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/wallets/${wallet.id}/balance`}>{t('balanceLink')}</Link>
+          </Button>
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/wallets">{t('walletDetailBack')}</Link>
+          </Button>
+        </Cluster>
       }
     >
       <Section title={t('editTitle')}>

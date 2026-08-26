@@ -10,7 +10,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { money, quantity } from '@/db/numeric';
+import { money, quantity, rate } from '@/db/numeric';
 import { assets } from '@/db/schema/assets';
 import { users } from '@/db/schema/users';
 
@@ -35,10 +35,104 @@ export const wallets = pgTable(
     /** BR-010-02: descriptive only in v1 — never read by any calculation. */
     goal: text('goal'),
     color: text('color'),
+    /**
+     * SPEC-017 BR-017-02 — which target mode this wallet is in. Stored,
+     * because it is a **standing instruction** rather than a one-off
+     * calculation: `equal_weight` means "keep these equal", and BR-017-06 acts
+     * on it every time the wallet's asset set changes.
+     *
+     * `'none'` is the default and is what every wallet created before this
+     * column existed reads as, which is BR-017-01's "a wallet without targets
+     * behaves exactly as it does today" obtained from the schema rather than
+     * from a code path that has to remember.
+     *
+     * Mirrors `TARGET_MODES` in `core/wallets/targets.ts`. Duplicated rather
+     * than imported, exactly as `AssetClass` is in `core/quotes/ports.ts`:
+     * AR-01 forbids `core/` importing from `src/db`, and the CHECK below is
+     * the half that has to live here.
+     */
+    targetMode: text('target_mode').notNull().default('none'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('wallets_user_id_idx').on(table.userId)],
+  (table) => [
+    index('wallets_user_id_idx').on(table.userId),
+    check(
+      'wallets_target_mode_check',
+      sql`${table.targetMode} IN ('none', 'equal_weight', 'manual')`,
+    ),
+  ],
+);
+
+/**
+ * SPEC-017 DM — one row per `(wallet, asset)` the user has hand-set a target
+ * percentage for.
+ *
+ * **Rows exist in `manual` mode only.** Equal-weight stores nothing: BR-017-05
+ * derives `100 / n` on read, which is what makes BR-017-06's automatic
+ * recompute free — an asset joining an equal-weight wallet changes every
+ * target without touching a single row, so there is no migration of stored
+ * percentages to get wrong and no window in which the stored set disagrees
+ * with the wallet's actual holdings.
+ *
+ * ---------------------------------------------------------------------
+ * THE 100 % INVARIANT IS NOT ENFORCED BY THIS SCHEMA.
+ *
+ * BR-017-04: a wallet's manual targets must total **exactly** 100. That is a
+ * constraint **across rows** — `sum(target_pct) = 100` per wallet — and
+ * Postgres has no row-level CHECK that can express it. The per-row CHECK below
+ * bounds each value to 0–100 and nothing more.
+ *
+ * It is enforced in application code instead, by
+ * `WalletTargetRepository.lockForWallet` (`core/wallets/ports.ts`) taking
+ * `SELECT ... FOR UPDATE` over the wallet's target rows inside the same
+ * `withTenant` transaction as the write that follows — the same shape
+ * `wallet_allocations` uses for BR-010-05, and for the same reason: two
+ * concurrent edits that each individually total 100 would otherwise interleave
+ * into a set that does not. `tests/integration/wallet-target-invariant.test.ts`
+ * is the proof under genuinely concurrent writes.
+ *
+ * There is no phantom-row gap here, unlike `lockForAsset`: the lock is taken
+ * on the **wallet** row itself (which always exists — a target set belongs to
+ * a wallet), so a wallet with no targets yet is still serialised.
+ * ---------------------------------------------------------------------
+ */
+export const walletTargets = pgTable(
+  'wallet_targets',
+  {
+    id: uuid('id').primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    walletId: uuid('wallet_id')
+      .notNull()
+      .references(() => wallets.id, { onDelete: 'cascade' }),
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => assets.id),
+    /**
+     * BR-017-03: a percentage of **market value**, 0–100.
+     *
+     * `rate` (NUMERIC(20,8) → `Quantity`) rather than the `numeric(9,6)` the
+     * issue's data model sketched, so the column round-trips through
+     * `src/db/numeric.ts` like every other non-money decimal in the project and
+     * a percentage can never exist as a JS `number` between the database and
+     * the domain (AR-06/AR-07). The extra scale is harmless: 100 ÷ 3 is not
+     * representable at six places either, and equal-weight never stores a row
+     * at all.
+     */
+    targetPct: rate('target_pct').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('wallet_targets_wallet_id_asset_id_key').on(table.walletId, table.assetId),
+    index('wallet_targets_user_id_wallet_id_idx').on(table.userId, table.walletId),
+    check(
+      'wallet_targets_target_pct_range_check',
+      sql`${table.targetPct} >= 0 AND ${table.targetPct} <= 100`,
+    ),
+  ],
 );
 
 /**

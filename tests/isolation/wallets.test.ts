@@ -13,6 +13,7 @@ import {
   walletAllocations,
   walletAllocationEvents,
   walletAssetRules,
+  walletTargets,
 } from '@/db/schema/wallets';
 import { withTenant } from '@/db/tenant';
 import type { AssetId } from '@/core/shared/ids';
@@ -21,7 +22,8 @@ import { Money, Quantity } from '@/core/shared/money';
 
 /**
  * TS-13/TS-15 — `wallets`, `wallet_allocations`, `wallet_asset_rules`
- * (SPEC-010, #13) and `wallet_allocation_events` (SPEC-014, #17) are
+ * (SPEC-010, #13), `wallet_allocation_events` (SPEC-014, #17) and
+ * `wallet_targets` (SPEC-017, #89) are
  * tenant-scoped tables; the enumeration gate
  * (`tests/isolation/enumeration.test.ts`) blocks a merge until each is named
  * by an isolation test with its own coverage. This is that test.
@@ -31,7 +33,7 @@ import { Money, Quantity } from '@/core/shared/money';
  * sensitive as `positions` (SPEC-006/007's isolation test makes the same
  * point) and worth the same "no shortcuts" treatment.
  */
-describe('SPEC-010/014 — the wallet tables and the allocation event log, isolated', () => {
+describe('SPEC-010/014/017 — the wallet tables, the event log and the targets, isolated', () => {
   let testDb: TestDatabase;
   let appPool: Pool;
   let migratorPool: Pool;
@@ -96,6 +98,15 @@ describe('SPEC-010/014 — the wallet tables and the allocation event log, isola
           effectiveOn: '2026-03-02',
           cause: 'assignment',
         });
+        // SPEC-017: what A *intends* to hold, which is as personal as what
+        // they do hold.
+        await tx.insert(walletTargets).values({
+          id: randomUUID(),
+          userId: userA,
+          walletId: walletA,
+          assetId: petr,
+          targetPct: Quantity.fromString('100'),
+        });
       },
       appDb,
     );
@@ -123,6 +134,13 @@ describe('SPEC-010/014 — the wallet tables and the allocation event log, isola
         await tx
           .insert(walletAssetRules)
           .values({ userId: userB, assetId: petr, walletId: walletB });
+        await tx.insert(walletTargets).values({
+          id: randomUUID(),
+          userId: userB,
+          walletId: walletB,
+          assetId: petr,
+          targetPct: Quantity.fromString('35'),
+        });
         await tx.insert(walletAllocationEvents).values({
           id: randomUUID(),
           userId: userB,
@@ -317,19 +335,62 @@ describe('SPEC-010/014 — the wallet tables and the allocation event log, isola
     expect(surviving[0]?.quantity.toString()).toBe('5');
   });
 
+  /**
+   * SPEC-017. A target set states the proportions one person means to hold —
+   * their plan for their own money, at asset granularity. Leaking it is not
+   * meaningfully less exposing than leaking the allocation itself.
+   */
+  it('as tenant A, an unfiltered wallet_targets read returns only A’s targets', async () => {
+    const rows = await withTenant(userA, async (tx) => tx.select().from(walletTargets), appDb);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.walletId).toBe(walletA);
+    expect(rows[0]?.targetPct.toString()).toBe('100');
+    expect(rows.some((row) => row.targetPct.toString() === '35')).toBe(false);
+  });
+
+  it('tenant A cannot insert a wallet_target attributed to tenant B', async () => {
+    const bbas = await seedAsset(testDb.migrationUrl, 'BBAS3', 'Banco do Brasil ON');
+    await expect(
+      withTenant(
+        userA,
+        async (tx) =>
+          tx.insert(walletTargets).values({
+            id: randomUUID(),
+            userId: userB,
+            walletId: walletA,
+            assetId: bbas.id,
+            targetPct: Quantity.fromString('50'),
+          }),
+        appDb,
+      ),
+    ).rejects.toMatchObject({ cause: { code: '42501' } });
+  });
+
+  it('an aggregate over wallet_targets cannot see across the boundary (TS-14)', async () => {
+    const result = await withTenant(
+      userA,
+      async (tx) => tx.execute(sql`SELECT sum(target_pct) AS total FROM wallet_targets`),
+      appDb,
+    );
+    // A's 100 alone. B's 35 would make this 135 and would be invisible as a
+    // leak — the aggregate hides which rows it read.
+    expect((result.rows[0] as { total: string | null }).total).toBe('100.00000000');
+  });
+
   it('a query outside withTenant fails rather than returning everything (TS-16)', async () => {
     await expect(appDb.select().from(wallets)).rejects.toThrow();
     await expect(appDb.select().from(walletAllocations)).rejects.toThrow();
     await expect(appDb.select().from(walletAssetRules)).rejects.toThrow();
     await expect(appDb.select().from(walletAllocationEvents)).rejects.toThrow();
+    await expect(appDb.select().from(walletTargets)).rejects.toThrow();
   });
 
-  it('all four tables have ENABLE and FORCE row level security', async () => {
+  it('all five tables have ENABLE and FORCE row level security', async () => {
     const result = await migratorDb.execute(
       sql`SELECT relname, relrowsecurity, relforcerowsecurity
             FROM pg_class
            WHERE relname IN ('wallets', 'wallet_allocations', 'wallet_asset_rules',
-                             'wallet_allocation_events')
+                             'wallet_allocation_events', 'wallet_targets')
              AND relnamespace = 'public'::regnamespace
            ORDER BY relname`,
     );
@@ -338,14 +399,14 @@ describe('SPEC-010/014 — the wallet tables and the allocation event log, isola
       relrowsecurity: boolean;
       relforcerowsecurity: boolean;
     }>;
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(5);
     for (const row of rows) {
       expect(row.relrowsecurity, row.relname).toBe(true);
       expect(row.relforcerowsecurity, row.relname).toBe(true);
     }
   });
 
-  it('deleting the tenant root removes all four, so account deletion is complete (AR-27)', async () => {
+  it('deleting the tenant root removes all five, so account deletion is complete (AR-27)', async () => {
     const doomed = UserId.generate();
     await seedUser(testDb.migrationUrl, doomed);
     const doomedWallet = WalletId.generate();
@@ -373,6 +434,13 @@ describe('SPEC-010/014 — the wallet tables and the allocation event log, isola
         await tx
           .insert(walletAssetRules)
           .values({ userId: doomed, assetId: petr, walletId: doomedWallet });
+        await tx.insert(walletTargets).values({
+          id: randomUUID(),
+          userId: doomed,
+          walletId: doomedWallet,
+          assetId: petr,
+          targetPct: Quantity.fromString('100'),
+        });
         await tx.insert(walletAllocationEvents).values({
           id: randomUUID(),
           userId: doomed,
@@ -411,5 +479,10 @@ describe('SPEC-010/014 — the wallet tables and the allocation event log, isola
       [doomed],
     );
     expect(Number(events.rows[0]?.n)).toBe(0);
+    const targets = await migratorPool.query<{ n: string }>(
+      'SELECT count(*)::int AS n FROM wallet_targets WHERE user_id = $1',
+      [doomed],
+    );
+    expect(Number(targets.rows[0]?.n)).toBe(0);
   });
 });

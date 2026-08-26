@@ -1,4 +1,5 @@
 import type { UserId, WalletId } from '@/core/shared/ids';
+import type { TargetMode } from '@/core/wallets/targets';
 
 /**
  * SPEC-010 — a wallet is a purpose-based grouping that cuts across brokers and
@@ -11,12 +12,21 @@ export interface Wallet {
   readonly name: string;
   readonly description: string | null;
   /**
-   * BR-010-02: a stated goal. Descriptive only in v1 — never read by any
-   * calculation. Out of Scope explicitly excludes target allocations,
-   * rebalancing or "will I reach my number" projections (PRD Q6).
+   * BR-010-02: a stated goal. Descriptive only — never read by any
+   * calculation, and still not read by one: SPEC-017's targets are a separate,
+   * numeric declaration (`targetMode` below), not an interpretation of this
+   * sentence. PRD Q6, which SPEC-010's Out of Scope pointed at, is answered by
+   * SPEC-017 DL-017-01.
    */
   readonly goal: string | null;
   readonly color: string | null;
+  /**
+   * SPEC-017 BR-017-01/02 — whether this wallet declares target allocations,
+   * and how. `'none'` for every wallet that has never been given any, which is
+   * what makes BR-017-01's "behaves exactly as it does today" the default
+   * rather than a special case.
+   */
+  readonly targetMode: TargetMode;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }

@@ -90,6 +90,10 @@ const WALLET_TABLES = [
   'wallet_allocation_events',
   'wallet_allocations',
   'wallet_asset_rules',
+  // SPEC-017. Ordered before `wallets` like every other child table — the
+  // CASCADE would take it anyway, but naming it keeps the list a readable
+  // inventory of what a wallet reset actually clears.
+  'wallet_targets',
   'wallets',
 ] as const;
 
