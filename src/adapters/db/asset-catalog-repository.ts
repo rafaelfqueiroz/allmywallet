@@ -1,5 +1,6 @@
 import { eq, inArray } from 'drizzle-orm';
 import type { Database } from '@/db/client';
+import type { Tx } from '@/db/tenant';
 import { assets } from '@/db/schema/assets';
 import { AssetId } from '@/core/shared/ids';
 import type { Asset, AssetCatalogPort, AssetClass } from '@/core/quotes/ports';
@@ -15,7 +16,16 @@ import type { Asset, AssetCatalogPort, AssetClass } from '@/core/quotes/ports';
  * upserts into it rather than owning it.
  */
 export class DrizzleAssetCatalogRepository implements AssetCatalogPort {
-  constructor(private readonly db: Database) {}
+  /**
+   * `Database | Tx`, because both are correct here and callers legitimately
+   * have one or the other. `assets` carries no `user_id` and no RLS policy, so
+   * nothing about these queries depends on the tenant context a transaction
+   * would carry — but a caller already inside `withTenant` (the import worker
+   * builds every wallet port from one `Tx` so a commit and its allocations
+   * share a transaction) has no pooled handle to hand over, and manufacturing
+   * one would put this read on a second connection for no reason.
+   */
+  constructor(private readonly db: Database | Tx) {}
 
   async findByCode(code: string): Promise<Asset | null> {
     const [row] = await this.db.select().from(assets).where(eq(assets.code, code));

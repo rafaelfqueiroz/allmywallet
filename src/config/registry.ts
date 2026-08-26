@@ -206,6 +206,37 @@ export const REGISTRY = {
       'Basis points of TWR-vs-XIRR divergence before the inline explanation appears (FR-5.5).',
     range: 'integer, 1–5000 (basis points)',
   },
+  /**
+   * SPEC-017 BR-017-15 — how far a targeted asset may sit from the target the
+   * *user themselves* set before it is flagged.
+   *
+   * A config key rather than a constant for the reason SPEC-002 exists, and
+   * for one specific to this spec: SPEC-017's whole regulatory footing is that
+   * **every number originates with the user** (DL-017-01). A tolerance
+   * hard-coded in the domain would be the product volunteering a threshold —
+   * the one thing the feature is not permitted to do. `levels: ['user']` is
+   * therefore not a convenience, it is the rule: 5 is a starting point the
+   * account owner can move, and AC-9 requires moving it to change which assets
+   * flag with no deploy.
+   *
+   * Percentage **points**, not a percentage: it is compared against
+   * `|current − target|`, and both sides of that subtraction are already
+   * percentages of the wallet.
+   */
+  'wallets.drift_tolerance_pp': {
+    key: 'wallets.drift_tolerance_pp',
+    // Non-integer on purpose — 0,5 pp is a legitimate tolerance for a wallet
+    // of four assets, where a whole point is a quarter of a target. `0` is
+    // permitted and means "flag any drift at all", which is a coherent
+    // instruction rather than the disabled-by-mistake reading
+    // `quotes.cadence_minutes` had to exclude (DL-002-01).
+    schema: z.number().min(0).max(100),
+    default: 5,
+    levels: ['user'],
+    description:
+      'Percentage points of drift from a wallet target before the asset is flagged (SPEC-017 BR-017-15).',
+    range: 'number, 0–100 (percentage points)',
+  },
   'ui.theme': {
     key: 'ui.theme',
     schema: z.enum(['system', 'light', 'dark']),

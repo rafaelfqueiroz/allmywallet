@@ -8,18 +8,22 @@ import type {
   AllocationChange,
   AssetPositionQuery,
   PositionQueryPort,
+  StoredWalletTarget,
   WalletAllocation,
   WalletAllocationRepository,
   StandingRule,
   WalletAssetRuleRepository,
   WalletRepository,
+  WalletTargetRepository,
 } from '@/core/wallets/ports';
+import { isTargetMode, type TargetMode } from '@/core/wallets/targets';
 import type { Wallet } from '@/core/wallets/wallet';
 import { positions } from '@/db/schema/positions';
 import {
   walletAllocationEvents,
   walletAllocations,
   walletAssetRules,
+  walletTargets,
   wallets,
 } from '@/db/schema/wallets';
 import type { Tx } from '@/db/tenant';
@@ -59,6 +63,7 @@ export class DrizzleWalletRepository implements WalletRepository {
         description: row.description,
         goal: row.goal,
         color: row.color,
+        targetMode: row.targetMode,
         updatedAt: row.updatedAt,
       })
       .where(eq(wallets.id, wallet.id));
@@ -272,6 +277,89 @@ export class DrizzleWalletAssetRuleRepository implements WalletAssetRuleReposito
 }
 
 /**
+ * SPEC-017 — the target set's persistence, and the 100 % invariant's lock.
+ *
+ * See `core/wallets/ports.ts`'s note on `WalletTargetRepository` for why the
+ * lock is taken on the **wallet** row rather than on the target rows, and
+ * `src/db/schema/wallets.ts` for why no CHECK constraint can hold the
+ * invariant in the first place.
+ */
+export class DrizzleWalletTargetRepository implements WalletTargetRepository {
+  constructor(
+    private readonly tx: Tx,
+    private readonly userId: UserId,
+  ) {}
+
+  async listForWallet(walletId: WalletId): Promise<readonly StoredWalletTarget[]> {
+    const rows = await this.tx
+      .select()
+      .from(walletTargets)
+      .where(eq(walletTargets.walletId, walletId));
+    return rows.map(toTargetDomain);
+  }
+
+  async listAll(): Promise<readonly StoredWalletTarget[]> {
+    const rows = await this.tx.select().from(walletTargets);
+    return rows.map(toTargetDomain);
+  }
+
+  async lockForWallet(walletId: WalletId): Promise<readonly StoredWalletTarget[]> {
+    /**
+     * The wallet row, locked first and for the rest of the transaction. Every
+     * writer of this wallet's targets passes through here, so two concurrent
+     * edits serialise on this line rather than both reading a set that is
+     * stale by the time either writes.
+     *
+     * RLS still applies to a locking read — the policy's `USING` clause is
+     * evaluated before the lock is taken — so this can never lock, or even
+     * see, another tenant's wallet.
+     */
+    await this.tx.select().from(wallets).where(eq(wallets.id, walletId)).for('update');
+
+    const rows = await this.tx
+      .select()
+      .from(walletTargets)
+      .where(eq(walletTargets.walletId, walletId))
+      .for('update');
+    return rows.map(toTargetDomain);
+  }
+
+  /**
+   * Delete-then-insert inside the caller's transaction (AR-11), so the table
+   * never holds a partially applied set. An upsert per row would leave a
+   * window in which the stored percentages total something other than 100 —
+   * the exact state BR-017-04 says may not be persisted.
+   */
+  async replaceForWallet(
+    walletId: WalletId,
+    targets: readonly StoredWalletTarget[],
+  ): Promise<void> {
+    await this.tx.delete(walletTargets).where(eq(walletTargets.walletId, walletId));
+    if (targets.length === 0) return;
+
+    await this.tx.insert(walletTargets).values(
+      targets.map((target) => ({
+        // AR-25: UUIDv7, time-ordered — the set is rewritten wholesale, so
+        // every row here is a genuine insert.
+        id: uuidv7(),
+        userId: this.userId,
+        walletId,
+        assetId: target.assetId,
+        targetPct: target.targetPct,
+      })),
+    );
+  }
+}
+
+function toTargetDomain(row: typeof walletTargets.$inferSelect): StoredWalletTarget {
+  return {
+    walletId: WalletId.of(row.walletId),
+    assetId: AssetId.of(row.assetId),
+    targetPct: row.targetPct,
+  };
+}
+
+/**
  * AR-02/AR-03: the seam between wallets and SPEC-007's position cache.
  * Reads `positions` (never the ledger) and aggregates across institutions
  * with the same function SPEC-007's own reports use, so a wallet's notion of
@@ -327,9 +415,21 @@ function toWalletDomain(row: typeof wallets.$inferSelect): Wallet {
     description: row.description,
     goal: row.goal,
     color: row.color,
+    targetMode: toTargetMode(row.targetMode),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * The column is `text` with a CHECK (AR-30), so the driver hands back a plain
+ * string. The CHECK makes an unknown value unreachable through this
+ * application; falling back to `'none'` rather than throwing keeps a wallet
+ * readable if one ever arrives from a hand-run statement — with **no** targets
+ * applied, which is the only safe reading of a mode nobody understands.
+ */
+function toTargetMode(value: string): TargetMode {
+  return isTargetMode(value) ? value : 'none';
 }
 
 function toWalletRow(wallet: Wallet, userId: UserId): typeof wallets.$inferInsert {
@@ -340,6 +440,7 @@ function toWalletRow(wallet: Wallet, userId: UserId): typeof wallets.$inferInser
     description: wallet.description,
     goal: wallet.goal,
     color: wallet.color,
+    targetMode: wallet.targetMode,
     createdAt: wallet.createdAt,
     updatedAt: wallet.updatedAt,
   };

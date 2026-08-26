@@ -2,6 +2,7 @@ import {
   DrizzleAssetResolver,
   DrizzleInstitutionResolver,
 } from '@/adapters/db/ingestion-resolvers';
+import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
 import { SystemClock } from '@/core/shared/clock';
@@ -14,6 +15,7 @@ import {
   DrizzlePositionQueryRepository,
   DrizzleWalletAllocationRepository,
   DrizzleWalletAssetRuleRepository,
+  DrizzleWalletTargetRepository,
   DrizzleWalletRepository,
 } from '@/adapters/db/wallet-repository';
 import { db } from '@/db/client';
@@ -94,7 +96,9 @@ export async function withTransactionWriteDeps<T>(
         wallets: new DrizzleWalletRepository(tx, userId),
         allocations: new DrizzleWalletAllocationRepository(tx, userId),
         assetRules: new DrizzleWalletAssetRuleRepository(tx, userId),
+        targets: new DrizzleWalletTargetRepository(tx, userId),
         positionQuery: new DrizzlePositionQueryRepository(tx),
+        assetCatalog: new DrizzleAssetCatalogRepository(tx),
         clock,
       };
       return fn({

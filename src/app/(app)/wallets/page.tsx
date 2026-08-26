@@ -55,7 +55,7 @@ export default async function WalletsPage() {
     );
   }
 
-  const { comparison, unassigned, pending, standingRules, labels } =
+  const { comparison, unassigned, pending, standingRules, unbalanced, labels } =
     await loadWalletsPageData(userId);
 
   const walletOptions = comparison.map((row) => (
@@ -149,8 +149,39 @@ export default async function WalletsPage() {
       </Section>
 
       <Section title={t('needsAttentionTitle')} description={t('needsAttentionDescription')}>
+        {/*
+          SPEC-017 BR-017-17 / DL-017-08 — out-of-balance wallets land in **this**
+          queue rather than a new one. SPEC-010 BR-010-12 already established
+          one place to look for "is there anything for me to do?", and a second
+          surface splits the answer across two screens.
+
+          Rendered above the pending allocations because a wallet is a coarser
+          unit than a single unassigned holding, not because it is more urgent —
+          nothing here ranks anything.
+        */}
+        {unbalanced.length > 0 && (
+          <List gap="sm">
+            {unbalanced.map((balance) => (
+              <ListItem key={balance.walletId} separated>
+                <Cluster justify="between" gap="sm" align="baseline">
+                  <Text as="span" size="sm">
+                    {balance.outOfBalance
+                      ? t('needsAttentionOutOfBalance', { wallet: balance.walletName })
+                      : t('needsAttentionNeedsReview', { wallet: balance.walletName })}
+                  </Text>
+                  <Button asChild variant="link" size="sm">
+                    <Link href={`/wallets/${balance.walletId}/balance`}>
+                      {t('needsAttentionBalanceOpen')}
+                    </Link>
+                  </Button>
+                </Cluster>
+              </ListItem>
+            ))}
+          </List>
+        )}
+
         {pending.length === 0 ? (
-          <EmptyState title={t('needsAttentionEmpty')} />
+          unbalanced.length === 0 && <EmptyState title={t('needsAttentionEmpty')} />
         ) : (
           <List gap="lg">
             {pending.map((item) => {

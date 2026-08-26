@@ -4,12 +4,15 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { AssetId, WalletId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
+import { normalizeDecimalInput } from '@/lib/decimal-input';
 import { isErr } from '@/core/shared/result';
 import { IDLE, INVALID_INPUT, failure, type ActionState } from '@/lib/action-state';
 import { allocateToWallet } from '@/core/wallets/allocate';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { deleteWallet } from '@/core/wallets/delete-wallet';
 import { clearStandingRule, setStandingRule } from '@/core/wallets/standing-rule';
+import { TARGET_MODES, setWalletTargets, type WalletTarget } from '@/core/wallets/targets';
+import { TARGET_FIELD_PREFIX } from '@/app/(app)/wallets/target-fields';
 import { updateWallet } from '@/core/wallets/update-wallet';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
 import { requireUserId } from '@/lib/session';
@@ -189,5 +192,67 @@ export async function clearStandingRuleAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePath('/wallets');
+  return IDLE;
+}
+
+/**
+ * SPEC-017 BR-017-02/04/08 — the target editor's one action.
+ *
+ * The percentages arrive as `target:<assetId>` fields, one per targetable
+ * holding (`target-fields.ts`), which is what lets the form be generated from
+ * the wallet rather than from a fixed shape: the asset set is the user's and
+ * changes whenever they allocate something.
+ *
+ * Nothing here decides anything. It parses, and `setWalletTargets` refuses or
+ * writes — including BR-017-04's exactly-100 rule, which the form deliberately
+ * does **not** pre-check: a refusal the user can see beats a submit button that
+ * silently stays disabled with no explanation of which number is wrong.
+ */
+const SetTargetsSchema = z.object({
+  walletId: z.string(),
+  mode: z.enum(TARGET_MODES),
+  /** BR-017-08: an unchecked checkbox submits nothing at all, which is `false`. */
+  confirmDiscard: z.literal('on').optional(),
+});
+
+export async function setWalletTargetsAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await requireUserId();
+  const parsed = SetTargetsSchema.safeParse({
+    walletId: formData.get('walletId'),
+    mode: formData.get('mode'),
+    confirmDiscard: formData.get('confirmDiscard') ?? undefined,
+  });
+  if (!parsed.success) return INVALID_INPUT;
+  const walletId = WalletId.of(parsed.data.walletId);
+
+  const targets: WalletTarget[] = [];
+  for (const [field, raw] of formData.entries()) {
+    if (!field.startsWith(TARGET_FIELD_PREFIX) || typeof raw !== 'string') continue;
+    // AR-06: a pt-BR "12,5" becomes the string "12.5" and is handed to
+    // `Quantity`'s own parser. A `Number(...)` here would be the one float in
+    // the whole path, on the value every drift figure is measured against.
+    const normalized = normalizeDecimalInput(raw);
+    if (normalized === null) return INVALID_INPUT;
+    const assetId = field.slice(TARGET_FIELD_PREFIX.length);
+    if (!/^[0-9a-f-]{36}$/i.test(assetId)) return INVALID_INPUT;
+    targets.push({ assetId: AssetId.of(assetId), targetPct: Quantity.fromString(normalized) });
+  }
+
+  const result = await withWalletDeps(userId, (deps) =>
+    setWalletTargets(deps, userId, {
+      walletId,
+      mode: parsed.data.mode,
+      targets,
+      confirmDiscard: parsed.data.confirmDiscard === 'on',
+    }),
+  );
+  if (isErr(result)) return failure(result.error);
+
+  revalidatePath('/wallets');
+  revalidatePath(`/wallets/${walletId}`);
+  revalidatePath(`/wallets/${walletId}/balance`);
   return IDLE;
 }

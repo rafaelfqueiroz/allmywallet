@@ -92,6 +92,13 @@
       "when": 1787425247346,
       "tag": "0012_wallet_allocation_events",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787744666355,
+      "tag": "0013_wallet_targets",
+      "breakpoints": true
     }
   ]
 }

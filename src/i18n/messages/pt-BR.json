@@ -133,7 +133,14 @@
     "INVALID_NAME": "A carteira precisa de um nome.",
     "INVALID_ALLOCATION_QUANTITY": "A quantidade {quantity} não pode ser atribuída a uma carteira — informe um número maior que zero.",
     "ALLOCATION_EXCEEDS_HOLDINGS": "Suas carteiras ficariam com {requested} cota(s) deste ativo, mas você tem {held}. Reduza a quantidade atribuída.",
-    "WALLET_ALLOCATION_INSUFFICIENT": "Esta carteira tem {allocated} cota(s) deste ativo e a operação pede {requested}."
+    "WALLET_ALLOCATION_INSUFFICIENT": "Esta carteira tem {allocated} cota(s) deste ativo e a operação pede {requested}.",
+    "TARGETS_MUST_TOTAL_100": "As metas desta carteira somam {total}% e precisam somar exatamente 100%. Diferença: {difference} ponto(s) percentual(is).",
+    "INVALID_TARGET_PCT": "A meta {targetPct} não é válida — informe um valor entre 0 e 100.",
+    "DUPLICATE_TARGET_ASSET": "Este ativo aparece mais de uma vez na lista de metas.",
+    "TARGET_ASSET_NOT_TARGETABLE": "Este ativo não pode receber meta nesta carteira: ou é renda fixa, que fica fora das metas, ou não está atribuído a ela.",
+    "TARGET_ASSET_MISSING": "Faltam {missingCount} ativo(s) desta carteira na lista de metas. Cada ativo que pode ter meta precisa de um percentual, nem que seja 0%.",
+    "WALLET_HAS_NO_TARGETABLE_ASSETS": "Esta carteira só tem renda fixa, que fica fora das metas — não há percentual a definir aqui.",
+    "TARGET_DISCARD_NOT_CONFIRMED": "Trocar o modo apaga {discardedCount} meta(s) que você definiu à mão. Confirme para continuar."
   },
   "vocabulary": {
     "patrimonio": "Patrimônio",
@@ -173,6 +180,10 @@
       "ui.theme": {
         "label": "Tema",
         "description": "Seguir o sistema, ou fixar em claro ou escuro."
+      },
+      "wallets.drift_tolerance_pp": {
+        "label": "Tolerância de desvio (p.p.)",
+        "description": "A quantos pontos percentuais da sua meta um ativo passa a ser sinalizado."
       }
     },
     "groupingOptions": {
@@ -232,7 +243,11 @@
     "allocationsEmpty": "Nenhum ativo atribuído a esta carteira ainda.",
     "costBasisUnknown": "Custo não registrado",
     "editTitle": "Editar carteira",
-    "save": "Salvar alterações"
+    "save": "Salvar alterações",
+    "balanceLink": "Metas e desvio",
+    "needsAttentionOutOfBalance": "{wallet}: ao menos um ativo passou da tolerância que você definiu.",
+    "needsAttentionNeedsReview": "{wallet}: as metas não somam 100%.",
+    "needsAttentionBalanceOpen": "Ver metas e desvio"
   },
   "import": {
     "title": "Importar extratos B3",
@@ -970,5 +985,49 @@
     "walletScope": {
       "explanation": "Nesta carteira, cada provento é atribuído conforme o que ela tinha do ativo na data do pagamento. Remanejar um ativo hoje não muda a renda dos meses anteriores."
     }
+  },
+  "balanceamento": {
+    "title": "Metas e desvio",
+    "description": "O que você declarou para esta carteira, e a distância entre isso e o que ela tem hoje. Todo número aqui parte de uma meta que você mesmo informou.",
+    "signedOut": "Entre na sua conta para ver as metas desta carteira.",
+    "back": "Voltar à carteira",
+    "modeTitle": "Modo das metas",
+    "modeLabel": "Modo",
+    "modeNone": "Sem metas",
+    "modeEqualWeight": "Peso igual",
+    "modeManual": "Manual",
+    "modeHint": "Peso igual divide 100% pelo número de ativos e refaz a conta sozinho quando a carteira muda. Manual guarda o que você digitou e nunca altera nada por conta própria.",
+    "save": "Salvar metas",
+    "discardWarning": "Sair do modo manual apaga os {count} percentual(is) que você digitou.",
+    "discardConfirm": "Confirmo que os percentuais definidos à mão serão apagados",
+    "coverage": "As metas cobrem {covered} desta carteira; {rest} é renda fixa e fica fora da conta.",
+    "coverageAll": "As metas cobrem toda esta carteira.",
+    "coverageUnknown": "Esta carteira não tem valor de mercado hoje, então não há proporção coberta a informar.",
+    "onlyFixedIncome": "Esta carteira só tem renda fixa. Renda fixa não recebe meta: antes do vencimento ela normalmente não pode ser negociada, então um desvio contra ela não teria como ser corrigido e a carteira ficaria permanentemente sinalizada por algo fora do seu alcance.",
+    "empty": "Esta carteira ainda não tem nenhum ativo atribuído.",
+    "needsReview": "As metas desta carteira somam {total} e precisam somar 100%. Um ativo novo entra com 0% e espera a sua decisão — nada é redistribuído sozinho.",
+    "tableTitle": "Metas por ativo",
+    "tableCaption": "Meta, participação atual, desvio e distância, por ativo desta carteira",
+    "columnAsset": "Ativo",
+    "columnQuantity": "Quantidade",
+    "columnValue": "Valor",
+    "columnTarget": "Meta",
+    "columnCurrent": "Hoje",
+    "columnDrift": "Desvio",
+    "columnGapValue": "Distância em R$",
+    "columnGapShares": "Distância em cotas",
+    "unavailable": "Indisponível",
+    "unavailablePrice": "A cotação de {assets} está desatualizada ou não foi obtida. Cada percentual desta tabela é uma fração do mesmo total, e esse total inclui o ativo sem preço — então nenhum deles seria um fato sobre hoje.",
+    "unavailableNoValue": "Os ativos com meta desta carteira não têm valor de mercado hoje, então não há proporção a calcular. Uma fração de zero é indefinida, não zero.",
+    "approximate": "aproximado",
+    "approximateHint": "A cotação chega com atraso, então a quantidade de cotas é aritmética sobre um preço que já não é o do instante.",
+    "outOfTolerance": "Passou da tolerância",
+    "toleranceHint": "Tolerância atual: {tolerance} ponto(s) percentual(is), ajustável em Preferências.",
+    "untargetedTitle": "Fora das metas",
+    "untargetedDescription": "Renda fixa não recebe meta e não entra no total contra o qual os percentuais acima são calculados.",
+    "untargetedEmpty": "Nada nesta carteira fica fora das metas.",
+    "targetsTitle": "Definir metas",
+    "targetPctLabel": "Meta de {asset} (%)",
+    "noAdviceNote": "Estes números são a distância até a meta que você definiu, calculada sobre um preço já exibido. Não são uma sugestão de operação."
   }
 }

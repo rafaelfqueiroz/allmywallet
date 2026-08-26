@@ -30,6 +30,9 @@ export async function createWallet(
     description: normalizeText(input.description),
     goal: normalizeText(input.goal),
     color: normalizeText(input.color),
+    // SPEC-017 BR-017-01: targets are opt-in. A new wallet declares none, and
+    // behaves exactly as wallets did before the feature existed.
+    targetMode: 'none',
     createdAt: now,
     updatedAt: now,
   };

@@ -150,11 +150,25 @@ function PreferenceControl({
     );
   }
 
+  /*
+   * `step="any"` because the registry holds both integer keys
+   * (`import.staleness_days`) and fractional ones — SPEC-017's
+   * `wallets.drift_tolerance_pp` is a tolerance in percentage points, where
+   * 0,5 is a legitimate setting for a wallet of four assets. A number input
+   * defaults to `step="1"`, and the browser then rejects 0,5 with a message
+   * this screen never wrote and cannot explain.
+   *
+   * Nothing is loosened by it: `setConfigValue` re-validates against the key's
+   * own schema (BR-002-04), so a fraction typed into an integer key is refused
+   * server-side with the key, the value and the permitted range named — which
+   * is a better refusal than the browser's anyway.
+   */
   return (
     <Input
       {...controlProps}
       name="value"
       type="number"
+      step="any"
       defaultValue={typeof value === 'number' ? value : undefined}
       className="w-32"
     />

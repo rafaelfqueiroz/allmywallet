@@ -105,6 +105,53 @@ export interface WalletAllocationRepository {
   deleteForWallet(walletId: WalletId, change: AllocationChange): Promise<void>;
 }
 
+/**
+ * SPEC-017 — one stored manual target. Rows exist in `manual` mode only;
+ * equal weight derives `100 / n` on read and stores nothing (BR-017-05), which
+ * is what makes BR-017-06's automatic recompute free.
+ */
+export interface StoredWalletTarget {
+  readonly walletId: WalletId;
+  readonly assetId: AssetId;
+  /** BR-017-03: a percentage of market value, 0–100. */
+  readonly targetPct: Quantity;
+}
+
+/**
+ * THE 100 % INVARIANT (BR-017-04) — `sum(target_pct) = 100` per wallet — spans
+ * rows and cannot be a single-row CHECK constraint, exactly like
+ * `WalletAllocationRepository`'s sum invariant above.
+ *
+ * `lockForWallet` is how it is enforced: it must take a row lock covering the
+ * wallet's target set **inside the same `withTenant` transaction** as the write
+ * that follows (`targets.ts`'s `setWalletTargets` is the only caller, and takes
+ * it before it validates anything). Two concurrent edits then serialise rather
+ * than both reading a set that is stale by the time either writes — without it,
+ * two edits that each individually total 100 could interleave into a stored set
+ * that does not, and no constraint in the database would notice.
+ *
+ * It locks the **wallet** row rather than the target rows, which is the one
+ * place this differs from `lockForAsset`. `SELECT ... FOR UPDATE` locks only
+ * rows that exist, and a wallet defining targets for the first time has none —
+ * the phantom gap `lockForAsset` closes by also locking `positions`. A wallet
+ * always has its own row, so locking that closes the gap with no second query.
+ */
+export interface WalletTargetRepository {
+  /** Unlocked read, for display paths that do not write. */
+  listForWallet(walletId: WalletId): Promise<readonly StoredWalletTarget[]>;
+  /** Every target this tenant has, for the balance sweep behind the "Needs attention" queue. */
+  listAll(): Promise<readonly StoredWalletTarget[]>;
+  /** `SELECT ... FOR UPDATE` on the wallet — see the invariant note above. Must run inside `withTenant`. */
+  lockForWallet(walletId: WalletId): Promise<readonly StoredWalletTarget[]>;
+  /**
+   * The wallet's target set becomes exactly `targets`, in one statement pair.
+   * Replace rather than upsert: a target set is validated as a whole against
+   * BR-017-04, so persisting it a row at a time would leave the table holding
+   * sets that never totalled 100 between statements.
+   */
+  replaceForWallet(walletId: WalletId, targets: readonly StoredWalletTarget[]): Promise<void>;
+}
+
 export interface StandingRule {
   readonly assetId: AssetId;
   readonly walletId: WalletId;

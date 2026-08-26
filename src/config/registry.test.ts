@@ -22,8 +22,12 @@ describe('registry', () => {
     // so the SPEC-002 screen renders it with no other change); plus one
     // SPEC-012 addition, `reports.twr_xirr_divergence_points` — BR-012-04
     // fires an inline explanation past a threshold, and SPEC-002's whole
-    // premise is that a threshold is configuration rather than a constant.
-    expect(CONFIG_KEYS).toHaveLength(24);
+    // premise is that a threshold is configuration rather than a constant;
+    // plus one SPEC-017 addition, `wallets.drift_tolerance_pp` — BR-017-15's
+    // tolerance, which has to be the user's own number rather than one the
+    // product volunteered (DL-017-01), so it is a key at `user` level rather
+    // than a constant anywhere.
+    expect(CONFIG_KEYS).toHaveLength(25);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {
@@ -77,6 +81,12 @@ describe('registry', () => {
       // two returns separate routinely and may want a wider band before the
       // page starts explaining it to them.
       'reports.twr_xirr_divergence_points',
+      // SPEC-017 BR-017-15: how far a holding may sit from a target the user
+      // set before it is flagged. AC-9 requires changing it to change which
+      // assets flag with no deploy, which is what a registry key at `user`
+      // level buys — and DL-017-01 requires the threshold to be theirs rather
+      // than one the product volunteered.
+      'wallets.drift_tolerance_pp',
       // DS-30: the design system's theme toggle is a registry key rather than
       // a bespoke settings control, so the generated preferences screen picks
       // it up with no change of its own.
