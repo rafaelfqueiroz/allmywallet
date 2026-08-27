@@ -26,6 +26,10 @@ export type InstitutionId = Branded<string, 'InstitutionId'>;
 export type ImportRowId = Branded<string, 'ImportRowId'>;
 export type FixedIncomeContractId = Branded<string, 'FixedIncomeContractId'>;
 export type ConsentId = Branded<string, 'ConsentId'>;
+/** SPEC-018 — one price rule on one asset, for one user. */
+export type OpportunityRuleId = Branded<string, 'OpportunityRuleId'>;
+/** SPEC-018 BR-018-24 — one recorded send, keyed on the observation that caused it. */
+export type OpportunityNotificationId = Branded<string, 'OpportunityNotificationId'>;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -98,4 +102,15 @@ export const FixedIncomeContractId = {
 export const ConsentId = {
   of: (value: string): ConsentId => brandId<ConsentId>(value, 'ConsentId'),
   generate: (): ConsentId => uuidv7() as ConsentId,
+};
+
+export const OpportunityRuleId = {
+  of: (value: string): OpportunityRuleId => brandId<OpportunityRuleId>(value, 'OpportunityRuleId'),
+  generate: (): OpportunityRuleId => uuidv7() as OpportunityRuleId,
+};
+
+export const OpportunityNotificationId = {
+  of: (value: string): OpportunityNotificationId =>
+    brandId<OpportunityNotificationId>(value, 'OpportunityNotificationId'),
+  generate: (): OpportunityNotificationId => uuidv7() as OpportunityNotificationId,
 };

@@ -195,6 +195,10 @@
       "wallets.drift_tolerance_pp": {
         "label": "Tolerância de desvio (p.p.)",
         "description": "A quantos pontos percentuais da sua meta um ativo passa a ser sinalizado."
+      },
+      "notifications.opportunity_cooldown_hours": {
+        "label": "Intervalo mínimo entre e-mails (horas)",
+        "description": "Depois de um e-mail sobre um ativo, quanto tempo esperar antes de enviar outro sobre o mesmo ativo."
       }
     },
     "groupingOptions": {

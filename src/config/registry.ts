@@ -275,6 +275,75 @@ export const REGISTRY = {
     description: 'Grace window between a deletion request and irreversible purge (FR-8.12).',
     range: 'integer, 7–365',
   },
+  /**
+   * SPEC-018 BR-018-22/DL-018-05 — how long a sent opportunity email
+   * suppresses the next one for the same asset.
+   *
+   * A config key rather than a constant because the trade it encodes is a
+   * real one and the right number is not knowable in advance: BR-018-23
+   * states plainly that a *genuine* second crossing inside the window is
+   * suppressed exactly as a false one would be. If that case shows up in
+   * practice the first response is to move this number, not to ship a
+   * release.
+   *
+   * `levels: ['user']` as well as deployment, unlike every other key in this
+   * file's notification block: how often an inbox may be written to is the
+   * inbox owner's judgement, not the operator's. The floor is 1 hour rather
+   * than 0 — a zero cooldown is "email me on every state change", which
+   * BR-018-22 does not offer and which the ceiling on quote cadence would
+   * make erratic rather than responsive.
+   */
+  'notifications.opportunity_cooldown_hours': {
+    key: 'notifications.opportunity_cooldown_hours',
+    schema: z.number().int().min(1).max(720),
+    default: 24,
+    levels: ['deployment', 'user'],
+    description:
+      'Hours a sent opportunity email suppresses further email for the same asset (SPEC-018 BR-018-22).',
+    range: 'integer hours, 1–720',
+  },
+  /**
+   * SPEC-018 BR-018-27 — a do-not-disturb window, in São Paulo wall-clock
+   * time, during which no opportunity email is sent however the state moves.
+   *
+   * `null` by default, meaning no quiet window at all. That is not the same
+   * as "email at any hour": BR-018-27's *other* half — market hours — is
+   * already structural rather than configured, because evaluation happens
+   * only when a quote is written and SPEC-008 BR-008-06 writes quotes only
+   * while the B3 session is open. This key exists for the band a person wants
+   * quiet *inside* those hours, which is the only part a schedule cannot
+   * already infer.
+   *
+   * A `{ start, end }` pair of `HH:MM` strings rather than two integer keys:
+   * the two bounds are one decision and are meaningless apart, and a window
+   * whose halves could be set independently is a window that can be left
+   * half-configured between two deploys. Deployment-only — the preferences
+   * surface renders numbers, booleans, enums and arrays, and an object
+   * control does not exist there (`src/app/(settings)/preferences/page.tsx`).
+   *
+   * `start > end` is legal and means the window wraps midnight (22:00–07:00),
+   * which is the common case; `start === end` is rejected, since it reads
+   * equally as "no quiet window" (which `null` already says) and as "quiet
+   * always" (which would disable the feature's email through a value that
+   * looks like a time).
+   */
+  'notifications.quiet_hours': {
+    key: 'notifications.quiet_hours',
+    schema: z
+      .object({
+        start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+        end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+      })
+      .nullable()
+      .refine((window) => window === null || window.start !== window.end, {
+        message: 'start and end must differ',
+      }),
+    default: null,
+    levels: ['deployment'],
+    description:
+      'São Paulo wall-clock window during which no opportunity email is sent; null means none (SPEC-018 BR-018-27).',
+    range: "{ start: 'HH:MM', end: 'HH:MM' } with start ≠ end, or null",
+  },
   'features.ingestion_adapters': {
     key: 'features.ingestion_adapters',
     schema: z.boolean(),
