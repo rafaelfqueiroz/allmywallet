@@ -297,6 +297,23 @@ export const walletAllocationEvents = pgTable(
       .references(() => assets.id),
     /** The allocated quantity **after** this change. Zero means "no longer allocated". */
     quantity: quantity('quantity').notNull(),
+    /**
+     * SPEC-019 BR-019-11 — the wallet's accumulated cost of its allocated
+     * shares **after** this change, mirroring `quantity`'s semantics exactly:
+     * zero when the allocation was removed, carried alongside every other
+     * change. Added by the same migration that creates `wallet_goals`
+     * because that is the growth goal's "amount invested" line over history —
+     * `wallet_allocations.cost_basis_at_allocation` is current state only and
+     * cannot answer what was invested on any past date.
+     *
+     * Nullable, and **never backfilled** (AR-69/DV-27): there is no staging
+     * environment, so a column added to a table this large is expand-only.
+     * Every row written before this migration reads `null` here, which is the
+     * honest answer — the invested-basis line legitimately begins where the
+     * data begins, not where a backfill guessed at history the log never
+     * recorded a cost for.
+     */
+    costBasisAfter: money('cost_basis_after'),
     /** AR-29: the business date the change takes effect, never a timestamp. */
     effectiveOn: date('effective_on').notNull(),
     /**

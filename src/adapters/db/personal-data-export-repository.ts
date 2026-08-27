@@ -3,6 +3,7 @@ import { assets, institutions } from '@/db/schema/assets';
 import { transactions } from '@/db/schema/transactions';
 import { fixedIncomeContracts } from '@/db/schema/import-rows';
 import { wallets, walletAllocations } from '@/db/schema/wallets';
+import { walletGoals } from '@/db/schema/goals';
 import { configOverrides } from '@/db/schema/config';
 import { users } from '@/db/schema/users';
 import type { Tx } from '@/db/tenant';
@@ -10,6 +11,7 @@ import { AssetId, type UserId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
 import type {
   ExportedAllocation,
+  ExportedWalletGoal,
   ExportedFixedIncomeContract,
   ExportedPreference,
   ExportedProfile,
@@ -91,6 +93,30 @@ export class DrizzlePersonalDataExportRepository implements PersonalDataExportPo
       .from(wallets)
       .where(eq(wallets.userId, userId));
     return rows;
+  }
+
+  /**
+   * SPEC-019's `wallet_goals` — BR-004-05's export covers every tenant-scoped
+   * entity, and a goal is one: the name is the user's own words, the amount is
+   * a target for their money.
+   */
+  async loadWalletGoals(userId: UserId): Promise<readonly ExportedWalletGoal[]> {
+    const rows = await this.tx
+      .select({
+        walletId: walletGoals.walletId,
+        name: walletGoals.name,
+        kind: walletGoals.kind,
+        amount: walletGoals.amount,
+        basis: walletGoals.basis,
+        period: walletGoals.period,
+        achievedOn: walletGoals.achievedOn,
+      })
+      .from(walletGoals)
+      .where(eq(walletGoals.userId, userId));
+    return rows.map((row) => ({
+      ...row,
+      achievedOn: (row.achievedOn as BusinessDate | null) ?? null,
+    }));
   }
 
   async loadAllocations(userId: UserId): Promise<readonly ExportedAllocation[]> {

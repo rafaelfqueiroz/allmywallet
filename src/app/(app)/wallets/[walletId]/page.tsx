@@ -58,6 +58,10 @@ export default async function WalletDetailPage({
       title={wallet.name}
       actions={
         <Cluster gap="sm">
+          {/* SPEC-019 — the wallet's growth and earnings goals. */}
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/wallets/${wallet.id}/goals`}>{t('goalsLink')}</Link>
+          </Button>
           {/* SPEC-017 — the wallet's targets and the drift against them. */}
           <Button asChild variant="outline" size="sm">
             <Link href={`/wallets/${wallet.id}/balance`}>{t('balanceLink')}</Link>

@@ -94,6 +94,10 @@ const WALLET_TABLES = [
   // CASCADE would take it anyway, but naming it keeps the list a readable
   // inventory of what a wallet reset actually clears.
   'wallet_targets',
+  // SPEC-019. Cascades from `wallets` (unlike `wallet_allocation_events`
+  // above) — see `wallet_goals`'s own comment in `src/db/schema/goals.ts` for
+  // why a goal is allowed to disappear with the wallet it was about.
+  'wallet_goals',
   'wallets',
 ] as const;
 

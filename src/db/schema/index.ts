@@ -15,4 +15,5 @@ export * from './market';
 export * from './valuation';
 export * from './observability';
 export * from './wallets';
+export * from './goals';
 export * from './privacy';

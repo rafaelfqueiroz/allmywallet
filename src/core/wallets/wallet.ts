@@ -12,11 +12,21 @@ export interface Wallet {
   readonly name: string;
   readonly description: string | null;
   /**
-   * BR-010-02: a stated goal. Descriptive only — never read by any
-   * calculation, and still not read by one: SPEC-017's targets are a separate,
-   * numeric declaration (`targetMode` below), not an interpretation of this
-   * sentence. PRD Q6, which SPEC-010's Out of Scope pointed at, is answered by
-   * SPEC-017 DL-017-01.
+   * BR-010-02: the wallet's stated purpose, in the user's own words.
+   *
+   * **No longer the whole story.** SPEC-019 promotes BR-010-02 from
+   * descriptive to calculated (DL-019-06): a wallet's *measured* goals are
+   * rows in `wallet_goals`, each with an amount, a kind and a progress figure
+   * — `core/goals/`. This column stays as the sentence it always was, and the
+   * goals page offers it as the name of a first goal rather than duplicating
+   * it. Two fields both called "goal" on one wallet, one of them decorative,
+   * is the trap DL-019-06 exists to avoid; keeping this one as *the purpose*
+   * and putting the numbers next door is how that is avoided.
+   *
+   * Still read by no calculation. SPEC-017's targets (`targetMode` below) are
+   * a separate numeric declaration, not an interpretation of this sentence,
+   * and neither is a SPEC-019 goal. PRD Q6, which SPEC-010's Out of Scope
+   * pointed at, is answered by SPEC-017 DL-017-01.
    */
   readonly goal: string | null;
   readonly color: string | null;

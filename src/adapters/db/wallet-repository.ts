@@ -181,7 +181,13 @@ export class DrizzleWalletAllocationRepository implements WalletAllocationReposi
         },
       });
 
-    await this.recordEvent(allocation.walletId, allocation.assetId, allocation.quantity, change);
+    await this.recordEvent(
+      allocation.walletId,
+      allocation.assetId,
+      allocation.quantity,
+      allocation.costBasisAtAllocation,
+      change,
+    );
   }
 
   async delete(walletId: WalletId, assetId: AssetId, change: AllocationChange): Promise<void> {
@@ -192,7 +198,9 @@ export class DrizzleWalletAllocationRepository implements WalletAllocationReposi
     // Zero, not silence. The fold reads the latest event at or before a date;
     // with no row the last positive quantity would stand for every later date,
     // and a sold-out position would keep earning income it never received.
-    await this.recordEvent(walletId, assetId, Quantity.zero(), change);
+    // SPEC-019 BR-019-11: the invested-basis line needs the same treatment —
+    // a removed allocation has zero cost after it, not an unknown one.
+    await this.recordEvent(walletId, assetId, Quantity.zero(), Money.zero(), change);
   }
 
   async deleteForWallet(walletId: WalletId, change: AllocationChange): Promise<void> {
@@ -207,7 +215,13 @@ export class DrizzleWalletAllocationRepository implements WalletAllocationReposi
     await this.tx.delete(walletAllocations).where(eq(walletAllocations.walletId, walletId));
 
     for (const row of held) {
-      await this.recordEvent(walletId, AssetId.of(row.assetId), Quantity.zero(), change);
+      await this.recordEvent(
+        walletId,
+        AssetId.of(row.assetId),
+        Quantity.zero(),
+        Money.zero(),
+        change,
+      );
     }
   }
 
@@ -216,11 +230,19 @@ export class DrizzleWalletAllocationRepository implements WalletAllocationReposi
    * rather than of deltas: the fold that answers "what did this wallet hold on
    * that date" is then a last-value-per-key lookup with no arithmetic, and a
    * missed row costs one answer rather than every later one.
+   *
+   * SPEC-019 BR-019-11: `costBasisAfter` carries the same "after" semantics
+   * as `quantity`, added by the same migration that introduced `wallet_goals`
+   * (`0014_wallet_goals.sql`). It is `Money | null` rather than a required
+   * argument because rows written before that migration have no value here —
+   * see the column's comment in `src/db/schema/wallets.ts` for why that is
+   * expand/contract-safe and deliberately left unbackfilled.
    */
   private async recordEvent(
     walletId: WalletId,
     assetId: AssetId,
     quantity: Quantity,
+    costBasisAfter: Money | null,
     change: AllocationChange,
   ): Promise<void> {
     await this.tx.insert(walletAllocationEvents).values({
@@ -229,6 +251,7 @@ export class DrizzleWalletAllocationRepository implements WalletAllocationReposi
       walletId,
       assetId,
       quantity,
+      costBasisAfter,
       effectiveOn: change.effectiveOn,
       cause: change.cause,
     });
