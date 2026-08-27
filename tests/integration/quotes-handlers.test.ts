@@ -14,6 +14,7 @@ import {
   FakeTradingCalendar,
 } from '@/core/quotes/test-support';
 import { handleQuotesCloseCapture, handleQuotesPoll } from '@/worker/handlers/quotes';
+import type { OpportunityEvaluateJobPayload } from '@/worker/handlers/opportunity';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { resetConfigState } from '../support/reset';
 
@@ -133,6 +134,7 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
       }),
     );
     const repository = new DrizzleQuoteRepository(db);
+    const enqueuedEvaluations: OpportunityEvaluateJobPayload[] = [];
 
     await handleQuotesPoll({
       database: db,
@@ -143,11 +145,48 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
       budgetCounter: new DrizzleQuoteBudgetCounter(db),
       heldAssets,
       provider,
+      enqueueOpportunityEvaluation: async (payload) => {
+        enqueuedEvaluations.push(payload);
+      },
     });
 
     const stored = await repository.getLatestQuote(asset.id);
     expect(stored?.price.toString()).toBe('38.42');
     expect(provider.callCount).toBe(1);
+
+    // SPEC-018 BR-018-11 — a real poll enqueues evaluation for exactly the
+    // asset that just received a new quote.
+    expect(enqueuedEvaluations).toEqual([{ assetIds: [asset.id] }]);
+  });
+
+  it('SPEC-018 BR-018-11: no opportunity evaluation is enqueued when nothing was polled', async () => {
+    await seedHeldAsset('PETR4');
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const asset = await catalog.findByCode('PETR4');
+    if (!asset) throw new Error('setup failed');
+    const heldAssets = new FakeHeldAssetsPort([asset.id]);
+
+    // Session closed — `computePollingSet`/`pollHeldAsset` never run, so
+    // there is nothing new to evaluate.
+    const calendar = new FakeTradingCalendar(['2026-03-16']);
+    const provider = new FakeQuoteProvider();
+    const enqueuedEvaluations: OpportunityEvaluateJobPayload[] = [];
+
+    await handleQuotesPoll({
+      database: db,
+      clock: new FakeClock('2026-03-14T14:00:00Z'), // a Saturday
+      calendar,
+      catalog,
+      repository: new DrizzleQuoteRepository(db),
+      budgetCounter: new DrizzleQuoteBudgetCounter(db),
+      heldAssets,
+      provider,
+      enqueueOpportunityEvaluation: async (payload) => {
+        enqueuedEvaluations.push(payload);
+      },
+    });
+
+    expect(enqueuedEvaluations).toEqual([]);
   });
 
   it('BR-008-09/10: close-capture supersedes the day’s intraday quote in history, never rewriting latest_quotes', async () => {
@@ -216,6 +255,7 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
     const repository = new DrizzleQuoteRepository(db);
     const budgetCounter = new DrizzleQuoteBudgetCounter(db);
     const clock = new FakeClock('2026-03-16T14:00:00Z');
+    const enqueuedEvaluations: OpportunityEvaluateJobPayload[] = [];
     const deps = {
       database: db,
       clock,
@@ -225,6 +265,9 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
       budgetCounter,
       heldAssets,
       provider,
+      enqueueOpportunityEvaluation: async (payload: OpportunityEvaluateJobPayload) => {
+        enqueuedEvaluations.push(payload);
+      },
     };
 
     await handleQuotesPoll(deps);
@@ -232,5 +275,9 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
 
     expect(provider.callCount).toBe(1);
     expect((await budgetCounter.getUsage('2026-03')).scheduled).toBe(1);
+    // The first call polls (and enqueues); the retry finds the quote already
+    // fresh (`pollHeldAsset`'s own "already fresh" check) and polls nothing,
+    // so it enqueues nothing a second time.
+    expect(enqueuedEvaluations).toEqual([{ assetIds: [asset.id] }]);
   });
 });

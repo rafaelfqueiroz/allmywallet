@@ -1125,5 +1125,30 @@
         "notElapsed": "Ainda não ocorreu"
       }
     }
+  },
+  "email": {
+    "opportunity": {
+      "stateLabel": {
+        "buy": "compra",
+        "hold": "manutenção",
+        "sell": "venda"
+      },
+      "subjectBound": "{assetCode}: preço no seu limite de {stateLabel}",
+      "subjectDefault": "{assetCode}: preço na sua faixa padrão",
+      "bodyBound": "O preço de {assetCode} ({assetName}) está em {price} — no ou além do seu limite de {stateLabel} de {threshold}, a regra que você configurou para este ativo.",
+      "bodyDefault": "O preço de {assetCode} ({assetName}) está em {price}, dentro da faixa entre os limites que você configurou. O estado que você escolheu para essa faixa é \"{stateLabel}\".",
+      "quoteMeta": "Cotação de {quotedAt}, via {source}.",
+      "delayDisclosure": "As cotações têm um atraso de cerca de 30 minutos e só são atualizadas durante o pregão da B3 — uma oscilação que reverte dentro desse intervalo pode não ter sido observada.",
+      "notAdvice": "Esta mensagem informa apenas qual das suas próprias regras está valendo agora. A AllMyWallet não recomenda comprar, vender ou manter nenhum ativo.",
+      "unsubscribeLinkText": "Cancelar todos os avisos de oportunidade"
+    },
+    "unsubscribePage": {
+      "title": "Cancelar avisos de oportunidade",
+      "invalid": "Este link não é válido ou já foi usado. Se você ainda recebe avisos de oportunidade e quer que parem, entre na sua conta e desative o e-mail em Configurações > Privacidade.",
+      "confirmTitle": "Cancelar avisos de oportunidade",
+      "confirmBody": "Isso interrompe todo e-mail de oportunidade de compra/venda desta conta, para todos os ativos. Você pode reativar quando quiser em Configurações > Privacidade.",
+      "confirmButton": "Cancelar avisos",
+      "done": "Pronto — você não vai mais receber avisos de oportunidade por e-mail. Você pode reativar quando quiser em Configurações > Privacidade."
+    }
   }
 }

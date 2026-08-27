@@ -100,6 +100,17 @@ const KNOWN_ORPHANS: ReadonlyMap<string, string> = new Map([
   // #13 — a helper that outlived its caller; `pending.ts` computes the same
   // count locally in `walletCountFor`.
   ['walletsHoldingCount', '#13'],
+  // #90 — SPEC-018's rule-editing use case. This dispatch built the domain,
+  // the repositories and the worker/email/unsubscribe surface; the rule
+  // creation/edit form under `src/app/(app)/watch/` is explicitly the next
+  // agent's job (see the dispatch report), and `updateRule` has no caller
+  // until that form exists. `createRule`, its sibling, does not appear here:
+  // a stray mention of the identifier in `core/opportunity/errors.ts`'s doc
+  // comment on `RULE_ALREADY_EXISTS` makes this text-based scan see it as
+  // "reachable" even though nothing actually calls it yet either — worth the
+  // next agent's attention, but not this list's to correct, since fixing it
+  // means editing `core/opportunity/`, which this dispatch was told not to.
+  ['updateRule', '#90'],
 ]);
 
 function orphanedUseCases(): string[] {
