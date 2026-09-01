@@ -74,6 +74,9 @@ export function aQuote(overrides: Partial<StoredQuote>): StoredQuote {
     quotedAt: new Date('2026-03-16T13:00:00Z'),
     fetchedAt: new Date('2026-03-16T13:00:00Z'),
     source: 'brapi',
+    // The common case; a Tesouro Direto close is `tier: 'daily'` and the
+    // tests that care say so.
+    tier: 'intraday',
     ...overrides,
   };
 }

@@ -59,6 +59,28 @@ export interface WatchIneligibleAsset {
   readonly assetClass: AssetClass;
 }
 
+/**
+ * BR-018-03 — a rule whose position closed to zero. Retained, not deleted,
+ * and reactivated automatically on a rebuy; it evaluates nothing and sends
+ * nothing while it sits here.
+ *
+ * It gets its own list rather than being folded into `watched` because it has
+ * no current price, no state and no holding behind it — everything
+ * `WatchRuleRow` exists to carry. Leaving it out of the view altogether (as
+ * this file first did) made it unreachable: a user could neither see the
+ * thresholds still on file nor delete them, and would meet them again months
+ * later as an email about a rule they could not have removed.
+ */
+export interface WatchRetainedRule {
+  readonly assetId: AssetId;
+  readonly ruleId: OpportunityRuleId;
+  readonly code: string;
+  readonly name: string;
+  readonly lower: OpportunityBound | null;
+  readonly upper: OpportunityBound | null;
+  readonly defaultState: OpportunityState;
+}
+
 export interface WatchView {
   /** BR-018-01/02/20 — held, eligible, already has a rule. */
   readonly watched: readonly WatchRuleRow[];
@@ -66,6 +88,8 @@ export interface WatchView {
   readonly available: readonly WatchAvailableAsset[];
   /** Held, but no market price to watch (BR-018-02) — CDB, LCI, LCA. */
   readonly ineligible: readonly WatchIneligibleAsset[];
+  /** BR-018-03 — rules kept through a closed position, paused rather than deleted. */
+  readonly retained: readonly WatchRetainedRule[];
   /** BR-018-15/19 — the same `quotes.cadence_minutes` SPEC-008 polls at, for the delay disclosure. */
   readonly delayMinutes: number;
   /** BR-018-25/26 — whether `email_reminders` is currently granted, so the page can point at `/privacy` rather than imply email is on when it is off. */
@@ -115,6 +139,8 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
       const watched: WatchRuleRow[] = [];
       const available: WatchAvailableAsset[] = [];
       const ineligible: WatchIneligibleAsset[] = [];
+      const retained: WatchRetainedRule[] = [];
+      const heldAssetIds = new Set(heldNonZero.map((row) => row.assetId));
 
       for (const holding of heldNonZero) {
         const asset = assetsById.get(holding.assetId);
@@ -154,10 +180,28 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
         }
       }
 
+      // BR-018-03 — every rule on an asset this user no longer holds. Read
+      // from `allRules` rather than from the holdings loop above, which by
+      // construction can only see assets that *are* held.
+      for (const rule of allRules) {
+        if (heldAssetIds.has(rule.assetId)) continue;
+        const asset = assetsById.get(rule.assetId);
+        retained.push({
+          assetId: rule.assetId,
+          ruleId: rule.id,
+          code: asset?.code ?? '—',
+          name: asset?.name ?? '—',
+          lower: rule.lower,
+          upper: rule.upper,
+          defaultState: rule.defaultState,
+        });
+      }
+
       return {
         watched,
         available,
         ineligible,
+        retained,
         delayMinutes: cadenceCfg.value,
         emailConsented:
           consent !== null && consent.grantedAt !== null && consent.revokedAt === null,

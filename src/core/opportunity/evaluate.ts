@@ -61,7 +61,21 @@ export function evaluateRule(
   timing: EvaluationTiming,
 ): EvaluatedResult {
   if (quote === null) return { state: 'unknown' };
-  if (isQuoteStale(timing.sessionOpen, timing.cadenceMinutes, timing.now, quote.fetchedAt)) {
+  /*
+   * BR-018-16 — "stale beyond **its tier**". The cadence test belongs to the
+   * intraday tier and only to it: a `daily` quote is a published close, which
+   * is republished once a day and is the price every other screen shows for
+   * that asset until the next one lands (`core/valuation/tesouro.ts`). Timing
+   * it against `quotes.cadence_minutes` would report a Tesouro Direto holding
+   * as `unknown` within half an hour of every session opening, while
+   * Patrimônio priced the very same position from the very same row without
+   * qualification — two screens disagreeing about one asset, which is the
+   * outcome BR-018-14 exists to rule out.
+   */
+  if (
+    quote.tier === 'intraday' &&
+    isQuoteStale(timing.sessionOpen, timing.cadenceMinutes, timing.now, quote.fetchedAt)
+  ) {
     return { state: 'unknown' };
   }
 

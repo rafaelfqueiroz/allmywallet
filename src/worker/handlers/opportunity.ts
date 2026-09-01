@@ -6,6 +6,7 @@ import { SystemClock, type Clock } from '@/core/shared/clock';
 import { AssetId, UserId } from '@/core/shared/ids';
 import { evaluateOpportunities } from '@/core/opportunity/run-evaluation';
 import type { OpportunityDependencies } from '@/core/opportunity/dependencies';
+import type { OpportunityNotifier } from '@/core/opportunity/ports';
 import type { QuietHoursWindow } from '@/core/opportunity/notify';
 import type { TradingCalendar } from '@/core/quotes/ports';
 import { resolveConfig } from '@/config/resolve';
@@ -62,6 +63,14 @@ export interface OpportunityHandlerDeps {
    * two config reads below.
    */
   readonly depsFor: (tx: Tx, userId: UserId) => OpportunityDependencies;
+  /**
+   * Delivery, deliberately outside `depsFor` and therefore outside the tenant
+   * transaction. `evaluateOpportunities` returns the alerts it claimed and
+   * this sends them once that transaction has committed — see that function's
+   * own doc comment for why an email must not be sent from inside something
+   * that can still roll back.
+   */
+  readonly notifier: OpportunityNotifier;
 }
 
 function resolveDeps(overrides?: Partial<OpportunityHandlerDeps>): OpportunityHandlerDeps {
@@ -81,6 +90,7 @@ function resolveDeps(overrides?: Partial<OpportunityHandlerDeps>): OpportunityHa
     database,
     clock,
     calendar,
+    notifier: overrides?.notifier ?? notifier,
     depsFor:
       overrides?.depsFor ??
       ((tx, userId) => ({
@@ -89,7 +99,6 @@ function resolveDeps(overrides?: Partial<OpportunityHandlerDeps>): OpportunityHa
         quotes,
         catalog,
         notificationLog: new DrizzleOpportunityNotificationLog(tx, userId),
-        notifier,
         consents: new DrizzleConsentRepository(tx, userId),
         clock,
       })),
@@ -113,7 +122,7 @@ export async function handleOpportunityEvaluate(
   payload: OpportunityEvaluateJobPayload,
   overrides?: Partial<OpportunityHandlerDeps>,
 ): Promise<void> {
-  const { database, clock, calendar, depsFor } = resolveDeps(overrides);
+  const { database, clock, calendar, depsFor, notifier } = resolveDeps(overrides);
   const assetIds = payload.assetIds.map((id) => AssetId.of(id));
   if (assetIds.length === 0) return;
 
@@ -161,7 +170,30 @@ export async function handleOpportunityEvaluate(
         database,
       );
       evaluated += summary.evaluated;
-      sent += summary.sent;
+
+      /*
+       * Commit, then send. `withTenant` has returned by this point, so every
+       * claim in `summary.alerts` is durably committed and no later failure
+       * can take it back — which is what makes a failed delivery lose one
+       * message rather than resurface as a duplicate on the next poll
+       * (DL-018-08, and `evaluateOpportunities`'s own doc comment).
+       *
+       * Each send is guarded on its own: one asset's delivery failing must
+       * not cost the other assets in the same pass their email, and must not
+       * abort the tenant walk either.
+       */
+      for (const alert of summary.alerts) {
+        try {
+          await notifier.sendStateChange(userId, alert);
+          sent += 1;
+        } catch (error) {
+          failures += 1;
+          logger.error(
+            { queue: 'opportunity.evaluate', userId, state: alert.state, err: error },
+            'opportunity.evaluate: state change claimed but delivery failed',
+          );
+        }
+      }
     } catch (error) {
       failures += 1;
       // AR-39/BR-004-04: the tenant id is a UUID, not personal data, and

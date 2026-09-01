@@ -37,12 +37,25 @@ export class LogEmailSender implements OpportunityNotifier {
     const unsubscribeUrl = `${appOrigin()}/unsubscribe?token=${encodeURIComponent(token)}`;
     const rendered = renderOpportunityEmail(alert, unsubscribeUrl);
 
+    /*
+     * AR-49/BR-004-04 — deliberately **not** the asset code, and not the
+     * subject line either, which contains it. A hashed user id is
+     * pseudonymous on its own; a hashed user id beside a ticker is a record
+     * that this person holds that ticker, sitting in a log stream that is
+     * neither RLS-scoped nor covered by SPEC-004's export and deletion
+     * rights. `LogGoalNotificationAdapter` logs an opaque id for the same
+     * reason. The state alone says nothing about who holds what.
+     *
+     * `subjectLength`/`bodyLength` are here so a rendering failure — an empty
+     * body, an unsubstituted placeholder — is still visible in the log
+     * without the content itself being in it.
+     */
     logger.info(
       {
         userIdHash: hashUserId(userId),
-        assetCode: alert.assetCode,
         state: alert.state,
-        subject: rendered.subject,
+        subjectLength: rendered.subject.length,
+        bodyLength: rendered.text.length,
       },
       'SPEC-018 BR-018-25/DL-018-07: opportunity state change — email rendered, not sent (no email provider configured)',
     );

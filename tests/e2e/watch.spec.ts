@@ -76,9 +76,9 @@ test.describe('SPEC-018 — Observar preços', () => {
     // BR-018-05/06/07 — both bounds, each with the user's own chosen meaning,
     // and a default band between them.
     await form.getByLabel('Limite inferior (R$)').fill('30,00');
-    await form.getByLabel('Abaixo deste limite, o preço significa').selectOption('buy');
+    await form.getByLabel('Neste limite ou abaixo dele, o preço significa').selectOption('buy');
     await form.getByLabel('Limite superior (R$)').fill('40,00');
-    await form.getByLabel('Acima deste limite, o preço significa').selectOption('sell');
+    await form.getByLabel('Neste limite ou acima dele, o preço significa').selectOption('sell');
     await form.getByLabel('Entre os dois limites, o preço significa').selectOption('hold');
     await form.getByRole('button', { name: 'Criar regra' }).click();
 
@@ -150,6 +150,11 @@ test.describe('SPEC-018 — Observar preços', () => {
 
     const row = page.getByRole('listitem').filter({ hasText: code });
     await expect(row.getByText(/não tem preço de mercado/i)).toBeVisible();
+
+    // The other half of AC-2, and the half worth having: the message is only
+    // honest if there is genuinely no way to configure a rule from here.
+    await expect(row.getByRole('button', { name: 'Criar regra' })).toHaveCount(0);
+    await expect(row.getByLabel('Limite inferior (R$)')).toHaveCount(0);
   });
 
   test('has no accessibility violations', async ({ signedIn }) => {

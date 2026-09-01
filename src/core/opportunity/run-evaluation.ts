@@ -27,29 +27,56 @@ export interface EvaluationSummary {
   readonly evaluated: number;
   /** Rules whose evaluated state is a real, different state from their previously persisted one. */
   readonly changed: number;
-  readonly sent: number;
+  /**
+   * Changes this pass **claimed** in the notification log, and therefore owes
+   * an email for. Not "sent" — see `alerts` below, and this function's own
+   * doc comment for why the send is not this function's to perform.
+   */
+  readonly claimed: number;
   /** A real change (see `changed`) that produced no email for a BR-018-25/26/27 policy reason. */
   readonly suppressed: number;
+  /**
+   * The messages this pass claimed, for the caller to deliver **after** the
+   * transaction this ran in has committed. One entry per `claimed`.
+   */
+  readonly alerts: readonly OpportunityAlert[];
 }
 
-const EMPTY_SUMMARY: EvaluationSummary = { evaluated: 0, changed: 0, sent: 0, suppressed: 0 };
+const EMPTY_SUMMARY: EvaluationSummary = {
+  evaluated: 0,
+  changed: 0,
+  claimed: 0,
+  suppressed: 0,
+  alerts: [],
+};
 
 /**
  * One evaluation pass over a set of assets that just received a quote.
  *
  * **Idempotent under pg-boss retry (AR-19).** Running this twice over the
- * same stored quote sends exactly one email: `OpportunityNotificationLog
+ * same stored quote claims exactly one email: `OpportunityNotificationLog
  * .claim` is keyed on `(ruleId, state, quote.quotedAt)`, so a retried call
- * recomputes the identical key, finds it already claimed, and skips the send
- * — see `ports.ts` and DL-018-08. `recordObservation` (which advances the
- * persisted `lastState`) is written *after* the claim/send step for every
- * rule, specifically so that a crash between "decide to send" and "claim
- * succeeded" leaves `lastState` untouched: a retry then recomputes the same
- * `state_changed` decision from the same prior state, rather than reading
- * the new state back as `lastState` and concluding — wrongly — that nothing
- * changed and no email is owed. A crash *after* the claim succeeds is safe
- * the other way: the retry's `claim` call reports `false` (already claimed)
- * and the loop proceeds straight to `recordObservation`.
+ * recomputes the identical key, finds it already claimed, and returns no
+ * alert for it — see `ports.ts` and DL-018-08.
+ *
+ * **This function does not send anything, and that is the whole point.** It
+ * returns the alerts it claimed and leaves delivery to the caller, because
+ * every write above runs inside one tenant transaction (`withTenant`,
+ * AR-11) and an email is not transactional. Sending from in here would put
+ * an unrecoverable side effect inside something that can still roll back:
+ * one rule's send failing would discard the *previous* rule's committed
+ * claim along with the whole pass's `lastState` advances, and the next poll
+ * would then re-evaluate against the stale prior state, find a fresh
+ * `quotedAt`, claim a new key and send the same crossing twice — precisely
+ * the duplicate DL-018-08 exists to prevent. It would also hold a pooled
+ * connection and the transaction's locks open across an SMTP round trip.
+ *
+ * So the ordering that matters is the caller's: commit, then send. That
+ * makes delivery at-most-once — a crash between the commit and the send
+ * loses one message, and the log's committed claim means it is never
+ * re-sent. That is the direction DL-018-08 chooses deliberately: the spec's
+ * acceptance criteria ask for "exactly one email" and "no duplicate on
+ * re-run", and a duplicate reaching an inbox is the failure it names.
  */
 export async function evaluateOpportunities(
   deps: OpportunityDependencies,
@@ -90,8 +117,8 @@ export async function evaluateOpportunities(
   const consented = consent !== null && consent.grantedAt !== null && consent.revokedAt === null;
 
   let changed = 0;
-  let sent = 0;
   let suppressed = 0;
+  const alerts: OpportunityAlert[] = [];
 
   for (const rule of rules) {
     const quote = quotesByAsset.get(rule.assetId) ?? null;
@@ -141,7 +168,7 @@ export async function evaluateOpportunities(
           sentAt: now,
         });
         if (claimed) {
-          const alert: OpportunityAlert = {
+          alerts.push({
             assetCode: asset.code,
             assetName: asset.name,
             price: result.quote.price,
@@ -150,9 +177,8 @@ export async function evaluateOpportunities(
             state: result.state,
             matched: result.matched,
             threshold: result.threshold,
-          };
-          await deps.notifier.sendStateChange(userId, alert);
-          sent += 1;
+            delayMinutes: options.cadenceMinutes,
+          });
         }
       }
     } else if (
@@ -168,11 +194,13 @@ export async function evaluateOpportunities(
     // changed, so `lastEvaluatedAt` always reflects the last time a usable
     // quote was actually evaluated.
     //
-    // Ordered after the notification decision above, not before — see this
-    // function's own doc comment for why that order is what makes a retry
-    // safe rather than merely idempotent-looking.
+    // Ordered after the claim above, not before, so a failure while claiming
+    // leaves `lastState` untouched: the retry then recomputes the same
+    // `state_changed` decision from the same prior state, rather than reading
+    // the new state back and concluding that nothing changed and no email is
+    // owed.
     await deps.rules.recordObservation(rule.id, result.state, now);
   }
 
-  return { evaluated: rules.length, changed, sent, suppressed };
+  return { evaluated: rules.length, changed, claimed: alerts.length, suppressed, alerts };
 }

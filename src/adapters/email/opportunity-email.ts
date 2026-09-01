@@ -80,7 +80,7 @@ export function renderOpportunityEmail(
   }
 
   const quoteMeta = t('quoteMeta', { quotedAt, source: alert.source });
-  const delayDisclosure = t('delayDisclosure');
+  const delayDisclosure = t('delayDisclosure', { minutes: alert.delayMinutes });
   const notAdvice = t('notAdvice');
   const unsubscribeLinkText = t('unsubscribeLinkText');
 

@@ -22,6 +22,11 @@ function aBoundAlert(overrides: Partial<OpportunityAlert> = {}): OpportunityAler
     state: 'buy',
     matched: 'lower',
     threshold: Money.fromString('30'),
+    // BR-018-15 — the cadence the disclosure quotes. Not 30: the degraded
+    // value (BR-008-22) is the interesting case, and pinning it to something
+    // other than the default is what would catch a renderer that hardcoded
+    // the number back.
+    delayMinutes: 60,
     ...overrides,
   };
 }
@@ -105,10 +110,14 @@ describe('renderOpportunityEmail — BR-018-28 (no CPF, no position size, no por
     }
   });
 
-  it('discloses the quote’s own timestamp, source and the ~30 minute delay (BR-018-15)', () => {
+  it('discloses the quote’s own timestamp, source and the delay it was read at (BR-018-15)', () => {
     const rendered = renderOpportunityEmail(aBoundAlert(), UNSUBSCRIBE_URL);
     expect(rendered.text).toContain('brapi_free');
-    expect(rendered.text).toMatch(/30 minutos/);
+    // The alert's own `delayMinutes` (60 here — a degraded cadence, BR-008-22),
+    // not a constant: a message quoting 30 while the screen quotes 60 would be
+    // the product disagreeing with itself about how old the price is.
+    expect(rendered.text).toMatch(/60 minutos/);
+    expect(rendered.text).not.toMatch(/30 minutos/);
   });
 
   it('carries an unsubscribe link built from the caller-supplied URL', () => {

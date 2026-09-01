@@ -1,7 +1,7 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
-import { latestQuotes } from '@/db/schema/market';
+import { latestQuotes, priceQuotes } from '@/db/schema/market';
 import { positions } from '@/db/schema/positions';
 import { assets } from '@/db/schema/assets';
 import { AssetId, type UserId } from '@/core/shared/ids';
@@ -39,6 +39,57 @@ export class DrizzleStoredQuoteReader implements StoredQuoteReader {
         quotedAt: row.quotedAt,
         fetchedAt: row.fetchedAt,
         source: row.source,
+        tier: 'intraday',
+      });
+    }
+
+    /*
+     * BR-018-02 admits Tesouro Direto, and Tesouro Direto has **no row in
+     * `latest_quotes`, ever**: `derivePollingSet` polls only
+     * stock/FII/BDR/ETF (SPEC-008 BR-008-11, `core/quotes/polling-set.ts`)
+     * and `tesouro.sync` writes the daily file into `price_quotes` instead.
+     * Reading only the table above would therefore hand every Tesouro rule a
+     * `null` quote for the rest of time — a rule the product offers, accepts,
+     * and can never evaluate. That is exactly the failure this spec's own Out
+     * of Scope section refuses ("offering one would ship a rule that silently
+     * never fires"), and it would be invisible: the badge would just read
+     * "sem cotação válida" forever.
+     *
+     * So an asset with no intraday quote falls back to its most recent
+     * published close — the same row `core/valuation/tesouro.ts` prices the
+     * position from, which is what BR-018-14 requires: one stored price, so
+     * no two screens can disagree. Marked `daily`, because `evaluate.ts`
+     * must not time a once-a-day close against an intraday cadence.
+     *
+     * This is a fallback rather than a class check: an asset class is not
+     * this adapter's business, and "no intraday quote, but a close exists" is
+     * the precise condition either way.
+     */
+    const missing = [...assetIds].filter((assetId) => !result.has(assetId));
+    if (missing.length === 0) return result;
+
+    const closes = await this.db
+      .select()
+      .from(priceQuotes)
+      .where(inArray(priceQuotes.assetId, missing))
+      .orderBy(priceQuotes.assetId, desc(priceQuotes.date));
+
+    for (const row of closes) {
+      const assetId = AssetId.of(row.assetId);
+      // Ordered newest-first per asset, so the first row seen for an asset is
+      // its latest close and every later one is history.
+      if (result.has(assetId)) continue;
+      // `price_quotes.date` is a business date (AR-29), not an instant: the
+      // close is *of* that day, with no meaningful time of day. Read at
+      // midnight UTC so both timestamps below are honest about that rather
+      // than implying a precision the row does not carry.
+      const closedAt = new Date(`${row.date}T00:00:00.000Z`);
+      result.set(assetId, {
+        price: row.close,
+        quotedAt: closedAt,
+        fetchedAt: closedAt,
+        source: row.source,
+        tier: 'daily',
       });
     }
     return result;

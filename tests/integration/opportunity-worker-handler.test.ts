@@ -181,10 +181,14 @@ describe('SPEC-018 — handleOpportunityEvaluate (integration)', () => {
     const calendar = new FakeTradingCalendar(['2026-03-16']);
     calendar.sessionOpenOverride = true;
 
-    const notifiers = new Map<UserId, FakeOpportunityNotifier>([
-      [userA, new FakeOpportunityNotifier()],
-      [userB, new FakeOpportunityNotifier()],
-    ]);
+    /*
+     * One notifier for the whole run, not one per tenant: delivery is the
+     * handler's own step, performed after each tenant's transaction commits
+     * (`worker/handlers/opportunity.ts`), so `sent[i].userId` is what says
+     * which tenant a message was for. A per-tenant map would have hidden a
+     * handler that sent every tenant's alert to the wrong one.
+     */
+    const notifier = new FakeOpportunityNotifier();
 
     /**
      * **Why this test opens a second, dedicated `Pool`/`Database` (`handlerPool`)
@@ -233,15 +237,12 @@ describe('SPEC-018 — handleOpportunityEvaluate (integration)', () => {
       tx: Parameters<Parameters<typeof handlerDb.transaction>[0]>[0],
       userId: UserId,
     ): OpportunityDependencies {
-      const notifier = notifiers.get(userId);
-      if (notifier === undefined) throw new Error(`no fake notifier seeded for ${userId}`);
       return {
         rules: new DrizzleOpportunityRuleRepository(tx, userId),
         heldAssets: new DrizzleHeldAssetReader(tx, userId),
         quotes: new DrizzleStoredQuoteReader(handlerDb),
         catalog: new DrizzleAssetCatalogRepository(handlerDb),
         notificationLog: new DrizzleOpportunityNotificationLog(tx, userId),
-        notifier,
         consents: new DrizzleConsentRepository(tx, userId),
         clock,
       };
@@ -250,18 +251,20 @@ describe('SPEC-018 — handleOpportunityEvaluate (integration)', () => {
     try {
       await handleOpportunityEvaluate(
         { assetIds: [assetId] },
-        { database: handlerDb, clock, calendar, depsFor },
+        { database: handlerDb, clock, calendar, depsFor, notifier },
       );
     } finally {
       await handlerPool.end();
     }
 
     // userA consented — exactly one email, addressed to userA.
-    expect(notifiers.get(userA)?.sent).toHaveLength(1);
-    expect(notifiers.get(userA)?.sent[0]?.userId).toBe(userA);
-    expect(notifiers.get(userA)?.sent[0]?.alert.state).toBe('buy');
+    expect(notifier.sent).toHaveLength(1);
+    expect(notifier.sent[0]?.userId).toBe(userA);
+    expect(notifier.sent[0]?.alert.state).toBe('buy');
     // userB never consented — the state still advances (BR-018-20), but no email.
-    expect(notifiers.get(userB)?.sent).toHaveLength(0);
+    // Tenant B reached no sendable state, so nothing in the one shared inbox
+    // above belongs to them.
+    expect(notifier.sent.filter((entry) => entry.userId === userB)).toHaveLength(0);
 
     const ruleB = await withTenant(
       userB,

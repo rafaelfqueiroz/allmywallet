@@ -10,12 +10,14 @@ import { ConsentId, PositionId, UserId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { isErr, isOk } from '@/core/shared/result';
 import { evaluateOpportunities } from '@/core/opportunity/run-evaluation';
-import type { EvaluateOpportunitiesOptions } from '@/core/opportunity/run-evaluation';
+import type {
+  EvaluateOpportunitiesOptions,
+  EvaluationSummary,
+} from '@/core/opportunity/run-evaluation';
 import { createRule } from '@/core/opportunity/rule';
 import type { OpportunityDependencies } from '@/core/opportunity/dependencies';
 import { OpportunityErrorCode } from '@/core/opportunity/errors';
-import { FakeOpportunityNotifier } from '@/core/opportunity/test-support';
-import { FakeQuoteProvider } from '@/core/quotes/test-support';
+import type { OpportunityAlert } from '@/core/opportunity/ports';
 import { revokeConsent } from '@/core/privacy/consent';
 import type { PrivacyDependencies } from '@/core/privacy/dependencies';
 import {
@@ -32,6 +34,7 @@ import {
 } from '@/adapters/db/opportunity-read-adapters';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
+import { DrizzleQuoteBudgetCounter } from '@/adapters/db/quote-budget-counter';
 import { DrizzleConsentRepository } from '@/adapters/db/consent-repository';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { resetLedger, resetOpportunity, resetUsers, resetConsents } from '../support/reset';
@@ -144,21 +147,40 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     );
   }
 
-  function depsFor(
-    tx: Tx,
-    notifier: FakeOpportunityNotifier,
-    clock: FakeClock,
-  ): OpportunityDependencies {
+  function depsFor(tx: Tx, clock: FakeClock): OpportunityDependencies {
     return {
       rules: new DrizzleOpportunityRuleRepository(tx, userId),
       heldAssets: new DrizzleHeldAssetReader(tx, userId),
       quotes: new DrizzleStoredQuoteReader(db),
       catalog: new DrizzleAssetCatalogRepository(db),
       notificationLog: new DrizzleOpportunityNotificationLog(tx, userId),
-      notifier,
       consents: new DrizzleConsentRepository(tx, userId),
       clock,
     };
+  }
+
+  /**
+   * One evaluation pass, in the shape `worker/handlers/opportunity.ts`
+   * performs it: the tenant transaction commits, and only then are the
+   * alerts it claimed delivered. `delivered` accumulates across passes the
+   * way an inbox does, which is what makes "exactly one email" (AC-11) and
+   * "no duplicate on re-run" (AC-13) assertable at this level rather than
+   * against a notifier that would have been called from inside a transaction
+   * that can still roll back.
+   */
+  async function evaluatePass(
+    clock: FakeClock,
+    assetIds: readonly AssetId[],
+    delivered: OpportunityAlert[],
+    options: EvaluateOpportunitiesOptions = OPTIONS,
+  ): Promise<EvaluationSummary> {
+    const summary = await withTenant(
+      userId,
+      (tx) => evaluateOpportunities(depsFor(tx, clock), userId, assetIds, options),
+      db,
+    );
+    delivered.push(...summary.alerts);
+    return summary;
   }
 
   async function setQuote(assetId: AssetId, price: string, fetchedAt: Date): Promise<void> {
@@ -184,39 +206,53 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     const clock = new FakeClock('2026-03-16T13:00:00Z');
     await setQuote(stock.id, '35', clock.now());
 
-    const notifier = new FakeOpportunityNotifier();
-    // Present in the test's scope, never wired into `OpportunityDependencies`
-    // — there is no port for it to be wired into (`dependencies.ts`'s own
-    // doc comment). Its count staying at zero after a full pass is the
-    // acceptance criterion's own wording: "assert the count is unchanged".
-    const provider = new FakeQuoteProvider();
+    const delivered: OpportunityAlert[] = [];
+    /*
+     * "The request count is unchanged" measured against the thing that
+     * actually counts requests: `quote_budget_usage`, which SPEC-008
+     * increments once per successful provider call (BR-008-19/20,
+     * `pollHeldAsset`). A fake provider handed to nobody would report zero
+     * calls however this code behaved — it is not wired into
+     * `OpportunityDependencies` and cannot be, since there is no port there
+     * to hold it (`dependencies.ts`). This counter is real, shared, and is
+     * the number the budget alarm itself reads, so a regression that found
+     * some way to fetch a quote from an evaluation would move it.
+     */
+    const budget = new DrizzleQuoteBudgetCounter(db);
+    const yearMonth = clock.today().slice(0, 7);
+    const before = await budget.getUsage(yearMonth);
 
     await withTenant(
       userId,
       async (tx) => {
-        const created = await createRule(depsFor(tx, notifier, clock), userId, {
+        const created = await createRule(depsFor(tx, clock), userId, {
           assetId: stock.id,
           lower: { price: Money.fromString('30'), state: 'buy' },
         });
         expect(isOk(created)).toBe(true);
-        await evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS);
+        await evaluateOpportunities(depsFor(tx, clock), userId, [stock.id], OPTIONS);
       },
       db,
     );
 
-    expect(provider.callCount).toBe(0);
+    // A full cycle: the rule was created, a quote read, a state evaluated and
+    // persisted, and an alert claimed — with no provider request behind any
+    // of it.
+    const after = await budget.getUsage(yearMonth);
+    expect(after).toEqual(before);
+    expect(delivered).toHaveLength(0); // first observation, baseline only
   });
 
   it('AC-11/AC-13: a state change with consent sends exactly one email; re-running over the same quote sends none', async () => {
     await seedPosition(stock.id, '100');
     await grantEmailConsent();
     const clock = new FakeClock('2026-03-16T13:00:00Z');
-    const notifier = new FakeOpportunityNotifier();
+    const delivered: OpportunityAlert[] = [];
 
     await withTenant(
       userId,
       (tx) =>
-        createRule(depsFor(tx, notifier, clock), userId, {
+        createRule(depsFor(tx, clock), userId, {
           assetId: stock.id,
           lower: { price: Money.fromString('30'), state: 'buy' },
           upper: { price: Money.fromString('45'), state: 'sell' },
@@ -227,45 +263,33 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     // Pass 1 — baseline inside the band (hold). No email: BR-018-21 needs a
     // *change*, and a rule's first evaluation has nothing to differ from.
     await setQuote(stock.id, '35', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
-    expect(notifier.sent).toHaveLength(0);
+    await evaluatePass(clock, [stock.id], delivered);
+    expect(delivered).toHaveLength(0);
 
     // Pass 2 — the price crosses the lower bound. A real, sendable transition.
     clock.set('2026-03-16T13:30:00Z');
     await setQuote(stock.id, '29', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
-    expect(notifier.sent).toHaveLength(1);
-    expect(notifier.sent[0]?.alert.state).toBe('buy');
+    await evaluatePass(clock, [stock.id], delivered);
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0]?.state).toBe('buy');
 
     // Pass 3 — same quote evaluated again (a pg-boss-style retry over an
     // observation the state has already caught up to). No new state to
     // report, so no second email.
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
-    expect(notifier.sent).toHaveLength(1);
+    await evaluatePass(clock, [stock.id], delivered);
+    expect(delivered).toHaveLength(1);
   });
 
   it('AC-12: a second state change inside the cooldown window sends nothing, while the persisted state still advances', async () => {
     await seedPosition(stock.id, '100');
     await grantEmailConsent();
     const clock = new FakeClock('2026-03-16T13:00:00Z');
-    const notifier = new FakeOpportunityNotifier();
+    const delivered: OpportunityAlert[] = [];
 
     await withTenant(
       userId,
       (tx) =>
-        createRule(depsFor(tx, notifier, clock), userId, {
+        createRule(depsFor(tx, clock), userId, {
           assetId: stock.id,
           lower: { price: Money.fromString('30'), state: 'buy' },
           upper: { price: Money.fromString('45'), state: 'sell' },
@@ -274,33 +298,21 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     );
 
     await setQuote(stock.id, '35', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
 
     // First real crossing — sends and starts the cooldown clock.
     clock.set('2026-03-16T13:30:00Z');
     await setQuote(stock.id, '29', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
-    expect(notifier.sent).toHaveLength(1);
+    await evaluatePass(clock, [stock.id], delivered);
+    expect(delivered).toHaveLength(1);
 
     // A second, genuine crossing three hours later — well inside the 24h
     // cooldown (DL-018-05's accepted cost: a real second crossing is
     // suppressed exactly as a false one would be).
     clock.set('2026-03-16T16:30:00Z');
     await setQuote(stock.id, '46', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
-    expect(notifier.sent).toHaveLength(1); // still just the one email
+    await evaluatePass(clock, [stock.id], delivered);
+    expect(delivered).toHaveLength(1); // still just the one email
 
     // But the in-app state is current (BR-018-20) — the suppression is
     // visible, not silent.
@@ -316,12 +328,12 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     await seedPosition(stock.id, '100');
     // Deliberately no `grantEmailConsent()` call.
     const clock = new FakeClock('2026-03-16T13:00:00Z');
-    const notifier = new FakeOpportunityNotifier();
+    const delivered: OpportunityAlert[] = [];
 
     await withTenant(
       userId,
       (tx) =>
-        createRule(depsFor(tx, notifier, clock), userId, {
+        createRule(depsFor(tx, clock), userId, {
           assetId: stock.id,
           lower: { price: Money.fromString('30'), state: 'buy' },
         }),
@@ -329,21 +341,13 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     );
 
     await setQuote(stock.id, '35', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
 
     clock.set('2026-03-16T13:30:00Z');
     await setQuote(stock.id, '29', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
 
-    expect(notifier.sent).toHaveLength(0);
+    expect(delivered).toHaveLength(0);
     const found = await withTenant(
       userId,
       (tx) => new DrizzleOpportunityRuleRepository(tx, userId).findByAsset(stock.id),
@@ -356,12 +360,12 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     await seedPosition(stock.id, '100');
     await grantEmailConsent();
     const clock = new FakeClock('2026-03-16T13:00:00Z');
-    const notifier = new FakeOpportunityNotifier();
+    const delivered: OpportunityAlert[] = [];
 
     await withTenant(
       userId,
       (tx) =>
-        createRule(depsFor(tx, notifier, clock), userId, {
+        createRule(depsFor(tx, clock), userId, {
           assetId: stock.id,
           lower: { price: Money.fromString('30'), state: 'buy' },
         }),
@@ -371,13 +375,9 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     // Fetched 45 minutes before "now", with a 30-minute cadence and the
     // session open — `isQuoteStale` reads this as stale.
     await setQuote(stock.id, '29', new Date('2026-03-16T12:15:00Z'));
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
 
-    expect(notifier.sent).toHaveLength(0);
+    expect(delivered).toHaveLength(0);
     const found = await withTenant(
       userId,
       (tx) => new DrizzleOpportunityRuleRepository(tx, userId).findByAsset(stock.id),
@@ -392,12 +392,11 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     const cdb = await seedAsset(testDb.migrationUrl, 'CDB-TESTE', 'CDB Banco Teste', 'cdb');
     await seedPosition(cdb.id, '1000');
     const clock = new FakeClock('2026-03-16T13:00:00Z');
-    const notifier = new FakeOpportunityNotifier();
 
     const result = await withTenant(
       userId,
       (tx) =>
-        createRule(depsFor(tx, notifier, clock), userId, {
+        createRule(depsFor(tx, clock), userId, {
           assetId: cdb.id,
           lower: { price: Money.fromString('100'), state: 'sell' },
         }),
@@ -414,12 +413,12 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     await seedPosition(stock.id, '10');
     await grantEmailConsent();
     const clock = new FakeClock('2026-03-16T13:00:00Z');
-    const notifier = new FakeOpportunityNotifier();
+    const delivered: OpportunityAlert[] = [];
 
     const created = await withTenant(
       userId,
       (tx) =>
-        createRule(depsFor(tx, notifier, clock), userId, {
+        createRule(depsFor(tx, clock), userId, {
           assetId: stock.id,
           lower: { price: Money.fromString('30'), state: 'buy' },
           upper: { price: Money.fromString('45'), state: 'sell' },
@@ -431,11 +430,7 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     // Sell to zero.
     await seedPosition(stock.id, '0');
     await setQuote(stock.id, '35', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
 
     const afterSale = await withTenant(
       userId,
@@ -448,11 +443,7 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     // Rebuy.
     await seedPosition(stock.id, '10');
     clock.set('2026-03-16T13:30:00Z');
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
 
     const afterRebuy = await withTenant(
       userId,
@@ -468,12 +459,12 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     await seedPosition(stock.id, '100');
     await grantEmailConsent();
     const clock = new FakeClock('2026-03-16T13:00:00Z');
-    const notifier = new FakeOpportunityNotifier();
+    const delivered: OpportunityAlert[] = [];
 
     await withTenant(
       userId,
       (tx) =>
-        createRule(depsFor(tx, notifier, clock), userId, {
+        createRule(depsFor(tx, clock), userId, {
           assetId: stock.id,
           lower: { price: Money.fromString('30'), state: 'buy' },
           upper: { price: Money.fromString('45'), state: 'sell' },
@@ -482,19 +473,11 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     );
 
     await setQuote(stock.id, '35', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
     clock.set('2026-03-16T13:30:00Z');
     await setQuote(stock.id, '29', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
-    expect(notifier.sent).toHaveLength(1);
+    await evaluatePass(clock, [stock.id], delivered);
+    expect(delivered).toHaveLength(1);
 
     // The exact call `confirmUnsubscribeAction` makes once the token verifies
     // — no `requireUserId()`/session anywhere in this path (AR-12's
@@ -519,12 +502,8 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     // consent still gated correctly this would otherwise send.
     clock.set('2026-03-18T13:00:00Z');
     await setQuote(stock.id, '46', clock.now());
-    await withTenant(
-      userId,
-      (tx) => evaluateOpportunities(depsFor(tx, notifier, clock), userId, [stock.id], OPTIONS),
-      db,
-    );
+    await evaluatePass(clock, [stock.id], delivered);
 
-    expect(notifier.sent).toHaveLength(1); // unchanged — no email since the revoke
+    expect(delivered).toHaveLength(1); // unchanged — no email since the revoke
   });
 });

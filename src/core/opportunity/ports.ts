@@ -144,17 +144,50 @@ export interface OpportunityAlert {
   readonly matched: 'lower' | 'upper' | 'default';
   /** `null` when the default band matched — there is no single threshold to name. */
   readonly threshold: Money | null;
+  /**
+   * BR-018-15 — the polling cadence the disclosure in the message quotes, in
+   * minutes. Carried on the alert rather than read by the adapter because it
+   * is `quotes.cadence_minutes`, which SPEC-008 BR-008-22 **degrades at
+   * runtime** under budget pressure: an adapter that hardcoded 30, or read the
+   * key a second time, could tell a reader a different delay than the screen
+   * that showed them the same state. This is the number the evaluation
+   * actually used to decide the quote was fresh enough to act on.
+   */
+  readonly delayMinutes: number;
 }
 
 export interface OpportunityNotifier {
   sendStateChange(userId: UserId, alert: OpportunityAlert): Promise<void>;
 }
 
+/**
+ * How often the price behind a quote is republished, which is what decides
+ * whether it can be *stale* at all (BR-018-16's "beyond its tier").
+ *
+ * `intraday` is SPEC-008's polled quote (`latest_quotes`): republished every
+ * `quotes.cadence_minutes` while the B3 session is open, so one older than
+ * that interval is genuinely behind and the state reads `unknown`.
+ *
+ * `daily` is a published close (`price_quotes`) — the only price Tesouro
+ * Direto has, since `derivePollingSet` deliberately never polls it
+ * (SPEC-008 BR-008-11) and `tesouro.sync` writes closes rather than quotes.
+ * It is not carried forward *by this feature*: it is the price the rest of
+ * the product already shows for that title, because `core/valuation`'s
+ * `valueTesouro` values the position from exactly this row and flags nothing
+ * for its age (BR-009-03's carry-forward). Applying a minutes-based cadence
+ * to it would mark every Tesouro holding `unknown` from the first minute of
+ * every session — a state disagreeing with the price *Patrimônio* is showing
+ * the same user on the same screen refresh, which BR-018-14 exists to
+ * prevent.
+ */
+export type QuoteTier = 'intraday' | 'daily';
+
 export interface StoredQuote {
   readonly price: Money;
   readonly quotedAt: Date;
   readonly fetchedAt: Date;
   readonly source: string;
+  readonly tier: QuoteTier;
 }
 
 /**

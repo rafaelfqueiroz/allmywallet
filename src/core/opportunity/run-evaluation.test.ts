@@ -63,14 +63,14 @@ describe('BR-018-11 — zero provider requests', () => {
   it('returns the empty summary and touches nothing when no assets are given', async () => {
     const deps = consentedDeps();
     const summary = await evaluateOpportunities(deps, USER, [], BASE_OPTIONS);
-    expect(summary).toEqual({ evaluated: 0, changed: 0, sent: 0, suppressed: 0 });
+    expect(summary).toEqual({ evaluated: 0, changed: 0, claimed: 0, suppressed: 0, alerts: [] });
     expect(deps.quotes.calls).toBe(0);
   });
 
   it('returns the empty summary when the asset has no active rule', async () => {
     const deps = consentedDeps();
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
-    expect(summary).toEqual({ evaluated: 0, changed: 0, sent: 0, suppressed: 0 });
+    expect(summary).toEqual({ evaluated: 0, changed: 0, claimed: 0, suppressed: 0, alerts: [] });
   });
 });
 
@@ -113,7 +113,7 @@ describe('BR-018-03 — activation is reconciled on every pass', () => {
 
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.active).toBe(false);
-    expect(summary).toEqual({ evaluated: 0, changed: 0, sent: 0, suppressed: 0 });
+    expect(summary).toEqual({ evaluated: 0, changed: 0, claimed: 0, suppressed: 0, alerts: [] });
   });
 });
 
@@ -135,7 +135,7 @@ describe('BR-018-16 — an unknown reading is evaluated but changes nothing', ()
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(summary).toEqual({ evaluated: 1, changed: 0, sent: 0, suppressed: 0 });
+    expect(summary).toEqual({ evaluated: 1, changed: 0, claimed: 0, suppressed: 0, alerts: [] });
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('sell'); // untouched, not overwritten with a guess
   });
@@ -161,20 +161,26 @@ describe('BR-018-21 — a state change with notifications enabled sends exactly 
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(summary).toEqual({ evaluated: 1, changed: 1, sent: 1, suppressed: 0 });
-    expect(deps.notifier.sent).toHaveLength(1);
-    expect(deps.notifier.sent[0]).toEqual({
-      userId: USER,
-      alert: {
-        assetCode: 'PETR4',
-        assetName: 'Petrobras PN',
-        price: money('25'),
-        quotedAt: expect.any(Date),
-        source: 'brapi',
-        state: 'buy',
-        matched: 'lower',
-        threshold: money('30'),
-      },
+    expect(summary).toEqual({
+      evaluated: 1,
+      changed: 1,
+      claimed: 1,
+      suppressed: 0,
+      alerts: expect.any(Array),
+    });
+    expect(summary.alerts).toHaveLength(1);
+    expect(summary.alerts[0]).toEqual({
+      assetCode: 'PETR4',
+      assetName: 'Petrobras PN',
+      price: money('25'),
+      quotedAt: expect.any(Date),
+      source: 'brapi',
+      state: 'buy',
+      matched: 'lower',
+      threshold: money('30'),
+      // BR-018-15 — the cadence this evaluation judged freshness by, so the
+      // message cannot quote a different delay than the screen.
+      delayMinutes: BASE_OPTIONS.cadenceMinutes,
     });
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('buy');
@@ -197,7 +203,7 @@ describe('BR-018-21 — a state change with notifications enabled sends exactly 
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(summary.sent).toBe(0);
+    expect(summary.claimed).toBe(0);
     expect(summary.changed).toBe(0); // no prior real state to have changed from
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('buy');
@@ -220,7 +226,7 @@ describe('BR-018-21 — a state change with notifications enabled sends exactly 
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(summary).toEqual({ evaluated: 1, changed: 0, sent: 0, suppressed: 0 });
+    expect(summary).toEqual({ evaluated: 1, changed: 0, claimed: 0, suppressed: 0, alerts: [] });
   });
 });
 
@@ -246,9 +252,11 @@ describe('AR-19 — idempotent under a retried job over the same quote', () => {
     const first = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
     const second = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(first.sent).toBe(1);
-    expect(second.sent).toBe(0); // lastState now equals 'buy' too, so this is simply "unchanged"
-    expect(deps.notifier.sent).toHaveLength(1);
+    expect(first.claimed).toBe(1);
+    expect(first.alerts).toHaveLength(1);
+    // lastState now equals 'buy' too, so the second pass is simply "unchanged"
+    expect(second.claimed).toBe(0);
+    expect(second.alerts).toHaveLength(0);
   });
 
   it('a very late redelivery of the same observation is caught by the log, not by cooldown', async () => {
@@ -291,8 +299,9 @@ describe('AR-19 — idempotent under a retried job over the same quote', () => {
       cooldownHours: 1,
     });
 
-    expect(redelivery.sent).toBe(0); // decideNotification said send — the log is what actually stopped it
-    expect(deps.notifier.sent).toHaveLength(0);
+    // `decideNotification` said send — the log is what actually stopped it.
+    expect(redelivery.claimed).toBe(0);
+    expect(redelivery.alerts).toHaveLength(0);
     // In-app state still catches up, independent of the suppressed resend.
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('buy');
@@ -321,7 +330,7 @@ describe('BR-018-22/23 — cooldown suppresses a second state change inside the 
       aQuote({ price: money('25'), quotedAt: new Date('2026-03-16T12:00:00Z') }),
     );
     const morning = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
-    expect(morning.sent).toBe(1);
+    expect(morning.claimed).toBe(1);
 
     // Afternoon, same day: crosses the upper bound — a genuine second
     // crossing, deliberately suppressed by BR-018-23.
@@ -331,8 +340,13 @@ describe('BR-018-22/23 — cooldown suppresses a second state change inside the 
     );
     const afternoon = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(afternoon).toEqual({ evaluated: 1, changed: 1, sent: 0, suppressed: 1 });
-    expect(deps.notifier.sent).toHaveLength(1);
+    expect(afternoon).toEqual({
+      evaluated: 1,
+      changed: 1,
+      claimed: 0,
+      suppressed: 1,
+      alerts: [],
+    });
     // In-app state is current regardless of the suppressed email.
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('sell');
@@ -357,7 +371,7 @@ describe('BR-018-25 — consent gates the send, not the in-app state', () => {
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(summary).toEqual({ evaluated: 1, changed: 1, sent: 0, suppressed: 1 });
+    expect(summary).toEqual({ evaluated: 1, changed: 1, claimed: 0, suppressed: 1, alerts: [] });
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('buy'); // in-app state still updates
   });
@@ -379,7 +393,7 @@ describe('BR-018-25 — consent gates the send, not the in-app state', () => {
     deps.quotes.set(ASSET, aQuote({ price: money('10') }));
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
-    expect(summary.sent).toBe(0);
+    expect(summary.claimed).toBe(0);
     expect(summary.suppressed).toBe(1);
   });
 
@@ -400,7 +414,7 @@ describe('BR-018-25 — consent gates the send, not the in-app state', () => {
     deps.quotes.set(ASSET, aQuote({ price: money('10') }));
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
-    expect(summary.sent).toBe(0);
+    expect(summary.claimed).toBe(0);
     expect(summary.suppressed).toBe(1);
   });
 });
@@ -424,7 +438,7 @@ describe('BR-018-26 — per-asset mute suppresses only the email', () => {
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(summary).toEqual({ evaluated: 1, changed: 1, sent: 0, suppressed: 1 });
+    expect(summary).toEqual({ evaluated: 1, changed: 1, claimed: 0, suppressed: 1, alerts: [] });
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('buy');
   });
@@ -451,7 +465,7 @@ describe('BR-018-27 — quiet hours suppress the send', () => {
       quietHours: { start: '09:00', end: '11:00' },
     });
 
-    expect(summary.sent).toBe(0);
+    expect(summary.claimed).toBe(0);
     expect(summary.suppressed).toBe(1);
   });
 });
@@ -474,8 +488,8 @@ describe('an asset missing from the catalog is skipped defensively', () => {
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET], BASE_OPTIONS);
 
-    expect(summary.sent).toBe(0);
-    expect(deps.notifier.sent).toHaveLength(0);
+    expect(summary.claimed).toBe(0);
+    expect(summary.alerts).toHaveLength(0);
     // The observation is still persisted — the gap is in the catalog, not in evaluation.
     const reloaded = await deps.rules.findByAsset(ASSET);
     expect(reloaded?.lastState).toBe('buy');
@@ -514,6 +528,12 @@ describe('evaluates several rules across several assets in one pass', () => {
 
     const summary = await evaluateOpportunities(deps, USER, [ASSET, ASSET_2], BASE_OPTIONS);
 
-    expect(summary).toEqual({ evaluated: 2, changed: 1, sent: 1, suppressed: 0 });
+    expect(summary).toEqual({
+      evaluated: 2,
+      changed: 1,
+      claimed: 1,
+      suppressed: 0,
+      alerts: expect.any(Array),
+    });
   });
 });

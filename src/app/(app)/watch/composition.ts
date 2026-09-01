@@ -9,7 +9,6 @@ import {
   DrizzleHeldAssetReader,
   DrizzleStoredQuoteReader,
 } from '@/adapters/db/opportunity-read-adapters';
-import { LogEmailSender } from '@/adapters/email/log-email-sender';
 import { db } from '@/db/client';
 import { withTenant, type Tx } from '@/db/tenant';
 
@@ -27,8 +26,10 @@ import { withTenant, type Tx } from '@/db/tenant';
  * (`clock`) and is exactly the adapter the worker wires for the same port —
  * using it here costs nothing and keeps one fewer stub class in the tree.
  * `createRule`/`updateRule` (`core/opportunity/rule.ts`) never call
- * `notifier.sendStateChange` — only `run-evaluation.ts`'s worker path does —
- * so it is, in practice, as inert here as the goals stub is on its own route.
+ * No notifier: `OpportunityDependencies` carries none (see its own doc
+ * comment). This surface reads and writes rules; the one place an email is
+ * delivered is `worker/handlers/opportunity.ts`, after its tenant transaction
+ * has committed.
  */
 const clock = new SystemClock();
 
@@ -45,7 +46,6 @@ export function buildWatchDeps(tx: Tx, userId: UserId): OpportunityDependencies 
     // `wallets/composition.ts#buildWalletDeps` gives for `assetCatalog`.
     catalog: new DrizzleAssetCatalogRepository(tx),
     notificationLog: new DrizzleOpportunityNotificationLog(tx, userId),
-    notifier: new LogEmailSender(clock),
     // SPEC-004's own repository, not a feature-local copy — see
     // `core/opportunity/dependencies.ts`'s own comment on why a second
     // consent store is the one thing LGPD compliance cannot survive.

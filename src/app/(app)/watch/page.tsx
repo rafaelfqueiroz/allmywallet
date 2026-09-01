@@ -85,6 +85,13 @@ export default async function WatchPage() {
         <Note>{t('delayDisclosure', { minutes: view.delayMinutes })}</Note>
         <Note>{t('notAdvice')}</Note>
         <Note>{t('addNotOpenNote')}</Note>
+        {/*
+          BR-018-25 — opt-in is off by default, so for a new account every
+          state below is in-app only. Saying which it is stops the screen from
+          implying an email that will never arrive; `emailConsented` is read
+          from SPEC-004's own consent record, not a feature-local copy.
+        */}
+        <Note>{view.emailConsented ? t('emailOn') : t('emailOff')}</Note>
       </Stack>
 
       <Section title={t('yourRulesTitle')} description={t('yourRulesDescription')}>
@@ -98,6 +105,43 @@ export default async function WatchPage() {
           </List>
         )}
       </Section>
+
+      {view.retained.length > 0 && (
+        <Section title={t('retainedTitle')} description={t('retainedDescription')}>
+          <List gap="sm">
+            {view.retained.map((rule) => (
+              <ListItem key={rule.assetId} separated>
+                <Stack gap="sm">
+                  <Cluster justify="between" gap="sm">
+                    <span className="font-medium">
+                      {rule.code} — {rule.name}
+                    </span>
+                    <Badge variant="secondary">{t('retainedBadge')}</Badge>
+                  </Cluster>
+                  <Text as="span" size="xs" tone="muted">
+                    {t('columnLower')}: {boundText(rule.lower, t)} · {t('columnUpper')}:{' '}
+                    {boundText(rule.upper, t)} · {t('columnDefault')}:{' '}
+                    {t(`stateLabel.${rule.defaultState}`)}
+                  </Text>
+                  {/*
+                    The only affordance a paused rule needs. Editing thresholds
+                    on an asset the user no longer holds would be editing a
+                    rule against a position that does not exist; deleting it is
+                    what BR-018-03's "not silently deleted by a sale" leaves to
+                    the person who wrote it.
+                  */}
+                  <ActionForm action={deleteRuleAction}>
+                    <input type="hidden" name="assetId" value={rule.assetId} />
+                    <Button type="submit" variant="destructive" size="sm">
+                      {t('delete')}
+                    </Button>
+                  </ActionForm>
+                </Stack>
+              </ListItem>
+            ))}
+          </List>
+        </Section>
+      )}
 
       <Section title={t('availableTitle')} description={t('availableDescription')}>
         {view.available.length === 0 ? (

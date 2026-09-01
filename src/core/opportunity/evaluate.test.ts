@@ -46,6 +46,44 @@ describe('BR-018-16 — no usable quote reads unknown', () => {
     const result = evaluateRule(rule, quote, outsideSession);
     expect(result.state).not.toBe('unknown');
   });
+
+  /**
+   * BR-018-02 admits Tesouro Direto, and Tesouro Direto is never polled
+   * intraday (SPEC-008 BR-008-11) — its only price is the daily close
+   * `tesouro.sync` writes. Before the tier existed, a rule on a Tesouro title
+   * read `unknown` from half an hour into every session and stayed there
+   * forever, while *Patrimônio* priced the same holding from the same row
+   * without qualification. The rule was accepted, shown, and could never
+   * fire.
+   */
+  it('a daily-tier close is not timed against the intraday cadence (BR-018-02/14)', () => {
+    const rule = aRule({ lower: aBound('30', 'buy'), upper: aBound('40', 'sell') });
+    // Yesterday's published close, read during today's open session — hours
+    // beyond `cadenceMinutes`, and correct.
+    const close = aQuote({
+      tier: 'daily',
+      price: money('29'),
+      quotedAt: new Date('2026-03-15T00:00:00Z'),
+      fetchedAt: new Date('2026-03-15T00:00:00Z'),
+      source: 'tesouro_transparente',
+    });
+
+    const result = evaluateRule(rule, close, TIMING);
+
+    expect(result.state).toBe('buy');
+    expect(result).toMatchObject({ matched: 'lower' });
+  });
+
+  it('an intraday quote of the same age *is* stale, which is what the tier distinguishes', () => {
+    const rule = aRule({ lower: aBound('30', 'buy'), upper: aBound('40', 'sell') });
+    const quote = aQuote({
+      tier: 'intraday',
+      price: money('29'),
+      fetchedAt: new Date('2026-03-15T00:00:00Z'),
+    });
+
+    expect(evaluateRule(rule, quote, TIMING)).toEqual({ state: 'unknown' });
+  });
 });
 
 describe('BR-018-12 — a price exactly on a bound matches that bound', () => {
