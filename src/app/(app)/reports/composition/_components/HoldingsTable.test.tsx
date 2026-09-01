@@ -21,6 +21,7 @@ import {
 
 const labels: HoldingsTableLabels = {
   code: 'Ativo',
+  state: 'Estado',
   assetClass: 'Classe',
   sector: 'Setor',
   quantity: 'Quantidade',
@@ -70,6 +71,10 @@ const rows: readonly HoldingRow[] = [
     unrealizedGain: cell('R$ 100,00', 2),
     concentrated: true,
     estimated: false,
+    // SPEC-018 BR-018-19 — watched, with a usable quote.
+    opportunityState: 'buy',
+    opportunityStateLabel: 'compra',
+    opportunityStateTitle: 'Estado da sua própria regra.',
   },
   {
     id: 'a-2',
@@ -85,6 +90,10 @@ const rows: readonly HoldingRow[] = [
     unrealizedGain: cell('−R$ 50,00', 0, true),
     concentrated: true,
     estimated: false,
+    // BR-018-16 — watched, but no usable quote: still a badge, deliberately.
+    opportunityState: 'unknown',
+    opportunityStateLabel: 'sem cotação válida',
+    opportunityStateTitle: 'A cotação está ausente ou desatualizada demais.',
   },
   {
     id: 'a-3',
@@ -98,6 +107,12 @@ const rows: readonly HoldingRow[] = [
     value: cell('R$ 400,00', 0),
     share: cell('—', undefined),
     unrealizedGain: cell('R$ 10,00', 1),
+    // BR-018-02 — a CDB has no market price and can never carry a rule, so
+    // there is no state to show. `null` is the absence of a rule, which is
+    // not the same as `unknown` (a rule whose price cannot be read).
+    opportunityState: null,
+    opportunityStateLabel: '',
+    opportunityStateTitle: '',
     concentrated: false,
     estimated: true,
   },
@@ -243,6 +258,7 @@ describe('HoldingsTable — sorting without column headers', () => {
       'Ativo',
       'Classe',
       'Setor',
+      'Estado',
       'Quantidade',
       'Preço médio',
       'Preço atual',
@@ -270,5 +286,30 @@ describe('HoldingsTable — sorting without column headers', () => {
     await user.click(screen.getByRole('button', { name: 'Ordem decrescente' }));
     expect(cardCodes()).toEqual(['CDBX', 'ITSA4', 'HGLG11']);
     expect(screen.getByRole('button', { name: 'Ordem crescente' })).toBeInTheDocument();
+  });
+
+  /**
+   * SPEC-018 BR-018-19/BR-018-17 and DL-018-06 — the acceptance criterion
+   * "every state is rendered with both a colour and a text label; an
+   * automated check fails the build if a state renders as colour alone" is
+   * enforced twice: `StateBadge` makes `label` a required prop, so a
+   * colour-only call site does not compile, and this asserts the text is
+   * genuinely in the document rather than merely typed as required.
+   */
+  it('shows each watched holding’s state as text, not colour alone', () => {
+    render(<HoldingsTable rows={rows} labels={labels} />);
+
+    expect(screen.getAllByText('compra').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('sem cotação válida').length).toBeGreaterThan(0);
+  });
+
+  it('shows no state for a holding that carries no rule (BR-018-02)', () => {
+    render(<HoldingsTable rows={rows} labels={labels} />);
+
+    // CDBX is a CDB: BR-018-02 gives it no market price to watch, so its
+    // Estado cell is empty rather than reading `unknown`, which would say
+    // "watched, but the price cannot be read" about an asset nobody can
+    // watch at all.
+    expect(column('Estado')).toEqual(['compra', 'sem cotação válida', '']);
   });
 });

@@ -3,7 +3,7 @@ import type { Database } from '@/db/client';
 import { computePollingSet } from '@/core/quotes/polling-set';
 import { pollHeldAsset } from '@/core/quotes/poll-held-asset';
 import { captureClosePrice } from '@/core/quotes/capture-close-price';
-import { NoLedgerHeldAssetsRepository } from '@/adapters/db/held-assets-repository';
+import { DrizzleHeldAssetsRepository } from '@/adapters/db/held-assets-repository';
 import type {
   AssetCatalogPort,
   BudgetCounterPort,
@@ -13,6 +13,9 @@ import type {
   QuoteRepositoryPort,
   TradingCalendar,
 } from '@/core/quotes/ports';
+import { enqueue } from '@/lib/queue';
+import { QUEUE } from '@/worker/queues';
+import type { OpportunityEvaluateJobPayload } from '@/worker/handlers/opportunity';
 import {
   buildQuoteProvider,
   buildQuotesComposition,
@@ -45,6 +48,16 @@ export interface QuotesHandlerDeps {
   readonly budgetCounter: BudgetCounterPort;
   readonly heldAssets: HeldAssetsPort;
   readonly provider: QuoteProvider;
+  /**
+   * SPEC-018 BR-018-11 — how `quotes.poll` asks for the assets it just polled
+   * to be evaluated. A seam rather than a direct `enqueue` call, the same
+   * shape as `ImportHandlerDeps.enqueueSnapshot`
+   * (`src/worker/handlers/import.ts`), so an integration test can assert
+   * *that* an evaluation was requested and for *which* assets without
+   * standing up pg-boss — and, just as importantly, assert it was **not**
+   * called when nothing was polled.
+   */
+  readonly enqueueOpportunityEvaluation: (payload: OpportunityEvaluateJobPayload) => Promise<void>;
 }
 
 interface ResolvedQuotesDeps extends Omit<QuotesHandlerDeps, 'database'> {
@@ -61,8 +74,11 @@ async function resolveDeps(overrides?: Partial<QuotesHandlerDeps>): Promise<Reso
     catalog: overrides?.catalog ?? composition.catalog,
     repository: overrides?.repository ?? composition.repository,
     budgetCounter: overrides?.budgetCounter ?? composition.budgetCounter,
-    heldAssets: overrides?.heldAssets ?? new NoLedgerHeldAssetsRepository(),
+    heldAssets: overrides?.heldAssets ?? new DrizzleHeldAssetsRepository(database),
     provider: overrides?.provider ?? (await buildQuoteProvider(database)),
+    enqueueOpportunityEvaluation:
+      overrides?.enqueueOpportunityEvaluation ??
+      ((payload) => enqueue(QUEUE.OPPORTUNITY_EVALUATE, payload)),
   };
 }
 
@@ -84,6 +100,7 @@ export async function handleQuotesPoll(overrides?: Partial<QuotesHandlerDeps>): 
     heldAssets,
     provider,
     resolveConfigWith,
+    enqueueOpportunityEvaluation,
   } = await resolveDeps(overrides);
 
   if (!calendar.isSessionOpen(clock.now())) {
@@ -101,15 +118,27 @@ export async function handleQuotesPoll(overrides?: Partial<QuotesHandlerDeps>): 
   let polled = 0;
   let skippedBudget = 0;
   let failed = 0;
+  // SPEC-018 BR-018-11/DL-018-04 — exactly the assets that actually received
+  // a new quote this cycle, never the whole polling set: a rule on an asset
+  // that was skipped (budget) or failed has nothing new to evaluate, and
+  // evaluating it anyway would be a second read of the same stale quote for
+  // no reason.
+  const polledAssetIds: string[] = [];
   for (const asset of assets) {
     const result = await pollHeldAsset({ repository, provider, budgetCounter, clock }, asset, {
       cadenceMinutes,
       monthlyQuota,
       ondemandReservePct,
     });
-    if (result.outcome === 'polled') polled += 1;
-    else if (result.outcome === 'skipped_budget') skippedBudget += 1;
+    if (result.outcome === 'polled') {
+      polled += 1;
+      polledAssetIds.push(asset.id);
+    } else if (result.outcome === 'skipped_budget') skippedBudget += 1;
     else if (result.outcome === 'failed') failed += 1;
+  }
+
+  if (polledAssetIds.length > 0) {
+    await enqueueOpportunityEvaluation({ assetIds: polledAssetIds });
   }
 
   logger.info(

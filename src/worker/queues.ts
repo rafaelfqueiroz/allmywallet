@@ -22,6 +22,12 @@ export const QUEUE = {
   ACCOUNT_DELETION_SWEEP: 'account.deletion-sweep',
   // SPEC-004 BR-004-15: audit_log retention (`retention.audit_months`).
   AUDIT_RETENTION_SWEEP: 'privacy.audit-retention-sweep',
+  // SPEC-018 BR-018-11/DL-018-04: evaluated only when `quotes.poll` writes a
+  // new intraday quote — never on a schedule of its own. Registered with no
+  // `cron` in `src/worker/registrations.ts`, the same shape as
+  // `IMPORT_STAGE`/`IMPORT_COMMIT` above: enqueued on demand by
+  // `handleQuotesPoll`, consumed only by the worker (AR-16).
+  OPPORTUNITY_EVALUATE: 'opportunity.evaluate',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -87,6 +93,14 @@ export const QUEUE_POLICIES: Readonly<Record<QueueName, QueuePolicy>> = {
     expireInSeconds: 1800,
   },
   [QUEUE.AUDIT_RETENTION_SWEEP]: { ...DEFAULT_POLICY, retryLimit: 1, expireInSeconds: 1800 },
+  // A missed evaluation is corrected by the *next* quote write a few minutes
+  // later (the same reasoning as QUOTES_POLL above), and retrying hard here
+  // buys nothing: the payload names assets, not quotes, so a retry re-reads
+  // whatever is in `latest_quotes` *now* rather than replaying the specific
+  // observation that triggered it. `evaluateOpportunities` is idempotent
+  // under a retry regardless (DL-018-08), so this is tuned for "don't pile up
+  // stale evaluations", not for correctness.
+  [QUEUE.OPPORTUNITY_EVALUATE]: { ...DEFAULT_POLICY, retryLimit: 2, retryDelaySeconds: 60 },
 };
 
 /**

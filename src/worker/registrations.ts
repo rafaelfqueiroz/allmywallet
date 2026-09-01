@@ -9,6 +9,7 @@ import {
   handleAccountDeletionSweep,
   handleAuditRetentionSweep,
 } from '@/worker/handlers/account-deletion';
+import { handleOpportunityEvaluate } from '@/worker/handlers/opportunity';
 
 /**
  * Split out of `src/worker/index.ts` so this list — pure data plus handler
@@ -85,6 +86,19 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
   {
     queue: QUEUE.IMPORT_COMMIT,
     handler: handleImportCommit,
+  },
+  /**
+   * SPEC-018 BR-018-11/DL-018-04 — no `cron`, deliberately, the same shape as
+   * the two import queues above: enqueued on demand by `handleQuotesPoll`
+   * (`src/worker/handlers/quotes.ts`) the moment a quote actually changes,
+   * never on a schedule of its own. That is what keeps this feature's added
+   * provider-request count at zero (BR-018-11's own acceptance criterion) —
+   * there is no cron firing this job blind for it to matter whether the
+   * handler happens to no-op.
+   */
+  {
+    queue: QUEUE.OPPORTUNITY_EVALUATE,
+    handler: handleOpportunityEvaluate,
   },
   /**
    * SPEC-009 BR-009-14/16. Both run once daily and both are ordered *after*

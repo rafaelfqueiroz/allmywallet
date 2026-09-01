@@ -26,8 +26,13 @@ describe('registry', () => {
     // plus one SPEC-017 addition, `wallets.drift_tolerance_pp` — BR-017-15's
     // tolerance, which has to be the user's own number rather than one the
     // product volunteered (DL-017-01), so it is a key at `user` level rather
-    // than a constant anywhere.
-    expect(CONFIG_KEYS).toHaveLength(25);
+    // than a constant anywhere; plus two SPEC-018 additions,
+    // `notifications.opportunity_cooldown_hours` (BR-018-22, the window a
+    // sent email suppresses the next one for) and
+    // `notifications.quiet_hours` (BR-018-27, the band inside market hours
+    // that stays silent) — both are the tunables DL-018-05's accepted trade
+    // is adjusted through, which is precisely why they are not constants.
+    expect(CONFIG_KEYS).toHaveLength(27);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {
@@ -91,6 +96,11 @@ describe('registry', () => {
       // a bespoke settings control, so the generated preferences screen picks
       // it up with no change of its own.
       'ui.theme',
+      // SPEC-018 BR-018-22: how often the product may write to an inbox is
+      // the inbox owner's judgement, not the operator's — and BR-018-23's
+      // accepted cost (a genuine second crossing suppressed) is one only the
+      // person receiving the email can decide is worth paying.
+      'notifications.opportunity_cooldown_hours',
     ] satisfies ConfigKey[]);
   });
 

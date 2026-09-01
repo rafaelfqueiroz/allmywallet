@@ -124,3 +124,23 @@ export async function resetConsents(migrationUrl: string): Promise<void> {
     await pool.end();
   }
 }
+
+/**
+ * SPEC-018's two tables. `opportunity_notifications` cascades from
+ * `opportunity_rules` (which itself cascades from `users`), so `resetUsers`
+ * alone would clear both — but truncating them explicitly, like every other
+ * `reset*` helper here, lets a suite reset opportunity state without
+ * disturbing another file's seeded tenants on the shared CI database
+ * (TS-03). Listed child-first for the same readability reason as
+ * `WALLET_TABLES`, even though the CASCADE would take it regardless.
+ */
+const OPPORTUNITY_TABLES = ['opportunity_notifications', 'opportunity_rules'] as const;
+
+export async function resetOpportunity(migrationUrl: string): Promise<void> {
+  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
+  try {
+    await pool.query(`TRUNCATE ${OPPORTUNITY_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+  } finally {
+    await pool.end();
+  }
+}

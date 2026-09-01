@@ -77,6 +77,7 @@
     "dashboard": "Painel",
     "transactions": "Transações",
     "wallets": "Carteiras",
+    "watch": "Observar preços",
     "import": "Importar",
     "reports": "Relatórios",
     "settings": "Configurações",
@@ -151,7 +152,14 @@
     "GOAL_BASIS_NOT_APPLICABLE": "Este campo é só para metas de crescimento.",
     "GOAL_PERIOD_NOT_APPLICABLE": "Este campo é só para metas de proventos.",
     "NOT_A_GROWTH_GOAL": "Esta meta não é de crescimento.",
-    "NOT_AN_EARNINGS_GOAL": "Esta meta não é de proventos."
+    "NOT_AN_EARNINGS_GOAL": "Esta meta não é de proventos.",
+    "RULE_NOT_FOUND": "Esta regra de observação não existe mais. Atualize a página e tente de novo.",
+    "ASSET_NOT_HELD": "Uma regra de observação só pode existir em um ativo que você possui atualmente. Você não tem mais nenhuma posição neste ativo.",
+    "ASSET_CLASS_NOT_WATCHABLE": "Este ativo não tem preço de mercado e por isso não pode ter uma regra de observação. CDB, LCI e LCA rendem por contrato, não por cotação.",
+    "RULE_ALREADY_EXISTS": "Este ativo já tem uma regra de observação. Edite a regra existente em vez de criar uma nova.",
+    "NO_BOUNDS_SET": "Defina ao menos um limite — inferior, superior, ou os dois.",
+    "INVALID_THRESHOLD": "Informe um preço maior que zero para o limite.",
+    "LOWER_NOT_BELOW_UPPER": "O limite inferior precisa ser menor que o limite superior."
   },
   "vocabulary": {
     "patrimonio": "Patrimônio",
@@ -195,6 +203,10 @@
       "wallets.drift_tolerance_pp": {
         "label": "Tolerância de desvio (p.p.)",
         "description": "A quantos pontos percentuais da sua meta um ativo passa a ser sinalizado."
+      },
+      "notifications.opportunity_cooldown_hours": {
+        "label": "Intervalo mínimo entre e-mails (horas)",
+        "description": "Depois de um e-mail sobre um ativo, quanto tempo esperar antes de enviar outro sobre o mesmo ativo."
       }
     },
     "groupingOptions": {
@@ -850,6 +862,8 @@
       "description": "Um ativo por linha. Clique no título de uma coluna para ordenar por ela.",
       "caption": "Ativos do escopo selecionado, com valor, quantidade, preços e ganho não realizado",
       "code": "Ativo",
+      "state": "Estado",
+      "stateTitle": "Estado da sua própria regra de observação para este ativo, sobre a última cotação registrada — não é uma recomendação. Os limites são seus e ficam em Observar preços. O estado \"compra\" se refere a aumentar uma posição que você já tem, nunca a abrir uma nova.",
       "assetClass": "Classe",
       "sector": "Setor",
       "quantity": "Quantidade",
@@ -1121,5 +1135,84 @@
         "notElapsed": "Ainda não ocorreu"
       }
     }
+  },
+  "email": {
+    "opportunity": {
+      "stateLabel": {
+        "buy": "compra",
+        "hold": "manutenção",
+        "sell": "venda"
+      },
+      "subjectBound": "{assetCode}: preço no seu limite de {stateLabel}",
+      "subjectDefault": "{assetCode}: preço na sua faixa padrão",
+      "bodyBound": "O preço de {assetCode} ({assetName}) está em {price} — no ou além do seu limite de {stateLabel} de {threshold}, a regra que você configurou para este ativo.",
+      "bodyDefault": "O preço de {assetCode} ({assetName}) está em {price}, dentro da faixa entre os limites que você configurou. O estado que você escolheu para essa faixa é \"{stateLabel}\".",
+      "quoteMeta": "Cotação de {quotedAt}, via {source}.",
+      "delayDisclosure": "As cotações têm um atraso de cerca de {minutes} minutos e só são atualizadas durante o pregão da B3 — uma oscilação que reverte dentro desse intervalo pode não ter sido observada.",
+      "notAdvice": "Esta mensagem informa apenas qual das suas próprias regras está valendo agora. A AllMyWallet não recomenda comprar, vender ou manter nenhum ativo.",
+      "unsubscribeLinkText": "Cancelar todos os avisos de oportunidade"
+    },
+    "unsubscribePage": {
+      "title": "Cancelar avisos de oportunidade",
+      "invalid": "Este link não é válido ou já foi usado. Se você ainda recebe avisos de oportunidade e quer que parem, entre na sua conta e desative o e-mail em Configurações > Privacidade.",
+      "confirmTitle": "Cancelar avisos de oportunidade",
+      "confirmBody": "Isso interrompe todo e-mail de oportunidade de compra/venda desta conta, para todos os ativos. Você pode reativar quando quiser em Configurações > Privacidade.",
+      "confirmButton": "Cancelar avisos",
+      "done": "Pronto — você não vai mais receber avisos de oportunidade por e-mail. Você pode reativar quando quiser em Configurações > Privacidade."
+    }
+  },
+  "watch": {
+    "title": "Observar preços",
+    "description": "Regras que comparam um preço já exibido a limites que você mesmo definiu, e avisam quando o resultado muda. A AllMyWallet não recomenda comprar, vender ou manter nada — cada regra é sua.",
+    "signedOut": "Entre na sua conta para ver suas regras de observação.",
+    "delayDisclosure": "As cotações têm um atraso de cerca de {minutes} minutos e só são atualizadas durante o pregão da B3. Uma oscilação que sobe e desce dentro desse intervalo pode não ter sido observada — o estado abaixo reflete a última cotação registrada, não o preço deste instante.",
+    "notAdvice": "Cada estado abaixo mostra apenas qual das suas próprias regras está valendo agora, sobre um preço já exibido em outras telas. A AllMyWallet não recomenda comprar, vender ou manter nenhum ativo.",
+    "addNotOpenNote": "Uma regra só existe em um ativo que você já possui — o estado \"compra\" aqui sempre significa aumentar uma posição que você já tem, nunca abrir uma posição nova.",
+    "emailOff": "O e-mail de aviso está desligado nesta conta, então nada é enviado — os estados abaixo continuam valendo normalmente aqui na tela. Você pode ligar o e-mail em Configurações > Privacidade.",
+    "emailOn": "O e-mail de aviso está ligado nesta conta. Você pode desligá-lo a qualquer momento em Configurações > Privacidade.",
+    "stateLabel": {
+      "buy": "compra",
+      "hold": "manutenção",
+      "sell": "venda",
+      "unknown": "sem cotação válida"
+    },
+    "stateTitleBound": "Preço no ou além do seu limite de {stateLabel} de {threshold}.",
+    "stateTitleDefault": "Preço entre os seus dois limites — a faixa que você definiu como \"{stateLabel}\".",
+    "stateTitleUnknown": "A cotação está ausente ou desatualizada demais para avaliar esta regra.",
+    "yourRulesTitle": "Ativos observados",
+    "yourRulesDescription": "Cada linha compara a última cotação registrada às suas próprias regras.",
+    "empty": "Você ainda não configurou nenhuma regra de observação.",
+    "retainedTitle": "Regras guardadas",
+    "retainedDescription": "Você não possui mais estes ativos, então estas regras estão pausadas — elas não avaliam nada nem enviam e-mail. Os limites ficam guardados e voltam a valer sozinhos se você comprar o ativo de novo.",
+    "retainedBadge": "Pausada",
+    "columnLower": "Limite inferior",
+    "columnUpper": "Limite superior",
+    "columnDefault": "Entre os limites",
+    "columnLastEmail": "Último e-mail enviado",
+    "noPrice": "Sem cotação",
+    "noBound": "Não definido",
+    "noEmailSent": "Nenhum e-mail enviado ainda",
+    "mutedBadge": "Silenciado",
+    "mute": "Silenciar avisos",
+    "unmute": "Reativar avisos",
+    "edit": "Editar regra",
+    "delete": "Excluir regra",
+    "deleteHint": "A regra é removida — para voltar a observar este ativo será preciso criar uma regra nova.",
+    "availableTitle": "Ativos que você pode observar",
+    "availableDescription": "Ativos com preço de mercado que você possui e que ainda não têm uma regra.",
+    "availableEmpty": "Todos os seus ativos com preço de mercado já têm uma regra, ou você ainda não possui nenhum.",
+    "ineligibleTitle": "Sem preço de mercado",
+    "ineligibleDescription": "CDB, LCI e LCA não têm preço de mercado e por isso não podem ter uma regra de observação.",
+    "ineligibleNoPrice": "Este ativo não tem preço de mercado para observar.",
+    "createTitle": "Nova regra para {asset}",
+    "editTitle": "Editar regra de {asset}",
+    "lowerPriceLabel": "Limite inferior (R$)",
+    "lowerStateLabel": "Neste limite ou abaixo dele, o preço significa",
+    "upperPriceLabel": "Limite superior (R$)",
+    "upperStateLabel": "Neste limite ou acima dele, o preço significa",
+    "defaultStateLabel": "Entre os dois limites, o preço significa",
+    "boundsHint": "Defina ao menos um limite. O significado de cada limite é seu — \"abaixo de R$ 30\" pode ser compra para quem está comprando na baixa, ou venda para quem usa um stop-loss. Deixe um limite em branco para não defini-lo.",
+    "create": "Criar regra",
+    "save": "Salvar alterações"
   }
 }

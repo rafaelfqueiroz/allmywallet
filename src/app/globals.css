@@ -55,6 +55,24 @@
   --color-positive: var(--positive);
   --color-negative: var(--negative);
 
+  /* SPEC-018 DL-018-06 — the buy/hold/sell state a watch rule evaluates to.
+   * Deliberately three tokens of their own, never `--positive`/`--negative`:
+   * those two are about a *figure* (a gain or a loss), and reusing "negative"
+   * for "sell" would code taking a profit as danger, which is exactly the
+   * red-green mistake DL-018-06 rejects. Green/yellow/blue, matching the
+   * Okabe–Ito `--chart-3`/`--chart-4`/`--chart-5` hues for the same
+   * deuteranopia-safe reasoning, but re-tuned in lightness/chroma for use as
+   * foreground text on a tinted badge background (a 10% tint behind
+   * full-opacity text) — the same pattern `--destructive` uses on `Badge`'s
+   * `destructive` variant. `--chart-4`'s own `#f0e442` fails WCAG AA badly
+   * as text on a light background, so this is not the same value. See
+   * `StateBadge` (src/components/patterns/state-badge.tsx) for the one place
+   * these are used, and the PR description for the measured contrast ratios
+   * in both themes. */
+  --color-opportunity-buy: var(--opportunity-buy);
+  --color-opportunity-hold: var(--opportunity-hold);
+  --color-opportunity-sell: var(--opportunity-sell);
+
   /* DL-04: Okabe–Ito, bound one-to-one to the eight asset classes in
    * src/components/charts/. Wrappers land in PR2; the tokens are here because
    * tokens are PR1. */
@@ -127,6 +145,14 @@
   --positive: oklch(0.5 0.14 150);
   --negative: oklch(0.53 0.19 25);
 
+  /* SPEC-018 DL-018-06 — see the `@theme inline` comment above. Hues match
+   * `--chart-3`/`--chart-4`/`--chart-5` (165.5°/90°/244°); lightness/chroma
+   * chosen for ≥4.5:1 contrast as text against `--background`, measured:
+   * buy 5.79:1, hold 5.99:1, sell 5.91:1. */
+  --opportunity-buy: oklch(0.48 0.14 165.5);
+  --opportunity-hold: oklch(0.5 0.13 90);
+  --opportunity-sell: oklch(0.5 0.13 244);
+
   /* Okabe–Ito's published values, unmodified, so the colour-vision-deficiency
    * validation they carry still applies. Kept in hex rather than converted to
    * oklch precisely so they stay auditable against the source. The eighth is a
@@ -183,6 +209,14 @@
     --positive: oklch(0.72 0.16 150);
     --negative: oklch(0.7 0.18 25);
 
+    /* SPEC-018 DL-018-06 — measured against `--background` in this theme:
+     * buy 8.33:1, hold 9.67:1, sell 7.92:1. Must stay identical to the
+     * `.dark` block below — tests/structural/design-tokens.test.ts fails the
+     * build otherwise. */
+    --opportunity-buy: oklch(0.72 0.14 165.5);
+    --opportunity-hold: oklch(0.78 0.13 90);
+    --opportunity-sell: oklch(0.72 0.13 244);
+
     --chart-1: #e69f00;
     --chart-2: #56b4e9;
     --chart-3: #009e73;
@@ -233,6 +267,11 @@
 
   --positive: oklch(0.72 0.16 150);
   --negative: oklch(0.7 0.18 25);
+
+  /* SPEC-018 DL-018-06 — must stay identical to the media-query block above. */
+  --opportunity-buy: oklch(0.72 0.14 165.5);
+  --opportunity-hold: oklch(0.78 0.13 90);
+  --opportunity-sell: oklch(0.72 0.13 244);
 
   --chart-1: #e69f00;
   --chart-2: #56b4e9;
