@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BusinessDate } from '@/core/shared/clock';
 import { evaluateRule } from '@/core/opportunity/evaluate';
 import { aBound, aQuote, aRule, money } from '@/core/opportunity/test-support';
 
@@ -9,7 +10,14 @@ import { aBound, aQuote, aRule, money } from '@/core/opportunity/test-support';
  * business rule, never against `evaluateRule`'s own output.
  */
 
-const TIMING = { sessionOpen: true, cadenceMinutes: 30, now: new Date('2026-03-16T13:00:00Z') };
+const TIMING = {
+  sessionOpen: true,
+  cadenceMinutes: 30,
+  now: new Date('2026-03-16T13:00:00Z'),
+  // 2026-03-16 is a Monday, so the previous trading day is Friday the 13th —
+  // the oldest close that still counts as current (BR-018-16, daily tier).
+  dailyQuoteFloor: BusinessDate.of('2026-03-13'),
+};
 
 describe('BR-018-16 — no usable quote reads unknown', () => {
   it('is unknown when no quote has ever been stored', () => {
@@ -58,13 +66,14 @@ describe('BR-018-16 — no usable quote reads unknown', () => {
    */
   it('a daily-tier close is not timed against the intraday cadence (BR-018-02/14)', () => {
     const rule = aRule({ lower: aBound('30', 'buy'), upper: aBound('40', 'sell') });
-    // Yesterday's published close, read during today's open session — hours
-    // beyond `cadenceMinutes`, and correct.
+    // Friday's published close, read during Monday's open session — days
+    // beyond `cadenceMinutes`, and correct: it is the newest close that can
+    // exist, since `tesouro.sync` runs after the close it publishes.
     const close = aQuote({
       tier: 'daily',
       price: money('29'),
-      quotedAt: new Date('2026-03-15T00:00:00Z'),
-      fetchedAt: new Date('2026-03-15T00:00:00Z'),
+      quotedAt: new Date('2026-03-13T12:00:00Z'),
+      fetchedAt: new Date('2026-03-13T12:00:00Z'),
       source: 'tesouro_transparente',
     });
 
@@ -72,6 +81,22 @@ describe('BR-018-16 — no usable quote reads unknown', () => {
 
     expect(result.state).toBe('buy');
     expect(result).toMatchObject({ matched: 'lower' });
+  });
+
+  it('a daily close older than the last trading day reads unknown (BR-018-16)', () => {
+    const rule = aRule({ lower: aBound('30', 'buy'), upper: aBound('40', 'sell') });
+    // Three weeks old — a `tesouro.sync` that has been dead-lettering. Before
+    // the daily tier had a staleness test of its own, this rendered a
+    // confident "compra" and sent an email over a three-week-old price.
+    const close = aQuote({
+      tier: 'daily',
+      price: money('29'),
+      quotedAt: new Date('2026-02-20T12:00:00Z'),
+      fetchedAt: new Date('2026-02-20T12:00:00Z'),
+      source: 'tesouro_transparente',
+    });
+
+    expect(evaluateRule(rule, close, TIMING)).toEqual({ state: 'unknown' });
   });
 
   it('an intraday quote of the same age *is* stale, which is what the tier distinguishes', () => {

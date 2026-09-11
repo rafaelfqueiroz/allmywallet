@@ -18,18 +18,12 @@ import { withTenant, type Tx } from '@/db/tenant';
  * `core/opportunity`'s ports to their Drizzle adapters for this route's
  * Server Components and server actions.
  *
- * `notifier` is wired to the real (interim) `LogEmailSender` rather than a
- * throwing stub, unlike `goals-composition.ts`'s `UnusedWalletValuationPort`.
- * The difference: that stub exists because a *generic* pricer cannot be built
- * without a wallet in scope yet (a real data dependency is missing), whereas
- * `LogEmailSender` needs nothing this composition root does not already have
- * (`clock`) and is exactly the adapter the worker wires for the same port —
- * using it here costs nothing and keeps one fewer stub class in the tree.
- * `createRule`/`updateRule` (`core/opportunity/rule.ts`) never call
- * No notifier: `OpportunityDependencies` carries none (see its own doc
- * comment). This surface reads and writes rules; the one place an email is
- * delivered is `worker/handlers/opportunity.ts`, after its tenant transaction
- * has committed.
+ * **No notifier**, and no stub standing in for one either:
+ * `OpportunityDependencies` carries no `OpportunityNotifier` at all (see its
+ * own doc comment for why an email must not be sendable from inside a tenant
+ * transaction). This surface reads rules and writes rules. The single place a
+ * message is delivered is `worker/handlers/opportunity.ts`, after its
+ * transaction has committed.
  */
 const clock = new SystemClock();
 
@@ -37,10 +31,12 @@ export function buildWatchDeps(tx: Tx, userId: UserId): OpportunityDependencies 
   return {
     rules: new DrizzleOpportunityRuleRepository(tx, userId),
     heldAssets: new DrizzleHeldAssetReader(tx, userId),
-    // `latest_quotes` has no tenant column (AR-15) but `DrizzleStoredQuoteReader`
-    // is typed against the pooled `Database`, not `Tx` — matching how
-    // `worker/handlers/opportunity.ts#resolveDeps` builds the same class.
-    quotes: new DrizzleStoredQuoteReader(db),
+    // AR-15/deadlock avoidance, exactly as for `catalog` below: `latest_quotes`
+    // and `price_quotes` carry no tenant column, so reading them on the
+    // transaction this request already holds is free — and taking a *second*
+    // pooled connection from inside an open transaction is how ten concurrent
+    // renders of `/reports/composition` deadlock a `max: 10` pool.
+    quotes: new DrizzleStoredQuoteReader(tx),
     // AR-15/deadlock avoidance: the transaction already open for this
     // request, not a second pooled connection — the same reasoning
     // `wallets/composition.ts#buildWalletDeps` gives for `assetCatalog`.

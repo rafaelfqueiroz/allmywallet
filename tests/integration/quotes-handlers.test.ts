@@ -275,9 +275,26 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
 
     expect(provider.callCount).toBe(1);
     expect((await budgetCounter.getUsage('2026-03')).scheduled).toBe(1);
-    // The first call polls (and enqueues); the retry finds the quote already
-    // fresh (`pollHeldAsset`'s own "already fresh" check) and polls nothing,
-    // so it enqueues nothing a second time.
-    expect(enqueuedEvaluations).toEqual([{ assetIds: [asset.id] }]);
+
+    /*
+     * AR-19 for SPEC-008 is about the *provider*: the retry makes no second
+     * call and spends no second request, asserted above.
+     *
+     * The evaluation enqueue is the opposite requirement, and this assertion
+     * is the regression test for getting it wrong. It used to read
+     * `toEqual([{ assetIds: [asset.id] }])` — one enqueue, because only
+     * freshly *polled* assets were enqueued and the retry polled nothing. But
+     * a retry happens precisely when the first attempt failed *after* writing
+     * the quote, and the commonest way for it to fail there is the enqueue
+     * itself. With the old rule the retry enqueued nothing, and that cycle's
+     * quote was never evaluated by anyone — a crossing inside it silently
+     * lost, which is the one signal SPEC-018 BR-018-11 depends on.
+     *
+     * So an already-fresh asset is enqueued too, and the retry re-requests
+     * the evaluation. It costs nothing: evaluation issues no provider request
+     * by construction and is idempotent over an observation it has already
+     * seen (DL-018-08).
+     */
+    expect(enqueuedEvaluations).toEqual([{ assetIds: [asset.id] }, { assetIds: [asset.id] }]);
   });
 });

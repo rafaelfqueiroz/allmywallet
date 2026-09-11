@@ -23,7 +23,7 @@ import type { OpportunityAlert } from '@/core/opportunity/ports';
  * and `unsubscribeUrl`. There is no path from here to a CPF, a position size
  * or a portfolio value: `OpportunityAlert` (`core/opportunity/ports.ts`)
  * cannot carry any of the three, so this function could not render them even
- * if it tried. `tests/integration/opportunity-email.test.ts` scans the actual
+ * if it tried. `./opportunity-email.test.ts` scans the actual
  * rendered output rather than trusting that description (AC-17).
  */
 

@@ -9,6 +9,7 @@ import type { OpportunityDependencies } from '@/core/opportunity/dependencies';
 import type { OpportunityNotifier } from '@/core/opportunity/ports';
 import type { QuietHoursWindow } from '@/core/opportunity/notify';
 import type { TradingCalendar } from '@/core/quotes/ports';
+import { previousTradingDay } from '@/core/quotes/staleness';
 import { resolveConfig } from '@/config/resolve';
 import { resolveQuoteBudgetConfig } from '@/worker/handlers/composition';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
@@ -128,6 +129,10 @@ export async function handleOpportunityEvaluate(
 
   const now = clock.now();
   const sessionOpen = calendar.isSessionOpen(now);
+  // BR-018-16's daily-tier floor — the newest close that can exist, given
+  // `tesouro.sync` publishes after the session it reports on. Computed once
+  // for the whole walk: it is a property of the calendar, not of a tenant.
+  const dailyQuoteFloor = previousTradingDay((date) => calendar.isTradingDay(date), clock.today());
 
   // BR-018-14: the same `quotes.cadence_minutes` SPEC-008 polls at — reading
   // a second, feature-local cadence would let this job disagree with the
@@ -165,6 +170,7 @@ export async function handleOpportunityEvaluate(
             cadenceMinutes,
             cooldownHours,
             quietHours,
+            dailyQuoteFloor,
           });
         },
         database,

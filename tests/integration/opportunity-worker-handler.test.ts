@@ -178,7 +178,10 @@ describe('SPEC-018 — handleOpportunityEvaluate (integration)', () => {
     });
 
     const clock = new FakeClock('2026-03-16T13:30:00Z');
-    const calendar = new FakeTradingCalendar(['2026-03-16']);
+    // Monday the 16th and the Friday before it: BR-018-16's daily-tier floor
+    // is the previous trading day, so a calendar that knows only one day
+    // cannot answer what the newest publishable close would be.
+    const calendar = new FakeTradingCalendar(['2026-03-13', '2026-03-16']);
     calendar.sessionOpenOverride = true;
 
     /*

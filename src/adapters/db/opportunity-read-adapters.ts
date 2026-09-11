@@ -1,4 +1,4 @@
-import { desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { latestQuotes, priceQuotes } from '@/db/schema/market';
@@ -23,7 +23,18 @@ import type { HeldAssetReader, StoredQuote, StoredQuoteReader } from '@/core/opp
  * this class can only read what SPEC-008 has already written.
  */
 export class DrizzleStoredQuoteReader implements StoredQuoteReader {
-  constructor(private readonly db: Database) {}
+  /**
+   * `Database | Tx`, the same shape `DrizzleAssetCatalogRepository` takes, and
+   * for the same reason: a caller already inside a `withTenant` transaction
+   * must be able to hand it *that* transaction rather than have this class
+   * reach the pool for a second connection. Neither table below carries RLS
+   * (AR-15), so reading them on the caller's transaction costs nothing and
+   * avoids the deadlock this seam exists to prevent — with `max: 10` and no
+   * `connectionTimeoutMillis` (`src/db/client.ts`), ten concurrent requests
+   * each holding a transaction and then asking the pool for an eleventh
+   * connection wait forever rather than failing.
+   */
+  constructor(private readonly db: Database | Tx) {}
 
   async latestFor(assetIds: readonly AssetId[]): Promise<ReadonlyMap<AssetId, StoredQuote>> {
     if (assetIds.length === 0) return new Map();
@@ -55,23 +66,41 @@ export class DrizzleStoredQuoteReader implements StoredQuoteReader {
      * never fires"), and it would be invisible: the badge would just read
      * "sem cotação válida" forever.
      *
-     * So an asset with no intraday quote falls back to its most recent
-     * published close — the same row `core/valuation/tesouro.ts` prices the
-     * position from, which is what BR-018-14 requires: one stored price, so
-     * no two screens can disagree. Marked `daily`, because `evaluate.ts`
-     * must not time a once-a-day close against an intraday cadence.
+     * So a **daily-priced** asset with no intraday quote falls back to its
+     * most recent published close — the same row `core/valuation/tesouro.ts`
+     * prices the position from, which is what BR-018-14 requires: one stored
+     * price, so no two screens can disagree.
      *
-     * This is a fallback rather than a class check: an asset class is not
-     * this adapter's business, and "no intraday quote, but a close exists" is
-     * the precise condition either way.
+     * **The class filter is load-bearing, and an earlier version of this
+     * method did not have it.** A bare "no intraday row, but a close exists"
+     * test catches far more than Tesouro: a stock added while the budget was
+     * exhausted, or one dropped from the polling set after a delisting, has
+     * no `latest_quotes` row either. Falling those back to a three-week-old
+     * close tagged `daily` handed them a tier `evaluate.ts` times far more
+     * leniently, and AC-16 — "an asset whose quote is stale shows the unknown
+     * state and sends nothing" — stopped holding for exactly the assets this
+     * spec is mostly about. An intraday-priced asset with no intraday quote
+     * has no usable price, and `null` is the honest answer for it.
      */
     const missing = [...assetIds].filter((assetId) => !result.has(assetId));
     if (missing.length === 0) return result;
 
     const closes = await this.db
-      .select()
+      .select({
+        assetId: priceQuotes.assetId,
+        date: priceQuotes.date,
+        close: priceQuotes.close,
+        source: priceQuotes.source,
+        assetClass: assets.assetClass,
+      })
       .from(priceQuotes)
-      .where(inArray(priceQuotes.assetId, missing))
+      .innerJoin(assets, eq(assets.id, priceQuotes.assetId))
+      .where(
+        and(
+          inArray(priceQuotes.assetId, missing),
+          inArray(assets.assetClass, DAILY_PRICED_CLASSES),
+        ),
+      )
       .orderBy(priceQuotes.assetId, desc(priceQuotes.date));
 
     for (const row of closes) {
@@ -79,21 +108,44 @@ export class DrizzleStoredQuoteReader implements StoredQuoteReader {
       // Ordered newest-first per asset, so the first row seen for an asset is
       // its latest close and every later one is history.
       if (result.has(assetId)) continue;
-      // `price_quotes.date` is a business date (AR-29), not an instant: the
-      // close is *of* that day, with no meaningful time of day. Read at
-      // midnight UTC so both timestamps below are honest about that rather
-      // than implying a precision the row does not carry.
-      const closedAt = new Date(`${row.date}T00:00:00.000Z`);
       result.set(assetId, {
         price: row.close,
-        quotedAt: closedAt,
-        fetchedAt: closedAt,
+        quotedAt: closeInstant(row.date),
+        fetchedAt: closeInstant(row.date),
         source: row.source,
         tier: 'daily',
       });
     }
     return result;
   }
+}
+
+/**
+ * The classes whose only price is a published close. Tesouro Direto is the
+ * whole list today: CDB, LCI and LCA have no market price at all (BR-018-02
+ * refuses a rule on them outright) and everything else is polled intraday.
+ *
+ * Spelled out here rather than derived from `isIntradayEligible`'s
+ * complement, which would silently enrol CDB/LCI/LCA the day a rule on them
+ * became expressible.
+ */
+const DAILY_PRICED_CLASSES = ['tesouro_direto'] as const;
+
+/**
+ * `price_quotes.date` is a business date (AR-29) — the close is *of* that
+ * day, with no meaningful time of day — but `StoredQuote` carries instants,
+ * so one has to be chosen.
+ *
+ * **Noon UTC, not midnight.** Midnight UTC is 21:00 of the *previous* day in
+ * São Paulo, and every display path formats in São Paulo (`src/i18n/format.ts`),
+ * so a close dated 16/03 was rendered to the reader as "15/03 21:00" — on the
+ * watch row and inside the email — disagreeing with every other screen that
+ * shows the same row's date. Noon is far enough from both boundaries that the
+ * instant names the same calendar day in either zone, which is also what lets
+ * `evaluate.ts` read the business date back out of it exactly.
+ */
+function closeInstant(date: string): Date {
+  return new Date(`${date}T12:00:00.000Z`);
 }
 
 /**

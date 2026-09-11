@@ -118,12 +118,32 @@ export async function handleQuotesPoll(overrides?: Partial<QuotesHandlerDeps>): 
   let polled = 0;
   let skippedBudget = 0;
   let failed = 0;
-  // SPEC-018 BR-018-11/DL-018-04 — exactly the assets that actually received
-  // a new quote this cycle, never the whole polling set: a rule on an asset
-  // that was skipped (budget) or failed has nothing new to evaluate, and
-  // evaluating it anyway would be a second read of the same stale quote for
-  // no reason.
-  const polledAssetIds: string[] = [];
+  /*
+   * SPEC-018 BR-018-11/DL-018-04 — the assets that have a usable stored quote
+   * after this cycle: the ones just polled, **and** the ones that were
+   * already fresh.
+   *
+   * The `already_fresh` half is not padding, it is what makes a retry able to
+   * recover. `pollHeldAsset` is idempotent by reporting `already_fresh` for
+   * an asset polled inside the current cadence window (AR-19) — which is what
+   * stops a retry double-spending budget, and precisely what used to make a
+   * retry *lossy* here. If the enqueue below failed after the quotes were
+   * written and committed, pg-boss re-entered this handler, every asset came
+   * back `already_fresh`, the polled list was empty, and that cycle's quote
+   * write was never evaluated by anybody. A crossing inside it was gone — the
+   * one signal BR-018-11 hangs the whole feature on.
+   *
+   * Enqueueing the fresh ones too costs nothing that matters:
+   * `evaluateOpportunities` issues no provider request by construction
+   * (`core/opportunity/dependencies.ts`) and is idempotent over an
+   * observation it has already seen (DL-018-08), so a re-evaluation of an
+   * unchanged quote decides "unchanged" and sends nothing.
+   *
+   * `skipped_budget` and `failed` assets stay out: whatever is stored for
+   * them is what the previous cycle already evaluated, and nothing about them
+   * changed.
+   */
+  const evaluatableAssetIds: string[] = [];
   for (const asset of assets) {
     const result = await pollHeldAsset({ repository, provider, budgetCounter, clock }, asset, {
       cadenceMinutes,
@@ -132,13 +152,15 @@ export async function handleQuotesPoll(overrides?: Partial<QuotesHandlerDeps>): 
     });
     if (result.outcome === 'polled') {
       polled += 1;
-      polledAssetIds.push(asset.id);
+      evaluatableAssetIds.push(asset.id);
+    } else if (result.outcome === 'already_fresh') {
+      evaluatableAssetIds.push(asset.id);
     } else if (result.outcome === 'skipped_budget') skippedBudget += 1;
     else if (result.outcome === 'failed') failed += 1;
   }
 
-  if (polledAssetIds.length > 0) {
-    await enqueueOpportunityEvaluation({ assetIds: polledAssetIds });
+  if (evaluatableAssetIds.length > 0) {
+    await enqueueOpportunityEvaluation({ assetIds: evaluatableAssetIds });
   }
 
   logger.info(

@@ -1,3 +1,4 @@
+import type { BusinessDate } from '@/core/shared/clock';
 import { OpportunityNotificationId } from '@/core/shared/ids';
 import type { AssetId, UserId } from '@/core/shared/ids';
 import type { OpportunityDependencies } from '@/core/opportunity/dependencies';
@@ -21,6 +22,14 @@ export interface EvaluateOpportunitiesOptions {
   readonly cooldownHours: number;
   /** `notifications.quiet_hours` (SPEC-002), resolved by the caller. */
   readonly quietHours: QuietHoursWindow | null;
+  /**
+   * BR-018-16 — the oldest business date a daily-tier close may carry and
+   * still be read as current. The caller computes it from the trading
+   * calendar (`previousTradingDay`); `core/` is handed the answer rather than
+   * a calendar, which keeps this use case free of a port it would otherwise
+   * need only for one date.
+   */
+  readonly dailyQuoteFloor: BusinessDate;
 }
 
 export interface EvaluationSummary {
@@ -89,7 +98,19 @@ export async function evaluateOpportunities(
   // BR-018-03 — recomputed from current holdings every time rules are read,
   // rather than hooked into the transaction-write path. Cheap: this is a
   // full read of the user's rules and holdings, not a per-asset query.
-  const [held, allRules] = await Promise.all([deps.heldAssets.listHeld(), deps.rules.listAll()]);
+  /*
+   * The cheap exit first, and it carries real weight now that `quotes.poll`
+   * enqueues on every cadence tick rather than only when a price moved: this
+   * job walks **every** tenant (a quote is shared, BR-018-25), and the
+   * overwhelming majority of them watch nothing at all. A tenant with no rule
+   * costs one indexed read of their own empty `opportunity_rules` and stops,
+   * rather than also listing their whole position set to reconcile an
+   * activation state that cannot exist.
+   */
+  const allRules = await deps.rules.listAll();
+  if (allRules.length === 0) return EMPTY_SUMMARY;
+
+  const held = await deps.heldAssets.listHeld();
   const heldAssetIds = new Set(
     held.filter((row) => !row.quantity.isZero()).map((row) => row.assetId),
   );
@@ -126,6 +147,7 @@ export async function evaluateOpportunities(
       sessionOpen: options.sessionOpen,
       cadenceMinutes: options.cadenceMinutes,
       now,
+      dailyQuoteFloor: options.dailyQuoteFloor,
     });
 
     // BR-018-16 — an unknown reading has nothing to persist, decide or send:

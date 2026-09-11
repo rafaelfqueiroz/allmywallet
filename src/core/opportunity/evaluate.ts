@@ -1,4 +1,5 @@
 import { isQuoteStale } from '@/core/quotes/staleness';
+import { BusinessDate, businessDateInSaoPaulo } from '@/core/shared/clock';
 import type { Money } from '@/core/shared/money';
 import type { OpportunityRule, OpportunityState, StoredQuote } from '@/core/opportunity/ports';
 
@@ -20,6 +21,19 @@ export interface EvaluationTiming {
   readonly sessionOpen: boolean;
   readonly cadenceMinutes: number;
   readonly now: Date;
+  /**
+   * BR-018-16, the daily tier's half of "stale beyond its tier": the oldest
+   * business date a published close may carry and still be read as current —
+   * the most recent trading day strictly before today
+   * (`previousTradingDay`, `core/quotes/staleness.ts`).
+   *
+   * A daily price has no cadence to be late against, but it can still be
+   * genuinely old: a `tesouro.sync` dead-lettering for three weeks leaves a
+   * three-week-old close in `price_quotes`, and a state computed from it
+   * would be confident and wrong. Calendar-derived rather than a tolerance in
+   * days, so weekends and B3 holidays need no special case.
+   */
+  readonly dailyQuoteFloor: BusinessDate;
 }
 
 /**
@@ -72,9 +86,22 @@ export function evaluateRule(
    * qualification — two screens disagreeing about one asset, which is the
    * outcome BR-018-14 exists to rule out.
    */
-  if (
-    quote.tier === 'intraday' &&
-    isQuoteStale(timing.sessionOpen, timing.cadenceMinutes, timing.now, quote.fetchedAt)
+  if (quote.tier === 'intraday') {
+    if (isQuoteStale(timing.sessionOpen, timing.cadenceMinutes, timing.now, quote.fetchedAt)) {
+      return { state: 'unknown' };
+    }
+  } else if (
+    /*
+     * The daily tier's own test. Without it this branch was an escape hatch
+     * from BR-018-16 rather than a second reading of it: any quote tagged
+     * `daily` was structurally incapable of reading `unknown`, however old.
+     *
+     * The close's business date is read from `quotedAt` in São Paulo, which
+     * is exact because the adapter builds that instant at noon UTC precisely
+     * so it names one calendar day in both zones
+     * (`adapters/db/opportunity-read-adapters.ts`).
+     */
+    BusinessDate.isBefore(businessDateInSaoPaulo(quote.quotedAt), timing.dailyQuoteFloor)
   ) {
     return { state: 'unknown' };
   }

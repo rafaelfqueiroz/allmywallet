@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { db as globalDb, type Database } from '@/db/client';
-import { withTenant } from '@/db/tenant';
+import { withEachTenant } from '@/db/tenant';
 import { users } from '@/db/schema/users';
 import { positions } from '@/db/schema/positions';
 import { AssetId, UserId } from '@/core/shared/ids';
@@ -37,21 +37,35 @@ export class DrizzleHeldAssetsRepository implements HeldAssetsPort {
 
   async listDistinctHeldAssetIds(): Promise<readonly AssetId[]> {
     const tenants = await this.database.select({ id: users.id }).from(users);
+    const userIds = tenants.map((tenant) => UserId.of(tenant.id));
+
+    /*
+     * `withEachTenant`, not a `withTenant` per account. This runs on every
+     * `quotes.poll` (every five minutes through market hours) and every
+     * `budget.check`, so the per-account form cost one BEGIN/COMMIT round
+     * trip per account per tick — growing linearly with signups to derive a
+     * set the free tier caps at ~51 assets. One transaction, one connection,
+     * the same transaction-scoped `set_config` (AR-11/AR-13).
+     *
+     * Safe to share a transaction here precisely because nothing below
+     * writes: this gathers a fact. The jobs that *write* per tenant keep
+     * their own transaction each, so one tenant's failure cannot roll back
+     * another's.
+     */
+    const perTenant = await withEachTenant(
+      userIds,
+      (tx) =>
+        tx
+          .select({ assetId: positions.assetId })
+          .from(positions)
+          // `positions.quantity >= 0` always holds (its own CHECK), so `> 0`
+          // and BR-008-08's "non-zero" agree without needing `<>`.
+          .where(sql`${positions.quantity} > 0`),
+      this.database,
+    );
 
     const held = new Set<string>();
-    for (const tenant of tenants) {
-      const userId = UserId.of(tenant.id);
-      const rows = await withTenant(
-        userId,
-        (tx) =>
-          tx
-            .select({ assetId: positions.assetId })
-            .from(positions)
-            // `positions.quantity >= 0` always holds (its own CHECK), so `> 0`
-            // and BR-008-08's "non-zero" agree without needing `<>`.
-            .where(sql`${positions.quantity} > 0`),
-        this.database,
-      );
+    for (const rows of perTenant) {
       for (const row of rows) held.add(row.assetId);
     }
 

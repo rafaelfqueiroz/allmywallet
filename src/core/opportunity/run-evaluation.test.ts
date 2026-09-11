@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BusinessDate } from '@/core/shared/clock';
 import { OpportunityNotificationId } from '@/core/shared/ids';
 import { evaluateOpportunities } from '@/core/opportunity/run-evaluation';
 import type { EvaluateOpportunitiesOptions } from '@/core/opportunity/run-evaluation';
@@ -34,6 +35,8 @@ const BASE_OPTIONS: EvaluateOpportunitiesOptions = {
   cadenceMinutes: 30,
   cooldownHours: 24,
   quietHours: null,
+  // 2026-03-16 is a Monday; Friday the 13th is the newest close that can exist.
+  dailyQuoteFloor: BusinessDate.of('2026-03-13'),
 };
 
 function consentedDeps() {

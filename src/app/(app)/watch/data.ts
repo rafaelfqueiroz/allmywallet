@@ -6,6 +6,7 @@ import { evaluateRule } from '@/core/opportunity/evaluate';
 import type { EvaluatedState, OpportunityBound, OpportunityState } from '@/core/opportunity/ports';
 import { canCarryRule } from '@/core/opportunity/rule';
 import type { AssetClass } from '@/core/quotes/ports';
+import { previousTradingDay } from '@/core/quotes/staleness';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
 import { buildWatchDeps } from '@/app/(app)/watch/composition';
 import { db } from '@/db/client';
@@ -101,6 +102,10 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
   const calendar = new B3TradingCalendar();
   const now = clock.now();
   const sessionOpen = calendar.isSessionOpen(now);
+  // BR-018-16's daily-tier floor, from the same calendar `opportunity.evaluate`
+  // reads — so this screen and the job cannot disagree about whether a
+  // published close is still current.
+  const dailyQuoteFloor = previousTradingDay((date) => calendar.isTradingDay(date), clock.today());
 
   return withTenant(
     userId,
@@ -154,6 +159,7 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
             sessionOpen,
             cadenceMinutes: cadenceCfg.value,
             now,
+            dailyQuoteFloor,
           });
 
           watched.push({
@@ -233,17 +239,34 @@ export async function loadWatchStates(
   const calendar = new B3TradingCalendar();
   const now = clock.now();
   const sessionOpen = calendar.isSessionOpen(now);
+  const dailyQuoteFloor = previousTradingDay((date) => calendar.isTradingDay(date), clock.today());
 
   return withTenant(
     userId,
     async (tx) => {
       const deps = buildWatchDeps(tx, userId);
-      const [rules, cadenceCfg] = await Promise.all([
+      const [rules, held, cadenceCfg] = await Promise.all([
         deps.rules.listAll(),
+        deps.heldAssets.listHeld(),
         resolveConfig('quotes.cadence_minutes', { db: tx, userId }),
       ]);
 
-      const active = rules.filter((rule) => rule.active);
+      /*
+       * BR-018-14 — **held, not `active`**, and the difference is a bug this
+       * once had. `active` is only flipped back by `reconcileActivation`
+       * inside an evaluation pass, and a pass runs only when `quotes.poll`
+       * actually writes a quote. So between rebuying an asset and the next
+       * cadence window — every evening, every weekend — a rule was `active:
+       * false` on a position the user genuinely holds. `/watch` rendered its
+       * state (it filters on the holding) and this badge rendered nothing,
+       * which is exactly the "two screens disagreeing about one asset" that
+       * rule exists to forbid. Both now ask the same question of the same
+       * data, so neither can wait on a job to agree with the other.
+       */
+      const heldAssetIds = new Set(
+        held.filter((row) => !row.quantity.isZero()).map((row) => row.assetId),
+      );
+      const active = rules.filter((rule) => heldAssetIds.has(rule.assetId));
       if (active.length === 0) return new Map<AssetId, EvaluatedState>();
 
       const assetIds = active.map((rule) => rule.assetId);
@@ -255,6 +278,7 @@ export async function loadWatchStates(
           sessionOpen,
           cadenceMinutes: cadenceCfg.value,
           now,
+          dailyQuoteFloor,
         });
         states.set(rule.assetId, evaluated.state);
       }

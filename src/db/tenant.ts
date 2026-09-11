@@ -40,3 +40,44 @@ export async function withTenant<T>(
     return fn(tx);
   });
 }
+
+/**
+ * A read-only sweep across many tenants, in **one** transaction and on one
+ * pooled connection.
+ *
+ * `withTenant` per tenant is the right shape for a request and the wrong one
+ * for a sweep. `quotes.poll` fires every five minutes through market hours
+ * and derives its polling set from every account's positions (SPEC-008
+ * BR-008-08), so the per-tenant form meant a `BEGIN` / `set_config` /
+ * `SELECT` / `COMMIT` round trip **per account, per tick** — five hundred
+ * accounts is five hundred transactions every five minutes on a two-vCPU box,
+ * to compute a set the free tier caps at roughly fifty assets. The cost grew
+ * with signups; the answer did not.
+ *
+ * This keeps tenant context in this file — the one module allowed to set it
+ * (AR-11) — and uses the identical mechanism: `set_config(..., true)`, so the
+ * setting is transaction-scoped and cannot escape onto a pooled connection
+ * (AR-13). Each iteration overwrites the previous tenant's value, and the
+ * whole thing is discarded at `COMMIT`.
+ *
+ * **Reads only.** Every tenant in the sweep shares one transaction, so one
+ * tenant's failed write would roll back every other tenant's — which is
+ * exactly why `opportunity.evaluate` and `valuation.snapshot`, both of which
+ * write, keep their per-tenant `withTenant` and their per-tenant failure
+ * isolation. Use this only where the result is a fact being *gathered*.
+ */
+export async function withEachTenant<T>(
+  userIds: readonly UserId[],
+  fn: (tx: Tx, userId: UserId) => Promise<T>,
+  database: Database = db,
+): Promise<readonly T[]> {
+  if (userIds.length === 0) return [];
+  return database.transaction(async (tx) => {
+    const results: T[] = [];
+    for (const userId of userIds) {
+      await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
+      results.push(await fn(tx, userId));
+    }
+    return results;
+  });
+}

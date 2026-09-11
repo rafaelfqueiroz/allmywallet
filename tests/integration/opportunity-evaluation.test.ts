@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '@/db/schema';
 import { positions } from '@/db/schema/positions';
 import { withTenant, type Tx } from '@/db/tenant';
-import { FakeClock } from '@/core/shared/clock';
+import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import type { AssetId } from '@/core/shared/ids';
 import { ConsentId, PositionId, UserId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
@@ -198,6 +198,9 @@ describe('SPEC-018 — evaluateOpportunities (integration)', () => {
     cadenceMinutes: 30,
     cooldownHours: 24,
     quietHours: null,
+    // 2026-03-16 is a Monday; Friday the 13th is the newest close that can
+    // exist (BR-018-16's daily tier).
+    dailyQuoteFloor: BusinessDate.of('2026-03-13'),
   };
 
   it('AC-7: issues zero provider requests across a full evaluation cycle', async () => {
