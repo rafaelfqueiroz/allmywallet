@@ -14,6 +14,7 @@ import {
   FakeTradingCalendar,
 } from '@/core/quotes/test-support';
 import { handleQuotesCloseCapture, handleQuotesPoll } from '@/worker/handlers/quotes';
+import type { OpportunityEvaluateJobPayload } from '@/worker/handlers/opportunity';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { resetConfigState } from '../support/reset';
 
@@ -133,6 +134,7 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
       }),
     );
     const repository = new DrizzleQuoteRepository(db);
+    const enqueuedEvaluations: OpportunityEvaluateJobPayload[] = [];
 
     await handleQuotesPoll({
       database: db,
@@ -143,11 +145,48 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
       budgetCounter: new DrizzleQuoteBudgetCounter(db),
       heldAssets,
       provider,
+      enqueueOpportunityEvaluation: async (payload) => {
+        enqueuedEvaluations.push(payload);
+      },
     });
 
     const stored = await repository.getLatestQuote(asset.id);
     expect(stored?.price.toString()).toBe('38.42');
     expect(provider.callCount).toBe(1);
+
+    // SPEC-018 BR-018-11 — a real poll enqueues evaluation for exactly the
+    // asset that just received a new quote.
+    expect(enqueuedEvaluations).toEqual([{ assetIds: [asset.id] }]);
+  });
+
+  it('SPEC-018 BR-018-11: no opportunity evaluation is enqueued when nothing was polled', async () => {
+    await seedHeldAsset('PETR4');
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const asset = await catalog.findByCode('PETR4');
+    if (!asset) throw new Error('setup failed');
+    const heldAssets = new FakeHeldAssetsPort([asset.id]);
+
+    // Session closed — `computePollingSet`/`pollHeldAsset` never run, so
+    // there is nothing new to evaluate.
+    const calendar = new FakeTradingCalendar(['2026-03-16']);
+    const provider = new FakeQuoteProvider();
+    const enqueuedEvaluations: OpportunityEvaluateJobPayload[] = [];
+
+    await handleQuotesPoll({
+      database: db,
+      clock: new FakeClock('2026-03-14T14:00:00Z'), // a Saturday
+      calendar,
+      catalog,
+      repository: new DrizzleQuoteRepository(db),
+      budgetCounter: new DrizzleQuoteBudgetCounter(db),
+      heldAssets,
+      provider,
+      enqueueOpportunityEvaluation: async (payload) => {
+        enqueuedEvaluations.push(payload);
+      },
+    });
+
+    expect(enqueuedEvaluations).toEqual([]);
   });
 
   it('BR-008-09/10: close-capture supersedes the day’s intraday quote in history, never rewriting latest_quotes', async () => {
@@ -216,6 +255,7 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
     const repository = new DrizzleQuoteRepository(db);
     const budgetCounter = new DrizzleQuoteBudgetCounter(db);
     const clock = new FakeClock('2026-03-16T14:00:00Z');
+    const enqueuedEvaluations: OpportunityEvaluateJobPayload[] = [];
     const deps = {
       database: db,
       clock,
@@ -225,6 +265,9 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
       budgetCounter,
       heldAssets,
       provider,
+      enqueueOpportunityEvaluation: async (payload: OpportunityEvaluateJobPayload) => {
+        enqueuedEvaluations.push(payload);
+      },
     };
 
     await handleQuotesPoll(deps);
@@ -232,5 +275,26 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
 
     expect(provider.callCount).toBe(1);
     expect((await budgetCounter.getUsage('2026-03')).scheduled).toBe(1);
+
+    /*
+     * AR-19 for SPEC-008 is about the *provider*: the retry makes no second
+     * call and spends no second request, asserted above.
+     *
+     * The evaluation enqueue is the opposite requirement, and this assertion
+     * is the regression test for getting it wrong. It used to read
+     * `toEqual([{ assetIds: [asset.id] }])` — one enqueue, because only
+     * freshly *polled* assets were enqueued and the retry polled nothing. But
+     * a retry happens precisely when the first attempt failed *after* writing
+     * the quote, and the commonest way for it to fail there is the enqueue
+     * itself. With the old rule the retry enqueued nothing, and that cycle's
+     * quote was never evaluated by anyone — a crossing inside it silently
+     * lost, which is the one signal SPEC-018 BR-018-11 depends on.
+     *
+     * So an already-fresh asset is enqueued too, and the retry re-requests
+     * the evaluation. It costs nothing: evaluation issues no provider request
+     * by construction and is idempotent over an observation it has already
+     * seen (DL-018-08).
+     */
+    expect(enqueuedEvaluations).toEqual([{ assetIds: [asset.id] }, { assetIds: [asset.id] }]);
   });
 });

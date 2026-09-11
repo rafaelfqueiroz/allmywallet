@@ -3,7 +3,7 @@ import { logger } from '@/lib/logger';
 import { setRuntimeState, clearRuntimeState, getRuntimeStateRow } from '@/config/runtime-state';
 import { evaluateBudget } from '@/core/quotes/evaluate-budget';
 import { computePollingSet } from '@/core/quotes/polling-set';
-import { NoLedgerHeldAssetsRepository } from '@/adapters/db/held-assets-repository';
+import { DrizzleHeldAssetsRepository } from '@/adapters/db/held-assets-repository';
 import type {
   AssetCatalogPort,
   BudgetCounterPort,
@@ -55,7 +55,7 @@ export async function handleBudgetCheck(overrides?: Partial<BudgetHandlerDeps>):
   const calendar = overrides?.calendar ?? composition.calendar;
   const catalog = overrides?.catalog ?? composition.catalog;
   const budgetCounter = overrides?.budgetCounter ?? composition.budgetCounter;
-  const heldAssets = overrides?.heldAssets ?? new NoLedgerHeldAssetsRepository();
+  const heldAssets = overrides?.heldAssets ?? new DrizzleHeldAssetsRepository(database);
   const config = await resolveQuoteBudgetConfig(database);
 
   const yearMonth = clock.today().slice(0, 7);

@@ -155,6 +155,12 @@ export default defineConfig({
         // `core/reporting/**` onto a fake port's convenience defaults rather
         // than onto the calculations the gate is there for.
         'src/core/reporting/test-support.ts',
+        // SPEC-018 — same reasoning as `core/reporting/test-support.ts`
+        // above: hand-written fakes and builders exist to exercise the
+        // opportunity module's own decisions, and measuring the fakes
+        // themselves would pull the 100 %-branch gate below onto a port
+        // stub's convenience defaults instead of onto buy/sell/hold logic.
+        'src/core/opportunity/test-support.ts',
         'src/worker/index.ts',
         'src/i18n/request.ts',
         // SPEC-001: Auth.js configuration and provider wiring — the decisions
@@ -191,6 +197,12 @@ export default defineConfig({
         // whether a plan is working. Wrong is worse than missing, so it joins
         // the engine's gate rather than the 80 % floor.
         'src/core/goals/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
+        // SPEC-018 — this module decides whether someone's inbox is written
+        // to and what state their screen shows for a rule they set up
+        // themselves. Wrong is worse than missing (a silently-skipped email
+        // is recoverable; a wrong buy/sell state or a duplicate send is not),
+        // so it joins the engine's gate rather than the 80 % floor.
+        'src/core/opportunity/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

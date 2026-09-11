@@ -1,5 +1,6 @@
 import {
   ChartPie,
+  Eye,
   Receipt,
   Settings,
   ShieldCheck,
@@ -19,10 +20,13 @@ import {
  * no page yet; linking to it would ship a navigation menu whose item 404s,
  * which is worse than a shorter menu. `nav.transactions` graduated out of that
  * category with #9 (SPEC-006) — a user can now reach their ledger.
+ * `nav.watch` (SPEC-018, #90) joined the same way — `/watch` exists as of
+ * this change.
  */
 export type NavItem = {
   readonly href: string;
-  readonly labelKey: 'transactions' | 'wallets' | 'import' | 'reports' | 'settings' | 'privacy';
+  readonly labelKey:
+    'transactions' | 'wallets' | 'watch' | 'import' | 'reports' | 'settings' | 'privacy';
   readonly icon: LucideIcon;
 };
 
@@ -32,6 +36,10 @@ export const NAV_ITEMS: readonly NavItem[] = [
   // the views built on top of it.
   { href: '/transactions', labelKey: 'transactions', icon: Receipt },
   { href: '/wallets', labelKey: 'wallets', icon: Wallet },
+  // SPEC-018 — rules exist only on held assets (BR-018-01), so this sits
+  // beside wallets rather than beside reports: it watches the same holdings,
+  // not a derived view of them.
+  { href: '/watch', labelKey: 'watch', icon: Eye },
   { href: '/import', labelKey: 'import', icon: Upload },
   { href: '/reports', labelKey: 'reports', icon: ChartPie },
   { href: '/preferences', labelKey: 'settings', icon: Settings },

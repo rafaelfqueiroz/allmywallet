@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from '@/components/patterns/data-table';
 import { Badge } from '@/components/ui/badge';
+import { StateBadge, type WatchState } from '@/components/patterns/state-badge';
 import { Text } from '@/components/ui/text';
 import { Cluster } from '@/components/layout/cluster';
 
@@ -75,10 +76,25 @@ export interface HoldingRow {
   readonly concentrated: boolean;
   /** BR-015-09 — accrued rather than observed. */
   readonly estimated: boolean;
+  /**
+   * SPEC-018 BR-018-19 — the same buy/hold/sell/unknown state `/watch` shows,
+   * `null` only when this asset carries no opportunity rule at all (most
+   * holdings). A rule's `unknown` state (BR-018-16 — no usable quote) still
+   * renders, deliberately, as the muted `StateBadge` rather than being
+   * hidden: it is the "watched but nothing to report right now" case, not
+   * the same thing as never having watched this asset.
+   */
+  readonly opportunityState: WatchState | null;
+  /** Already translated (AR-44) — a three/four-word label, e.g. "compra". */
+  readonly opportunityStateLabel: string;
+  /** BR-018-18 — states the user's own rule, never a recommendation. */
+  readonly opportunityStateTitle: string;
 }
 
 export interface HoldingsTableLabels {
   readonly code: string;
+  /** SPEC-018 BR-018-19 — the opportunity-state column header. */
+  readonly state: string;
   readonly assetClass: string;
   readonly sector: string;
   readonly quantity: string;
@@ -177,6 +193,32 @@ export function HoldingsTable({
       },
       { id: 'assetClass', header: labels.assetClass, accessorFn: (row) => row.assetClass },
       { id: 'sector', header: labels.sector, accessorFn: (row) => row.sector },
+      /*
+       * SPEC-018 BR-018-19 — the watch state, as a badge in the holdings
+       * list. It sits with the categorical columns rather than the figures
+       * because it is not one: it is which of the user's own rules currently
+       * matches (BR-018-18), and the cell carries no arithmetic at all —
+       * server-formatted label and title, exactly like every other cell in
+       * this table (see the header comment).
+       *
+       * `undefined` for a holding with no rule, so `sortUndefined: 'last'`
+       * keeps unwatched assets at the bottom in both directions: not having a
+       * rule is the absence of a state, not the lowest one.
+       */
+      {
+        id: 'opportunityState',
+        header: labels.state,
+        accessorFn: (row) => row.opportunityStateLabel || undefined,
+        sortUndefined: 'last',
+        cell: ({ row }) =>
+          row.original.opportunityState === null ? null : (
+            <StateBadge
+              state={row.original.opportunityState}
+              label={row.original.opportunityStateLabel}
+              title={row.original.opportunityStateTitle}
+            />
+          ),
+      },
       numeric('quantity', labels.quantity),
       numeric('averagePrice', labels.averagePrice),
       numeric('currentPrice', labels.currentPrice),

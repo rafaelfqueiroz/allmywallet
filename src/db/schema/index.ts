@@ -17,3 +17,4 @@ export * from './observability';
 export * from './wallets';
 export * from './goals';
 export * from './privacy';
+export * from './opportunity';

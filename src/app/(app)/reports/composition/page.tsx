@@ -3,6 +3,8 @@ import { defaultGroupingFor, type GroupNames } from '@/core/reporting/grouping';
 import type { GroupKey } from '@/core/reporting/ports';
 import type { Money as MoneyValue, Quantity } from '@/core/shared/money';
 import type { AllocationShift, CompositionReport } from '@/core/reporting/composition/ports';
+import type { EvaluatedState } from '@/core/opportunity/ports';
+import type { AssetId } from '@/core/shared/ids';
 import { assetClassColor, chartColorAt } from '@/components/charts/palette';
 import { formatCurrency, formatDateTime, formatPercent, formatQuantity } from '@/i18n/format';
 import { fromSearchParams } from '@/lib/report-url-state';
@@ -13,6 +15,7 @@ import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
 import { tryUserId } from '@/app/(app)/reports/session';
 import { loadComposition } from '@/app/(app)/reports/composition/data';
+import { loadWatchStates } from '@/app/(app)/watch/data';
 import {
   ShareChart,
   type ShareChartSlice,
@@ -75,6 +78,9 @@ interface PageProps {
 export default async function CompositionPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
   const tc = await getTranslations('composicao');
+  // SPEC-018 BR-018-19: the badge reuses `/watch`'s own state labels rather
+  // than a second set here, so one state never has two names (AR-44).
+  const tw = await getTranslations('watch');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -103,6 +109,16 @@ export default async function CompositionPage({ searchParams }: PageProps) {
     scope: state.scope,
     grouping: state.grouping,
   });
+
+  /*
+   * SPEC-018 BR-018-19 — the watch state as a badge in the holdings list.
+   * Read after the report rather than inside `loadComposition`: it is not part
+   * of the composition report (nothing about a share of *patrimônio* depends
+   * on it), and folding it in would put an opportunity read behind SPEC-015's
+   * own cache and scope rules. Empty for a user who watches nothing, which is
+   * every user until they configure a rule.
+   */
+  const watchStates = await loadWatchStates(userId);
 
   const labelOf = (key: GroupKey, names: GroupNames): string => resolveGroupLabel(key, names, t);
 
@@ -162,9 +178,10 @@ export default async function CompositionPage({ searchParams }: PageProps) {
 
           <Section title={tc('holdings.title')} description={tc('holdings.description')}>
             <HoldingsTable
-              rows={holdingRows(report.rows, t)}
+              rows={holdingRows(report.rows, watchStates, t, tc, tw)}
               labels={{
                 code: tc('holdings.code'),
+                state: tc('holdings.state'),
                 assetClass: tc('holdings.assetClass'),
                 sector: tc('holdings.sector'),
                 quantity: tc('holdings.quantity'),
@@ -464,7 +481,10 @@ function shareText(share: MoneyValue | null): string {
  */
 function holdingRows(
   rows: readonly CompositionReport['rows'][number][],
+  watchStates: ReadonlyMap<AssetId, EvaluatedState>,
   t: (key: string) => string,
+  tc: (key: string) => string,
+  tw: (key: string) => string,
 ): HoldingRow[] {
   const quantity = rankOf(rows, (row) => row.quantity);
   const averagePrice = rankOf(rows, (row) => row.averagePrice);
@@ -488,6 +508,13 @@ function holdingRows(
     unrealizedGain: cell(row.unrealizedGain, formatCurrency, unrealizedGain[index]),
     concentrated: row.concentrated,
     estimated: row.estimated,
+    /*
+     * BR-018-19 — `null` for a holding with no rule, which is most of them.
+     * The label and the title are resolved here, on the server, from the same
+     * `watch.*` catalogue entries `/watch` itself renders (AR-44), so the two
+     * screens cannot describe the same state in two different words.
+     */
+    ...watchCells(watchStates.get(row.assetId), tc, tw),
   }));
 }
 
@@ -525,4 +552,30 @@ function cell<T extends MoneyValue | Quantity>(
       // directions rather than letting it pass for zero.
       { text: '—', rank: undefined, negative: false }
     : { text: format(figure), rank, negative: figure.isNegative() };
+}
+
+/**
+ * SPEC-018 BR-018-18 — the badge's text, and the sentence behind it.
+ *
+ * The title deliberately says whose rule this is rather than what to do about
+ * it: this table already carries the one flag in the product that comes close
+ * to an opinion (BR-015-06's concentration badge), and a state that read as a
+ * recommendation here would be the product volunteering a view on an asset,
+ * which SPEC-018 exists not to do. The full wording — which bound matched and
+ * at what threshold — lives on `/watch`, where there is room to state the
+ * user's own numbers back to them.
+ */
+function watchCells(
+  state: EvaluatedState | undefined,
+  tc: (key: string) => string,
+  tw: (key: string) => string,
+): Pick<HoldingRow, 'opportunityState' | 'opportunityStateLabel' | 'opportunityStateTitle'> {
+  if (state === undefined) {
+    return { opportunityState: null, opportunityStateLabel: '', opportunityStateTitle: '' };
+  }
+  return {
+    opportunityState: state,
+    opportunityStateLabel: tw(`stateLabel.${state}`),
+    opportunityStateTitle: tc('holdings.stateTitle'),
+  };
 }
