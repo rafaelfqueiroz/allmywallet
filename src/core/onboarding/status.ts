@@ -61,17 +61,23 @@ export function deriveOnboardingStatus(
     firstWallet: facts.walletCount >= 1,
   };
 
-  // SPEC-020 BR-020-04: export → upload → review → commit.
-  const stage: OnboardingStage = complete
-    ? 'done'
-    : facts.stagedBatch === null
-      ? 'upload'
-      : facts.stagedBatch.status === 'pending'
-        ? 'processing'
-        : 'review';
-
-  const stagedBatchId: ImportBatchId | null =
-    stage === 'processing' || stage === 'review' ? (facts.stagedBatch?.batchId ?? null) : null;
+  // SPEC-020 BR-020-04: export → upload → review → commit. `stagedBatchId` is
+  // derived alongside `stage` rather than from it afterwards, so there is no
+  // branch that has to reconcile "processing/review" against a possibly-null
+  // `stagedBatch` the type system already rules out here.
+  let stage: OnboardingStage;
+  let stagedBatchId: ImportBatchId | null = null;
+  if (complete) {
+    stage = 'done';
+  } else if (facts.stagedBatch === null) {
+    stage = 'upload';
+  } else if (facts.stagedBatch.status === 'pending') {
+    stage = 'processing';
+    stagedBatchId = facts.stagedBatch.batchId;
+  } else {
+    stage = 'review';
+    stagedBatchId = facts.stagedBatch.batchId;
+  }
 
   // SPEC-020 BR-020-09/12: the one persisted fact, and it never marks a step
   // complete — read here and nowhere near `steps` or `complete` above.
