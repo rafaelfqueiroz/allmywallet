@@ -8,7 +8,7 @@ import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
-import { tryUserId } from '@/app/(app)/reports/session';
+import { tryUserId } from '@/lib/session';
 import { loadEarnings } from '@/app/(app)/reports/earnings/data';
 import { IncomeChart } from '@/app/(app)/reports/earnings/_components/IncomeChart';
 import { PageShell } from '@/components/patterns/page-shell';

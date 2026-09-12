@@ -13,7 +13,7 @@ import { hasFixedIncome } from '@/lib/fixed-income';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
-import { tryUserId } from '@/app/(app)/reports/session';
+import { tryUserId } from '@/lib/session';
 import { loadPatrimonio } from '@/app/(app)/reports/patrimonio/data';
 import { ValueChart } from '@/app/(app)/reports/patrimonio/_components/ValueChart';
 import { ContributionChart } from '@/app/(app)/reports/patrimonio/_components/ContributionChart';

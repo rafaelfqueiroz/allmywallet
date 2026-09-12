@@ -4,7 +4,7 @@ import { formatDateTime } from '@/i18n/format';
 import { UploadForm } from '@/app/(app)/import/_components/UploadForm';
 import { uploadExtractAction } from '@/app/(app)/import/actions';
 import { listImportBatches, loadImportFreshness } from '@/app/(app)/import/data';
-import { tryUserId } from '@/app/(app)/import/session';
+import { tryUserId } from '@/lib/session';
 import { ExportGuide } from '@/app/(app)/import/_components/ExportGuide';
 import { StalenessPrompt } from '@/app/(app)/import/_components/StalenessPrompt';
 import { PageShell } from '@/components/patterns/page-shell';

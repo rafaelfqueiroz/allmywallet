@@ -88,6 +88,87 @@
     "collapseSidebar": "Recolher menu lateral",
     "expandSidebar": "Expandir menu lateral"
   },
+  "dashboard": {
+    "title": "Painel",
+    "description": "Quanto você tem, o que precisa da sua atenção e de quando são os dados.",
+    "signedOut": "Entre na sua conta para ver seu painel.",
+    "value": {
+      "label": "Patrimônio atual",
+      "reportLink": "Ver o relatório de patrimônio"
+    },
+    "markers": {
+      "attention": {
+        "badge": "Sem preço de mercado",
+        "explanation": "{count, plural, one {# posição não pôde ser precificada e entra no total pelo custo de aquisição} other {# posições não puderam ser precificadas e entram no total pelo custo de aquisição}}. Para essa parte, o número acima não é uma avaliação de mercado."
+      },
+      "accrued": {
+        "badge": "Inclui renda fixa acruada",
+        "explanation": "Parte do total é calculada a partir do indexador contratado, não observada em um mercado. É um número real, só não é um preço."
+      },
+      "carried": {
+        "badge": "Preços de até {date}",
+        "explanation": "Parte dos preços é o fechamento de um pregão anterior — fim de semana, feriado, negociação suspensa, ou uma cotação que o orçamento do provedor não pôde atualizar. São preços reais e observados; só não são os de hoje."
+      }
+    },
+    "freshness": {
+      "valuation": "Valores de {date}",
+      "quotedAt": "Cotações de {timestamp}",
+      "noQuote": "Nenhuma cotação de mercado por trás destes valores",
+      "delay": "Atraso de até {minutes} minutos — nunca em tempo real",
+      "lastImport": "Última importação: {date}",
+      "neverImported": "Nenhum extrato importado ainda"
+    },
+    "staleness": {
+      "action": "Importar extrato"
+    },
+    "empty": {
+      "onboarding": {
+        "title": "Ainda não há nada para mostrar aqui",
+        "description": "Seu patrimônio aparece nesta tela depois da primeira importação. Não mostramos R$ 0,00 antes disso: zero seria uma afirmação sobre o seu dinheiro, e o que existe hoje é ausência de dados, não ausência de patrimônio.",
+        "action": "Importar meu primeiro extrato"
+      },
+      "noHoldings": {
+        "title": "Você não tem posições em aberto",
+        "description": "Seus extratos já foram importados e nenhuma posição está aberta hoje. O histórico continua nos relatórios e no extrato de transações.",
+        "action": "Ver transações"
+      }
+    },
+    "reconciliation": {
+      "title": "Conferência com a B3",
+      "asOf": "Posição de {date}",
+      "state": {
+        "reconciled": "Confere com a B3",
+        "discrepancies_found": "{count, plural, one {# divergência em aberto} other {# divergências em aberto}}",
+        "never_reconciled": "Nunca conferido"
+      },
+      "body": {
+        "reconciled": "Na última conferência, todas as quantidades que calculamos bateram com o que a B3 informou.",
+        "reconciledAfterAdjustments": "A última conferência encontrou {count, plural, one {# divergência} other {# divergências}} e você aceitou o número da B3 em {count, plural, one {ela} other {todas}}. Nada segue em aberto — mas o acerto foi seu, não um acaso.",
+        "discrepancies_found": "Em pelo menos um ativo, a quantidade que calculamos não bate com a que a B3 informou. Até você decidir o que fazer, o total acima segue o nosso cálculo.",
+        "never_reconciled": "Nunca comparamos o seu histórico com a posição informada pela B3. Sem essa comparação, um extrato faltando não tem como aparecer — o cálculo fica errado sem parecer errado."
+      },
+      "open": "Ver a conferência",
+      "importPosicao": "Importar o extrato de Posição"
+    },
+    "attention": {
+      "title": "Precisa da sua atenção",
+      "description": "Tudo o que está esperando uma decisão sua, em um lugar só.",
+      "empty": "Nada esperando por você.",
+      "more": "{count, plural, one {mais # item em Carteiras} other {mais # itens em Carteiras}}",
+      "importRows": {
+        "label": "{count, plural, one {# linha importada sem classificação} other {# linhas importadas sem classificação}}",
+        "consequence": "Enquanto não forem classificadas, essas linhas ficam de fora do cálculo — o patrimônio acima está subestimado.",
+        "action": "Classificar"
+      },
+      "pending": {
+        "unknownAsset": "Ativo",
+        "reasonNoWallet": "Nenhuma carteira reivindicou este ativo.",
+        "reasonAmbiguousSplit": "O ativo está dividido entre carteiras e a compra nova não tem destino óbvio.",
+        "consequence": "O valor já está no total acima; falta decidir de qual carteira ele faz parte.",
+        "action": "Distribuir"
+      }
+    }
+  },
   "common": {
     "loading": "Carregando…",
     "save": "Salvar",

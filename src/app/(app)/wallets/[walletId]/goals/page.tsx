@@ -5,7 +5,7 @@ import { WalletId } from '@/core/shared/ids';
 import { GROWTH_BASES, EARNINGS_PERIODS } from '@/core/goals/goal';
 import { loadGoalsView } from '@/app/(app)/wallets/goals-data';
 import { createGoalAction } from '@/app/(app)/wallets/goal-actions';
-import { tryUserId } from '@/app/(app)/wallets/session';
+import { tryUserId } from '@/lib/session';
 import { GrowthGoalCard } from '@/app/(app)/wallets/[walletId]/goals/_components/GrowthGoalCard';
 import { EarningsGoalCard } from '@/app/(app)/wallets/[walletId]/goals/_components/EarningsGoalCard';
 import { PageShell } from '@/components/patterns/page-shell';

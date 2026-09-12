@@ -13,7 +13,7 @@ import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
-import { tryUserId } from '@/app/(app)/reports/session';
+import { tryUserId } from '@/lib/session';
 import { loadComposition } from '@/app/(app)/reports/composition/data';
 import { loadWatchStates } from '@/app/(app)/watch/data';
 import {

@@ -14,7 +14,7 @@ import { NextResponse, type NextRequest } from 'next/server';
  * session cookie, not for a valid session — middleware runs on the edge
  * runtime, which has no database connection, and `sessions` is the only place
  * a database-strategy session can be verified (SPEC-001 BR-001-06/07). So a
- * stale or forged cookie buys a redirect to `/transactions` and nothing else:
+ * stale or forged cookie buys a redirect to `/dashboard` and nothing else:
  * that route resolves the session properly and renders its signed-out state.
  * This is a routing convenience and is *never* an authorisation decision —
  * every protected surface still calls `requireUserId()` for itself (AR-12).
@@ -33,7 +33,7 @@ export function middleware(request: NextRequest): NextResponse {
 
   if (!signedIn) return NextResponse.next();
 
-  const destination = new URL('/transactions', request.url);
+  const destination = new URL('/dashboard', request.url);
 
   return NextResponse.redirect(destination);
 }

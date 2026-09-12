@@ -1,13 +1,18 @@
 import { eq, sql } from 'drizzle-orm';
 import { db, closePool } from '@/db/client';
 import { assets, transactions, users } from '@/db/schema';
+import { latestQuotes, priceQuotes } from '@/db/schema/market';
 import { withTenant } from '@/db/tenant';
 import { AssetId, UserId } from '@/core/shared/ids';
+import { Money } from '@/core/shared/money';
 import { hashUserId, logger } from '@/lib/logger';
 import {
   REFERENCE_ASSET_CLASS_TO_SCHEMA,
+  REFERENCE_AS_OF_DATE,
   REFERENCE_TRANSACTION_COUNT,
   REFERENCE_USER_ID,
+  centsToDecimalString,
+  generateReferenceQuotes,
   generateReferenceWorkload,
   referenceTransactionRows,
   type ReferenceAsset,
@@ -73,6 +78,10 @@ export async function seedReferenceWorkload(): Promise<ReferenceWorkload> {
   // re-run must land on the same rows rather than duplicating the catalogue.
   const assetIds = await upsertAssets(workload.assets);
 
+  // AR-15: `price_quotes` and `latest_quotes` are shared reference data with no
+  // tenant column, so they are written on the pooled `db`, outside `withTenant`.
+  const quotes = await upsertQuotes(assetIds);
+
   const seeded = await withTenant(
     userId,
     async (tx) => {
@@ -95,6 +104,7 @@ export async function seedReferenceWorkload(): Promise<ReferenceWorkload> {
     {
       assets: workload.assets.length,
       transactions: workload.transactions.length,
+      quotes,
       inserted: seeded,
       userId: hashUserId(userId),
     },
@@ -130,6 +140,71 @@ async function upsertAssets(
     ids.set(asset.ticker, AssetId.of(row.id));
   }
   return ids;
+}
+
+/**
+ * SPEC-016 BR-016-01 — **the price history, without which the budgets measure
+ * nothing.**
+ *
+ * Until #98 this seeder wrote users, assets and transactions and stopped there.
+ * Every holding in the reference portfolio therefore took SPEC-009's
+ * `COST_FALLBACK`, so the nightly run measured a dashboard and four reports
+ * that never read `price_quotes`, never read `latest_quotes`, and never priced
+ * anything — green, fast, and a statement about a code path production does not
+ * take.
+ *
+ * `latest_quotes` carries one row per asset (BR-008-10: it is overwritten on
+ * every refresh and never becomes history), stamped just behind the workload's
+ * as-of date so the intraday path has something current to find.
+ *
+ * Idempotent like everything else here: `ON CONFLICT DO NOTHING` on the closes,
+ * because the nightly job seeds before every measurement and a re-run must land
+ * on the same rows rather than failing on the primary key.
+ */
+async function upsertQuotes(assetIds: ReadonlyMap<string, AssetId>): Promise<number> {
+  const generated = generateReferenceQuotes();
+  if (generated.length === 0) return 0;
+
+  const rows = generated.map((quote) => {
+    const assetId = assetIds.get(quote.ticker);
+    if (assetId === undefined) throw new Error(`upsertQuotes: no asset id for ${quote.ticker}`);
+    return {
+      assetId,
+      date: quote.date,
+      close: Money.fromString(centsToDecimalString(quote.closeCents)),
+      source: 'reference-workload',
+    };
+  });
+
+  for (let start = 0; start < rows.length; start += INSERT_CHUNK) {
+    await db
+      .insert(priceQuotes)
+      .values(rows.slice(start, start + INSERT_CHUNK))
+      .onConflictDoNothing();
+  }
+
+  // The last close per asset, which is the one an intraday read would serve.
+  const lastByAsset = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) lastByAsset.set(row.assetId, row);
+
+  const quotedAt = new Date(`${REFERENCE_AS_OF_DATE}T20:00:00Z`);
+  for (const row of lastByAsset.values()) {
+    await db
+      .insert(latestQuotes)
+      .values({
+        assetId: row.assetId,
+        price: row.close,
+        quotedAt,
+        fetchedAt: quotedAt,
+        source: 'reference-workload',
+      })
+      .onConflictDoUpdate({
+        target: latestQuotes.assetId,
+        set: { price: row.close, quotedAt, fetchedAt: quotedAt },
+      });
+  }
+
+  return rows.length;
 }
 
 // Only run when invoked directly (`pnpm db:seed:reference`), so tests can

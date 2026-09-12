@@ -17,6 +17,10 @@ import AxeBuilder from '@axe-core/playwright';
 const ROUTES = [
   '/',
   '/signin',
+  // #98 — the authenticated landing. Checked here in its signed-out state like
+  // every other route; the populated page's own axe pass is
+  // `dashboard.spec.ts`, which can sign in.
+  '/dashboard',
   '/wallets',
   // SPEC-006 #9 — added when the ledger got a surface. Both render their
   // signed-out state here, which is the state this suite runs in.

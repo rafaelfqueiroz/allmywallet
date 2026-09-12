@@ -248,10 +248,41 @@ export interface ImportBatchRepository {
   listAll(): Promise<readonly ImportBatch[]>;
 }
 
+/**
+ * One committed batch's outstanding rows, for the dashboard's "Needs
+ * attention" queue (#98, SPEC-010 BR-010-12).
+ *
+ * A **count**, not the rows: the reference workload is 10.000 rows and the
+ * dashboard carries a 2s p95 budget (SPEC-016 BR-016-02), so loading every row
+ * to find out whether any of them is outstanding is the shape of read that
+ * budget exists to forbid.
+ */
+export interface ImportRowAttentionCount {
+  readonly batchId: ImportBatchId;
+  readonly count: number;
+}
+
 export interface ImportRowRepository {
   insertMany(rows: readonly ImportRow[]): Promise<void>;
   findById(id: ImportRowId): Promise<ImportRow | null>;
   listByBatch(batchId: ImportBatchId): Promise<readonly ImportRow[]>;
+  /**
+   * BR-005-20 / BR-010-12 — rows still needing a decision, grouped by batch,
+   * **committed batches only**.
+   *
+   * *Needing a decision* is `unclassified` or `invalid`, the same pair
+   * `stage-batch.ts`'s `needsAttention` count and `/import/[batchId]` already
+   * treat as outstanding. Defining it a third way would let the dashboard and
+   * the import detail screen disagree about how much work is left.
+   *
+   * *Committed only* because a row in a batch still being previewed is not
+   * standing work — the user is inside that flow, and cancelling deletes the
+   * rows outright (BR-005-12). A **committed** batch's unclassified row is
+   * different in kind: it is stored and inert (SPEC-006 DL-006-06), permanently
+   * excluded from the replay behind every position, and therefore quietly
+   * understating every figure on the dashboard until someone reclassifies it.
+   */
+  countNeedsAttentionByBatch(): Promise<readonly ImportRowAttentionCount[]>;
   /** BR-005-12: cancel deletes every staged row for the batch. */
   deleteByBatch(batchId: ImportBatchId): Promise<number>;
   /** Commit marks each applied row with the transaction it became. */

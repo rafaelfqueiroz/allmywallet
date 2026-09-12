@@ -437,6 +437,33 @@ export class DrizzleReportDataPort implements ReportDataPort {
     return rows[0]?.quotedAt ?? null;
   }
 
+  /**
+   * SPEC-020 BR-020-26 / #98 — **has this tenant's position cache ever held a
+   * row**, including one closed to zero.
+   *
+   * Every other read here filters `quantity > 0`, because a closed position is
+   * worth nothing and would render as a zero row. This one deliberately does
+   * not: the dashboard's onboarding empty state has to tell a brand-new account
+   * apart from one that entered its ledger by hand and has since sold
+   * everything, and a closed position is the only trace the second leaves.
+   *
+   * SPEC-007's cache, not the ledger — a `SELECT 1 … LIMIT 1` over an indexed
+   * tenant-scoped table, which is what keeps BR-016-05 true on the screen with
+   * the tightest budget in the product.
+   *
+   * Kept off `ReportDataPort` alongside `lastImportAt`, `latestQuoteAt` and
+   * `earliestSnapshotDate`: one caller needs it, and widening the shared port
+   * would oblige the other four — and every hand-written fake — to carry a
+   * method they never call.
+   */
+  async hasAnyPosition(): Promise<boolean> {
+    const rows = await this.tx
+      .select({ one: sql<number>`1` })
+      .from(positions)
+      .limit(1);
+    return rows.length > 0;
+  }
+
   /** The `all` period's anchor — the first date this tenant has a snapshot for. */
   async earliestSnapshotDate(): Promise<BusinessDate | null> {
     const rows = await this.tx

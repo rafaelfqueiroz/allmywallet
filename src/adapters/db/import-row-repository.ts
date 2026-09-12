@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { chunked } from '@/adapters/db/chunk';
 import { importRows } from '@/db/schema/import-rows';
+import { importBatches } from '@/db/schema/transactions';
 import type { Tx } from '@/db/tenant';
 import { BusinessDate } from '@/core/shared/clock';
 import {
@@ -15,6 +16,7 @@ import { Money, Quantity } from '@/core/shared/money';
 import type { TransactionType } from '@/core/ledger/transaction';
 import type {
   ImportRow,
+  ImportRowAttentionCount,
   ImportRowClassification,
   ImportRowRepository,
   NormalizedRecord,
@@ -59,6 +61,36 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
   async listByBatch(batchId: ImportBatchId): Promise<readonly ImportRow[]> {
     const rows = await this.tx.select().from(importRows).where(eq(importRows.batchId, batchId));
     return rows.map(toDomain);
+  }
+
+  /**
+   * #98 / BR-010-12 — the dashboard's "Needs attention" count.
+   *
+   * **A grouped count with a join, rather than reading rows.** The reference
+   * workload is 10.000 rows (BR-016-01) against a 2s p95 dashboard budget
+   * (BR-016-02); `listByBatch` per batch would be the read that misses it.
+   *
+   * `import_rows_batch_id_idx` covers the grouping, and both tables are
+   * tenant-scoped and FORCEd, so the join runs entirely inside the caller's
+   * `withTenant` transaction (AR-11) with RLS applied to each side.
+   */
+  async countNeedsAttentionByBatch(): Promise<readonly ImportRowAttentionCount[]> {
+    const rows = await this.tx
+      .select({
+        batchId: importRows.batchId,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(importRows)
+      .innerJoin(importBatches, eq(importBatches.id, importRows.batchId))
+      .where(
+        and(
+          inArray(importRows.classification, ['unclassified', 'invalid']),
+          eq(importBatches.status, 'committed'),
+        ),
+      )
+      .groupBy(importRows.batchId);
+
+    return rows.map((row) => ({ batchId: ImportBatchId.of(row.batchId), count: row.count }));
   }
 
   async deleteByBatch(batchId: ImportBatchId): Promise<number> {
