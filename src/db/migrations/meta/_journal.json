@@ -113,6 +113,13 @@
       "when": 1787862217524,
       "tag": "0015_opportunity",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1789236856339,
+      "tag": "0016_users_onboarding_dismissed_at",
+      "breakpoints": true
     }
   ]
 }

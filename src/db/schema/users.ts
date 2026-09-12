@@ -36,6 +36,11 @@ export const users = pgTable('users', {
   // column exists so #7 has somewhere to record "deletion requested" without
   // a schema change of its own.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  // SPEC-020 BR-020-09 — the one onboarding fact that is not a query: the user
+  // chose to dismiss the guide. Never a completion marker (BR-020-12); every
+  // step's completion is derived (`core/onboarding/status.ts`). Not personal
+  // data under BR-001-05 — it records a product decision, not who the user is.
+  onboardingDismissedAt: timestamp('onboarding_dismissed_at', { withTimezone: true }),
 });
 
 /**
