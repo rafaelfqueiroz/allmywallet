@@ -1,5 +1,5 @@
-import { AssetId, InstitutionId } from '@/core/shared/ids';
-import type { ImportBatchId, ImportRowId, TransactionId } from '@/core/shared/ids';
+import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
+import type { ImportRowId, TransactionId } from '@/core/shared/ids';
 import type { AssetClass } from '@/core/quotes/ports';
 import type {
   AssetResolverPort,
@@ -7,6 +7,7 @@ import type {
   ImportBatch,
   ImportBatchRepository,
   ImportRow,
+  ImportRowAttentionCount,
   ImportRowRepository,
   InstitutionResolverPort,
 } from '@/core/ingestion/ports';
@@ -65,6 +66,24 @@ export class FakeImportRowRepository implements ImportRowRepository {
 
   async listByBatch(batchId: ImportBatchId): Promise<readonly ImportRow[]> {
     return [...this.#rows.values()].filter((row) => row.batchId === batchId);
+  }
+
+  /**
+   * The fake has no batch table to join, so it cannot honour the adapter's
+   * committed-only filter — every seeded row counts. Stated rather than hidden:
+   * the filter is a SQL fact and `tests/integration/dashboard.test.ts` is what
+   * proves it, which is where a join belongs (TS-30).
+   */
+  async countNeedsAttentionByBatch(): Promise<readonly ImportRowAttentionCount[]> {
+    const counts = new Map<string, number>();
+    for (const row of this.#rows.values()) {
+      if (row.classification !== 'unclassified' && row.classification !== 'invalid') continue;
+      counts.set(row.batchId, (counts.get(row.batchId) ?? 0) + 1);
+    }
+    return [...counts].map(([batchId, count]) => ({
+      batchId: ImportBatchId.of(batchId),
+      count,
+    }));
   }
 
   async deleteByBatch(batchId: ImportBatchId): Promise<number> {

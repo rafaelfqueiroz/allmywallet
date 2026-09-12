@@ -54,7 +54,11 @@ test.describe('landing page', () => {
 
     // The redirect is `src/middleware.ts`, before the prerendered page is even
     // looked up — which is what lets `/` stay static for everyone else.
-    await expect(signedIn.page).toHaveURL(/\/transactions$/);
+    //
+    // #98 — the destination is the dashboard, which is what SPEC-001 BR-001-04
+    // always asked for; `/transactions` was the stand-in while `src/app/(app)/`
+    // had no index page.
+    await expect(signedIn.page).toHaveURL(/\/dashboard$/);
   });
 
   // The matcher covers `/` and nothing else, deliberately: an unverified

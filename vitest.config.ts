@@ -193,6 +193,14 @@ export default defineConfig({
         'src/core/positions/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
         'src/core/valuation/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
         'src/core/reporting/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
+        // #98 — the dashboard read model. It computes nothing, which is exactly
+        // why it joins this gate rather than the 80 % floor: every branch in it
+        // is a decision about *what to say* — a figure or an empty state, three
+        // reconciliation verdicts, an item in the queue or none — and each of
+        // those is a claim about someone's money that is worse wrong than
+        // missing. BR-020-27's "R$ 0,00 is a false claim" is one such branch,
+        // and it is untestable at 80 %.
+        'src/core/dashboard/**': { lines: 100, functions: 100, branches: 100, statements: 100 },
         // SPEC-019 — a goal's progress is a figure a user reads to decide
         // whether a plan is working. Wrong is worse than missing, so it joins
         // the engine's gate rather than the 80 % floor.

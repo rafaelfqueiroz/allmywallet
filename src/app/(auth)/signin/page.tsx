@@ -20,12 +20,18 @@ export default function SignInPage() {
     // SPEC-001 BR-001-02: scope is pinned in src/auth.ts's provider config,
     // not here — this call never widens it.
     //
-    // The ledger, not `/`: since #37 the root is a marketing page, and landing
-    // a user who has just signed in on the pitch that persuaded them to is a
-    // dead end. `/transactions` is BR-006-01's single source of truth and the
-    // first item in the navigation; SPEC-013's dashboard takes this spot when
-    // it exists.
-    await signIn('google', { redirectTo: '/transactions' });
+    // SPEC-001 BR-001-04 — sign-in routes to the dashboard, which is what the
+    // rule has asked for since M0 and what #98 finally built. Not `/`: since
+    // #37 the root is a marketing page, and landing a user who has just signed
+    // in on the pitch that persuaded them to is a dead end.
+    //
+    // **This is the whole landing for now, on purpose.** BR-001-04's exact
+    // words are "routes to onboarding", and #97 (SPEC-020) adds that
+    // divergence — first sign-in to the guided flow, returning users straight
+    // here. #98 deliberately makes the dashboard everyone's landing first, so
+    // the two changes stay separable and the four rules that need a dashboard
+    // stop waiting on the onboarding flow to be built.
+    await signIn('google', { redirectTo: '/dashboard' });
   }
 
   return (

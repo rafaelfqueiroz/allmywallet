@@ -27,17 +27,23 @@ describe('middleware', () => {
     expect(response.headers.get('location')).toBeNull();
   });
 
-  it('sends a signed-in visitor to the ledger', () => {
+  /**
+   * #98 — the dashboard, not the ledger. `/transactions` was the stand-in while
+   * `src/app/(app)/` had no index page; SPEC-001 BR-001-04 always asked for
+   * this destination, and `signIn()` is configured with the same one, so the
+   * two ways into the product cannot drift apart.
+   */
+  it('sends a signed-in visitor to the dashboard', () => {
     const response = middleware(request('authjs.session-token=any-token'));
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe('http://localhost:3000/transactions');
+    expect(response.headers.get('location')).toBe('http://localhost:3000/dashboard');
   });
 
   it('recognises the secure cookie name production actually sets', () => {
     const response = middleware(request('__Secure-authjs.session-token=any-token'));
 
-    expect(response.headers.get('location')).toBe('http://localhost:3000/transactions');
+    expect(response.headers.get('location')).toBe('http://localhost:3000/dashboard');
   });
 
   it('ignores unrelated cookies', () => {

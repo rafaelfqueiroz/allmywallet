@@ -8,7 +8,7 @@ Loaded at the start of every session. Orientation and the rules that are expensi
 
 **Current state: M0–M7 built.** The sixteen original spec tasks (#4–#19) are closed — auth, config, isolation, LGPD, import, ledger, cost basis, market data, valuation, wallets, the reporting framework and all four reports — and so is M7: wallet balancing (#89), buy/sell opportunity (#90), wallet goals (#91).
 
-The next milestone is **M8 — onboarding** ([SPEC-020](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-020-User-Onboarding), issue #97), taken ahead of further feature work because PRD R1 rates manual-import friction High/High and names guided onboarding as its mitigation. **[#98](https://github.com/rafaelfqueiroz/allmywallet/issues/98) lands first**: there is no authenticated dashboard, so BR-005-26, BR-010-12 and FR-8.29 have nowhere to live and sign-in routes everyone to `/transactions`. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written.
+The current milestone is **M8 — onboarding** ([SPEC-020](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-020-User-Onboarding), issue #97), taken ahead of further feature work because PRD R1 rates manual-import friction High/High and names guided onboarding as its mitigation. **[#98](https://github.com/rafaelfqueiroz/allmywallet/issues/98) landed first**: `/dashboard` now exists and is the sign-in landing, so BR-005-26, BR-010-12 and FR-8.29 finally have a screen. **#97 is what remains** — the guided first run, and the first-sign-in divergence BR-001-04 asks for on top of the landing #98 gave everyone. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written.
 
 ## Where the artifacts live
 

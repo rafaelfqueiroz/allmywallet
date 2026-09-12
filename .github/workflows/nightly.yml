@@ -59,6 +59,17 @@ jobs:
       - name: Seed the reference workload
         run: pnpm db:seed:reference
 
+      # #98 / FR-8.29 — the dashboard budget is a budget on a *populated*
+      # screen, and the seeder deliberately writes no `positions` rows: SPEC-007
+      # owns that table, and a fixture writing them would assert an average cost
+      # the engine never computed (DM-4). So the cache is built by SPEC-007's own
+      # rebuild entry point. Without this step the dashboard suite fails loudly
+      # rather than measuring an empty portfolio.
+      - name: Rebuild the reference tenant's position cache
+        # REFERENCE_USER_ID (src/db/reference-workload.ts) — fixed, so the
+        # workload is identical run to run (TS-23).
+        run: pnpm positions:rebuild --user 00000000-0000-7000-8000-000000000001
+
       - name: Measure against the budgets
         id: budgets
         run: pnpm test:performance
