@@ -83,7 +83,7 @@ describe('the onboarding surface has no gate panel (SPEC-020 BR-020-15, DL-020-0
       violations,
       'SPEC-020 BR-020-15/DL-020-05: onboarding renders no gate list of its own. Data-quality gates ' +
         '(a missing fixed-income rate, an unclassified row, a pending allocation) surface only in the ' +
-        "dashboard's \"Needs attention\" queue, described only by core/onboarding/gates.ts#describeGate " +
+        'dashboard\'s "Needs attention" queue, described only by core/onboarding/gates.ts#describeGate ' +
         'and rendered only by AttentionQueue.',
     ).toEqual([]);
   });

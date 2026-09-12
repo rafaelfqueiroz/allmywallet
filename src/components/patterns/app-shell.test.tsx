@@ -125,7 +125,9 @@ describe('AppShell', () => {
     it('renders no help entry when no action is supplied', () => {
       pathname.current = '/wallets';
       render(<AppShell>conteúdo</AppShell>);
-      expect(screen.queryByRole('button', { name: 'Guia de primeiros passos' })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Guia de primeiros passos' }),
+      ).not.toBeInTheDocument();
     });
 
     it('submits the action rather than navigating, so reopening is never a GET', async () => {

@@ -49,12 +49,7 @@ export async function ContractTermsForm({
           </NativeSelect>
         </Field>
         <Field id="contract-rate" label={t('rateLabel')} hint={t('rateHint')} width="sm">
-          <Input
-            name="ratePercent"
-            inputMode="decimal"
-            defaultValue={ratePercent ?? ''}
-            required
-          />
+          <Input name="ratePercent" inputMode="decimal" defaultValue={ratePercent ?? ''} required />
         </Field>
       </Cluster>
       <Cluster>

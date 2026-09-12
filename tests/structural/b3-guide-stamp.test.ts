@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { B3_GUIDE_VERIFIED_AS_OF, B3_PARSER_FINGERPRINT } from '@/components/onboarding/verification';
+import {
+  B3_GUIDE_VERIFIED_AS_OF,
+  B3_PARSER_FINGERPRINT,
+} from '@/components/onboarding/verification';
 
 /**
  * SPEC-020 BR-020-25 — "the stamp is re-verified whenever a B3 parser changes
