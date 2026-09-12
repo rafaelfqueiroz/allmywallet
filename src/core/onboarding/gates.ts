@@ -4,8 +4,7 @@ import type { AttentionItem } from '@/core/dashboard/summary';
 /**
  * SPEC-020 BR-020-15..19 — every "Needs attention" item states what is wrong
  * (its `kind`), what it prevents, and the one screen that resolves it.
- * CONTRACT STUB: signatures are fixed; the body is implemented by the backend
- * dispatch. The UI maps `GateResolution` to a route; core never names routes.
+ * The UI maps `GateResolution` to a route; core never names routes.
  */
 export type GateConsequence =
   /** Unclassified rows are excluded from replay — every figure is understated. */

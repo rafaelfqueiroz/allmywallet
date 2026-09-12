@@ -3,8 +3,7 @@ import type { OnboardingFacts } from '@/core/onboarding/ports';
 
 /**
  * SPEC-020 — onboarding status, derived from `OnboardingFacts` and the one
- * persisted dismissal. CONTRACT STUB: signatures are fixed; the body is
- * implemented by the backend dispatch.
+ * persisted dismissal.
  */
 export interface OnboardingSteps {
   /** BR-020-03 — ≥ 1 committed import. The only step that gates completion. */

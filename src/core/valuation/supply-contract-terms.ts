@@ -11,8 +11,7 @@ import {
 
 /**
  * SPEC-009 BR-009-13 / SPEC-020 BR-020-19 — the user supplies the indexer and
- * contracted rate an extract could not provide. CONTRACT STUB: signatures are
- * fixed; the body is implemented by the backend dispatch.
+ * contracted rate an extract could not provide.
  */
 export interface ContractTermsPort {
   findByAssetId(assetId: AssetId): Promise<FixedIncomeContract | null>;
