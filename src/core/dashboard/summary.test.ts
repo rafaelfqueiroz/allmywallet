@@ -17,6 +17,7 @@ import {
 } from '@/core/reporting/test-support';
 import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
 import type { Discrepancy, ReconciliationReport } from '@/core/ingestion/reconcile';
+import type { ContractMissingRate } from '@/core/onboarding/ports';
 import type { PendingAllocation } from '@/core/wallets/pending';
 import {
   ATTENTION_QUEUE_LIMIT,
@@ -96,6 +97,7 @@ function input(overrides: Partial<DashboardSummaryInput> & { query: ReportQueryR
     reconciliation: null,
     pending: [] as readonly PendingAllocation[],
     unclassified: [] as readonly ImportRowAttentionCount[],
+    contractsMissingRate: [] as readonly ContractMissingRate[],
     assetLabels: LABELS,
     ...overrides,
   } satisfies DashboardSummaryInput;
@@ -589,6 +591,51 @@ describe('needs attention (BR-010-12)', () => {
         quantity: Quantity.fromString('40'),
         reason: 'no_wallet',
       },
+    ]);
+  });
+
+  /**
+   * SPEC-020 BR-020-16/19 — a held fixed-income contract with no readable
+   * rate understates the headline exactly as an unclassified row does, so it
+   * sits between `import_rows` and `pending_allocation` in the ordering —
+   * never a second queue (BR-020-15).
+   */
+  it('lists a missing fixed-income rate between import rows and pending allocations', async () => {
+    const query = await queryFor([{ assetId: PETR }, { assetId: VALE }]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        unclassified: [{ batchId: BATCH, count: 3 }],
+        contractsMissingRate: [{ assetId: VALE }],
+        pending: [
+          { assetId: PETR, unassignedQuantity: Quantity.fromString('40'), reason: 'no_wallet' },
+        ],
+      }),
+    );
+
+    expect(summary.attention).toEqual([
+      { kind: 'import_rows', batchId: BATCH, count: 3 },
+      { kind: 'fixed_income_rate', assetId: VALE, assetCode: 'VALE3' },
+      {
+        kind: 'pending_allocation',
+        assetId: PETR,
+        assetCode: 'PETR4',
+        quantity: Quantity.fromString('40'),
+        reason: 'no_wallet',
+      },
+    ]);
+  });
+
+  it('still surfaces a missing fixed-income rate whose label cannot be resolved', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+
+    const summary = buildDashboardSummary(
+      input({ query, assetLabels: new Map(), contractsMissingRate: [{ assetId: PETR }] }),
+    );
+
+    expect(summary.attention).toEqual([
+      { kind: 'fixed_income_rate', assetId: PETR, assetCode: null },
     ]);
   });
 

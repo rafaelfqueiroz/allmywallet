@@ -69,6 +69,12 @@ export const ValuationErrorCode = {
    * it as, and guessing one would put a plausible number on a broken row.
    */
   ASSET_NOT_FOUND: 'VALUATION_ASSET_NOT_FOUND',
+  /** SPEC-020 BR-020-19 — `supplyContractTerms` found no contract row for the asset. */
+  CONTRACT_TERMS_NOT_FOUND: 'VALUATION_CONTRACT_TERMS_NOT_FOUND',
+  /** SPEC-020 BR-020-19 — the supplied indexer is not one of `FIXED_INCOME_INDEXERS`. */
+  INDEXER_INVALID: 'VALUATION_INDEXER_INVALID',
+  /** SPEC-020 BR-020-19 — the supplied rate does not parse as a positive decimal. */
+  RATE_INVALID: 'VALUATION_RATE_INVALID',
 } as const;
 export type ValuationErrorCode = (typeof ValuationErrorCode)[keyof typeof ValuationErrorCode];
 
