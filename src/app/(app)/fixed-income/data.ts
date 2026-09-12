@@ -2,7 +2,10 @@ import type { AssetId, UserId } from '@/core/shared/ids';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { Result } from '@/core/shared/result';
 import type { FixedIncomeIndexer } from '@/core/valuation/ports';
-import { supplyContractTerms, type SupplyContractTermsInput } from '@/core/valuation/supply-contract-terms';
+import {
+  supplyContractTerms,
+  type SupplyContractTermsInput,
+} from '@/core/valuation/supply-contract-terms';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleFixedIncomeContractRepository } from '@/adapters/db/fixed-income-contract-repository';
 import { db } from '@/db/client';

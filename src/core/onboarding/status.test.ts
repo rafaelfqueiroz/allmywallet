@@ -88,8 +88,7 @@ describe('steps (BR-020-07)', () => {
   it('marks classification true only when nothing is unclassified', () => {
     expect(deriveOnboardingStatus(facts(), null).steps.classification).toBe(true);
     expect(
-      deriveOnboardingStatus(facts({ unclassifiedTransactionCount: 1 }), null).steps
-        .classification,
+      deriveOnboardingStatus(facts({ unclassifiedTransactionCount: 1 }), null).steps.classification,
     ).toBe(false);
   });
 
@@ -140,9 +139,7 @@ describe('stage (BR-020-04)', () => {
 
 describe('dismissal (BR-020-09/12/13)', () => {
   it('reads dismissed from a non-null timestamp', () => {
-    expect(deriveOnboardingStatus(facts(), new Date('2026-03-01T00:00:00Z')).dismissed).toBe(
-      true,
-    );
+    expect(deriveOnboardingStatus(facts(), new Date('2026-03-01T00:00:00Z')).dismissed).toBe(true);
   });
 
   it('reads not dismissed from null', () => {
@@ -181,9 +178,9 @@ describe('shouldGuide (BR-020-02/14)', () => {
   });
 
   it('does not guide once complete, dismissed or not', () => {
-    expect(
-      deriveOnboardingStatus(facts({ committedImportCount: 1 }), null).shouldGuide,
-    ).toBe(false);
+    expect(deriveOnboardingStatus(facts({ committedImportCount: 1 }), null).shouldGuide).toBe(
+      false,
+    );
     expect(
       deriveOnboardingStatus(facts({ committedImportCount: 1 }), new Date('2026-03-01T00:00:00Z'))
         .shouldGuide,
@@ -192,8 +189,8 @@ describe('shouldGuide (BR-020-02/14)', () => {
 
   /** BR-020-14 — a dismissed guide with no import stays hidden, not re-shown. */
   it('does not guide a dismissed, still-incomplete user', () => {
-    expect(
-      deriveOnboardingStatus(facts(), new Date('2026-03-01T00:00:00Z')).shouldGuide,
-    ).toBe(false);
+    expect(deriveOnboardingStatus(facts(), new Date('2026-03-01T00:00:00Z')).shouldGuide).toBe(
+      false,
+    );
   });
 });

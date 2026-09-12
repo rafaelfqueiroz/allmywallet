@@ -268,6 +268,8 @@ describe('SPEC-020 — onboarding facts and dismissal, isolated', () => {
   });
 
   it('a query outside withTenant fails rather than returning everything (TS-16)', async () => {
-    await expect(appDb.select().from(importBatches).where(eq(importBatches.userId, userA))).rejects.toThrow();
+    await expect(
+      appDb.select().from(importBatches).where(eq(importBatches.userId, userA)),
+    ).rejects.toThrow();
   });
 });

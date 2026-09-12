@@ -42,7 +42,9 @@ describe('SPEC-020 — onboarding status and gates (integration)', () => {
     await resetUsers(database.migrationUrl);
     const pool = new Pool({ connectionString: database.migrationUrl, max: 1 });
     try {
-      await pool.query('TRUNCATE daily_valuation_snapshots, fixed_income_contracts, assets RESTART IDENTITY CASCADE');
+      await pool.query(
+        'TRUNCATE daily_valuation_snapshots, fixed_income_contracts, assets RESTART IDENTITY CASCADE',
+      );
     } finally {
       await pool.end();
     }
@@ -151,13 +153,7 @@ describe('SPEC-020 — onboarding status and gates (integration)', () => {
     await migratorPool.query(
       `INSERT INTO fixed_income_contracts (id, user_id, asset_id, indexer, rate, issue_date, principal)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, '10000')`,
-      [
-        userId,
-        assetId,
-        opts.indexer ?? null,
-        opts.rate ?? null,
-        opts.issueDate ?? '2026-01-10',
-      ],
+      [userId, assetId, opts.indexer ?? null, opts.rate ?? null, opts.issueDate ?? '2026-01-10'],
     );
   }
 
@@ -346,9 +342,7 @@ describe('SPEC-020 — onboarding status and gates (integration)', () => {
       expect(isOk(result)).toBe(true);
 
       const after = await dashboard();
-      expect(after.summary.attention.some((item) => item.kind === 'fixed_income_rate')).toBe(
-        false,
-      );
+      expect(after.summary.attention.some((item) => item.kind === 'fixed_income_rate')).toBe(false);
     });
   });
 

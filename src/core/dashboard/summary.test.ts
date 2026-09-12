@@ -634,7 +634,9 @@ describe('needs attention (BR-010-12)', () => {
       input({ query, assetLabels: new Map(), contractsMissingRate: [{ assetId: PETR }] }),
     );
 
-    expect(summary.attention).toEqual([{ kind: 'fixed_income_rate', assetId: PETR, assetCode: null }]);
+    expect(summary.attention).toEqual([
+      { kind: 'fixed_income_rate', assetId: PETR, assetCode: null },
+    ]);
   });
 
   it('carries each pending reason so the queue can say why', async () => {

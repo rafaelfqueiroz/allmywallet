@@ -89,10 +89,7 @@ describe('supplyContractTerms (BR-020-19)', () => {
   it('refuses an indexer outside FIXED_INCOME_INDEXERS', async () => {
     const port = new FakeContractTermsPort(CONTRACT);
 
-    const result = await supplyContractTerms(
-      { contracts: port },
-      input({ indexer: 'selic' }),
-    );
+    const result = await supplyContractTerms({ contracts: port }, input({ indexer: 'selic' }));
 
     expect(isErr(result)).toBe(true);
     if (isErr(result)) expect(result.error.code).toBe(ValuationErrorCode.INDEXER_INVALID);
