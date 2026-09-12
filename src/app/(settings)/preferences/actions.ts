@@ -6,7 +6,8 @@ import { isErr } from '@/core/shared/result';
 import { db } from '@/db/client';
 import { REGISTRY, USER_SETTABLE_KEYS, type ConfigKey, type ConfigValue } from '@/config/registry';
 import { setConfigValue } from '@/config/resolve';
-import { requireSessionUserId } from '@/app/(settings)/preferences/session';
+import { withTenant } from '@/db/tenant';
+import { requireUserId } from '@/lib/session';
 
 /**
  * SPEC-002 — the only interface surface this spec ships (the spec's Out of
@@ -58,23 +59,32 @@ export async function saveUserPreference(
   const parsedKey = UserSettableKey.safeParse(key);
   if (!parsedKey.success) return { status: 'error', errorCode: 'VALIDATION_FAILED' };
 
-  const userId = requireSessionUserId();
+  // SPEC-001 BR-001-08 / AR-12: the tenant is the verified session's, and
+  // nothing in `formData` is ever read as one.
+  const userId = await requireUserId();
   const value = coerceFormValue(parsedKey.data, formData);
 
-  // TODO(#6): pass the transaction `withTenant(userId, ...)` supplies once it
-  // exists, rather than the plain `db` handle — see src/config/tx.ts.
-  const result = await setConfigValue(db, {
-    key: parsedKey.data,
-    level: 'user',
-    // `setConfigValue` re-validates this against the registry schema; an
-    // invalid coercion is reported as INVALID_VALUE, not thrown here. The
-    // cast is unavoidable — `parsedKey.data`'s static type is the full
-    // `ConfigKey` union, so its paired value type is a union too, and only
-    // the runtime re-validation actually narrows it.
-    value: value as ConfigValue<ConfigKey>,
-    actor: { kind: 'user', userId },
+  // AR-11: a user-level write reads `config_overrides` for the audit's
+  // previous value, and that RLS policy raises 22P02 outside `withTenant`
+  // rather than failing closed. One transaction also keeps the upsert and its
+  // BR-002-07 audit row atomic.
+  const result = await withTenant(
     userId,
-  });
+    (tx) =>
+      setConfigValue(tx, {
+        key: parsedKey.data,
+        level: 'user',
+        // `setConfigValue` re-validates this against the registry schema; an
+        // invalid coercion is reported as INVALID_VALUE, not thrown here. The
+        // cast is unavoidable — `parsedKey.data`'s static type is the full
+        // `ConfigKey` union, so its paired value type is a union too, and only
+        // the runtime re-validation actually narrows it.
+        value: value as ConfigValue<ConfigKey>,
+        actor: { kind: 'user', userId },
+        userId,
+      }),
+    db,
+  );
 
   if (isErr(result)) return { status: 'error', errorCode: result.error.code };
 

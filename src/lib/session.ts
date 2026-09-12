@@ -32,10 +32,7 @@ export async function requireUserId(): Promise<UserId> {
 /**
  * Non-throwing variant for read paths where "not signed in" is a normal
  * render state, not a fault — a Server Component that shows a
- * "sign in to continue" message instead of a thrown error. Mirrors the
- * `trySessionUserId()` shape `src/app/(settings)/preferences/session.ts`
- * established while auth had not landed yet on that branch; this is the
- * real implementation, now that it has.
+ * "sign in to continue" message instead of a thrown error.
  */
 export async function tryUserId(): Promise<UserId | undefined> {
   try {

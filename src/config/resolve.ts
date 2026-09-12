@@ -274,7 +274,7 @@ export interface SetConfigResult<K extends ConfigKey> {
 /**
  * SPEC-002 BR-002-03/04/07: authorizes, validates, upserts and audits a
  * single configuration write in one transaction-scoped call. `db` must be a
- * transaction for 'tenant'/'user' writes (TODO(#6) as above); a
+ * `withTenant` transaction for 'tenant'/'user' writes (AR-11); a
  * deployment-level write has no tenant context to speak of and may use the
  * plain database handle.
  */
