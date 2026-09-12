@@ -176,37 +176,55 @@
     "save": "Salvar",
     "signedOut": "Entre na sua conta para ajustar preferências.",
     "keys": {
-      "import.staleness_days": {
-        "label": "Dias sem importar até avisar",
-        "description": "Quantos dias sem uma nova importação disparam o lembrete."
+      "import": {
+        "staleness_days": {
+          "label": "Dias sem importar até avisar",
+          "description": "Quantos dias sem uma nova importação disparam o lembrete."
+        },
+        "reminder_enabled": {
+          "label": "Lembrete de importação",
+          "description": "Receber um aviso quando a carteira estiver desatualizada."
+        }
       },
-      "import.reminder_enabled": {
-        "label": "Lembrete de importação",
-        "description": "Receber um aviso quando a carteira estiver desatualizada."
+      "reports": {
+        "concentration_threshold_pct": {
+          "label": "Limite de concentração (%)",
+          "description": "A partir de qual peso um ativo é sinalizado como concentrado."
+        },
+        "default_grouping": {
+          "label": "Agrupamento padrão dos relatórios",
+          "description": "Como os relatórios agrupam suas posições por padrão."
+        },
+        "benchmarks": {
+          "label": "Benchmarks de comparação",
+          "description": "Índices exibidos junto da sua rentabilidade."
+        },
+        "default_grouping_wallet_scope": {
+          "label": "Agrupamento padrão dentro de uma carteira",
+          "description": "Como os relatórios agrupam as posições quando você olha uma única carteira."
+        },
+        "twr_xirr_divergence_points": {
+          "label": "Divergência entre TWR e XIRR (pontos-base)",
+          "description": "A partir de quantos pontos-base de diferença entre as duas rentabilidades a explicação aparece."
+        }
       },
-      "reports.concentration_threshold_pct": {
-        "label": "Limite de concentração (%)",
-        "description": "A partir de qual peso um ativo é sinalizado como concentrado."
+      "ui": {
+        "theme": {
+          "label": "Tema",
+          "description": "Seguir o sistema, ou fixar em claro ou escuro."
+        }
       },
-      "reports.default_grouping": {
-        "label": "Agrupamento padrão dos relatórios",
-        "description": "Como os relatórios agrupam suas posições por padrão."
+      "wallets": {
+        "drift_tolerance_pp": {
+          "label": "Tolerância de desvio (p.p.)",
+          "description": "A quantos pontos percentuais da sua meta um ativo passa a ser sinalizado."
+        }
       },
-      "reports.benchmarks": {
-        "label": "Benchmarks de comparação",
-        "description": "Índices exibidos junto da sua rentabilidade."
-      },
-      "ui.theme": {
-        "label": "Tema",
-        "description": "Seguir o sistema, ou fixar em claro ou escuro."
-      },
-      "wallets.drift_tolerance_pp": {
-        "label": "Tolerância de desvio (p.p.)",
-        "description": "A quantos pontos percentuais da sua meta um ativo passa a ser sinalizado."
-      },
-      "notifications.opportunity_cooldown_hours": {
-        "label": "Intervalo mínimo entre e-mails (horas)",
-        "description": "Depois de um e-mail sobre um ativo, quanto tempo esperar antes de enviar outro sobre o mesmo ativo."
+      "notifications": {
+        "opportunity_cooldown_hours": {
+          "label": "Intervalo mínimo entre e-mails (horas)",
+          "description": "Depois de um e-mail sobre um ativo, quanto tempo esperar antes de enviar outro sobre o mesmo ativo."
+        }
       }
     },
     "groupingOptions": {
