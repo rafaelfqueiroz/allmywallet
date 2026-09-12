@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { Menu, PanelLeft, PanelLeftClose } from 'lucide-react';
+import { LifeBuoy, Menu, PanelLeft, PanelLeftClose } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -19,8 +19,24 @@ import { NAV_ITEMS, type NavItem } from '@/components/patterns/nav-items';
  *
  * Bottom tabs were considered and rejected (DL-11): they are the better phone
  * pattern but a second component to build, test and keep in sync with this one.
+ *
+ * **`helpAction` (SPEC-020 BR-020-13)** — the guide's help entry point,
+ * reachable from either rendering of the shell on every authenticated screen.
+ * Taken as a prop rather than imported here: `AppShell` is a design-system
+ * pattern (DS-02, "a primitive knows nothing about the domain") and stays
+ * testable/reusable without pulling in `(app)/onboarding/actions.ts`.
+ * `src/app/authenticated-frame.tsx` is the one place that wires the real
+ * action in. A `<form>`, not a `Link` — BR-020-12/13 make reopening a real
+ * state change (clearing `users.onboarding_dismissed_at`), which a GET
+ * request (prefetch, crawler) must never trigger.
  */
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  helpAction,
+}: {
+  children: ReactNode;
+  helpAction?: (formData: FormData) => Promise<void>;
+}) {
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
   const [collapsed, setCollapsed] = useState(false);
@@ -59,7 +75,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             {collapsed ? <PanelLeft /> : <PanelLeftClose />}
           </Button>
         </div>
-        <NavList collapsed={collapsed} />
+        <div className="flex min-h-0 flex-1 flex-col justify-between">
+          <NavList collapsed={collapsed} />
+          {helpAction && <HelpEntry action={helpAction} collapsed={collapsed} />}
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -70,9 +89,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Menu />
               </Button>
             </DialogTrigger>
-            <DialogContent className="inset-y-0 top-0 left-0 h-dvh max-w-72 translate-x-0 translate-y-0 rounded-none rounded-r-xl">
+            <DialogContent className="inset-y-0 top-0 left-0 flex h-dvh max-w-72 translate-x-0 translate-y-0 flex-col justify-between rounded-none rounded-r-xl">
               <DialogTitle className="sr-only">{t('menu')}</DialogTitle>
               <NavList collapsed={false} onNavigate={() => setDrawerOpen(false)} />
+              {helpAction && <HelpEntry action={helpAction} collapsed={false} />}
             </DialogContent>
           </Dialog>
           <span className="font-heading font-semibold">{t('appName')}</span>
@@ -105,6 +125,42 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
         />
       ))}
     </nav>
+  );
+}
+
+/**
+ * SPEC-020 BR-020-13 — "the guide can be reopened at any time from a help
+ * entry point." Styled like `NavLink` (same padding, same icon treatment,
+ * same collapsed-to-icon behaviour) so it reads as part of the navigation
+ * rather than as an unrelated button bolted onto the bottom of it — but it is
+ * a `<form>` around a submit button, never an `<a>`/`Link`, for the GET/POST
+ * reason on `AppShell`'s own doc comment.
+ */
+function HelpEntry({
+  action,
+  collapsed,
+}: {
+  action: (formData: FormData) => Promise<void>;
+  collapsed: boolean;
+}) {
+  const t = useTranslations('nav');
+
+  return (
+    <form action={action} className="p-2">
+      <button
+        type="submit"
+        title={collapsed ? t('help') : undefined}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-md px-2 py-field text-sm outline-none',
+          'hover:bg-sidebar-accent/60',
+          'focus-visible:ring-3 focus-visible:ring-ring/50',
+          collapsed && 'justify-center',
+        )}
+      >
+        <LifeBuoy className="size-4 shrink-0" aria-hidden="true" />
+        {collapsed ? <span className="sr-only">{t('help')}</span> : t('help')}
+      </button>
+    </form>
   );
 }
 
