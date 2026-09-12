@@ -249,9 +249,9 @@
     "NO_BOUNDS_SET": "Defina ao menos um limite — inferior, superior, ou os dois.",
     "INVALID_THRESHOLD": "Informe um preço maior que zero para o limite.",
     "LOWER_NOT_BELOW_UPPER": "O limite inferior precisa ser menor que o limite superior.",
-    "VALUATION_CONTRACT_MISSING": "Não encontramos um contrato de renda fixa para este ativo. Atualize a página e tente novamente.",
-    "VALUATION_ASSET_NOT_FOUND": "Este ativo não existe mais. Atualize a página e tente novamente.",
-    "INVALID_RATE_PERCENT": "Informe uma taxa maior que zero."
+    "VALUATION_CONTRACT_TERMS_NOT_FOUND": "Não encontramos um contrato de renda fixa para este ativo. Atualize a página e tente novamente.",
+    "VALUATION_INDEXER_INVALID": "Escolha um indexador válido na lista.",
+    "VALUATION_RATE_INVALID": "Informe uma taxa maior que zero."
   },
   "vocabulary": {
     "patrimonio": "Patrimônio",
