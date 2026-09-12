@@ -311,6 +311,16 @@ export type AttentionItem =
       readonly count: number;
     }
   | {
+      /**
+       * SPEC-020 BR-020-16/19 — a held fixed-income contract whose indexer or
+       * rate could not be read. Valued at cost (SPEC-009 BR-009-13), so the
+       * headline above is understated until the user supplies it.
+       */
+      readonly kind: 'fixed_income_rate';
+      readonly assetId: AssetId;
+      readonly assetCode: string | null;
+    }
+  | {
       readonly kind: 'pending_allocation';
       readonly assetId: AssetId;
       /**
