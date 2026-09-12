@@ -38,9 +38,53 @@ export interface OnboardingStatus {
   readonly shouldGuide: boolean;
 }
 
+/**
+ * SPEC-020 BR-020-06/07 — every field here is a query result, never a stored
+ * flag. BR-020-03: `complete` is gated on `committedImportCount` alone — a
+ * user with a stale fixed-income rate or an unclassified row is still done
+ * (BR-020-17). BR-020-12: `dismissed` never feeds into `complete` or any
+ * `steps` flag — the two are read from entirely disjoint inputs.
+ */
 export function deriveOnboardingStatus(
-  _facts: OnboardingFacts,
-  _dismissedAt: Date | null,
+  facts: OnboardingFacts,
+  dismissedAt: Date | null,
 ): OnboardingStatus {
-  throw new Error('not implemented');
+  // SPEC-020 BR-020-03: "complete at the first successfully committed
+  // import. Nothing else gates completion." Deleting the only import (so the
+  // count reverts to 0) reverts this too (BR-020-08) — there is no latch.
+  const complete = facts.committedImportCount >= 1;
+
+  const steps: OnboardingSteps = {
+    import: complete,
+    fixedIncomeRates: facts.contractsMissingRate.length === 0,
+    classification: facts.unclassifiedTransactionCount === 0,
+    firstWallet: facts.walletCount >= 1,
+  };
+
+  // SPEC-020 BR-020-04: export → upload → review → commit.
+  const stage: OnboardingStage = complete
+    ? 'done'
+    : facts.stagedBatch === null
+      ? 'upload'
+      : facts.stagedBatch.status === 'pending'
+        ? 'processing'
+        : 'review';
+
+  const stagedBatchId: ImportBatchId | null =
+    stage === 'processing' || stage === 'review' ? (facts.stagedBatch?.batchId ?? null) : null;
+
+  // SPEC-020 BR-020-09/12: the one persisted fact, and it never marks a step
+  // complete — read here and nowhere near `steps` or `complete` above.
+  const dismissed = dismissedAt !== null;
+
+  return {
+    complete,
+    steps,
+    stage,
+    stagedBatchId,
+    dismissed,
+    // SPEC-020 BR-020-02/14: a dismissed guide stays hidden even with no
+    // import (BR-020-14) — dismissal alone is enough to stop guiding.
+    shouldGuide: !complete && !dismissed,
+  };
 }

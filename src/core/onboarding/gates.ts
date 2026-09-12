@@ -25,6 +25,40 @@ export interface GateDescription {
   readonly resolution: GateResolution;
 }
 
-export function describeGate(_item: AttentionItem): GateDescription {
-  throw new Error('not implemented');
+/**
+ * BR-020-18 — exhaustive over `AttentionItem['kind']` (the `never` check
+ * below fails the build the day a fourth kind is added without a
+ * description), so no queue item can reach the screen with nothing to say
+ * about what it blocks or how to resolve it.
+ */
+export function describeGate(item: AttentionItem): GateDescription {
+  switch (item.kind) {
+    // SPEC-020 BR-020-16: a row a committed import left unclassified is
+    // excluded from the replay behind every position — every figure on the
+    // dashboard, not only this one, is understated until it is resolved.
+    case 'import_rows':
+      return {
+        consequence: 'figures_understated',
+        resolution: { screen: 'import_batch', batchId: item.batchId },
+      };
+    // SPEC-020 BR-020-16/19: a held fixed-income contract with no readable
+    // rate cannot be accrued (SPEC-009 BR-009-13), so it is valued at cost —
+    // portfolio value is understated until the user supplies the terms.
+    case 'fixed_income_rate':
+      return {
+        consequence: 'portfolio_value_understated',
+        resolution: { screen: 'fixed_income_contract', assetId: item.assetId },
+      };
+    // SPEC-020 BR-020-16: the purchase is already inside the total
+    // (SPEC-010) — only the wallet filing is outstanding.
+    case 'pending_allocation':
+      return {
+        consequence: 'allocation_missing',
+        resolution: { screen: 'wallets' },
+      };
+    default: {
+      const exhaustive: never = item;
+      throw new Error(`describeGate: unhandled AttentionItem: ${JSON.stringify(exhaustive)}`);
+    }
+  }
 }
