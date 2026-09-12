@@ -240,6 +240,78 @@ export function centsToDecimalString(cents: number): string {
   return `${sign}${Math.floor(absolute / 100)}.${String(absolute % 100).padStart(2, '0')}`;
 }
 
+/**
+ * The asset classes a market quote prices. The other four (`tesouro_direto`,
+ * `cdb`, `lci`, `lca`) are priced by SPEC-009's accrual and its cost fallback,
+ * not by `price_quotes` — so leaving them unquoted is not a gap in the fixture,
+ * it is the mix a real Brazilian portfolio has and the one that makes the
+ * dashboard's "estimado" path get exercised at all.
+ */
+const MARKET_PRICED_CLASSES: readonly ReferenceAssetClass[] = ['acao', 'fii', 'bdr', 'etf'];
+
+/** One daily close. Cents, never a float (AR-06). */
+export interface ReferenceQuote {
+  readonly ticker: string;
+  readonly date: BusinessDate;
+  readonly closeCents: number;
+}
+
+/** The next calendar day, by UTC date arithmetic — AR-29's "a date is not a timestamp". */
+function nextDay(date: BusinessDate): BusinessDate {
+  const next = new Date(Date.parse(`${date}T00:00:00Z`) + 86_400_000);
+  return BusinessDate.of(next.toISOString().slice(0, 10));
+}
+
+/**
+ * SPEC-016 BR-016-01 — **the price history the budgets are measured against.**
+ *
+ * Added with #98. Before it, `pnpm db:seed:reference` wrote users, assets and
+ * transactions and nothing else, so every holding in the reference portfolio
+ * took SPEC-009's `COST_FALLBACK`: the nightly run measured a dashboard and
+ * four reports that never touched `price_quotes`, never touched
+ * `latest_quotes`, and never priced anything. The suites were green and the
+ * numbers meant nothing — the same "measures nothing, stays green forever"
+ * failure `tests/performance/transaction-list.test.ts` warns about, one level
+ * further down.
+ *
+ * Weekends are skipped and holidays are not. A fixture does not need B3's
+ * calendar to be useful here: a missing close is exactly what BR-009-03's
+ * carry-forward exists for, and leaving the real holidays in place would make
+ * the workload depend on `B3TradingCalendar` rather than on the seed.
+ *
+ * A deterministic random walk in integer cents, from a seed offset from
+ * `REFERENCE_SEED` so changing the transaction stream does not silently change
+ * every price too. Clamped at 1 cent: a walk that reaches zero would make the
+ * rest of that asset's history meaningless, and a zero close is not a thing a
+ * listed instrument has.
+ */
+export function generateReferenceQuotes(
+  assets: readonly ReferenceAsset[] = generateReferenceAssets(),
+): readonly ReferenceQuote[] {
+  const rng = mulberry32(REFERENCE_SEED ^ 0x9e37_79b9);
+  const quotes: ReferenceQuote[] = [];
+
+  for (const asset of assets) {
+    if (!MARKET_PRICED_CLASSES.includes(asset.assetClass)) continue;
+
+    // R$ 5,00 – R$ 105,00, stable per asset because the walk starts here.
+    let cents = 500 + Math.floor(rng() * 10_000);
+
+    for (let date = REFERENCE_START_DATE; date <= REFERENCE_AS_OF_DATE; date = nextDay(date)) {
+      const weekday = new Date(Date.parse(`${date}T00:00:00Z`)).getUTCDay();
+      // 0 = Sunday, 6 = Saturday.
+      if (weekday === 0 || weekday === 6) continue;
+
+      // ±2 % a day, in whole cents.
+      const drift = Math.floor(rng() * (cents / 25)) - Math.floor(cents / 50);
+      cents = Math.max(1, cents + drift);
+      quotes.push({ ticker: asset.ticker, date, closeCents: cents });
+    }
+  }
+
+  return quotes;
+}
+
 export function generateReferenceWorkload(): ReferenceWorkload {
   const assets = generateReferenceAssets();
   const transactions = generateReferenceTransactions(assets);

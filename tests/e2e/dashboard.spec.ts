@@ -100,8 +100,16 @@ test.describe('the dashboard', () => {
     await signedIn.page.goto('/dashboard');
 
     await expect(signedIn.page.getByText('R$ 250,00')).toBeVisible();
-    await expect(signedIn.page.getByText(/Valores de/)).toBeVisible();
     await expect(signedIn.page.getByText(/nunca em tempo real/)).toBeVisible();
+
+    /*
+     * BR-016-18 — `dd/mm/yyyy`, never the ISO string the date is stored as.
+     * Asserted as a pattern rather than a fixed date because the page renders
+     * *today*; the shape is the rule, and a `BusinessDate` interpolated raw
+     * into an ICU message renders `2026-09-12`, which this rejects.
+     */
+    await expect(signedIn.page.getByText(/Valores de \d{2}\/\d{2}\/\d{4}/)).toBeVisible();
+    await expect(signedIn.page.getByText(/Valores de \d{4}-\d{2}-\d{2}/)).toHaveCount(0);
   });
 
   /**
@@ -145,6 +153,8 @@ test.describe('the dashboard', () => {
     // BR-016-16: the badge's meaning is carried by its text, so this assertion
     // is the same one a screen-reader user would make.
     await expect(signedIn.page.getByText('Confere com a B3')).toBeVisible();
+    // BR-016-18 again, on the Posição date beside the badge.
+    await expect(signedIn.page.getByText(/Posição de \d{2}\/\d{2}\/\d{4}/)).toBeVisible();
   });
 
   /** TS-27 / BR-016-15 — axe on the populated page, in a real browser. */

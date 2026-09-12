@@ -89,25 +89,43 @@ export async function loadDashboard(
   return withTenant(
     userId,
     async (tx) => {
-      const port = new DrizzleReportDataPort(tx, userId);
+      /*
+       * The clock is passed through, not defaulted. `DrizzleReportDataPort` uses
+       * it to decide `mode = 'current' | 'historical'` when valuing holdings
+       * (BR-009-02: an intraday quote may only ever price today), so a port left
+       * on its own `SystemClock` would value "today" against yesterday's close
+       * on any test that pins a past date — and every suite here would exercise
+       * a path production never takes.
+       */
+      const port = new DrizzleReportDataPort(tx, userId, clock);
       const batches = new DrizzleImportBatchRepository(tx, userId);
       const rows = new DrizzleImportRowRepository(tx, userId);
       const walletDeps = buildWalletDeps(tx, userId);
 
-      const [committed, unclassified, lastImportAt, delayMinutes, thresholdDays] =
-        await Promise.all([
-          batches.listCommitted(),
-          rows.countNeedsAttentionByBatch(),
-          port.lastImportAt(),
-          // SPEC-008 BR-008-04 — the delay tier, read through the resolver so a
-          // runtime cadence degradation (BR-008-22) is reflected on screen
-          // rather than contradicted by it.
-          resolveConfig('quotes.cadence_minutes', { db: tx, userId }),
-          // BR-005-28 — a **user**-level key, so a quarterly importer's own
-          // setting wins over the deployment default here exactly as it does on
-          // `/import` and in the reminder job.
-          resolveConfig('import.staleness_days', { db: tx, userId }),
-        ]);
+      const [
+        committed,
+        unclassified,
+        lastImportAt,
+        earliestSnapshot,
+        hasEverHeldAnything,
+        delayMinutes,
+        thresholdDays,
+      ] = await Promise.all([
+        batches.listCommitted(),
+        rows.countNeedsAttentionByBatch(),
+        port.lastImportAt(),
+        port.earliestSnapshotDate(),
+        // BR-020-26 — see `hasAnyPosition`. A closed position counts.
+        port.hasAnyPosition(),
+        // SPEC-008 BR-008-04 — the delay tier, read through the resolver so a
+        // runtime cadence degradation (BR-008-22) is reflected on screen
+        // rather than contradicted by it.
+        resolveConfig('quotes.cadence_minutes', { db: tx, userId }),
+        // BR-005-28 — a **user**-level key, so a quarterly importer's own
+        // setting wins over the deployment default here exactly as it does on
+        // `/import` and in the reminder job.
+        resolveConfig('import.staleness_days', { db: tx, userId }),
+      ]);
 
       /**
        * BR-013-12 — the headline is the **report's** figure, obtained by
@@ -129,7 +147,7 @@ export async function loadDashboard(
           grouping: 'asset_class',
           today,
         },
-        await port.earliestSnapshotDate(),
+        earliestSnapshot,
       );
 
       if (!query.ok) {
@@ -160,6 +178,8 @@ export async function loadDashboard(
           quotedAt,
           delayMinutes: delayMinutes.value,
           lastImportAt,
+          earliestSnapshot,
+          hasEverHeldAnything,
           thresholdDays: thresholdDays.value,
           today,
           reconciliation: latestReconciliation(committed),

@@ -15,12 +15,13 @@ import { Text } from '@/components/ui/text';
  * 'Needs attention' queue used for unclassified imports, and on the
  * post-import summary **and dashboard** until resolved."
  *
- * **The same queue, not a second one.** `/wallets` renders the identical two
- * kinds of item (plus SPEC-017's out-of-balance wallets, which live with the
- * wallets they are about). DL-017-08 is explicit that a second surface splits
- * the answer to "is there anything for me to do?" across two screens; this is
- * the same queue rendered where the user lands, and every item links back to
- * the one screen that resolves it.
+ * **One queue, not a second one.** DL-017-08 is explicit that a second surface
+ * splits the answer to "is there anything for me to do?" across two screens.
+ * `/wallets` renders pending allocations and SPEC-017's out-of-balance wallets,
+ * which live with the wallets they are about; outstanding import rows have
+ * until now been visible only on `/import/[batchId]`, one batch at a time. This
+ * is the first screen on which BR-010-12's "the same queue" is literally one
+ * list, and every item links back to the screen that resolves it.
  *
  * **Every item states its consequence.** SPEC-020 BR-020-18's shape, applied
  * here because the two kinds have genuinely opposite consequences and looked

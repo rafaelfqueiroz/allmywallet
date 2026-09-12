@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   REFERENCE_ASSET_COUNT,
+  REFERENCE_AS_OF_DATE,
+  REFERENCE_START_DATE,
   REFERENCE_TRANSACTION_COUNT,
+  generateReferenceQuotes,
   generateReferenceWorkload,
 } from '@/db/reference-workload';
 
@@ -48,6 +51,64 @@ describe('reference workload — the basis for every nightly comparison', () => 
     const { assets, transactions } = generateReferenceWorkload();
     const touched = new Set(transactions.map((t) => t.ticker));
     expect(touched.size).toBe(assets.length);
+  });
+
+  /**
+   * #98 — the price history the budgets are measured against.
+   *
+   * Before it existed, `pnpm db:seed:reference` wrote no quotes at all, so every
+   * holding in the reference portfolio took SPEC-009's `COST_FALLBACK`: the
+   * nightly run measured a dashboard and four reports that never priced
+   * anything. Green, fast, and a statement about a code path production does
+   * not take.
+   */
+  describe('the price history (#98)', () => {
+    it('prices the market-traded classes and leaves the accrued ones to accrual', () => {
+      const quotes = generateReferenceQuotes();
+      const tickers = new Set(quotes.map((quote) => quote.ticker));
+
+      /*
+       * 100 assets cycling through 8 classes, and `acao`/`fii`/`bdr`/`etf` are
+       * the first four of that cycle — so twelve whole blocks of eight give
+       * 12 × 4 = 48, and the remaining four indices (96–99) land on all four
+       * again: **52**. The other 48 are CDB/LCI/LCA/Tesouro, deliberately
+       * unquoted, because that is the path BR-009-11's accrual and BR-009-13's
+       * fallback live on — a workload that quoted everything would measure
+       * neither.
+       */
+      expect(tickers.size).toBe(52);
+      expect(quotes.length).toBeGreaterThan(50_000);
+    });
+
+    it('covers the whole history, weekdays only', () => {
+      const quotes = generateReferenceQuotes();
+      const dates = [...new Set(quotes.map((quote) => quote.date))].sort();
+
+      // 2021-01-02 is a Saturday, so the history opens on the Monday. That is
+      // the weekday rule working, not the range being short.
+      expect(dates[0]).toBe('2021-01-04');
+      expect(REFERENCE_START_DATE.localeCompare(dates[0] ?? '')).toBeLessThanOrEqual(0);
+      expect(dates.at(-1)?.localeCompare(REFERENCE_AS_OF_DATE)).toBeLessThanOrEqual(0);
+      // Saturdays and Sundays carry no close, which is what makes BR-009-03's
+      // carry-forward a path the measurement actually takes.
+      for (const date of dates) {
+        const weekday = new Date(Date.parse(`${date}T00:00:00Z`)).getUTCDay();
+        expect(weekday, date).not.toBe(0);
+        expect(weekday, date).not.toBe(6);
+      }
+    });
+
+    it('never produces a zero or negative close', () => {
+      // A walk that reached zero would make the rest of that asset's history
+      // meaningless, and a zero close is not a thing a listed instrument has.
+      expect(generateReferenceQuotes().every((quote) => quote.closeCents > 0)).toBe(true);
+    });
+
+    it('is byte-for-byte identical across runs (TS-23)', () => {
+      expect(JSON.stringify(generateReferenceQuotes())).toBe(
+        JSON.stringify(generateReferenceQuotes()),
+      );
+    });
   });
 
   it('generates within a budget that keeps the nightly run worth running', () => {

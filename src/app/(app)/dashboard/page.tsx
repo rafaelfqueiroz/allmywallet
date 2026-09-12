@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import { formatDateTime } from '@/i18n/format';
+import { formatBusinessDate, formatDateTime } from '@/i18n/format';
 import { loadDashboard } from '@/app/(app)/dashboard/data';
 import { tryUserId } from '@/app/(app)/dashboard/session';
 import { AttentionQueue } from '@/app/(app)/dashboard/_components/AttentionQueue';
 import { ReconciliationStatus } from '@/app/(app)/dashboard/_components/ReconciliationStatus';
+import { ValuationMarkers } from '@/app/(app)/dashboard/_components/ValuationMarkers';
 import { PageShell } from '@/components/patterns/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
@@ -41,6 +42,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   const t = await getTranslations('dashboard');
+  const tImport = await getTranslations('import.staleness');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -74,7 +76,11 @@ export default async function DashboardPage() {
       */}
       <Cluster gap="md" align="baseline">
         <Text tone="muted" size="xs">
-          {t('freshness.valuation', { date: freshness.valuationAsOf })}
+          {/* AR-47 / BR-016-18 — `dd/mm/yyyy` through the shared formatter. A
+              `BusinessDate` interpolated straight into an ICU message renders
+              as the ISO string it is stored as, which is a format the spec
+              forbids and which reads as a machine's date to a Brazilian. */}
+          {t('freshness.valuation', { date: formatBusinessDate(freshness.valuationAsOf) })}
         </Text>
         <Text tone="muted" size="xs">
           {freshness.quotedAt === null
@@ -87,7 +93,7 @@ export default async function DashboardPage() {
         <Text tone="muted" size="xs">
           {freshness.lastImportAt === null
             ? t('freshness.neverImported')
-            : t('freshness.lastImport', { date: freshness.lastImportAt })}
+            : t('freshness.lastImport', { date: formatBusinessDate(freshness.lastImportAt) })}
         </Text>
       </Cluster>
 
@@ -100,9 +106,17 @@ export default async function DashboardPage() {
       {freshness.stale && freshness.daysSinceImport !== null && (
         <Note>
           <Stack gap="sm">
-            <Text weight="medium">{t('staleness.title', { days: freshness.daysSinceImport })}</Text>
+            {/* The wording is `/import`'s own (`import.staleness.*`), reused
+                rather than restated: two near-identical prompts about the same
+                threshold are two things that can drift, and the one a user
+                meets second would then contradict the one they met first. Only
+                the action differs — `/import`'s links to the export guide on
+                its own page, which does not exist here. */}
+            <Text weight="medium">
+              {tImport('staleTitle', { days: freshness.daysSinceImport })}
+            </Text>
             <Text size="sm" tone="muted">
-              {t('staleness.body', { threshold: freshness.thresholdDays })}
+              {tImport('body', { threshold: freshness.thresholdDays })}
             </Text>
             <div>
               <Button asChild variant="link" size="sm">
@@ -118,9 +132,11 @@ export default async function DashboardPage() {
           <StatCard
             label={t('value.label')}
             value={<Money value={portfolio.value} />}
-            /* BR-011-15 / CR-1 — accrued fixed income declares itself where the
-               figure is read, not in a footnote read once. */
-            hint={portfolio.estimated ? t('value.estimated') : undefined}
+            /* SPEC-009 AC-3/9/11 — *how* this was priced, where the figure is
+               read rather than in a footnote read once. Three separate facts:
+               see `ValuationMarkers` on why one badge covering all of them told
+               some users a false reason for a true warning. */
+            hint={<ValuationMarkers markers={portfolio.markers} />}
           />
           <div>
             <Button asChild variant="link" size="sm">

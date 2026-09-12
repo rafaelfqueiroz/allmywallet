@@ -76,6 +76,8 @@ function input(overrides: Partial<DashboardSummaryInput> & { query: ReportQueryR
     quotedAt: null,
     delayMinutes: 30,
     lastImportAt: day('2026-09-10'),
+    earliestSnapshot: null,
+    hasEverHeldAnything: false,
     thresholdDays: 30,
     today: TODAY,
     reconciliation: null,
@@ -128,18 +130,20 @@ describe('portfolio value (BR-020-27, BR-011-16, BR-013-12)', () => {
 
     const summary = buildDashboardSummary(input({ query }));
 
-    expect(summary.portfolio).toEqual({
+    expect(summary.portfolio).toMatchObject({
       kind: 'valued',
       value: Money.fromString('2000'),
-      estimated: false,
+      markers: { estimated: false, accrued: false, unpriced: 0, carriedForward: false },
     });
     // The identity that makes the dashboard and the Patrimônio report unable to
     // disagree: it is literally the same object, not an equal one.
     expect(summary.portfolio).toMatchObject({ value: query.report.total.value });
   });
 
-  it('marks the figure estimated when any component is accrued rather than observed', async () => {
-    // BR-011-15 / CR-1: one accrued component is enough.
+  it('marks the figure accrued when a contract-based component is in it', async () => {
+    // BR-011-15 / BR-009-11: one accrued component is enough. `basis` is the
+    // accrual's own evidence, and its presence is what separates this from the
+    // cost fallback below.
     const query = await queryFor([
       { assetId: PETR, quantity: qty('100'), value: money('1000'), costBasis: money('800') },
       {
@@ -148,15 +152,115 @@ describe('portfolio value (BR-020-27, BR-011-16, BR-013-12)', () => {
         value: money('1000'),
         costBasis: money('900'),
         estimated: true,
+        basis: {
+          indexer: 'cdi_percent',
+          ratePercent: '110',
+          businessDays: 20,
+          throughDate: day('2026-09-12'),
+          matured: false,
+          missingIndexDays: 0,
+        },
       },
     ]);
 
     const summary = buildDashboardSummary(input({ query }));
 
-    expect(summary.portfolio).toEqual({
+    expect(summary.portfolio).toMatchObject({
       kind: 'valued',
       value: Money.fromString('2000'),
-      estimated: true,
+      markers: { estimated: true, accrued: true, unpriced: 0, carriedForward: false },
+    });
+  });
+
+  /**
+   * SPEC-009 BR-009-13 — nothing could price this holding, so it sits at
+   * acquisition cost. `estimated` is true for the same reason accrual sets it,
+   * and telling the user the caveat comes from *renda fixa acruada* they do not
+   * own would be a false explanation of a true warning. `HoldingMarkers` makes
+   * the same distinction per row; this is it at portfolio grain.
+   */
+  it('tells a cost fallback apart from an accrual', async () => {
+    const query = await queryFor([
+      { assetId: PETR, quantity: qty('100'), value: money('1000'), costBasis: money('800') },
+      {
+        assetId: VALE,
+        quantity: qty('50'),
+        value: money('900'),
+        costBasis: money('900'),
+        estimated: true,
+        // No `basis`: nothing was accrued, the price simply could not be found.
+        basis: null,
+        needsAttention: 'PRICE_UNAVAILABLE',
+        priceDate: null,
+      },
+    ]);
+
+    const summary = buildDashboardSummary(input({ query }));
+
+    expect(summary.portfolio).toMatchObject({
+      markers: { estimated: true, accrued: false, unpriced: 1, carriedForward: false },
+    });
+  });
+
+  /**
+   * BR-009-03 / BR-008-24 — an observed close from an earlier date is not an
+   * estimate, and must not be shown as current either. The **oldest** such date
+   * is what the screen needs: `quotedAt` is already the freshest quote across
+   * the portfolio, so a screen carrying only that reports half an hour of delay
+   * over holdings that are weeks behind the market.
+   */
+  it('reports the oldest carried-forward price date, not the newest', async () => {
+    const query = await queryFor([
+      {
+        assetId: PETR,
+        quantity: qty('100'),
+        value: money('1000'),
+        costBasis: money('800'),
+        carriedForward: true,
+        priceDate: day('2026-08-21'),
+      },
+      {
+        assetId: VALE,
+        quantity: qty('50'),
+        value: money('1000'),
+        costBasis: money('900'),
+        carriedForward: true,
+        priceDate: day('2026-09-11'),
+      },
+    ]);
+
+    const summary = buildDashboardSummary(input({ query }));
+
+    expect(summary.portfolio).toMatchObject({
+      markers: {
+        // A carried-forward close is a real observed price, so it is not an
+        // estimate — folding it in would mark every Saturday's whole portfolio.
+        estimated: false,
+        accrued: false,
+        unpriced: 0,
+        carriedForward: true,
+        oldestPriceDate: '2026-08-21',
+      },
+    });
+  });
+
+  it('ignores a carried-forward flag with no price date behind it', async () => {
+    const query = await queryFor([
+      {
+        assetId: PETR,
+        quantity: qty('100'),
+        value: money('1000'),
+        costBasis: money('800'),
+        carriedForward: true,
+        priceDate: null,
+      },
+    ]);
+
+    const summary = buildDashboardSummary(input({ query }));
+
+    // Nothing to tell the user *from when*, so there is nothing honest to say.
+    expect(summary.portfolio).toMatchObject({
+      markers: { carriedForward: false, oldestPriceDate: null },
     });
   });
 
@@ -179,6 +283,21 @@ describe('portfolio value (BR-020-27, BR-011-16, BR-013-12)', () => {
     expect(summary.portfolio).toEqual({ kind: 'no_holdings' });
   });
 
+  it('shows the onboarding state only when there is no history of any kind', async () => {
+    const query = await queryFor([]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        lastImportAt: null,
+        earliestSnapshot: null,
+        hasEverHeldAnything: false,
+      }),
+    );
+
+    expect(summary.portfolio).toEqual({ kind: 'onboarding' });
+  });
+
   it('reports a genuinely worthless holding as a figure, not as an empty state', async () => {
     // A held position priced at zero is a fact about the money; an empty state
     // would be the opposite claim.
@@ -188,11 +307,28 @@ describe('portfolio value (BR-020-27, BR-011-16, BR-013-12)', () => {
 
     const summary = buildDashboardSummary(input({ query }));
 
-    expect(summary.portfolio).toEqual({
-      kind: 'valued',
-      value: Money.zero(),
-      estimated: false,
-    });
+    expect(summary.portfolio).toMatchObject({ kind: 'valued', value: Money.zero() });
+  });
+
+  /**
+   * SPEC-020 BR-020-26 — assets outside B3 custody are entered by hand, and
+   * `/transactions/new` exists for exactly that. A user who typed their whole
+   * ledger and has since closed every position has no import and no holding;
+   * telling them their *patrimônio* "aparece depois da primeira importação"
+   * denies them years of their own data.
+   */
+  it('does not call a manual-entry user a first run', async () => {
+    const query = await queryFor([]);
+
+    // Three independent traces of history, none of them the ledger (BR-016-05).
+    for (const history of [
+      { hasEverHeldAnything: true },
+      { earliestSnapshot: day('2024-01-05') },
+      { lastImportAt: day('2024-01-05') },
+    ]) {
+      const summary = buildDashboardSummary(input({ query, lastImportAt: null, ...history }));
+      expect(summary.portfolio, JSON.stringify(history)).toEqual({ kind: 'no_holdings' });
+    }
   });
 });
 
@@ -259,6 +395,7 @@ describe('reconciliation status (BR-005-26)', () => {
       state: 'never_reconciled',
       asOf: null,
       unresolvedCount: 0,
+      resolvedCount: 0,
       batchId: null,
     });
   });
@@ -268,6 +405,9 @@ describe('reconciliation status (BR-005-26)', () => {
       state: 'reconciled',
       asOf: BusinessDate.of('2026-09-10'),
       unresolvedCount: 0,
+      // Zero accepted, so the screen can say the comparison found nothing —
+      // which is a different sentence from "you settled what it found".
+      resolvedCount: 0,
       batchId: BATCH,
     });
   });
@@ -286,6 +426,7 @@ describe('reconciliation status (BR-005-26)', () => {
       state: 'discrepancies_found',
       asOf: BusinessDate.of('2026-09-10'),
       unresolvedCount: 2,
+      resolvedCount: 1,
       batchId: BATCH,
     });
   });
@@ -309,6 +450,9 @@ describe('reconciliation status (BR-005-26)', () => {
     expect(reconciliationStatus(sourceOf(report))).toMatchObject({
       state: 'reconciled',
       unresolvedCount: 0,
+      // The count the screen needs to avoid claiming the comparison found
+      // nothing, which is not what happened here.
+      resolvedCount: 2,
     });
   });
 

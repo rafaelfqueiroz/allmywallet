@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
+import { formatBusinessDate } from '@/i18n/format';
 import type { DashboardReconciliation } from '@/core/dashboard/summary';
 import { Section } from '@/components/patterns/section';
 import { Stack } from '@/components/layout/stack';
@@ -32,7 +33,18 @@ export async function ReconciliationStatus({
   readonly reconciliation: DashboardReconciliation;
 }) {
   const t = await getTranslations('dashboard.reconciliation');
-  const { state, asOf, unresolvedCount, batchId } = reconciliation;
+  const { state, asOf, unresolvedCount, resolvedCount, batchId } = reconciliation;
+
+  /**
+   * BR-005-25 — **`reconciled` has two histories behind it and they are not the
+   * same assurance.** The comparison found nothing, or it found disagreements
+   * the user has since accepted B3's figure on. Telling the second user that
+   * "todas as quantidades que calculamos bateram com o que a B3 informou"
+   * asserts something that did not happen — the ledger was *corrected* to
+   * agree, which is a different and more interesting fact about their data.
+   */
+  const bodyKey =
+    state === 'reconciled' && resolvedCount > 0 ? 'reconciledAfterAdjustments' : state;
 
   return (
     <Section title={t('title')}>
@@ -54,13 +66,14 @@ export async function ReconciliationStatus({
             // Without it the badge is a claim with no date attached, which is
             // the same failure BR-005-27 exists to prevent for portfolio value.
             <Text as="span" size="xs" tone="muted">
-              {t('asOf', { date: asOf })}
+              {/* AR-47 / BR-016-18 — `dd/mm/yyyy`, through the shared formatter. */}
+              {t('asOf', { date: formatBusinessDate(asOf) })}
             </Text>
           )}
         </Cluster>
 
         <Text size="sm" tone="muted">
-          {t(`body.${state}`)}
+          {t(`body.${bodyKey}`, { count: resolvedCount })}
         </Text>
 
         <div>

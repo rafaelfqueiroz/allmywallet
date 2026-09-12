@@ -40,6 +40,7 @@ describe('#98 — the dashboard read model (integration)', () => {
   const clock = new FakeClock('2026-03-20T12:00:00Z');
 
   let petr: AssetId;
+  let vale: AssetId;
   let cdb: AssetId;
   let xp: InstitutionId;
 
@@ -64,6 +65,7 @@ describe('#98 — the dashboard read model (integration)', () => {
     await seedUser(database.migrationUrl, userId);
 
     petr = (await seedAsset(database.migrationUrl, 'PETR4', 'Petrobras PN')).id;
+    vale = (await seedAsset(database.migrationUrl, 'VALE3', 'Vale ON')).id;
     cdb = (await seedAsset(database.migrationUrl, 'CDB-BANCO-X', 'CDB 110% CDI', 'cdb')).id;
     xp = await seedInstitution(database.migrationUrl, 'XP Investimentos');
 
@@ -108,11 +110,11 @@ describe('#98 — the dashboard read model (integration)', () => {
     );
   }
 
-  async function seedLatestQuote(assetId: AssetId, quotedAt: string): Promise<void> {
+  async function seedLatestQuote(assetId: AssetId, quotedAt: string, price = '1'): Promise<void> {
     await migratorPool.query(
       `INSERT INTO latest_quotes (asset_id, price, quoted_at, fetched_at, source)
-       VALUES ($1, 1, $2, now(), 'test')`,
-      [assetId, quotedAt],
+       VALUES ($1, $3, $2, now(), 'test')`,
+      [assetId, quotedAt, price],
     );
   }
 
@@ -235,20 +237,26 @@ describe('#98 — the dashboard read model (integration)', () => {
     });
 
     /**
-     * BR-011-15 / CR-1 — accrued fixed income is **computed**, not observed, and
-     * the figure that contains it says so. A CDB with no contract row cannot be
-     * accrued at all and falls back to cost, which is the same `estimated`
-     * signal for the same underlying reason: this number was not read off a
-     * market.
+     * SPEC-009 BR-009-13 — a CDB with no contract row cannot be accrued, so it
+     * falls back to acquisition cost and is flagged `needsAttention`.
+     *
+     * **This is the case that made the caveat lie.** `estimated` is set by two
+     * different causes, and the first version of this screen told every such
+     * user that the estimate came from *renda fixa acruada* — which is the
+     * wrong explanation here, and hid BR-009-13's "this is not a valuation, act
+     * on it" entirely. So the assertion is on `unpriced`, not on a boolean.
      */
-    it('marks the total estimated when a fixed-income holding contributes to it', async () => {
+    it('tells a cost fallback apart from an accrual', async () => {
       await seedPosition(petr, '100', '32.15', '3215');
       await seedClose(petr, '2026-03-20', '38.42');
       await seedPosition(cdb, '1', '10000', '10000');
 
       const { summary } = await load();
 
-      expect(summary.portfolio).toMatchObject({ kind: 'valued', estimated: true });
+      expect(summary.portfolio).toMatchObject({
+        kind: 'valued',
+        markers: { estimated: true, accrued: false, unpriced: 1 },
+      });
     });
 
     it('does not mark a fully observed total as estimated', async () => {
@@ -257,7 +265,49 @@ describe('#98 — the dashboard read model (integration)', () => {
 
       const { summary } = await load();
 
-      expect(summary.portfolio).toMatchObject({ kind: 'valued', estimated: false });
+      expect(summary.portfolio).toMatchObject({
+        kind: 'valued',
+        markers: { estimated: false, accrued: false, unpriced: 0, carriedForward: false },
+      });
+    });
+
+    /**
+     * SPEC-008 BR-008-24 — "never shown as current when it is not."
+     *
+     * The close is eight days old and `latest_quotes` carries a fresh instant.
+     * Before the markers existed, this screen reported *"Cotações de 20/03
+     * 16:45 — atraso de até 30 minutos"* over a total priced on 12/03, which is
+     * exactly the free-tier case PRD R5 makes ordinary: ~51 assets can be
+     * polled at a 30-minute cadence and the rest keep serving whatever
+     * `latest_quotes` last held.
+     */
+    it('reports the oldest price behind the total, not only the freshest quote', async () => {
+      // PETR4 was polled this morning; VALE3's last poll was three weeks ago and
+      // `latest_quotes` is never expired (BR-008-10 — it is overwritten, not
+      // aged out), so `resolvePrice` keeps serving that row and marks it
+      // carried forward.
+      await seedPosition(petr, '100', '32.15', '3215');
+      await seedLatestQuote(petr, '2026-03-20T16:45:00Z');
+      await seedPosition(vale, '100', '50.00', '5000');
+      await seedLatestQuote(vale, '2026-02-27T20:00:00Z');
+
+      const { summary } = await load();
+
+      expect(summary.portfolio).toMatchObject({
+        kind: 'valued',
+        // A real observed price, just an old one — so not an estimate, and not
+        // droppable either.
+        markers: { carriedForward: true, oldestPriceDate: '2026-02-27', estimated: false },
+      });
+      /*
+       * Both facts, on the same screen. `quotedAt` is the high-water mark
+       * across the holdings, so on its own it reports half an hour of delay
+       * over a *patrimônio* that is three weeks behind the market — the exact
+       * shape BR-008-24 forbids, and ordinary on the free tier, where ~51
+       * assets can be polled at a 30-minute cadence (PRD R5) and the rest keep
+       * serving whatever was last stored.
+       */
+      expect(summary.freshness.quotedAt?.toISOString()).toBe('2026-03-20T16:45:00.000Z');
     });
 
     /**
@@ -278,6 +328,29 @@ describe('#98 — the dashboard read model (integration)', () => {
 
       expect(summary.portfolio).toEqual({ kind: 'no_holdings' });
       expect(summary.freshness.lastImportAt).toBe('2026-03-18');
+    });
+
+    /**
+     * SPEC-020 BR-020-26 — assets outside B3 custody are entered by hand, and
+     * `/transactions/new` exists for that. A user who typed their whole ledger
+     * and has since closed every position has no import and no holding; keying
+     * the onboarding state on imports alone told them their *patrimônio* would
+     * appear "depois da primeira importação" and offered to start one.
+     *
+     * The position closed to zero is the only trace that user leaves, and
+     * `hasAnyPosition` is the read that finds it — SPEC-007's cache, not the
+     * ledger (BR-016-05).
+     */
+    it('does not call a manual-entry user with no imports a first run', async () => {
+      // BR-007-07: a closed position resets — quantity zero implies no
+      // residual cost and no residual average (`positions_closed_reset_check`).
+      // The row itself survives, and that is the trace this test is about.
+      await seedPosition(petr, '0', '0', '0');
+
+      const { summary } = await load();
+
+      expect(summary.freshness.lastImportAt).toBeNull();
+      expect(summary.portfolio).toEqual({ kind: 'no_holdings' });
     });
   });
 
@@ -369,6 +442,7 @@ describe('#98 — the dashboard read model (integration)', () => {
         state: 'never_reconciled',
         asOf: null,
         unresolvedCount: 0,
+        resolvedCount: 0,
         batchId: null,
       });
     });
@@ -385,6 +459,9 @@ describe('#98 — the dashboard read model (integration)', () => {
         state: 'reconciled',
         asOf: '2026-03-18',
         unresolvedCount: 0,
+        // Nothing was found and nothing was settled — the screen may say the
+        // quantities agreed.
+        resolvedCount: 0,
         batchId: '01920000-0000-7000-8000-0000000000e2',
       });
     });
@@ -427,7 +504,13 @@ describe('#98 — the dashboard read model (integration)', () => {
 
       const { summary } = await load();
 
-      expect(summary.reconciliation).toMatchObject({ state: 'reconciled', unresolvedCount: 0 });
+      expect(summary.reconciliation).toMatchObject({
+        state: 'reconciled',
+        unresolvedCount: 0,
+        // Two were found and settled, which is not the same assurance as
+        // "everything agreed" — the copy on screen turns on this number.
+        resolvedCount: 2,
+      });
     });
 
     it('reads the most recently committed reconciliation, not the most recent batch', async () => {

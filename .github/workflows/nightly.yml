@@ -53,6 +53,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm db:migrate
 
+      # `0000_roles.sql` creates `allmywallet_app` with no password; this sets
+      # it. Without it every connection on `DATABASE_URL` fails 28P01 and the
+      # whole suite errors in `beforeAll` — which `continue-on-error: true`
+      # above then swallows, so the run goes green and measures nothing. `ci.yml`
+      # has always paired the two commands; this workflow was missing the second
+      # (found while rehearsing the nightly locally for #98).
+      - run: pnpm db:provision-app-role
+
       # TS-23: 100 assets, 10,000 transactions, 5 years, generated from a fixed
       # seed. Deterministic is the point — numbers are only comparable across
       # runs if the workload is identical.

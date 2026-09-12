@@ -221,6 +221,7 @@ describe('#98 — dashboard surface tenant isolation', () => {
       state: 'never_reconciled',
       asOf: null,
       unresolvedCount: 0,
+      resolvedCount: 0,
       batchId: null,
     });
   });

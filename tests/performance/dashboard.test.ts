@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '@/db/schema';
+import { priceQuotes } from '@/db/schema/market';
 import { withTenant } from '@/db/tenant';
 import { FakeClock } from '@/core/shared/clock';
 import { UserId } from '@/core/shared/ids';
@@ -78,7 +79,13 @@ describe('SPEC-016 FR-8.29 — the dashboard at reference scale (nightly, adviso
         const [positions] = await tx
           .select({ total: sql<number>`count(*)::int` })
           .from(schema.positions);
-        return { transactions: transactions?.total ?? 0, positions: positions?.total ?? 0 };
+        // AR-15: shared reference data, readable on the same handle.
+        const [quotes] = await tx.select({ total: sql<number>`count(*)::int` }).from(priceQuotes);
+        return {
+          transactions: transactions?.total ?? 0,
+          positions: positions?.total ?? 0,
+          quotes: quotes?.total ?? 0,
+        };
       },
       database,
     );
@@ -103,6 +110,21 @@ describe('SPEC-016 FR-8.29 — the dashboard at reference scale (nightly, adviso
         'reference positions are empty — the dashboard would be measured against an empty ' +
           'portfolio. Run `pnpm positions:rebuild --user ' +
           `${REFERENCE_USER_ID}\` after seeding.`,
+      );
+    }
+
+    /*
+     * Without closes, every holding takes `COST_FALLBACK` and the measurement
+     * never touches `price_quotes`, `latest_quotes` or the accrual engine — the
+     * three things that would make this screen slow. That is how this suite was
+     * first written, and it reported a p95 of 246ms for a portfolio nothing had
+     * priced. Asserted rather than assumed, for the same reason the transaction
+     * count above is.
+     */
+    if (counts.quotes === 0) {
+      throw new Error(
+        'reference price history is empty — the dashboard would be measured against a portfolio ' +
+          'nothing can price. Re-run `pnpm db:seed:reference`.',
       );
     }
   }, 300_000);
