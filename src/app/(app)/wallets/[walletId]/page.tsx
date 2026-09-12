@@ -4,7 +4,7 @@ import { getTranslations } from 'next-intl/server';
 import { WalletId } from '@/core/shared/ids';
 import { deleteWalletAction, updateWalletAction } from '@/app/(app)/wallets/actions';
 import { labelFor, loadWalletDetail } from '@/app/(app)/wallets/data';
-import { tryUserId } from '@/app/(app)/wallets/session';
+import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/components/patterns/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';

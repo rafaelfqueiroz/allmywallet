@@ -51,20 +51,33 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm db:migrate
+
+      # ---------------------------------------------------------------------
+      # SETUP. Every step below is `id`-tagged and reported by the alert at the
+      # end, because a *setup* failure is the one this job is worst at showing:
+      # it skips the measurement, `continue-on-error: true` marks the job green,
+      # and the run says nothing at all. That is not hypothetical — the missing
+      # `db:provision-app-role` below had exactly that effect.
+      # ---------------------------------------------------------------------
+      - name: Apply migrations
+        id: migrate
+        run: pnpm db:migrate
 
       # `0000_roles.sql` creates `allmywallet_app` with no password; this sets
       # it. Without it every connection on `DATABASE_URL` fails 28P01 and the
-      # whole suite errors in `beforeAll` — which `continue-on-error: true`
-      # above then swallows, so the run goes green and measures nothing. `ci.yml`
-      # has always paired the two commands; this workflow was missing the second
-      # (found while rehearsing the nightly locally for #98).
-      - run: pnpm db:provision-app-role
+      # whole suite errors in `beforeAll`. `ci.yml` has always paired the two
+      # commands; this workflow was missing the second (found while rehearsing
+      # the nightly locally for #98).
+      - name: Provision the application role
+        id: provision
+        run: pnpm db:provision-app-role
 
       # TS-23: 100 assets, 10,000 transactions, 5 years, generated from a fixed
-      # seed. Deterministic is the point — numbers are only comparable across
-      # runs if the workload is identical.
+      # seed — plus, since #98, five years of daily closes for the 52
+      # market-priced assets. Deterministic is the point: numbers are only
+      # comparable across runs if the workload is identical.
       - name: Seed the reference workload
+        id: seed
         run: pnpm db:seed:reference
 
       # #98 / FR-8.29 — the dashboard budget is a budget on a *populated*
@@ -73,7 +86,12 @@ jobs:
       # the engine never computed (DM-4). So the cache is built by SPEC-007's own
       # rebuild entry point. Without this step the dashboard suite fails loudly
       # rather than measuring an empty portfolio.
+      #
+      # It is also a step that can legitimately refuse: `verifyPositions` will
+      # not replay a ledger it cannot reconcile, and the generator has produced
+      # an `INSUFFICIENT_QUANTITY` history before now.
       - name: Rebuild the reference tenant's position cache
+        id: rebuild
         # REFERENCE_USER_ID (src/db/reference-workload.ts) — fixed, so the
         # workload is identical run to run (TS-23).
         run: pnpm positions:rebuild --user 00000000-0000-7000-8000-000000000001
@@ -85,18 +103,46 @@ jobs:
       # BR-016-13: a regression that nobody sees is indistinguishable from no
       # regression. Naming the commit range is what makes the alert actionable
       # rather than merely alarming.
-      - name: Raise an issue on regression
-        if: failure() && steps.budgets.outcome == 'failure'
+      #
+      # **`if: failure()`, with no second condition.** The guard used to read
+      # `failure() && steps.budgets.outcome == 'failure'`, which cannot fire for
+      # the failure mode that matters most: when a setup step fails, `budgets` is
+      # *skipped*, so its outcome is `skipped` rather than `failure`, no issue is
+      # opened, and `continue-on-error: true` paints the job green. The run then
+      # measures nothing and says nothing — which is the exact condition #98 set
+      # out to fix, one step earlier in the sequence. Any failure in this job is
+      # worth an issue; the body says which kind it was.
+      - name: Raise an issue on a regression or a broken run
+        if: failure()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MIGRATE: ${{ steps.migrate.outcome }}
+          PROVISION: ${{ steps.provision.outcome }}
+          SEED: ${{ steps.seed.outcome }}
+          REBUILD: ${{ steps.rebuild.outcome }}
+          BUDGETS: ${{ steps.budgets.outcome }}
         run: |
           RANGE="$(git log --oneline -20 --format='%h %s' | head -20)"
+          if [ "$BUDGETS" = "failure" ]; then
+            HEADLINE="The nightly performance run missed a budget on \`main\`."
+            TITLE="Nightly performance regression — $(date -u +%Y-%m-%d)"
+          else
+            HEADLINE="The nightly performance run did not complete, so **no budget was measured**. A skipped measurement is not a passing one."
+            TITLE="Nightly performance run broken — $(date -u +%Y-%m-%d)"
+          fi
           printf '%s\n\n%s\n\n%s\n' \
-            "The nightly performance run missed a budget on \`main\`." \
+            "$HEADLINE" \
             "Budgets (TESTING §8): dashboard < 2s p95 · any report < 3s p95 · import preview 10k rows < 30s · import commit 10k rows < 60s." \
-            "Recent commits:" > /tmp/body.md
+            "Step outcomes:" > /tmp/body.md
+          printf '| step | outcome |\n|---|---|\n' >> /tmp/body.md
+          printf '| db:migrate | %s |\n' "$MIGRATE" >> /tmp/body.md
+          printf '| db:provision-app-role | %s |\n' "$PROVISION" >> /tmp/body.md
+          printf '| db:seed:reference | %s |\n' "$SEED" >> /tmp/body.md
+          printf '| positions:rebuild | %s |\n' "$REBUILD" >> /tmp/body.md
+          printf '| test:performance | %s |\n' "$BUDGETS" >> /tmp/body.md
+          printf '\n%s\n' "Recent commits:" >> /tmp/body.md
           printf '```\n%s\n```\n' "$RANGE" >> /tmp/body.md
           gh issue create \
-            --title "Nightly performance regression — $(date -u +%Y-%m-%d)" \
+            --title "$TITLE" \
             --label "performance" \
             --body-file /tmp/body.md

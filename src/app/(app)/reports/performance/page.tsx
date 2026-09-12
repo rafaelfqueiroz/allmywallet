@@ -15,7 +15,7 @@ import { fromSearchParams, withParam } from '@/lib/report-url-state';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
-import { tryUserId } from '@/app/(app)/reports/session';
+import { tryUserId } from '@/lib/session';
 import { comparisonSeries } from '@/core/reporting/performance/comparison-series';
 import { loadPerformance } from '@/app/(app)/reports/performance/data';
 import { BenchmarkChart } from '@/app/(app)/reports/performance/_components/BenchmarkChart';

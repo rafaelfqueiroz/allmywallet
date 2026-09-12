@@ -154,6 +154,7 @@
       "title": "Precisa da sua atenção",
       "description": "Tudo o que está esperando uma decisão sua, em um lugar só.",
       "empty": "Nada esperando por você.",
+      "more": "{count, plural, one {mais # item em Carteiras} other {mais # itens em Carteiras}}",
       "importRows": {
         "label": "{count, plural, one {# linha importada sem classificação} other {# linhas importadas sem classificação}}",
         "consequence": "Enquanto não forem classificadas, essas linhas ficam de fora do cálculo — o patrimônio acima está subestimado.",

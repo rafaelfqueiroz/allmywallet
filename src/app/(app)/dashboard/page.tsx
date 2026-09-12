@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { formatBusinessDate, formatDateTime } from '@/i18n/format';
 import { loadDashboard } from '@/app/(app)/dashboard/data';
-import { tryUserId } from '@/app/(app)/dashboard/session';
+import { tryUserId } from '@/lib/session';
 import { AttentionQueue } from '@/app/(app)/dashboard/_components/AttentionQueue';
 import { ReconciliationStatus } from '@/app/(app)/dashboard/_components/ReconciliationStatus';
 import { ValuationMarkers } from '@/app/(app)/dashboard/_components/ValuationMarkers';
@@ -54,7 +54,7 @@ export default async function DashboardPage() {
   }
 
   const { summary } = await loadDashboard(userId);
-  const { portfolio, freshness, reconciliation, attention } = summary;
+  const { portfolio, freshness, reconciliation, attention, attentionTotal } = summary;
 
   /**
    * SPEC-020 BR-020-27 — before the first import there is nothing to reconcile
@@ -171,7 +171,7 @@ export default async function DashboardPage() {
           {/* BR-005-26 */}
           <ReconciliationStatus reconciliation={reconciliation} />
           {/* BR-010-12 */}
-          <AttentionQueue items={attention} />
+          <AttentionQueue items={attention} total={attentionTotal} />
         </>
       )}
     </PageShell>

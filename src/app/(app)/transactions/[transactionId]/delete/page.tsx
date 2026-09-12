@@ -6,7 +6,7 @@ import { formatBusinessDate } from '@/i18n/format';
 import { messageValues } from '@/lib/action-state';
 import { deleteTransactionAction } from '@/app/(app)/transactions/actions';
 import { withTransactionWriteDeps } from '@/app/(app)/transactions/composition';
-import { tryUserId } from '@/app/(app)/transactions/session';
+import { tryUserId } from '@/lib/session';
 import { DeleteConfirm } from '@/app/(app)/transactions/_components/DeleteConfirm';
 import { PageShell } from '@/components/patterns/page-shell';
 import { Section } from '@/components/patterns/section';

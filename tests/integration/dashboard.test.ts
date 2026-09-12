@@ -548,6 +548,8 @@ describe('#98 — the dashboard read model (integration)', () => {
 
   describe('needs attention (BR-010-12)', () => {
     const BATCH = '01920000-0000-7000-8000-0000000000d1';
+    const BATCH_TWO = '01920000-0000-7000-8000-0000000000d2';
+    const BATCH_THREE = '01920000-0000-7000-8000-0000000000d3';
 
     it('is empty when there is nothing to do', async () => {
       await seedPosition(petr, '100', '32.15', '3215');
@@ -638,6 +640,33 @@ describe('#98 — the dashboard read model (integration)', () => {
       const { summary } = await load();
 
       expect(summary.attention).toEqual([]);
+    });
+
+    /**
+     * The first-week state, end to end: an extract imported, no wallet created,
+     * so every held asset awaits allocation. Six positions against a cap of
+     * five, which is the smallest fixture that can tell a cap from an accident.
+     */
+    it('caps the rendered queue and reports the true total', async () => {
+      for (const assetId of [petr, vale, cdb]) {
+        await seedPosition(assetId, '10', '1', '10');
+      }
+      await seedClose(petr, '2026-03-20', '1');
+      await seedClose(vale, '2026-03-20', '1');
+      await seedBatch({ id: BATCH, source: 'b3_movimentacao' });
+      for (let i = 0; i < 4; i += 1) await seedRow(BATCH, petr, 'unclassified');
+      await seedBatch({ id: BATCH_TWO, source: 'b3_movimentacao' });
+      await seedRow(BATCH_TWO, petr, 'unclassified');
+      await seedBatch({ id: BATCH_THREE, source: 'b3_movimentacao' });
+      await seedRow(BATCH_THREE, petr, 'invalid');
+
+      const { summary } = await load();
+
+      // 3 batches + 3 unallocated positions = 6, shown 5.
+      expect(summary.attentionTotal).toBe(6);
+      expect(summary.attention).toHaveLength(5);
+      // The three that understate the headline are never the ones dropped.
+      expect(summary.attention.slice(0, 3).every((item) => item.kind === 'import_rows')).toBe(true);
     });
 
     it('drops the entry once every row has been reclassified', async () => {

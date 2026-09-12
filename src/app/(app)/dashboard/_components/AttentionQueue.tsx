@@ -31,8 +31,16 @@ import { Text } from '@/components/ui/text';
  * decision. Told apart, one is urgent and one is housekeeping; told as a bare
  * count, they are indistinguishable.
  */
-export async function AttentionQueue({ items }: { readonly items: readonly AttentionItem[] }) {
+export async function AttentionQueue({
+  items,
+  total,
+}: {
+  readonly items: readonly AttentionItem[];
+  /** The full count, which may exceed `items.length` — see `ATTENTION_QUEUE_LIMIT`. */
+  readonly total: number;
+}) {
   const t = await getTranslations('dashboard.attention');
+  const hidden = total - items.length;
 
   return (
     <Section title={t('title')} description={t('description')}>
@@ -87,6 +95,19 @@ export async function AttentionQueue({ items }: { readonly items: readonly Atten
             ),
           )}
         </List>
+      )}
+
+      {hidden > 0 && (
+        /*
+         * Said, not silently truncated. The ordinary first-week state — a full
+         * extract imported and no wallet created yet — produces one item per
+         * held asset, which at reference scale is a hundred rows that would
+         * bury everything else on the screen. `/wallets` is where the work is
+         * actually done and shows all of them with the forms to resolve each.
+         */
+        <Button asChild variant="link" size="sm">
+          <Link href="/wallets">{t('more', { count: hidden })}</Link>
+        </Button>
       )}
     </Section>
   );

@@ -3,19 +3,23 @@ import { BusinessDate } from '@/core/shared/clock';
 import { ImportBatchId, type AssetId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { runReportQuery, type ReportQueryResult } from '@/core/reporting/base-query';
+import type { ReportAllocation } from '@/core/reporting/ports';
 import {
   FakeReportDataPort,
   anAsset,
   aPosition,
   assetIdOf,
   day,
+  institutionIdOf,
   money,
   qty,
+  walletIdOf,
 } from '@/core/reporting/test-support';
 import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
 import type { Discrepancy, ReconciliationReport } from '@/core/ingestion/reconcile';
 import type { PendingAllocation } from '@/core/wallets/pending';
 import {
+  ATTENTION_QUEUE_LIMIT,
   buildDashboardSummary,
   reconciliationStatus,
   type AssetLabel,
@@ -35,6 +39,9 @@ import {
 const TODAY = day('2026-09-12');
 const PETR = assetIdOf('1');
 const VALE = assetIdOf('2');
+const WALLET_A = walletIdOf('1');
+const WALLET_B = walletIdOf('2');
+const WALLET_C = walletIdOf('3');
 
 /** A one-day query at portfolio scope — exactly what the loader runs. */
 async function queryFor(
@@ -43,10 +50,16 @@ async function queryFor(
     anAsset({ assetId: PETR, code: 'PETR4', name: 'Petrobras PN' }),
     anAsset({ assetId: VALE, code: 'VALE3', name: 'Vale ON' }),
   ],
+  /**
+   * Allocations matter to exactly one assertion — the wallet-slice fan-out that
+   * `buildHoldingSet` produces — so they default to none and that test passes
+   * them explicitly, which keeps the fan-out visible where it is the subject.
+   */
+  allocations: ReportAllocation[] = [],
 ): Promise<ReportQueryResult> {
   const port = new FakeReportDataPort({
     positions: positions.map(aPosition),
-    allocations: [],
+    allocations,
     wallets: [],
     institutions: [],
     assets,
@@ -241,6 +254,83 @@ describe('portfolio value (BR-020-27, BR-011-16, BR-013-12)', () => {
         carriedForward: true,
         oldestPriceDate: '2026-08-21',
       },
+    });
+  });
+
+  /**
+   * `buildHoldingSet` emits one `ReportHolding` per **wallet slice** of a
+   * position and copies `needsAttention` onto each slice unchanged, on purpose:
+   * value and quantity divide between carteiras, how the price was obtained
+   * does not. So one unpriceable CDB filed across three wallets is three
+   * holdings — and counting holdings told the user "3 posições não puderam ser
+   * precificadas" about a single position, with no row beneath the badge to
+   * reconcile that against.
+   */
+  it('counts one unpriced position, not one per wallet it is filed in', async () => {
+    const query = await queryFor(
+      [
+        {
+          assetId: VALE,
+          quantity: qty('300'),
+          value: money('300'),
+          costBasis: money('300'),
+          estimated: true,
+          basis: null,
+          needsAttention: 'PRICE_UNAVAILABLE',
+          priceDate: null,
+        },
+      ],
+      undefined,
+      // The same 300 units, split across three carteiras.
+      [
+        { walletId: WALLET_A, assetId: VALE, quantity: Quantity.fromString('100') },
+        { walletId: WALLET_B, assetId: VALE, quantity: Quantity.fromString('100') },
+        { walletId: WALLET_C, assetId: VALE, quantity: Quantity.fromString('100') },
+      ],
+    );
+
+    // Three holdings in, one position out.
+    expect(query.report.groups.flatMap((group) => group.holdings)).toHaveLength(3);
+    expect(buildDashboardSummary(input({ query })).portfolio).toMatchObject({
+      markers: { unpriced: 1, estimated: true, accrued: false },
+    });
+  });
+
+  /**
+   * The other half of the grain: SPEC-007 BR-007-08 stores one position per
+   * `(asset, institution)`, and an institution is legitimately **null** — the
+   * reference workload's rows all are, and a manual entry need not name a
+   * broker. Two unpriceable rows for the same asset at different custodians are
+   * two positions the user can go and look at, so they count as two.
+   */
+  it('counts positions per custodian, including the one with no institution', async () => {
+    const query = await queryFor([
+      {
+        assetId: VALE,
+        institutionId: institutionIdOf('7'),
+        quantity: qty('100'),
+        value: money('100'),
+        costBasis: money('100'),
+        estimated: true,
+        basis: null,
+        needsAttention: 'PRICE_UNAVAILABLE',
+        priceDate: null,
+      },
+      {
+        assetId: VALE,
+        institutionId: null,
+        quantity: qty('50'),
+        value: money('50'),
+        costBasis: money('50'),
+        estimated: true,
+        basis: null,
+        needsAttention: 'PRICE_UNAVAILABLE',
+        priceDate: null,
+      },
+    ]);
+
+    expect(buildDashboardSummary(input({ query })).portfolio).toMatchObject({
+      markers: { unpriced: 2 },
     });
   });
 
@@ -533,6 +623,67 @@ describe('needs attention (BR-010-12)', () => {
 
     // An empty queue has to be able to mean "nothing to do".
     expect(summary.attention).toEqual([]);
+  });
+
+  /**
+   * The ordinary first-week state: a full extract imported, no wallet created
+   * yet, so every held asset is awaiting allocation. At BR-016-01's reference
+   * scale that is a hundred rows under the headline, which turns "is there
+   * anything for me to do?" into a holdings list and pushes the reconciliation
+   * status off the first screenful.
+   */
+  it('caps the queue and reports the true total rather than truncating silently', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+    const pending = Array.from({ length: 40 }, (_, index) => ({
+      assetId: assetIdOf(String(index + 10)),
+      unassignedQuantity: Quantity.fromString('1'),
+      reason: 'no_wallet' as const,
+    }));
+
+    const summary = buildDashboardSummary(input({ query, pending }));
+
+    expect(summary.attention).toHaveLength(ATTENTION_QUEUE_LIMIT);
+    // The honest count, so the screen can say what it is not showing.
+    expect(summary.attentionTotal).toBe(40);
+  });
+
+  it('never lets the cap push out the items that make the figures wrong', async () => {
+    // An unclassified row is excluded from the replay behind every position, so
+    // it understates the headline; a pending allocation is already inside that
+    // total. If the cap could drop the first kind in favour of the second, the
+    // ordering above would be decorative.
+    const query = await queryFor([{ assetId: PETR }]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        unclassified: [{ batchId: BATCH, count: 3 }],
+        pending: Array.from({ length: 20 }, (_, index) => ({
+          assetId: assetIdOf(String(index + 10)),
+          unassignedQuantity: Quantity.fromString('1'),
+          reason: 'no_wallet' as const,
+        })),
+      }),
+    );
+
+    expect(summary.attention[0]).toEqual({ kind: 'import_rows', batchId: BATCH, count: 3 });
+    expect(summary.attentionTotal).toBe(21);
+  });
+
+  it('reports a total equal to the list when nothing is hidden', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        pending: [
+          { assetId: PETR, unassignedQuantity: Quantity.fromString('40'), reason: 'no_wallet' },
+        ],
+      }),
+    );
+
+    expect(summary.attention).toHaveLength(1);
+    expect(summary.attentionTotal).toBe(1);
   });
 
   it('still surfaces a pending holding whose label cannot be resolved', async () => {

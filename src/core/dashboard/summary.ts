@@ -103,7 +103,23 @@ export interface ValuationMarkers {
   /** BR-011-15 / CR-1 — any component computed rather than observed. `accrued || unpriced > 0`. */
   readonly estimated: boolean;
   readonly accrued: boolean;
-  /** How many holdings nothing could price. Zero is the ordinary case. */
+  /**
+   * How many **positions** nothing could price. Zero is the ordinary case.
+   *
+   * Positions, not holdings, and the distinction is the whole reason this is a
+   * fold rather than a filter's `length`. `buildHoldingSet` emits one
+   * `ReportHolding` per *wallet slice* of a position — every allocation plus the
+   * unallocated remainder — and copies `needsAttention` onto each slice
+   * unchanged, deliberately ("value and quantity divide between wallets; how
+   * the price was obtained does not"). So one unpriceable CDB filed across
+   * three carteiras is three holdings, and counting holdings told the user
+   * *"3 posições não puderam ser precificadas"* about a single position — with
+   * no row beneath the badge to reconcile it against, which is exactly the
+   * situation `ValuationMarkers` exists to handle honestly.
+   *
+   * Counted at `(asset, institution)`, which is SPEC-007 BR-007-08's position
+   * grain and therefore the unit the user can go and look at.
+   */
   readonly unpriced: number;
   readonly carriedForward: boolean;
   /**
@@ -120,8 +136,8 @@ export interface ValuationMarkers {
 /** SPEC-009's three facts, folded over the scoped holdings. */
 export function valuationMarkers(holdings: readonly MarkedHolding[]): ValuationMarkers {
   let accrued = false;
-  let unpriced = 0;
   let oldestPriceDate: BusinessDate | null = null;
+  const unpricedPositions = new Set<string>();
 
   for (const holding of holdings) {
     // `basis` is the accrual's own evidence (indexer, rate, business days), so
@@ -129,7 +145,10 @@ export function valuationMarkers(holdings: readonly MarkedHolding[]): ValuationM
     // to cost" — the two causes of `estimated` that a single flag cannot tell
     // apart. `HoldingMarkers` makes the same test per row.
     if (holding.estimated && holding.basis !== null) accrued = true;
-    if (holding.needsAttention !== null) unpriced += 1;
+    if (holding.needsAttention !== null) {
+      // De-duplicated across wallet slices — see `unpriced`'s own note.
+      unpricedPositions.add(`${holding.assetId}|${holding.institutionId ?? ''}`);
+    }
     if (holding.carriedForward && holding.priceDate !== null) {
       if (oldestPriceDate === null || holding.priceDate < oldestPriceDate) {
         oldestPriceDate = holding.priceDate;
@@ -138,9 +157,9 @@ export function valuationMarkers(holdings: readonly MarkedHolding[]): ValuationM
   }
 
   return {
-    estimated: accrued || unpriced > 0,
+    estimated: accrued || unpricedPositions.size > 0,
     accrued,
-    unpriced,
+    unpriced: unpricedPositions.size,
     carriedForward: oldestPriceDate !== null,
     oldestPriceDate,
   };
@@ -319,7 +338,13 @@ export interface AssetLabel {
  */
 export type MarkedHolding = Pick<
   ReportHolding,
-  'estimated' | 'basis' | 'carriedForward' | 'priceDate' | 'needsAttention'
+  | 'assetId'
+  | 'institutionId'
+  | 'estimated'
+  | 'basis'
+  | 'carriedForward'
+  | 'priceDate'
+  | 'needsAttention'
 >;
 
 // ---------------------------------------------------------------------------
@@ -330,8 +355,32 @@ export interface DashboardSummary {
   readonly portfolio: DashboardPortfolio;
   readonly freshness: DashboardFreshness;
   readonly reconciliation: DashboardReconciliation;
+  /** At most `ATTENTION_QUEUE_LIMIT` items — see `attentionQueue`. */
   readonly attention: readonly AttentionItem[];
+  /**
+   * How many items there are in all, so the screen can say what it is **not**
+   * showing rather than silently truncating. A queue that hides work without
+   * admitting it is worse than a long one.
+   */
+  readonly attentionTotal: number;
 }
+
+/**
+ * How many queue items the dashboard shows before deferring to `/wallets`.
+ *
+ * **A cap is necessary here and nowhere else**, because the ordinary first-week
+ * state produces one item per held asset: a user who has imported a full
+ * extract and not yet created a wallet has every holding awaiting allocation.
+ * At BR-016-01's reference scale that is a hundred rows under the headline,
+ * which turns "is there anything for me to do?" into a holdings list and pushes
+ * the reconciliation status off the first screenful. The nightly budget cannot
+ * see it, because it measures the loader rather than the render.
+ *
+ * Five, because the queue's job on this screen is to answer *whether* there is
+ * work and of *what kind* — `/wallets` is where it is done, and it shows the
+ * whole list with the forms to resolve each one.
+ */
+export const ATTENTION_QUEUE_LIMIT = 5;
 
 export interface DashboardSummaryInput {
   /**
@@ -378,8 +427,16 @@ export interface DashboardSummaryInput {
  * Zero-count batches are dropped rather than rendered as "0 linhas": an empty
  * queue must be able to mean "nothing to do", and a row saying there is nothing
  * to do in it is the same noise the queue exists to remove.
+ *
+ * The full list is built and then capped, so `total` is the honest count rather
+ * than "five or fewer" — and because the cap is applied *after* the ordering
+ * above, the items that make the figures wrong can never be the ones pushed
+ * out.
  */
-function attentionQueue(input: DashboardSummaryInput): readonly AttentionItem[] {
+function attentionQueue(input: DashboardSummaryInput): {
+  readonly items: readonly AttentionItem[];
+  readonly total: number;
+} {
   const items: AttentionItem[] = [];
 
   for (const batch of input.unclassified) {
@@ -397,7 +454,7 @@ function attentionQueue(input: DashboardSummaryInput): readonly AttentionItem[] 
     });
   }
 
-  return items;
+  return { items: items.slice(0, ATTENTION_QUEUE_LIMIT), total: items.length };
 }
 
 /**
@@ -433,6 +490,8 @@ function portfolioOf(input: DashboardSummaryInput): DashboardPortfolio {
 }
 
 export function buildDashboardSummary(input: DashboardSummaryInput): DashboardSummary {
+  const attention = attentionQueue(input);
+
   return {
     portfolio: portfolioOf(input),
     freshness: {
@@ -449,6 +508,7 @@ export function buildDashboardSummary(input: DashboardSummaryInput): DashboardSu
       }),
     },
     reconciliation: reconciliationStatus(input.reconciliation),
-    attention: attentionQueue(input),
+    attention: attention.items,
+    attentionTotal: attention.total,
   };
 }

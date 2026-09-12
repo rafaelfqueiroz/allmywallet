@@ -8,7 +8,7 @@ import {
   listAssetOptions,
   listInstitutionOptions,
 } from '@/app/(app)/transactions/data';
-import { tryUserId } from '@/app/(app)/transactions/session';
+import { tryUserId } from '@/lib/session';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
 import { PageShell } from '@/components/patterns/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';

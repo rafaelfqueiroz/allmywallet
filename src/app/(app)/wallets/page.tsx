@@ -8,7 +8,7 @@ import {
   setStandingRuleAction,
 } from '@/app/(app)/wallets/actions';
 import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
-import { tryUserId } from '@/app/(app)/wallets/session';
+import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/components/patterns/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';

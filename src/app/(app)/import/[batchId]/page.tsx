@@ -13,7 +13,7 @@ import { loadImportBatchDetail } from '@/app/(app)/import/data';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletOptions, walletName } from '@/app/(app)/import/wallet-options';
 import { allocateAction } from '@/app/(app)/wallets/actions';
-import { tryUserId } from '@/app/(app)/import/session';
+import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/components/patterns/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
