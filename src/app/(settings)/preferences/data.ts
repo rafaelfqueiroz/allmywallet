@@ -2,7 +2,7 @@ import { db } from '@/db/client';
 import { withTenant } from '@/db/tenant';
 import { getEffectiveConfig, type EffectiveConfigEntry } from '@/config/effective';
 import { USER_SETTABLE_KEYS, type ConfigKey } from '@/config/registry';
-import { trySessionUserId } from '@/app/(settings)/preferences/session';
+import { tryUserId } from '@/lib/session';
 
 /**
  * AR-31: Server Components call a use case in `core/` (or, for this
@@ -14,7 +14,7 @@ import { trySessionUserId } from '@/app/(settings)/preferences/session';
 export async function loadUserSettablePreferences(): Promise<
   readonly EffectiveConfigEntry<ConfigKey>[]
 > {
-  const userId = trySessionUserId();
+  const userId = await tryUserId();
 
   /**
    * AR-11, and it bites hard here. `config_overrides` is tenant-scoped and its
@@ -26,7 +26,8 @@ export async function loadUserSettablePreferences(): Promise<
    *
    * Signed **out** there is no user id, no override read, and no crash — which
    * is exactly why every existing check passed: nothing in the suite had an
-   * authenticated session to render with until `tests/e2e/support/authenticated.ts`.
+   * authenticated session to render with until `tests/e2e/support/authenticated.ts`,
+   * and `tests/e2e/preferences.spec.ts` is the journey that now holds it.
    */
   const effective =
     userId === undefined

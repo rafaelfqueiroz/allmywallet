@@ -27,9 +27,9 @@ export interface EffectiveConfigEntry<K extends ConfigKey = ConfigKey> {
  * tenant/user overrides, for support/debugging a single user's effective
  * configuration.
  *
- * TODO(#6): a `userId`-scoped call must be given the transaction `withTenant`
- * produces for that user, per `resolve.ts`'s `Tx` doc comment — this function
- * does not itself set tenant context.
+ * A `userId`-scoped call must be given the transaction `withTenant` produces
+ * for that user (AR-11, `tx.ts`'s doc comment) — this function does not
+ * itself set tenant context.
  */
 export async function getEffectiveConfig(
   db: Tx,

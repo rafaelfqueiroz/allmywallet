@@ -12,9 +12,9 @@ import type { Database } from '@/db/client';
  * connection for deployment-level reads/writes, and whatever transaction
  * `withTenant` eventually hands a per-user call site.
  *
- * TODO(#6): once `withTenant` lands, every call site resolving a per-user key
- * must pass the transaction it provides here, not the module-level `db` —
- * that is the only thing that makes `current_setting('app.user_id')` resolve
+ * Every call site resolving or writing a per-user key must pass the
+ * transaction `withTenant` provides here, not the module-level `db` — that is
+ * the only thing that makes `current_setting('app.user_id')` resolve
  * correctly (ARCHITECTURE §5, AR-11).
  */
 export type Tx = Pick<Database, 'select' | 'insert' | 'update' | 'delete' | 'execute'>;

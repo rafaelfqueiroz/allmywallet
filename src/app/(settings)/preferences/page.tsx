@@ -2,7 +2,7 @@ import type * as React from 'react';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { REGISTRY, type ConfigKey } from '@/config/registry';
-import { trySessionUserId } from '@/app/(settings)/preferences/session';
+import { tryUserId } from '@/lib/session';
 import { loadUserSettablePreferences } from '@/app/(settings)/preferences/data';
 import { submitPreferenceForm } from '@/app/(settings)/preferences/actions';
 import { PageShell } from '@/components/patterns/page-shell';
@@ -41,7 +41,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function PreferencesPage() {
   const t = await getTranslations('preferences');
-  const userId = trySessionUserId();
+  const userId = await tryUserId();
   const preferences = await loadUserSettablePreferences();
 
   return (
