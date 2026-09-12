@@ -6,6 +6,7 @@ import type { ReportHolding } from '@/core/reporting/ports';
 import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import { daysSinceImport, isImportStale } from '@/core/ingestion/staleness';
+import type { ContractMissingRate } from '@/core/onboarding/ports';
 import type { PendingAllocation } from '@/core/wallets/pending';
 
 /**
@@ -418,6 +419,13 @@ export interface DashboardSummaryInput {
   readonly reconciliation: ReconciliationSource | null;
   readonly pending: readonly PendingAllocation[];
   readonly unclassified: readonly ImportRowAttentionCount[];
+  /**
+   * SPEC-020 BR-020-16/19 — held fixed-income contracts with no readable
+   * indexer or rate. `core/onboarding`'s own read (BR-020-07's query), passed
+   * in rather than re-derived here, for the same reason `unclassified` and
+   * `pending` are: this module assembles a queue, it does not compute one.
+   */
+  readonly contractsMissingRate: readonly ContractMissingRate[];
   /** Asset code and name for the queue's labels, keyed by id. */
   readonly assetLabels: ReadonlyMap<AssetId, AssetLabel>;
 }
@@ -425,14 +433,18 @@ export interface DashboardSummaryInput {
 /**
  * BR-010-12's queue, assembled.
  *
- * **Unclassified rows lead, and the order is an argument rather than a
- * preference.** A row left `unclassified` is stored and inert everywhere else
- * (SPEC-006 DL-006-06): it is excluded from the replay that produced the
- * positions, so it makes *every figure on this screen* understated, including
- * the headline directly above the queue. A holding awaiting allocation is
- * already inside that total and is only missing a filing decision — nothing on
- * the screen is wrong because of it. So the item that changes the numbers is
- * listed before the item that does not.
+ * **Unclassified rows and unpriced fixed-income contracts lead, in that
+ * order, and the order is an argument rather than a preference.** Both
+ * understate the headline directly above the queue: a row left
+ * `unclassified` is stored and inert everywhere else (SPEC-006 DL-006-06),
+ * excluded from the replay that produced the positions, and a contract with
+ * no readable rate cannot be accrued (SPEC-009 BR-009-13) and sits at cost
+ * instead (SPEC-020 BR-020-19). A holding awaiting allocation is already
+ * inside that total and is only missing a filing decision — nothing on the
+ * screen is wrong because of it. So the two kinds that change the numbers are
+ * listed before the kind that does not; between the two, unclassified rows
+ * lead because they are what SPEC-005 already surfaced first, on
+ * `/import/[batchId]`.
  *
  * Zero-count batches are dropped rather than rendered as "0 linhas": an empty
  * queue must be able to mean "nothing to do", and a row saying there is nothing
@@ -452,6 +464,14 @@ function attentionQueue(input: DashboardSummaryInput): {
   for (const batch of input.unclassified) {
     if (batch.count <= 0) continue;
     items.push({ kind: 'import_rows', batchId: batch.batchId, count: batch.count });
+  }
+
+  for (const contract of input.contractsMissingRate) {
+    items.push({
+      kind: 'fixed_income_rate',
+      assetId: contract.assetId,
+      assetCode: input.assetLabels.get(contract.assetId)?.code ?? null,
+    });
   }
 
   for (const pending of input.pending) {
