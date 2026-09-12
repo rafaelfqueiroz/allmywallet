@@ -1,4 +1,3 @@
-import { getTranslations } from 'next-intl/server';
 import { formatBusinessDate } from '@/i18n/format';
 import { B3_GUIDE_VERIFIED_AS_OF } from '@/components/onboarding/verification';
 import { Text } from '@/components/ui/text';
@@ -8,16 +7,18 @@ import { Text } from '@/components/ui/text';
  * `<date>`' stamp, visible to the user." Rendered as plain visible text, not a
  * tooltip or a footnote: staleness is meant to be seen, not discovered.
  *
- * AR-47/BR-016-18: `dd/mm/yyyy` through the shared formatter — interpolating a
- * `BusinessDate` directly into an ICU message would render the ISO string it
- * is stored as, which reads as a machine's date rather than a Brazilian one.
+ * A plain synchronous component (DS-02): `label` is the translated prefix
+ * ("Verificado na B3 em"), supplied by the caller's own `getTranslations`
+ * call, and `formatBusinessDate` — a pure function, not a next-intl call — is
+ * applied here to `B3_GUIDE_VERIFIED_AS_OF` directly. AR-47/BR-016-18:
+ * `dd/mm/yyyy` through the shared formatter, never a `BusinessDate`
+ * interpolated raw into an ICU message, which would render the ISO string it
+ * is stored as and read as a machine's date rather than a Brazilian one.
  */
-export async function GuideStamp() {
-  const t = await getTranslations('onboarding.guide');
-
+export function GuideStamp({ label }: { readonly label: string }) {
   return (
     <Text as="p" size="xs" tone="muted">
-      {t('stamp.verifiedAsOf', { date: formatBusinessDate(B3_GUIDE_VERIFIED_AS_OF) })}
+      {label} {formatBusinessDate(B3_GUIDE_VERIFIED_AS_OF)}
     </Text>
   );
 }

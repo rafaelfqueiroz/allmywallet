@@ -1365,7 +1365,7 @@
       "manualEntry": "Só os três extratos da B3 são aceitos aqui. Um ativo custodiado fora da B3 não aparece em nenhum deles — registre-o manualmente em Nova transação.",
       "openPortal": "Abrir a Área do Investidor da B3",
       "stamp": {
-        "verifiedAsOf": "Verificado na B3 em {date}"
+        "verifiedAsOf": "Verificado na B3 em"
       }
     },
     "diagram": {

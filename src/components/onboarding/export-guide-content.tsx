@@ -1,5 +1,9 @@
 import { getTranslations } from 'next-intl/server';
-import { ExtractDiagram, type ExtractDiagramStep } from '@/components/onboarding/extract-diagram';
+import {
+  ExtractDiagram,
+  type ExtractDiagramLabels,
+  type ExtractDiagramTab,
+} from '@/components/onboarding/extract-diagram';
 import { GuideStamp } from '@/components/onboarding/guide-stamp';
 import { Stack } from '@/components/layout/stack';
 import { List, ListItem } from '@/components/layout/list';
@@ -24,14 +28,51 @@ import { Text } from '@/components/ui/text';
  * words, in order, so that with every `<svg>` hidden the instructions survive
  * intact. `tests/e2e/onboarding.spec.ts` verifies exactly that by hiding every
  * `svg` in the guide and reading the list.
+ *
+ * This is the one place in the guide that still calls `getTranslations`
+ * itself — `ExtractDiagram` and `GuideStamp` are plain, prop-driven
+ * components (DS-02) so they can be rendered and asserted on directly in a
+ * component test; this file does the one translation call and hands each of
+ * them the strings it needs.
  */
 
-const EXTRACT_STEPS: readonly ExtractDiagramStep[] = ['movimentacao', 'negociacao', 'posicao'];
+type ExtractStep = 'movimentacao' | 'negociacao' | 'posicao';
+
+const EXTRACT_STEPS: readonly ExtractStep[] = ['movimentacao', 'negociacao', 'posicao'];
+
+const EXTRATOS_TABS = ['movimentacao', 'negociacao', 'eventos', 'ofertas'] as const;
+const INVESTIMENTOS_TABS = ['posicao', 'garantias'] as const;
 
 const B3_PORTAL_URL = 'https://investidor.b3.com.br';
 
+/**
+ * BR-020-20 — the two structural shapes: Movimentação and Negociação are tabs
+ * under Extratos; Posição is under Minha carteira → Investimentos.
+ */
+function diagramLabelsFor(
+  step: ExtractStep,
+  t: Awaited<ReturnType<typeof getTranslations>>,
+): ExtractDiagramLabels {
+  const inExtratos = step === 'movimentacao' || step === 'negociacao';
+  const tabKeys: readonly string[] = inExtratos ? EXTRATOS_TABS : INVESTIMENTOS_TABS;
+  const groupLabel = inExtratos ? t('extratos.groupLabel') : t('investimentos.groupLabel');
+  const tabs: readonly ExtractDiagramTab[] = tabKeys.map((key) => ({
+    key,
+    label: inExtratos ? t(`extratos.tabs.${key}`) : t(`investimentos.tabs.${key}`),
+  }));
+
+  return {
+    groupLabel,
+    tabs,
+    activeTabIndex: tabKeys.indexOf(step),
+    filtrar: t('filtrar'),
+    baixar: t('baixar'),
+  };
+}
+
 export async function ExportGuideContent() {
   const t = await getTranslations('onboarding.guide');
+  const tDiagram = await getTranslations('onboarding.diagram');
 
   return (
     <Stack gap="md">
@@ -44,7 +85,7 @@ export async function ExportGuideContent() {
                 {t(`steps.${step}.path`)}
               </Text>
               <Text size="sm">{t(`steps.${step}.why`)}</Text>
-              <ExtractDiagram step={step} />
+              <ExtractDiagram labels={diagramLabelsFor(step, tDiagram)} />
             </Stack>
           </ListItem>
         ))}
@@ -63,7 +104,7 @@ export async function ExportGuideContent() {
       </Text>
 
       {/* BR-020-24/25 */}
-      <GuideStamp />
+      <GuideStamp label={t('stamp.verifiedAsOf')} />
 
       <div>
         <Button asChild variant="outline">

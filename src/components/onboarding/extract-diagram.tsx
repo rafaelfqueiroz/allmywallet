@@ -1,5 +1,3 @@
-import { getTranslations } from 'next-intl/server';
-
 /**
  * SPEC-020 BR-020-23/DL-020-06 — a schematic of investidor.b3.com.br, drawn by
  * this project rather than captured from it. No screenshot of a third-party
@@ -15,36 +13,42 @@ import { getTranslations } from 'next-intl/server';
  * SPEC-016 BR-016-16 is the general form of the same rule: a chart, and this is
  * one, is never the sole carrier of information.
  *
- * Three extracts, two structural shapes:
- *  - Movimentação and Negociação are tabs under **Extratos** (alongside
- *    Eventos and Ofertas públicas, which this product does not use — shown to
- *    depict the real tab bar rather than a cropped one that implies there are
- *    only two tabs);
- *  - Posição is under **Minha carteira → Investimentos** (alongside
- *    Garantias).
+ * **A plain, synchronous component, translated labels taken as props** (DS-02:
+ * a primitive knows nothing about the domain) rather than an async Server
+ * Component calling `getTranslations` itself — `ExportGuideContent` does that
+ * once and hands this component the strings it needs, which is what lets this
+ * file be rendered and asserted on directly in a component test instead of
+ * only reachable through the E2E suite.
+ *
+ * Three extracts, two structural shapes: Movimentação and Negociação are tabs
+ * under **Extratos** (alongside Eventos and Ofertas públicas, which this
+ * product does not use — shown to depict the real tab bar rather than a
+ * cropped one that implies there are only two tabs); Posição is under **Minha
+ * carteira → Investimentos** (alongside Garantias). `ExportGuideContent`
+ * decides which shape a given step needs; this component only draws whatever
+ * `labels` describes.
  *
  * Every colour is a design token (`var(--token)`, DS-04), which is what keeps
  * this legible in both themes without a second dark-mode drawing — the
  * variable itself resolves differently per theme, the markup does not change.
  */
 
-export type ExtractDiagramStep = 'movimentacao' | 'negociacao' | 'posicao';
+export interface ExtractDiagramTab {
+  readonly key: string;
+  readonly label: string;
+}
 
-const EXTRATOS_TABS = ['movimentacao', 'negociacao', 'eventos', 'ofertas'] as const;
-const INVESTIMENTOS_TABS = ['posicao', 'garantias'] as const;
+export interface ExtractDiagramLabels {
+  /** The section the tab bar sits under — "Extratos" or "Minha carteira → Investimentos". */
+  readonly groupLabel: string;
+  readonly tabs: readonly ExtractDiagramTab[];
+  /** Index into `tabs` of the tab this diagram highlights. */
+  readonly activeTabIndex: number;
+  readonly filtrar: string;
+  readonly baixar: string;
+}
 
-export async function ExtractDiagram({ step }: { readonly step: ExtractDiagramStep }) {
-  const t = await getTranslations('onboarding.diagram');
-
-  const inExtratos = step === 'movimentacao' || step === 'negociacao';
-  const tabKeys = inExtratos ? EXTRATOS_TABS : INVESTIMENTOS_TABS;
-  const groupLabel = inExtratos ? t('extratos.groupLabel') : t('investimentos.groupLabel');
-  const tabs = tabKeys.map((key) => ({
-    key,
-    label: inExtratos ? t(`extratos.tabs.${key}`) : t(`investimentos.tabs.${key}`),
-  }));
-  const activeIndex = tabKeys.findIndex((key) => key === step);
-
+export function ExtractDiagram({ labels }: { readonly labels: ExtractDiagramLabels }) {
   const railX = 8;
   const railWidth = 64;
   const contentX = railX + railWidth + 12;
@@ -54,7 +58,7 @@ export async function ExtractDiagram({ step }: { readonly step: ExtractDiagramSt
   const actionY = 96;
   const actionHeight = 28;
 
-  const tabWidth = contentWidth / tabs.length;
+  const tabWidth = contentWidth / labels.tabs.length;
 
   return (
     <svg
@@ -83,14 +87,14 @@ export async function ExtractDiagram({ step }: { readonly step: ExtractDiagramSt
 
       {/* The section the tab bar sits under. */}
       <text x={contentX} y={26} fontSize="11" fill="var(--muted-foreground)">
-        {groupLabel}
+        {labels.groupLabel}
       </text>
 
       {/* Tab bar, target tab highlighted. */}
       <g>
-        {tabs.map((tab, index) => {
+        {labels.tabs.map((tab, index) => {
           const x = contentX + index * tabWidth;
-          const active = index === activeIndex;
+          const active = index === labels.activeTabIndex;
           return (
             <g key={tab.key}>
               <rect
@@ -132,7 +136,7 @@ export async function ExtractDiagram({ step }: { readonly step: ExtractDiagramSt
         textAnchor="middle"
         fill="var(--foreground)"
       >
-        {t('filtrar')}
+        {labels.filtrar}
       </text>
 
       <rect
@@ -151,7 +155,7 @@ export async function ExtractDiagram({ step }: { readonly step: ExtractDiagramSt
         textAnchor="middle"
         fill="var(--background)"
       >
-        {t('baixar')}
+        {labels.baixar}
       </text>
 
       {/* Numbered callouts — purely visual pointers; digits carry no letters so
