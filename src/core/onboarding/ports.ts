@@ -9,9 +9,21 @@ import type { AssetId, ImportBatchId, UserId } from '@/core/shared/ids';
  * future step that seems to need a flag needs another field here instead.
  */
 
-/** A held fixed-income contract whose indexer or contracted rate could not be read (SPEC-009 BR-009-13). */
+/**
+ * A fixed-income contract whose indexer or contracted rate could not be read
+ * (SPEC-009 BR-009-13), for an asset that is not a closed position.
+ */
 export interface ContractMissingRate {
   readonly assetId: AssetId;
+  /** From the asset catalogue — the holding set cannot label an asset that is not held. */
+  readonly assetCode: string;
+  /**
+   * `true` when an open position exists, so the contract sits at cost inside
+   * the total. `false` when no position exists at all: a Posição committed
+   * before the Movimentação carrying the application (BR-020-22's "any
+   * order"), so the asset is absent from the total, not merely valued at cost.
+   */
+  readonly held: boolean;
 }
 
 /** A batch uploaded but not yet committed — where the guided flow's "review" and "commit" steps point. */

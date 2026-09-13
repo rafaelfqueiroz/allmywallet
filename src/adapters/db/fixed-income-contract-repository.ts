@@ -92,13 +92,17 @@ export class DrizzleFixedIncomeContractRepository
         target: [fixedIncomeContracts.userId, fixedIncomeContracts.assetId],
         set: {
           // The indexer and the rate are one fact — "110" means nothing without
-          // "% do CDI" — so they are replaced as a pair or not at all. A
-          // per-column COALESCE let an extract's readable indexer land beside
-          // a rate the user supplied for a *different* indexer (IPCA + 6
-          // becoming 6% of CDI), with both columns non-null and so no gate to
-          // reveal it.
-          indexer: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.indexer ELSE ${fixedIncomeContracts.indexer} END`,
-          rate: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.rate ELSE ${fixedIncomeContracts.rate} END`,
+          // "% do CDI". Three cases, in order:
+          //  1. the extract carries both → it replaces the pair;
+          //  2. the stored pair is complete (read earlier, or supplied on
+          //     `/fixed-income/[assetId]`) → it is kept whole. A per-column
+          //     merge let an extract's lone "CDI" land beside a user's IPCA + 6,
+          //     producing 6% of CDI with no gate left to reveal it;
+          //  3. the stored pair is incomplete → take whatever the extract could
+          //     read, column by column, so a readable indexer is not thrown
+          //     away and the rate form opens pre-filled with it.
+          indexer: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.indexer WHEN ${fixedIncomeContracts.indexer} IS NOT NULL AND ${fixedIncomeContracts.rate} IS NOT NULL THEN ${fixedIncomeContracts.indexer} ELSE COALESCE(excluded.indexer, ${fixedIncomeContracts.indexer}) END`,
+          rate: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.rate WHEN ${fixedIncomeContracts.indexer} IS NOT NULL AND ${fixedIncomeContracts.rate} IS NOT NULL THEN ${fixedIncomeContracts.rate} ELSE COALESCE(excluded.rate, ${fixedIncomeContracts.rate}) END`,
           issueDate: input.issueDate,
           maturityDate: input.maturityDate,
           principal: input.principal,

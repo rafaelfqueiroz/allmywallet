@@ -196,7 +196,9 @@ describe('SPEC-020 — onboarding facts and dismissal, isolated', () => {
     expect(facts.committedImportCount).toBe(1);
     expect(facts.unclassifiedTransactionCount).toBe(1);
     expect(facts.walletCount).toBe(1);
-    expect(facts.contractsMissingRate).toEqual([{ assetId: cdb }]);
+    expect(facts.contractsMissingRate).toEqual([
+      expect.objectContaining({ assetId: cdb, held: true }),
+    ]);
   });
 
   it('as tenant B, OnboardingFacts counts only B’s rows', async () => {
@@ -209,7 +211,9 @@ describe('SPEC-020 — onboarding facts and dismissal, isolated', () => {
     expect(facts.committedImportCount).toBe(2);
     expect(facts.unclassifiedTransactionCount).toBe(2);
     expect(facts.walletCount).toBe(2);
-    expect(facts.contractsMissingRate).toEqual([{ assetId: cdb }]);
+    expect(facts.contractsMissingRate).toEqual([
+      expect.objectContaining({ assetId: cdb, held: true }),
+    ]);
   });
 
   /**

@@ -15,7 +15,7 @@ const PETR = AssetId.of('01920000-0000-7000-8000-0000000000a2');
 
 const ITEMS: readonly AttentionItem[] = [
   { kind: 'import_rows', batchId: BATCH, count: 3 },
-  { kind: 'fixed_income_rate', assetId: CDB, assetCode: 'CDB-BANCO-X' },
+  { kind: 'fixed_income_rate', assetId: CDB, assetCode: 'CDB-BANCO-X', held: true },
   {
     kind: 'pending_allocation',
     assetId: PETR,
@@ -35,15 +35,30 @@ describe('describeGate (BR-020-16..19)', () => {
     });
   });
 
-  it('describes a fixed-income contract missing a rate (BR-020-19)', () => {
+  it('describes a held fixed-income contract missing a rate (BR-020-19)', () => {
     const description = describeGate({
       kind: 'fixed_income_rate',
       assetId: CDB,
       assetCode: 'CDB-BANCO-X',
+      held: true,
     });
 
     expect(description).toEqual({
       consequence: 'portfolio_value_understated',
+      resolution: { screen: 'fixed_income_contract', assetId: CDB },
+    });
+  });
+
+  it('does not promise the rate fixes the total when the position is not imported yet', () => {
+    const description = describeGate({
+      kind: 'fixed_income_rate',
+      assetId: CDB,
+      assetCode: 'CDB-BANCO-X',
+      held: false,
+    });
+
+    expect(description).toEqual({
+      consequence: 'position_not_imported',
       resolution: { screen: 'fixed_income_contract', assetId: CDB },
     });
   });

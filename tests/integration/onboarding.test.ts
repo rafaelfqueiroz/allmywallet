@@ -344,6 +344,33 @@ describe('SPEC-020 — onboarding status and gates (integration)', () => {
       const after = await dashboard();
       expect(after.summary.attention.some((item) => item.kind === 'fixed_income_rate')).toBe(false);
     });
+
+    /**
+     * PR #102 review, finding 2 — committing Posição writes the contract and
+     * never a position (SPEC-005 BR-005-06), and BR-020-22 allows it to arrive
+     * before the Movimentação carrying the application. The gate must still
+     * appear, labelled from the catalogue, and marked not held so the queue
+     * does not promise that the rate alone fixes the total.
+     */
+    it('appears for a Posição imported before any position exists, marked not held', async () => {
+      await seedContract(cdb, { indexer: null, rate: null, issueDate: '2026-01-10' });
+
+      const facts = (await dashboard()).summary.attention;
+      expect(facts).toContainEqual({
+        kind: 'fixed_income_rate',
+        assetId: cdb,
+        assetCode: 'CDB-BANCO-X',
+        held: false,
+      });
+    });
+
+    it('does not appear for a position already closed to zero', async () => {
+      await seedPosition(cdb, '0', '0', '0');
+      await seedContract(cdb, { indexer: null, rate: null, issueDate: '2026-01-10' });
+
+      const after = await dashboard();
+      expect(after.summary.attention.some((item) => item.kind === 'fixed_income_rate')).toBe(false);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -427,6 +454,39 @@ describe('SPEC-020 — onboarding status and gates (integration)', () => {
       );
       expect(rows[0]?.indexer).toBe('ipca_spread');
       expect(Number(rows[0]?.rate)).toBe(6);
+    });
+
+    it('an incomplete stored contract keeps whatever a later extract could read', async () => {
+      const BATCH = '01920000-0000-7000-8000-0000000000c3';
+      await seedBatch({ id: BATCH, status: 'committed' });
+      await seedContract(cdb, { indexer: null, rate: null, issueDate: '2026-01-10' });
+
+      // PR #102 review, finding 3: the extract reads "CDI" but no rate. Nothing
+      // complete is stored to protect, so the readable indexer is kept and the
+      // rate form opens pre-filled with it.
+      await withTenant(
+        userId,
+        async (tx) => {
+          const repo = new DrizzleFixedIncomeContractRepository(tx, userId);
+          await repo.upsertByAsset({
+            assetId: cdb,
+            indexer: 'cdi_percent',
+            ratePercent: null,
+            issueDate: BusinessDate.of('2026-01-10'),
+            maturityDate: null,
+            principal: null,
+            source: ImportBatchId.of(BATCH),
+          });
+        },
+        db,
+      );
+
+      const { rows } = await migratorPool.query<{ indexer: string | null; rate: string | null }>(
+        'SELECT indexer, rate FROM fixed_income_contracts WHERE user_id = $1 AND asset_id = $2',
+        [userId, cdb],
+      );
+      expect(rows[0]?.indexer).toBe('cdi_percent');
+      expect(rows[0]?.rate).toBeNull();
     });
   });
 });

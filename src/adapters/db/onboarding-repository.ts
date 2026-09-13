@@ -1,4 +1,5 @@
-import { and, desc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, inArray, isNull, notExists, or, sql } from 'drizzle-orm';
+import { assets } from '@/db/schema/assets';
 import { fixedIncomeContracts } from '@/db/schema/import-rows';
 import { positions } from '@/db/schema/positions';
 import { importBatches, transactions } from '@/db/schema/transactions';
@@ -43,36 +44,51 @@ export class DrizzleOnboardingFactsRepository implements OnboardingFactsPort {
         /**
          * BR-020-07: "any fixed-income contract with no contracted rate."
          *
-         * Narrowed to contracts for an asset **currently held** — an `exists`
-         * against `positions.quantity > 0` — which the issue's plan did not
-         * name. A sold CDB has no bearing on today's portfolio value, so a
-         * stale contract row for it cannot understate anything on screen;
-         * counting it anyway would put a permanent, unresolvable gate in the
-         * queue for a holding that no longer exists. This is a deliberate
-         * reading of BR-020-07 (see the dispatch report's Decision log), not
-         * a widening of what the rule already says the dashboard is for
-         * (BR-020-19's "cannot be valued" only applies to what is valued at
-         * all).
+         * **Closed positions are excluded, and nothing else is.** A sold CDB
+         * (its cached position rows all at zero) has no bearing on today's
+         * portfolio value, so a gate for it would be permanent and
+         * unresolvable. But a contract with **no position row at all** is not
+         * a sold one: committing Posição writes contracts and never positions
+         * (SPEC-005 BR-005-06), so a user who imports Posição before the
+         * Movimentação carrying the application — BR-020-22 allows any order —
+         * has exactly that. The first version of this query required an open
+         * position and hid that user's gate; the PR #102 review caught it.
+         * `held` tells the two remaining cases apart so the gate can state the
+         * right consequence.
          */
         this.tx
-          .select({ assetId: fixedIncomeContracts.assetId })
+          .select({
+            assetId: fixedIncomeContracts.assetId,
+            assetCode: assets.code,
+            held: sql<boolean>`exists (select 1 from ${positions} where ${positions.assetId} = ${fixedIncomeContracts.assetId} and ${positions.quantity} > 0)`,
+          })
           .from(fixedIncomeContracts)
+          .innerJoin(assets, eq(assets.id, fixedIncomeContracts.assetId))
           .where(
             and(
               or(isNull(fixedIncomeContracts.indexer), isNull(fixedIncomeContracts.rate)),
-              exists(
-                this.tx
-                  .select({ one: sql`1` })
-                  .from(positions)
-                  .where(
-                    and(
-                      eq(positions.assetId, fixedIncomeContracts.assetId),
-                      sql`${positions.quantity} > 0`,
+              or(
+                exists(
+                  this.tx
+                    .select({ one: sql`1` })
+                    .from(positions)
+                    .where(
+                      and(
+                        eq(positions.assetId, fixedIncomeContracts.assetId),
+                        sql`${positions.quantity} > 0`,
+                      ),
                     ),
-                  ),
+                ),
+                notExists(
+                  this.tx
+                    .select({ one: sql`1` })
+                    .from(positions)
+                    .where(eq(positions.assetId, fixedIncomeContracts.assetId)),
+                ),
               ),
             ),
-          ),
+          )
+          .orderBy(assets.code),
 
         // BR-020-07/SPEC-006 DL-006-06: "any transaction with an unclassified
         // movement type" is `transactions.status = 'unclassified'`.
@@ -96,6 +112,8 @@ export class DrizzleOnboardingFactsRepository implements OnboardingFactsPort {
 
     const contractsMissingRate: readonly ContractMissingRate[] = contractRows.map((row) => ({
       assetId: AssetId.of(row.assetId),
+      assetCode: row.assetCode,
+      held: row.held,
     }));
 
     const staged = stagedRows[0];

@@ -320,6 +320,8 @@ export type AttentionItem =
       readonly kind: 'fixed_income_rate';
       readonly assetId: AssetId;
       readonly assetCode: string | null;
+      /** `false` when no position has been imported yet — see `ContractMissingRate.held`. */
+      readonly held: boolean;
     }
   | {
       readonly kind: 'pending_allocation';
@@ -474,10 +476,13 @@ function attentionQueue(input: DashboardSummaryInput): {
   }
 
   for (const contract of input.contractsMissingRate) {
+    // The contract's own code, not `assetLabels`: an asset with no position
+    // yet is not in the holding set the labels come from.
     gates.push({
       kind: 'fixed_income_rate',
       assetId: contract.assetId,
-      assetCode: input.assetLabels.get(contract.assetId)?.code ?? null,
+      assetCode: contract.assetCode,
+      held: contract.held,
     });
   }
 

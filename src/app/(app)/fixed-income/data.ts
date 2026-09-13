@@ -11,6 +11,7 @@ import { DrizzleFixedIncomeContractRepository } from '@/adapters/db/fixed-income
 import { db } from '@/db/client';
 import { withTenant } from '@/db/tenant';
 import { enqueue } from '@/lib/queue';
+import { logger } from '@/lib/logger';
 import { QUEUE } from '@/worker/queues';
 
 /**
@@ -91,7 +92,19 @@ export async function supplyContractTermsFor(
   );
 
   if (outcome.result.ok && outcome.issueDate !== null) {
-    await enqueue(QUEUE.VALUATION_SNAPSHOT, { userId, from: outcome.issueDate });
+    // PR #102 review — a failed enqueue must not reach the user as an error.
+    // The terms are already committed; throwing here would show an error
+    // boundary for a write that succeeded and invite a retry of it. Only the
+    // derived snapshots are behind, and the nightly sweep covers them — the
+    // same treatment `handleImportCommit` gives this exact case.
+    try {
+      await enqueue(QUEUE.VALUATION_SNAPSHOT, { userId, from: outcome.issueDate });
+    } catch (error) {
+      logger.error(
+        { err: error, component: 'fixed-income', from: outcome.issueDate },
+        'SPEC-009 BR-009-18: could not request a snapshot rebuild; the nightly sweep will cover it',
+      );
+    }
   }
 
   return outcome.result;

@@ -60,7 +60,7 @@ describe('completion (BR-020-03)', () => {
     const status = deriveOnboardingStatus(
       facts({
         committedImportCount: 1,
-        contractsMissingRate: [{ assetId: CDB }],
+        contractsMissingRate: [{ assetId: CDB, assetCode: 'CDB-BANCO-X', held: true }],
         unclassifiedTransactionCount: 3,
         walletCount: 0,
       }),
@@ -80,8 +80,10 @@ describe('steps (BR-020-07)', () => {
   it('marks fixedIncomeRates true only when nothing is missing a rate', () => {
     expect(deriveOnboardingStatus(facts(), null).steps.fixedIncomeRates).toBe(true);
     expect(
-      deriveOnboardingStatus(facts({ contractsMissingRate: [{ assetId: CDB }] }), null).steps
-        .fixedIncomeRates,
+      deriveOnboardingStatus(
+        facts({ contractsMissingRate: [{ assetId: CDB, assetCode: 'CDB-BANCO-X', held: false }] }),
+        null,
+      ).steps.fixedIncomeRates,
     ).toBe(false);
   });
 

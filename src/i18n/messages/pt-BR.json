@@ -173,6 +173,7 @@
       "consequence": {
         "figures_unreliable": "Enquanto não forem revisadas, essas linhas ficam de fora do cálculo — o patrimônio e as posições acima podem estar incorretos, para mais ou para menos.",
         "portfolio_value_understated": "Sem a taxa contratada, este contrato não pode ser avaliado — o patrimônio acima está subestimado até você informá-la.",
+        "position_not_imported": "Sem a taxa contratada, este contrato não pode ser avaliado — e a aplicação ainda não aparece nas suas posições. Informe a taxa e importe a Movimentação que contém a aplicação para que ela entre no patrimônio.",
         "allocation_missing": "O valor já está no total acima; falta decidir de qual carteira ele faz parte."
       }
     }

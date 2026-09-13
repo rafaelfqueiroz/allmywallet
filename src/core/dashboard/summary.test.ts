@@ -607,7 +607,7 @@ describe('needs attention (BR-010-12)', () => {
       input({
         query,
         unclassified: [{ batchId: BATCH, count: 3 }],
-        contractsMissingRate: [{ assetId: VALE }],
+        contractsMissingRate: [{ assetId: VALE, assetCode: 'VALE3', held: true }],
         pending: [
           { assetId: PETR, unassignedQuantity: Quantity.fromString('40'), reason: 'no_wallet' },
         ],
@@ -616,7 +616,7 @@ describe('needs attention (BR-010-12)', () => {
 
     expect(summary.attention).toEqual([
       { kind: 'import_rows', batchId: BATCH, count: 3 },
-      { kind: 'fixed_income_rate', assetId: VALE, assetCode: 'VALE3' },
+      { kind: 'fixed_income_rate', assetId: VALE, assetCode: 'VALE3', held: true },
       {
         kind: 'pending_allocation',
         assetId: PETR,
@@ -627,15 +627,25 @@ describe('needs attention (BR-010-12)', () => {
     ]);
   });
 
-  it('still surfaces a missing fixed-income rate whose label cannot be resolved', async () => {
+  /**
+   * PR #102 review — a Posição committed before the Movimentação carrying the
+   * application leaves a contract with no position, so the holding set has no
+   * label for it. The contract's own code is used, and `held` travels with
+   * the item so the queue can state the right consequence.
+   */
+  it('labels a missing rate from the contract when the asset is not in the holding set', async () => {
     const query = await queryFor([{ assetId: PETR }]);
 
     const summary = buildDashboardSummary(
-      input({ query, assetLabels: new Map(), contractsMissingRate: [{ assetId: PETR }] }),
+      input({
+        query,
+        assetLabels: new Map(),
+        contractsMissingRate: [{ assetId: VALE, assetCode: 'CDB-POSICAO', held: false }],
+      }),
     );
 
     expect(summary.attention).toEqual([
-      { kind: 'fixed_income_rate', assetId: PETR, assetCode: null },
+      { kind: 'fixed_income_rate', assetId: VALE, assetCode: 'CDB-POSICAO', held: false },
     ]);
   });
 
@@ -703,6 +713,8 @@ describe('needs attention (BR-010-12)', () => {
     const query = await queryFor([{ assetId: PETR }]);
     const contractsMissingRate = Array.from({ length: 6 }, (_, index) => ({
       assetId: assetIdOf(String(index + 60)),
+      assetCode: `CDB${index}`,
+      held: true,
     }));
     const pending = Array.from({ length: 4 }, (_, index) => ({
       assetId: assetIdOf(String(index + 10)),

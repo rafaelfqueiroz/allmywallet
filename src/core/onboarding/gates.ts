@@ -15,6 +15,12 @@ export type GateConsequence =
   | 'figures_unreliable'
   /** BR-020-19 — the contract cannot be valued; portfolio value is understated until supplied. */
   | 'portfolio_value_understated'
+  /**
+   * The rate is missing and the position itself has not been imported yet —
+   * supplying the rate alone would not fix the total, so the copy must not
+   * promise that it does.
+   */
+  | 'position_not_imported'
   /** Already inside the total; only the wallet filing is missing. */
   | 'allocation_missing';
 
@@ -48,10 +54,12 @@ export function describeGate(item: AttentionItem): GateDescription {
       };
     // SPEC-020 BR-020-16/19: a held fixed-income contract with no readable
     // rate cannot be accrued (SPEC-009 BR-009-13), so it is valued at cost —
-    // portfolio value is understated until the user supplies the terms.
+    // portfolio value is understated until the user supplies the terms. When
+    // no position exists yet (Posição imported first), the asset is missing
+    // from the total altogether, and the consequence says so instead.
     case 'fixed_income_rate':
       return {
-        consequence: 'portfolio_value_understated',
+        consequence: item.held ? 'portfolio_value_understated' : 'position_not_imported',
         resolution: { screen: 'fixed_income_contract', assetId: item.assetId },
       };
     // SPEC-020 BR-020-16: the purchase is already inside the total
