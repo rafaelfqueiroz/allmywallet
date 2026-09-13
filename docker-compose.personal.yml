@@ -2,7 +2,8 @@
 # never a fork (BR-021-12): the hosted definition keeps working unchanged, so a
 # VPS later needs no reconstruction.
 #
-# Always run through scripts/personal/*.sh, which pass this exact invocation:
+# Always run through scripts/personal/*.sh, which load both personal env files
+# into the shell and pass this exact invocation:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.personal.yml \
 #     --env-file "$ALLMYWALLET_ENV_FILE" --profile app …
@@ -21,14 +22,19 @@ services:
     # localhost:5432 can never reach it by accident (BR-021-06).
     ports: !override
       - '127.0.0.1:${PERSONAL_POSTGRES_PORT:-55432}:5432'
-    # BR-021-09: the personal env file lives outside the working tree.
-    env_file: !override
-      - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
+    # No env_file: Postgres gets exactly its three variables, and nothing from
+    # the app's env file (auth secret, email key). The password comes from
+    # migrator.env through the scripts' shell; `:?` refuses to start a personal
+    # database with the base file's development default password.
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must come from the personal migrator.env — run through scripts/personal/}
 
   web:
     # The image is only ever pulled deliberately, by scripts/personal/start.sh,
     # after a backup. `up` must never fetch a newer :latest on its own.
     pull_policy: never
+    # BR-021-09: outside the working tree. The runtime file only — it holds no
+    # migrator credential (see scripts/personal/lib.sh).
     env_file: !override
       - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
     # The base file publishes no web port (Caddy fronts it). Here the browser

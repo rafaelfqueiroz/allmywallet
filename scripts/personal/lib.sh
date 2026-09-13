@@ -12,9 +12,18 @@
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 # BR-021-09 (AR-75): outside the working tree by default, and refused inside it.
+#
+# Two files, because Compose injects an `env_file` wholesale into a container:
+#   personal.env  — what web and worker run with (app role, auth, email, backup
+#                   settings). Injected into those two containers.
+#   migrator.env  — the migrator/superuser credential and the migration URL.
+#                   Never an `env_file`: only the scripts read it, to
+#                   interpolate Postgres' password and to hand the one-off
+#                   migrator container its URL. No running container sees it.
 : "${ALLMYWALLET_ENV_FILE:=$HOME/.config/allmywallet/personal.env}"
+: "${ALLMYWALLET_MIGRATOR_ENV_FILE:=$(dirname "$ALLMYWALLET_ENV_FILE")/migrator.env}"
 : "${ALLMYWALLET_STATE_DIR:=$HOME/.local/state/allmywallet}"
-export ALLMYWALLET_ENV_FILE ALLMYWALLET_STATE_DIR
+export ALLMYWALLET_ENV_FILE ALLMYWALLET_MIGRATOR_ENV_FILE ALLMYWALLET_STATE_DIR
 
 IMAGE_REPO=${IMAGE_REPO:-ghcr.io/rafaelfqueiroz/allmywallet}
 DOCKER=${DOCKER:-docker}
@@ -43,9 +52,12 @@ inside_repo() {
   esac
 }
 
-# The device a path's filesystem lives on — `stat -f` on macOS, `stat -c` on Linux.
+# The device a path's filesystem lives on. GNU `stat -c` first: on Linux
+# `stat -f` also succeeds, but reports the *filesystem's* free inodes for %d,
+# so trying it first would compare inode counts instead of devices. BSD/macOS
+# `stat` rejects `-c`, and falls through to `-f %d`, which is the device there.
 device_of() {
-  stat -f %d "$1" 2>/dev/null || stat -c %d "$1"
+  stat -c %d "$1" 2>/dev/null || stat -f %d "$1"
 }
 
 # BR-021-18: true when both paths sit on the same volume.
@@ -54,13 +66,18 @@ same_volume() {
 }
 
 load_env() {
-  [ -f "$ALLMYWALLET_ENV_FILE" ] || die "no personal env file at $ALLMYWALLET_ENV_FILE — run scripts/personal/init.sh first"
-  if inside_repo "$ALLMYWALLET_ENV_FILE"; then
-    die "refusing $ALLMYWALLET_ENV_FILE: the personal env file must live outside the repository (BR-021-09)"
-  fi
+  local file
+  for file in "$ALLMYWALLET_ENV_FILE" "$ALLMYWALLET_MIGRATOR_ENV_FILE"; do
+    [ -f "$file" ] || die "no env file at $file — run scripts/personal/init.sh first"
+    if inside_repo "$file"; then
+      die "refusing $file: personal env files must live outside the repository (BR-021-09)"
+    fi
+  done
   set -a
   # shellcheck disable=SC1090
   . "$ALLMYWALLET_ENV_FILE"
+  # shellcheck disable=SC1090
+  . "$ALLMYWALLET_MIGRATOR_ENV_FILE"
   set +a
 }
 

@@ -60,8 +60,16 @@ describe.skipIf(!hasDocker)('docker compose definitions (SPEC-021)', () => {
         '--profile',
         'app',
       ],
-      { ALLMYWALLET_ENV_FILE: envFile },
+      { ALLMYWALLET_ENV_FILE: envFile, POSTGRES_PASSWORD: 'personal-test-password' },
     );
+
+    // No running app container gets the migrator credential (BR-021-09).
+    for (const name of ['web', 'worker']) {
+      const variables = Object.keys(personal.services[name]?.environment ?? {});
+      expect(variables).not.toContain('PERSONAL_DATABASE_MIGRATION_URL');
+      expect(variables).not.toContain('DATABASE_MIGRATION_URL');
+      expect(variables).not.toContain('POSTGRES_PASSWORD');
+    }
 
     expect(personal.name).toBe('allmywallet-personal');
     expect(Object.keys(personal.services).sort()).toEqual(['postgres', 'web', 'worker']);
@@ -72,6 +80,34 @@ describe.skipIf(!hasDocker)('docker compose definitions (SPEC-021)', () => {
     expect(ports.map((port) => port.published)).not.toContain('5432');
 
     expect(personal.services.web?.environment?.AUTH_URL).toBe('http://localhost:3100/api/auth');
+  });
+
+  it('the personal Postgres refuses to start on the development default password', () => {
+    const { POSTGRES_PASSWORD: _password, DOMAIN: _domain, ...inherited } = process.env;
+    const failed = spawnSync(
+      'docker',
+      [
+        'compose',
+        '-f',
+        'docker-compose.yml',
+        '-f',
+        'docker-compose.personal.yml',
+        '--env-file',
+        envFile,
+        '--profile',
+        'app',
+        'config',
+        '-q',
+      ],
+      {
+        cwd: resolve('.'),
+        env: { ...inherited, ALLMYWALLET_ENV_FILE: envFile },
+        encoding: 'utf-8',
+      },
+    );
+
+    expect(failed.status).not.toBe(0);
+    expect(failed.stderr).toContain('POSTGRES_PASSWORD must come from');
   });
 
   it('the hosted definition still requires DOMAIN and derives an https AUTH_URL from it', () => {

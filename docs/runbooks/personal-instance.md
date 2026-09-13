@@ -15,7 +15,8 @@ The personal production instance ([SPEC-021](https://github.com/rafaelfqueiroz/a
 scripts/personal/init.sh
 ```
 
-1. The first run writes `~/.config/allmywallet/personal.env` with generated secrets and stops.
+1. The first run writes two files with generated secrets and stops: `~/.config/allmywallet/personal.env`, what web and worker run with; and `migrator.env` beside it, the migrator credential, which only the scripts read and no running container ever sees.
+   Running `init.sh` again after that refuses; upgrades belong to `start.sh`, which backs up first.
 2. Fill in `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `BACKUP_DIR`, `BACKUP_AGE_RECIPIENT` and `PGDATA_HOST_PATH`. Register `http://localhost:3100/api/auth/callback/google` on the Google OAuth client.
 3. Run it again. It pulls the image, migrates, sets the database marker, takes the first backup and starts everything at <http://localhost:3100>.
 

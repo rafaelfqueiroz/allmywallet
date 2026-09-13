@@ -82,7 +82,7 @@ pnpm worker:dev               # worker, separate terminal
 
 ### The personal instance
 
-Its own Compose project (`allmywallet-personal`), on `127.0.0.1` only, with its env file at `~/.config/allmywallet/personal.env`. The procedure, including what to do when a start fails, is [docs/runbooks/personal-instance.md](../runbooks/personal-instance.md).
+Its own Compose project (`allmywallet-personal`), on `127.0.0.1` only, with its env files at `~/.config/allmywallet/` — `personal.env` for web and worker, and `migrator.env`, the migrator credential, which only the scripts read. The procedure, including what to do when a start fails, is [docs/runbooks/personal-instance.md](../runbooks/personal-instance.md).
 
 | Command | Does |
 |---|---|

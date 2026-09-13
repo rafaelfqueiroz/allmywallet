@@ -110,14 +110,11 @@ describe('lib.sh', () => {
 describe('backup.sh', () => {
   function envFile(extra: string): string {
     const path = join(sandbox, 'personal.env');
+    writeFileSync(path, ['BACKUP_AGE_RECIPIENT=age1stub', extra].join('\n'));
+    // The migrator credential lives beside it, never in the containers' env file.
     writeFileSync(
-      path,
-      [
-        'POSTGRES_USER=allmywallet_migrator',
-        'POSTGRES_DB=allmywallet',
-        'BACKUP_AGE_RECIPIENT=age1stub',
-        extra,
-      ].join('\n'),
+      join(sandbox, 'migrator.env'),
+      'POSTGRES_USER=allmywallet_migrator\nPOSTGRES_DB=allmywallet\n',
     );
     return path;
   }
@@ -188,9 +185,10 @@ describe('start.sh (BR-021-23–27)', () => {
     writeFileSync(join(state, 'last-good-tag'), 'local-lastgood\n');
     writeFileSync(join(state, 'current-digest'), 'sha256:old\n');
     const env = join(sandbox, 'personal.env');
+    writeFileSync(env, 'BACKUP_DIR=/nonexistent\n');
     writeFileSync(
-      env,
-      'PERSONAL_DATABASE_MIGRATION_URL=postgresql://m@postgres/x\nBACKUP_DIR=/nonexistent\n',
+      join(sandbox, 'migrator.env'),
+      'PERSONAL_DATABASE_MIGRATION_URL=postgresql://m@postgres/x\n',
     );
 
     const docker = stub(
@@ -295,6 +293,28 @@ describe('init.sh (BR-021-36)', () => {
     expect(result.stderr).toContain('FileVault');
     expect(loggedCalls()).toEqual([]);
     expect(() => readFileSync(envPath)).toThrow();
+  });
+
+  it('refuses to run again once initialised — upgrades belong to start.sh (BR-021-25)', () => {
+    const fdesetup = stub('fdesetup', 'echo "FileVault is On."');
+    const uname = stub('uname', 'echo Darwin');
+    const docker = stub('docker', `echo "docker $*" >> "${calls}"`);
+    const state = join(sandbox, 'state');
+    mkdirSync(state);
+    writeFileSync(join(state, 'current-tag'), 'local-current\n');
+
+    const result = run('init.sh', {
+      FDESETUP: fdesetup,
+      UNAME: uname,
+      DOCKER: docker,
+      ALLMYWALLET_ENV_FILE: join(sandbox, 'config', 'personal.env'),
+      ALLMYWALLET_STATE_DIR: state,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('already initialised');
+    // Nothing pulled, nothing migrated.
+    expect(loggedCalls()).toEqual([]);
   });
 
   it('refuses an env file inside the repository', () => {

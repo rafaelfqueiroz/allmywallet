@@ -33,24 +33,36 @@ case "$filevault" in
   *) die "refusing to initialise: full-disk encryption is off ('$filevault'). Turn FileVault on first (BR-021-36)." ;;
 esac
 
-if inside_repo "$ALLMYWALLET_ENV_FILE"; then
-  die "refusing $ALLMYWALLET_ENV_FILE: the personal env file must live outside the repository (BR-021-09)"
+for file in "$ALLMYWALLET_ENV_FILE" "$ALLMYWALLET_MIGRATOR_ENV_FILE"; do
+  if inside_repo "$file"; then
+    die "refusing $file: personal env files must live outside the repository (BR-021-09)"
+  fi
+done
+
+# Once only. A second run would pull and migrate real data with no backup
+# (BR-021-25) and overwrite last-known-good. Upgrades belong to start.sh.
+if [ -s "$ALLMYWALLET_STATE_DIR/current-tag" ]; then
+  die "already initialised ($ALLMYWALLET_STATE_DIR/current-tag exists) — start the instance with scripts/personal/start.sh"
 fi
 
-if [ ! -f "$ALLMYWALLET_ENV_FILE" ]; then
-  mkdir -p "$(dirname "$ALLMYWALLET_ENV_FILE")"
+if [ ! -f "$ALLMYWALLET_ENV_FILE" ] || [ ! -f "$ALLMYWALLET_MIGRATOR_ENV_FILE" ]; then
+  [ ! -f "$ALLMYWALLET_ENV_FILE" ] && [ ! -f "$ALLMYWALLET_MIGRATOR_ENV_FILE" ] ||
+    die "only one of $ALLMYWALLET_ENV_FILE and $ALLMYWALLET_MIGRATOR_ENV_FILE exists — refusing to regenerate secrets over the other"
+  mkdir -p "$(dirname "$ALLMYWALLET_ENV_FILE")" "$(dirname "$ALLMYWALLET_MIGRATOR_ENV_FILE")"
   umask 077
   postgres_password=$(openssl rand -hex 24)
   app_password=$(openssl rand -hex 24)
   auth_secret=$(openssl rand -base64 48 | tr -d '\n')
   sed \
-    -e "s|__POSTGRES_PASSWORD__|$postgres_password|g" \
     -e "s|__APP_PASSWORD__|$app_password|g" \
     -e "s|__AUTH_SECRET__|$auth_secret|g" \
     "$REPO_ROOT/scripts/personal/personal.env.example" >"$ALLMYWALLET_ENV_FILE"
-  chmod 600 "$ALLMYWALLET_ENV_FILE"
-  log "wrote $ALLMYWALLET_ENV_FILE with generated secrets."
-  log "fill in AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, BACKUP_DIR, BACKUP_AGE_RECIPIENT and PGDATA_HOST_PATH, then run this again."
+  sed \
+    -e "s|__POSTGRES_PASSWORD__|$postgres_password|g" \
+    "$REPO_ROOT/scripts/personal/migrator.env.example" >"$ALLMYWALLET_MIGRATOR_ENV_FILE"
+  chmod 600 "$ALLMYWALLET_ENV_FILE" "$ALLMYWALLET_MIGRATOR_ENV_FILE"
+  log "wrote $ALLMYWALLET_ENV_FILE and $ALLMYWALLET_MIGRATOR_ENV_FILE with generated secrets."
+  log "fill in AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET, BACKUP_DIR, BACKUP_AGE_RECIPIENT and PGDATA_HOST_PATH in $ALLMYWALLET_ENV_FILE, then run this again."
   exit 0
 fi
 
@@ -76,14 +88,20 @@ export IMAGE_TAG=$tag
 
 # 3–4.
 personal_compose up -d --wait postgres
-personal_compose run --rm --no-deps -T \
-  -e DATABASE_MIGRATION_URL="$PERSONAL_DATABASE_MIGRATION_URL" \
-  web node dist/migrate.js
 
 psql_personal() {
   personal_compose exec -T postgres \
     psql --no-psqlrc -v ON_ERROR_STOP=1 --username="$POSTGRES_USER" --dbname="$POSTGRES_DB" "$@"
 }
+
+# The state files can be lost while the database is not. A marked database
+# already holds real data: never migrate it from here.
+existing=$(psql_personal --tuples-only --no-align -c "SELECT current_setting('allmywallet.instance_role', true)")
+[ "$existing" != "personal" ] || die "database $POSTGRES_DB is already marked personal — refusing to re-initialise it; use scripts/personal/start.sh"
+
+personal_compose run --rm --no-deps -T \
+  -e DATABASE_MIGRATION_URL="$PERSONAL_DATABASE_MIGRATION_URL" \
+  web node dist/migrate.js
 
 # 5. `0000_roles.sql` creates the role with no password, deliberately. The
 #    statement is built by format(%L) server-side so the password is quoted by
