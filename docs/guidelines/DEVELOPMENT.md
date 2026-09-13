@@ -78,6 +78,8 @@ pnpm worker:dev               # worker, separate terminal
 
 `pnpm` is the package manager; the lockfile is committed and CI uses `--frozen-lockfile`.
 
+> **This setup is development, and its database is disposable.** Your real portfolio runs separately, as the personal production instance ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), ARCHITECTURE AR-71–AR-75). Never load the personal env file into a development shell: `startTestDatabase` reuses whatever `DATABASE_MIGRATION_URL` it finds, and `tests/support/reset.ts` truncates through it. The refusal guard (AR-72) is the second barrier, not the first. Commands for the personal instance are documented here once [#104](https://github.com/rafaelfqueiroz/allmywallet/issues/104) lands them.
+
 | Script | Does |
 |---|---|
 | `dev` / `worker:dev` | Next dev server / worker with reload |

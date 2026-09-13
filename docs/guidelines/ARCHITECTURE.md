@@ -280,6 +280,8 @@ Memory budget with the full M4 observability stack running:
 
 ## 15. Backup and restore
 
+> **Personal deployment ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment)) supersedes this section's target.** The product runs as loopback-only personal production on its owner's laptop. Backups there are `age`-encrypted `pg_dump`s to a **local destination on a different volume**, taken **before every migration and once per day on start**. AR-60, AR-64 and AR-65 apply unchanged; AR-61, AR-62, AR-63 and AR-66 are R2-specific and do not apply, and without R2 there is no Art. 33 international transfer. Everything below remains the design should hosted production ever be provisioned.
+>
 > **Deferred — tracked as [BL-001](https://github.com/rafaelfqueiroz/allmywallet/issues/1).** Not built yet; there is no production data to lose. **Trigger: before the first non-test user account exists.** The requirements below are decided and stand as written for when it is built.
 
 The dump is the most sensitive artifact the system produces — every user's complete financial position in one file.
@@ -306,7 +308,7 @@ Hostinger includes weekly backups of its own. They now match this policy's *freq
 
 ## 16. Environments
 
-**There is no staging environment, and none is planned.**
+**There is no staging environment, and none is planned. There is also, by decision, no hosted production:** the product runs as personal production on its owner's laptop ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment)). The rules below describe the hosted design, which stays intact; AR-71–AR-75 govern the personal deployment.
 
 | | |
 |---|---|
@@ -314,6 +316,16 @@ Hostinger includes weekly backups of its own. They now match this policy's *freq
 | **AR-68** | Migrations are rehearsed against a **restored production backup, locally** — which is why AR-65's restore drill carries double duty. Until BL-001 ships there is no such backup, so rehearsal runs against seeded data and carries less assurance. |
 | **AR-69** | Because there is no staging safety net, DV-27's expand/contract discipline is not optional. Every schema change must be safe to deploy alongside the previous version of the code, and safe to roll back to. |
 | **AR-70** | Revisit when a second developer joins, or the first time a migration causes an incident — whichever comes first. |
+
+### Personal deployment
+
+| | |
+|---|---|
+| **AR-71** | The personal instance is **production**, not staging: it holds the only copy of manual entries, wallets, allocations and typed rates. It runs as its own Compose project, overriding `docker-compose.yml` rather than forking it, with **every published port bound to `127.0.0.1`** and no Caddy. |
+| **AR-72** | The personal database carries a **database-level marker** (`ALTER DATABASE … SET allmywallet.instance_role = 'personal'`). Test database reuse and the seed scripts refuse, at their own entrypoints, to touch a database bearing it. The marker is not a row, because `tests/support/reset.ts` truncates `runtime_state`. |
+| **AR-73** | The runtime image **carries its migrator** (`dist/migrate.js` plus `src/db/migrations/`) and contains no secret and no personal data — it is public, irreversibly. |
+| **AR-74** | Start upgrades automatically when `:latest` differs from the running image, in a fixed sequence: backup → pull → gated migration → start → health check → last-known-good or rollback. **No migration runs without a backup from the same run**, and a health-check rollback runs the old image on the new schema — so AR-69 is absolute here, not a preference. |
+| **AR-75** | Personal secrets, including `DATABASE_MIGRATION_URL`, live in an env file **outside the repository working tree**. A development shell never has it loaded. |
 
 ### Deployment environment variables
 
