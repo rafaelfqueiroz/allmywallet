@@ -389,5 +389,44 @@ describe('SPEC-020 — onboarding status and gates (integration)', () => {
       expect(rows[0]?.indexer).toBe('cdi_percent');
       expect(Number(rows[0]?.rate)).toBe(110);
     });
+
+    it('a re-import with only one of indexer or rate readable keeps the supplied pair intact', async () => {
+      const BATCH = '01920000-0000-7000-8000-0000000000c2';
+      await seedBatch({ id: BATCH, status: 'committed' });
+      await seedContract(cdb, { indexer: null, rate: null, issueDate: '2026-01-10' });
+
+      const supplied = await supplyContractTermsFor(userId, {
+        assetId: cdb,
+        indexer: 'ipca_spread',
+        ratePercent: '6',
+      });
+      expect(isOk(supplied)).toBe(true);
+
+      // The extract reads "CDI" but no rate. A per-column merge would pair the
+      // extract's indexer with the user's rate: 6% of CDI.
+      await withTenant(
+        userId,
+        async (tx) => {
+          const repo = new DrizzleFixedIncomeContractRepository(tx, userId);
+          await repo.upsertByAsset({
+            assetId: cdb,
+            indexer: 'cdi_percent',
+            ratePercent: null,
+            issueDate: BusinessDate.of('2026-01-10'),
+            maturityDate: null,
+            principal: null,
+            source: ImportBatchId.of(BATCH),
+          });
+        },
+        db,
+      );
+
+      const { rows } = await migratorPool.query<{ indexer: string; rate: string }>(
+        'SELECT indexer, rate FROM fixed_income_contracts WHERE user_id = $1 AND asset_id = $2',
+        [userId, cdb],
+      );
+      expect(rows[0]?.indexer).toBe('ipca_spread');
+      expect(Number(rows[0]?.rate)).toBe(6);
+    });
   });
 });

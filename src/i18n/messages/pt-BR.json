@@ -1321,7 +1321,8 @@
       "upload": {
         "title": "2. Envie os arquivos",
         "description": "Os três arquivos podem ir juntos ou um de cada vez, em qualquer ordem.",
-        "done": "Arquivo enviado — processando."
+        "processing": "Arquivo recebido — a leitura ainda está em andamento. Você pode enviar os outros extratos enquanto isso.",
+        "awaitingReview": "Um arquivo já está pronto para revisão no passo 3. Os outros extratos podem ser enviados daqui mesmo."
       },
       "review": {
         "title": "3. Revise a prévia",
@@ -1395,7 +1396,7 @@
     "title": "Informar taxa contratada",
     "signedOut": "Entre na sua conta para informar a taxa contratada.",
     "assetLabel": "{code} — {name}",
-    "why": "Não conseguimos ler o indexador ou a taxa contratada deste ativo no extrato importado. Até você informar, ele é avaliado pelo custo de aquisição, não por um valor de mercado — o patrimônio acima está subestimado.",
+    "why": "Não conseguimos ler o indexador ou a taxa contratada deste ativo no extrato importado. Até você informar, ele é avaliado pelo custo de aquisição, não por um valor de mercado — até lá, o seu patrimônio aparece subestimado.",
     "indexerLabel": "Indexador",
     "indexerOptions": {
       "cdi_percent": "% do CDI",

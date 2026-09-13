@@ -91,8 +91,14 @@ export class DrizzleFixedIncomeContractRepository
       .onConflictDoUpdate({
         target: [fixedIncomeContracts.userId, fixedIncomeContracts.assetId],
         set: {
-          indexer: sql`COALESCE(excluded.indexer, ${fixedIncomeContracts.indexer})`,
-          rate: sql`COALESCE(excluded.rate, ${fixedIncomeContracts.rate})`,
+          // The indexer and the rate are one fact — "110" means nothing without
+          // "% do CDI" — so they are replaced as a pair or not at all. A
+          // per-column COALESCE let an extract's readable indexer land beside
+          // a rate the user supplied for a *different* indexer (IPCA + 6
+          // becoming 6% of CDI), with both columns non-null and so no gate to
+          // reveal it.
+          indexer: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.indexer ELSE ${fixedIncomeContracts.indexer} END`,
+          rate: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.rate ELSE ${fixedIncomeContracts.rate} END`,
           issueDate: input.issueDate,
           maturityDate: input.maturityDate,
           principal: input.principal,

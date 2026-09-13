@@ -44,13 +44,22 @@ export async function GuidedSteps({ status }: { readonly status: OnboardingStatu
 
         <ListItem>
           <Section title={t('steps.upload.title')} description={t('steps.upload.description')}>
-            {status.stage === 'upload' ? (
-              <UploadForm action={uploadExtractAction} />
-            ) : (
-              <Text size="sm" tone="muted">
-                {t('steps.upload.done')}
-              </Text>
-            )}
+            {/* BR-020-22 — "together or one at a time, in any order". The form
+                stays until the first commit: a user who sent Movimentação alone
+                still has two extracts to send from here. */}
+            <Stack gap="sm">
+              {status.stage === 'processing' && (
+                <Text size="sm" tone="muted">
+                  {t('steps.upload.processing')}
+                </Text>
+              )}
+              {status.stage === 'review' && (
+                <Text size="sm" tone="muted">
+                  {t('steps.upload.awaitingReview')}
+                </Text>
+              )}
+              {status.stage !== 'done' && <UploadForm action={uploadExtractAction} />}
+            </Stack>
           </Section>
         </ListItem>
 
