@@ -182,14 +182,20 @@ test.describe('the dashboard', () => {
     await expect(
       signedIn.page.getByRole('heading', { name: 'Precisa da sua atenção' }),
     ).toBeVisible();
+    // Scoped to the gate's own row: a held CDB in no wallet is *also* awaiting
+    // allocation, so its code legitimately appears twice in the one queue.
+    const gate = signedIn.page
+      .getByRole('listitem')
+      .filter({ has: signedIn.page.getByRole('link', { name: 'Informar taxa' }) });
+    await expect(gate).toHaveCount(1);
     // The cause: which asset.
-    await expect(signedIn.page.getByText(code)).toBeVisible();
+    await expect(gate.getByText(code)).toBeVisible();
     // BR-020-19 — the consequence, stated plainly.
     await expect(
-      signedIn.page.getByText(/patrimônio acima está subestimado até você informá-la/),
+      gate.getByText(/patrimônio acima está subestimado até você informá-la/),
     ).toBeVisible();
     // The resolution: one link, to the one screen that fixes it.
-    const link = signedIn.page.getByRole('link', { name: 'Informar taxa' });
+    const link = gate.getByRole('link', { name: 'Informar taxa' });
     await expect(link).toHaveAttribute('href', `/fixed-income/${assetId}`);
 
     await link.click();
