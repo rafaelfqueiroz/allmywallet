@@ -122,6 +122,20 @@ export const REGISTRY = {
     description: 'Which trading calendar dataset the TradingCalendar port uses (FR-6.6).',
     range: "one of: 'B3'",
   },
+  'personal.catchup_max_days': {
+    key: 'personal.catchup_max_days',
+    // SPEC-021 BR-021-28: how many missed business days worker-start catch-up
+    // covers. `0` is refused rather than read as "catch-up off" — a disabled
+    // catch-up would silently leave every missed close unrecorded, neither
+    // recovered nor marked as a gap. 90 business days is roughly the longest
+    // history the free quote tier's `3mo`/`6mo` ranges return.
+    schema: z.number().int().min(1).max(90),
+    default: 30,
+    levels: ['deployment'],
+    description:
+      'SPEC-021 BR-021-28: maximum business days of missed closes backfilled when the worker starts.',
+    range: 'integer business days, 1–90',
+  },
   'import.staleness_days': {
     key: 'import.staleness_days',
     schema: z.number().int().min(1).max(365),

@@ -68,6 +68,22 @@ describe('ValueChart', () => {
     const { container } = render(<ValueChart title="Patrimônio" summary="Sem dados" points={[]} />);
     expect((await audit(container)).violations).toEqual([]);
   });
+
+  it('SPEC-021 BR-021-31: accepts a gap day as a break in the series, and stays accessible', async () => {
+    const { container } = render(
+      <ValueChart
+        title="Patrimônio ao longo do tempo"
+        summary="De 100.000 a 118.500"
+        points={[
+          { date: '2026-03-12', value: 100000, estimated: false },
+          { date: '2026-03-13', value: null, estimated: false, gap: true },
+          { date: '2026-03-16', value: 118500, estimated: false },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('img', { name: 'Patrimônio ao longo do tempo' })).toBeInTheDocument();
+    expect((await audit(container)).violations).toEqual([]);
+  });
 });
 
 describe('ContributionChart', () => {

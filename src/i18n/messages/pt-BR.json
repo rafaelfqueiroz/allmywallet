@@ -894,6 +894,9 @@
       "badge": "Parte do período usa valores estimados",
       "hint": "Inclui renda fixa acruada, não observada no mercado"
     },
+    "gap": {
+      "badge": "Dias sem cotação de fechamento aparecem como falhas no gráfico"
+    },
     "decomposition": {
       "title": "De onde veio o crescimento",
       "description": "Dinheiro que cresceu porque você aportou não é dinheiro que cresceu porque rendeu.",

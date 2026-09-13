@@ -190,6 +190,81 @@ export type QuoteProviderErrorCode =
  */
 export interface QuoteProvider {
   fetchQuote(ticker: string): Promise<Result<QuoteProviderResult, DomainError>>;
+  /**
+   * SPEC-021 BR-021-29 — the provider's historical daily closes for `ticker`
+   * over `[from, to]` (both inclusive), used only by worker-start catch-up to
+   * recover closes missed while the worker was down.
+   *
+   * **One request for the whole range**, not one per day: BR-021-32 charges
+   * each request to the same monthly budget as polling, so a per-day shape
+   * would spend thirty requests where one suffices.
+   *
+   * The result may hold fewer dates than asked for — a provider that does not
+   * supply a day simply omits it, and the caller records that day as a gap
+   * (BR-021-31). It must never hold a date outside `[from, to]`.
+   */
+  fetchHistoricalCloses(
+    ticker: string,
+    from: BusinessDate,
+    to: BusinessDate,
+  ): Promise<Result<HistoricalClosesResult, DomainError>>;
+}
+
+/** One observed official close, as the provider's history reports it. */
+export interface HistoricalClose {
+  readonly date: BusinessDate;
+  readonly close: Money;
+}
+
+export interface HistoricalClosesResult {
+  readonly ticker: string;
+  /** Ascending by date, unique per date, every date inside the requested range. */
+  readonly closes: readonly HistoricalClose[];
+  /** Names the active `quotes.provider` adapter, persisted with every recovered close. */
+  readonly source: string;
+}
+
+/**
+ * SPEC-021 BR-021-28 — "since the last recorded close capture". The newest
+ * `price_quotes` date among `assetIds`, or `null` when none of them has ever
+ * had a close captured. Kept off `QuoteRepositoryPort` so the ports every
+ * existing quote job depends on do not grow a method only catch-up needs.
+ */
+export interface LatestCloseDatePort {
+  latestCloseDateAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null>;
+}
+
+/**
+ * SPEC-021 BR-021-31 — why a close could not be recovered. Persisted as a
+ * code, never prose (AR-44), so the chart can say *that* a day is a gap and
+ * an operator can say *why*.
+ */
+export const CloseGapReason = {
+  /** The provider request failed outright — network, 5xx, unparseable. */
+  PROVIDER_UNAVAILABLE: 'provider_unavailable',
+  /** The request succeeded but the provider's history has no close for the day. */
+  NOT_SUPPLIED: 'not_supplied',
+  /** BR-021-32: the scheduled share of the monthly budget could not afford the request. */
+  BUDGET_EXHAUSTED: 'budget_exhausted',
+} as const;
+export type CloseGapReason = (typeof CloseGapReason)[keyof typeof CloseGapReason];
+
+export interface CloseGap {
+  readonly assetId: AssetId;
+  readonly date: BusinessDate;
+  readonly reason: CloseGapReason;
+}
+
+/**
+ * SPEC-021 BR-021-31 — a gap is **recorded**, not inferred from an absent
+ * row. An absent `price_quotes` row cannot distinguish "never tried" from
+ * "tried and the provider had nothing", and only the second is a gap.
+ */
+export interface CloseGapRepositoryPort {
+  /** AR-19: keyed `(assetId, date)` — recording the same gap twice overwrites. */
+  recordGap(gap: CloseGap): Promise<void>;
+  /** A close recovered on a later attempt supersedes the gap it filled. */
+  clearGap(assetId: AssetId, date: BusinessDate): Promise<void>;
 }
 
 /** BCB SGS series 12 (CDI), 433 (IPCA), 11 (Selic), plus IBOV (FR-6.x). */

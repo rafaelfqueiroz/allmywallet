@@ -1,6 +1,6 @@
 {
-  "id": "a4c8f5b3-3b03-46b7-9e90-7f2fcdbe059c",
-  "prevId": "09b2ed4c-3ed9-497c-be17-769a17c0e56e",
+  "id": "8c041c1d-faa1-4f91-b4de-45bd13b95286",
+  "prevId": "a4c8f5b3-3b03-46b7-9e90-7f2fcdbe059c",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2130,6 +2130,71 @@
         "daily_valuation_snapshots_total_non_negative_check": {
           "name": "daily_valuation_snapshots_total_non_negative_check",
           "value": "\"daily_valuation_snapshots\".\"total_value\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.backup_runs": {
+      "name": "backup_runs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_name": {
+          "name": "file_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detail": {
+          "name": "detail",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finished_at": {
+          "name": "finished_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "backup_runs_finished_at_idx": {
+          "name": "backup_runs_finished_at_idx",
+          "columns": [
+            {
+              "expression": "finished_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "backup_runs_status_check": {
+          "name": "backup_runs_status_check",
+          "value": "\"backup_runs\".\"status\" IN ('succeeded', 'failed')"
         }
       },
       "isRLSEnabled": false

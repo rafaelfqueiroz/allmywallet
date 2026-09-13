@@ -60,6 +60,46 @@ export const priceQuotes = pgTable(
 );
 
 /**
+ * SPEC-021 BR-021-31 — a close that worker-start catch-up could not recover.
+ *
+ * Recorded rather than inferred from an absent `price_quotes` row, because an
+ * absent row cannot tell "never attempted" from "attempted, and the provider
+ * had nothing" — and only the second may be drawn on a chart as a gap. Never
+ * a stand-in price: this table holds no price column at all, so a gap cannot
+ * be read as an interpolated or carried-forward value by construction.
+ *
+ * Shared (AR-15, `src/db/shared-tables.ts`): keyed exactly like
+ * `price_quotes`, no user column. A later recovery deletes the row.
+ */
+export const CLOSE_GAP_REASONS = [
+  'provider_unavailable',
+  'not_supplied',
+  'budget_exhausted',
+] as const;
+
+export const priceQuoteGaps = pgTable(
+  'price_quote_gaps',
+  {
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => assets.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    reason: text('reason').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.assetId, table.date] }),
+    // The chart reads gaps by date range, across whichever assets a user holds.
+    index('price_quote_gaps_date_idx').on(table.date),
+    check(
+      'price_quote_gaps_reason_check',
+      sql`${table.reason} IN ('provider_unavailable', 'not_supplied', 'budget_exhausted')`,
+    ),
+  ],
+);
+
+/**
  * Delayed intraday quote, one row per asset, overwritten on every refresh
  * (BR-008-10: it never becomes history). `quoted_at` is the provider's
  * as-of timestamp (~30 min behind); `fetched_at` is when this system asked —
