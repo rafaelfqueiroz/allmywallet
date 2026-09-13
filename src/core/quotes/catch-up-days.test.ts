@@ -112,17 +112,20 @@ describe('enumerateCatchUpDays (SPEC-021 BR-021-28)', () => {
     expect(result.days).toEqual([]);
   });
 
-  it.each([0, -1, 1.5])('refuses maxDays = %s rather than reporting "nothing missed"', (maxDays) => {
-    expect(() =>
-      enumerateCatchUpDays({
-        calendar: MARCH,
-        now: new Date('2026-03-17T15:00:00Z'),
-        today: d('2026-03-17'),
-        lastCapturedClose: d('2026-03-11'),
-        maxDays,
-      }),
-    ).toThrow(RangeError);
-  });
+  it.each([0, -1, 1.5])(
+    'refuses maxDays = %s rather than reporting "nothing missed"',
+    (maxDays) => {
+      expect(() =>
+        enumerateCatchUpDays({
+          calendar: MARCH,
+          now: new Date('2026-03-17T15:00:00Z'),
+          today: d('2026-03-17'),
+          lastCapturedClose: d('2026-03-11'),
+          maxDays,
+        }),
+      ).toThrow(RangeError);
+    },
+  );
 });
 
 describe('lastDueCloseDate', () => {

@@ -22,6 +22,11 @@ describe('shared table declaration', () => {
     // nothing derived from anyone's holdings. The reasoning for each lives in
     // src/db/shared-tables.ts.
     //
+    // `price_quote_gaps` was added by SPEC-021 (BR-021-31): an asset id, a date
+    // and a reason code for a market close that could not be recovered — the
+    // negative counterpart of `price_quotes`, keyed the same way, holding
+    // nothing derived from anyone's holdings.
+    //
     // This assertion is deliberately exact. Its whole value is that the next
     // person to widen the tenant-boundary exemption has to come here and say
     // why, rather than appending a string and watching the suite stay green.
@@ -30,6 +35,7 @@ describe('shared table declaration', () => {
       'index_series',
       'institutions',
       'latest_quotes',
+      'price_quote_gaps',
       'price_quotes',
       'quote_budget_usage',
       'runtime_state',

@@ -21,7 +21,12 @@ import {
  */
 const d = (value: string): BusinessDate => BusinessDate.of(value);
 
-const PETR4: Asset = { id: AssetId.generate(), code: 'PETR4', name: 'Petrobras', assetClass: 'stock' };
+const PETR4: Asset = {
+  id: AssetId.generate(),
+  code: 'PETR4',
+  name: 'Petrobras',
+  assetClass: 'stock',
+};
 const VALE3: Asset = { id: AssetId.generate(), code: 'VALE3', name: 'Vale', assetClass: 'stock' };
 const DAYS = [d('2026-03-12'), d('2026-03-13'), d('2026-03-16')];
 const OPTIONS = { monthlyQuota: 15000, ondemandReservePct: 10 };
@@ -92,7 +97,10 @@ describe('backfillMissedCloses (SPEC-021)', () => {
   it('BR-021-31: a day the provider does not supply is recorded as a gap — never interpolated, never copied', async () => {
     const p = ports();
     // Friday 13 is missing from the provider's history.
-    p.provider.setHistory('PETR4', history('PETR4', { '2026-03-12': '31.10', '2026-03-16': '32.40' }));
+    p.provider.setHistory(
+      'PETR4',
+      history('PETR4', { '2026-03-12': '31.10', '2026-03-16': '32.40' }),
+    );
 
     const summary = await backfillMissedCloses(p, [PETR4], DAYS, OPTIONS);
 
@@ -127,15 +135,16 @@ describe('backfillMissedCloses (SPEC-021)', () => {
     // Passed VALE3-first; PETR4 still goes first because assets are ordered by code.
     const p = ports();
     p.budgetCounter.seed('2026-03', { scheduled: 89, ondemand: 0 });
-    p.provider.setHistory('PETR4', history('PETR4', { '2026-03-12': '31.10', '2026-03-13': '31.25', '2026-03-16': '32.40' }));
+    p.provider.setHistory(
+      'PETR4',
+      history('PETR4', { '2026-03-12': '31.10', '2026-03-13': '31.25', '2026-03-16': '32.40' }),
+    );
     p.provider.setHistory('VALE3', history('VALE3', { '2026-03-12': '60.00' }));
 
-    const summary = await backfillMissedCloses(
-      p,
-      [VALE3, PETR4],
-      DAYS,
-      { monthlyQuota: 100, ondemandReservePct: 10 },
-    );
+    const summary = await backfillMissedCloses(p, [VALE3, PETR4], DAYS, {
+      monthlyQuota: 100,
+      ondemandReservePct: 10,
+    });
 
     expect(p.provider.historicalCalls.map((c) => c.ticker)).toEqual(['PETR4']);
     expect(summary.recovered).toHaveLength(3);
@@ -175,7 +184,10 @@ describe('backfillMissedCloses (SPEC-021)', () => {
         source: 'brapi_free',
       });
     }
-    p.provider.setHistory('PETR4', history('PETR4', { '2026-03-13': '31.25', '2026-03-16': '32.40' }));
+    p.provider.setHistory(
+      'PETR4',
+      history('PETR4', { '2026-03-13': '31.25', '2026-03-16': '32.40' }),
+    );
 
     const summary = await backfillMissedCloses(p, [PETR4, VALE3], DAYS, OPTIONS);
 
@@ -187,7 +199,11 @@ describe('backfillMissedCloses (SPEC-021)', () => {
 
   it('a close recovered on a later start clears the gap the earlier start recorded', async () => {
     const p = ports();
-    await p.gaps.recordGap({ assetId: PETR4.id, date: d('2026-03-13'), reason: 'budget_exhausted' });
+    await p.gaps.recordGap({
+      assetId: PETR4.id,
+      date: d('2026-03-13'),
+      reason: 'budget_exhausted',
+    });
     p.provider.setHistory('PETR4', history('PETR4', { '2026-03-13': '31.25' }));
 
     await backfillMissedCloses(p, [PETR4], [d('2026-03-13')], OPTIONS);

@@ -147,12 +147,18 @@ describe('BrapiQuoteProvider.fetchHistoricalCloses (SPEC-021 BR-021-29)', () => 
   });
 
   it('never returns a close outside the requested window', () => {
-    const closes = extractHistoricalCloses(RECORDED_HISTORY_RESPONSE, d('2026-03-13'), d('2026-03-13'));
+    const closes = extractHistoricalCloses(
+      RECORDED_HISTORY_RESPONSE,
+      d('2026-03-13'),
+      d('2026-03-13'),
+    );
     expect(closes).toEqual([]);
   });
 
   it('a body with no history array yields no closes (every requested day becomes a gap)', () => {
-    expect(extractHistoricalCloses('{"results":[{"symbol":"PETR4"}]}', d('2026-03-12'), d('2026-03-16'))).toEqual([]);
+    expect(
+      extractHistoricalCloses('{"results":[{"symbol":"PETR4"}]}', d('2026-03-12'), d('2026-03-16')),
+    ).toEqual([]);
   });
 
   it('keeps the first candle when the provider repeats a date', () => {
@@ -165,7 +171,10 @@ describe('BrapiQuoteProvider.fetchHistoricalCloses (SPEC-021 BR-021-29)', () => 
     [400, 'a plan that refuses the range'],
     [503, 'a 5xx'],
   ])('%s (%s) is UNAVAILABLE — a provider failure, not a missing close', async (status) => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status, text: () => Promise.resolve('{}') }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status, text: () => Promise.resolve('{}') }),
+    );
     const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
     const result = await provider.fetchHistoricalCloses('PETR4', d('2026-03-12'), d('2026-03-16'));
     expect(result.ok).toBe(false);
@@ -176,8 +185,15 @@ describe('BrapiQuoteProvider.fetchHistoricalCloses (SPEC-021 BR-021-29)', () => 
     const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
     const network = await provider.fetchHistoricalCloses('PETR4', d('2026-03-12'), d('2026-03-16'));
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('{nope') }));
-    const malformed = await provider.fetchHistoricalCloses('PETR4', d('2026-03-12'), d('2026-03-16'));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('{nope') }),
+    );
+    const malformed = await provider.fetchHistoricalCloses(
+      'PETR4',
+      d('2026-03-12'),
+      d('2026-03-16'),
+    );
     for (const result of [network, malformed]) {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe(QuoteProviderErrorCode.UNAVAILABLE);
@@ -185,7 +201,10 @@ describe('BrapiQuoteProvider.fetchHistoricalCloses (SPEC-021 BR-021-29)', () => 
   });
 
   it('an empty results array is NOT_FOUND', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('{"results":[]}') }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ status: 200, text: () => Promise.resolve('{"results":[]}') }),
+    );
     const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
     const result = await provider.fetchHistoricalCloses('PETR4', d('2026-03-12'), d('2026-03-16'));
     expect(result.ok).toBe(false);

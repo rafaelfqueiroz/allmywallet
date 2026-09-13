@@ -58,7 +58,8 @@ const MILLISECONDS_PER_DAY = 86_400_000;
 function addCalendarDays(date: BusinessDate, days: number): BusinessDate {
   const [year, month, day] = date.split('-').map((part) => Number(part));
   // Date.UTC keeps this independent of the host's timezone (AR-29).
-  const millis = Date.UTC(Number(year), Number(month) - 1, Number(day)) + days * MILLISECONDS_PER_DAY;
+  const millis =
+    Date.UTC(Number(year), Number(month) - 1, Number(day)) + days * MILLISECONDS_PER_DAY;
   return BusinessDate.of(new Date(millis).toISOString().slice(0, 10));
 }
 

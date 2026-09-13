@@ -71,7 +71,11 @@ export const priceQuotes = pgTable(
  * Shared (AR-15, `src/db/shared-tables.ts`): keyed exactly like
  * `price_quotes`, no user column. A later recovery deletes the row.
  */
-export const CLOSE_GAP_REASONS = ['provider_unavailable', 'not_supplied', 'budget_exhausted'] as const;
+export const CLOSE_GAP_REASONS = [
+  'provider_unavailable',
+  'not_supplied',
+  'budget_exhausted',
+] as const;
 
 export const priceQuoteGaps = pgTable(
   'price_quote_gaps',

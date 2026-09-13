@@ -37,7 +37,9 @@ function calendarDaysBetween(from: BusinessDate, to: BusinessDate): number {
     const [year, month, day] = date.split('-').map((part) => Number(part));
     return Date.UTC(Number(year), Number(month) - 1, Number(day));
   };
-  return Math.round((millis(to) - millis(from)) / MILLISECONDS_PER_DAY);
+  // Both ends are UTC midnights, so the difference is an exact multiple of a
+  // day — no rounding decision exists here to make.
+  return (millis(to) - millis(from)) / MILLISECONDS_PER_DAY;
 }
 
 export function historyRangeFor(from: BusinessDate, to: BusinessDate): string {

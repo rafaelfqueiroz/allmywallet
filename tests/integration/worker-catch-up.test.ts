@@ -239,7 +239,10 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
       'PETR4',
       historyFor('PETR4', { '2026-03-12': '31.10', '2026-03-13': '29.00', '2026-03-16': '32.40' }),
     );
-    provider.setHistory('VALE3', historyFor('VALE3', { '2026-03-12': '61.00', '2026-03-16': '62.50' }));
+    provider.setHistory(
+      'VALE3',
+      historyFor('VALE3', { '2026-03-12': '61.00', '2026-03-16': '62.50' }),
+    );
     return provider;
   }
 
@@ -300,7 +303,11 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     expect(summary.gaps).toBe(1);
     expect(summary.rebuiltFrom).toBe('2026-03-12');
 
-    const { rows: closes } = await migratorPool.query<{ code: string; date: string; close: string }>(
+    const { rows: closes } = await migratorPool.query<{
+      code: string;
+      date: string;
+      close: string;
+    }>(
       `SELECT a.code, q.date::text AS date, q.close::text AS close
          FROM price_quotes q JOIN assets a ON a.id = q.asset_id
         ORDER BY a.code, q.date`,
