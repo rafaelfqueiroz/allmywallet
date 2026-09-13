@@ -6,9 +6,9 @@ Loaded at the start of every session. Orientation and the rules that are expensi
 
 **AllMyWallet** — a web app for Brazilian retail investors to consolidate stocks, FIIs, BDRs, ETFs, Tesouro Direto, CDB, LCI and LCA into one ledger, group holdings into purpose-driven wallets, and report on performance, portfolio value, earnings and composition.
 
-**Current state: M0–M7 built.** The sixteen original spec tasks (#4–#19) are closed — auth, config, isolation, LGPD, import, ledger, cost basis, market data, valuation, wallets, the reporting framework and all four reports — and so is M7: wallet balancing (#89), buy/sell opportunity (#90), wallet goals (#91).
+**Current state: M0–M8 built — every PRD milestone.** The sixteen original spec tasks (#4–#19) are closed — auth, config, isolation, LGPD, import, ledger, cost basis, market data, valuation, wallets, the reporting framework and all four reports — and so are M7 (balancing #89, opportunity #90, goals #91) and M8: the authenticated dashboard (#98) and guided onboarding ([SPEC-020](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-020-User-Onboarding), #97).
 
-The current milestone is **M8 — onboarding** ([SPEC-020](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-020-User-Onboarding), issue #97), taken ahead of further feature work because PRD R1 rates manual-import friction High/High and names guided onboarding as its mitigation. **[#98](https://github.com/rafaelfqueiroz/allmywallet/issues/98) landed first**: `/dashboard` now exists and is the sign-in landing, so BR-005-26, BR-010-12 and FR-8.29 finally have a screen. **#97 is what remains** — the guided first run, and the first-sign-in divergence BR-001-04 asks for on top of the landing #98 gave everyone. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written.
+**No milestone is next in the PRD.** Open work is defects and follow-ups — #94 (report reads deadlock under concurrency), #76 (large-import query count), #64, #62, #61 — and the pre-launch items #47 (domain and privacy contact) and #1–#3 (backups, metrics, staging). Onboarding makes a first real account likely, which is BL-001's trigger for backups. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written.
 
 ## Where the artifacts live
 
@@ -17,7 +17,7 @@ Three surfaces, each with one job. **Do not duplicate content between them** —
 | Surface | Holds | Source of truth for |
 |---|---|---|
 | **[Wiki](https://github.com/rafaelfqueiroz/allmywallet/wiki)** | [PRD](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD), [20 specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs), [Spec-Template](https://github.com/rafaelfqueiroz/allmywallet/wiki/Spec-Template) | *What* to build and why |
-| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | #1–#3 deferred infra; #4–#19 the original spec tasks and #89–#91 the M7 tasks, all closed; #20+ defects and follow-ups; #97–#98 open for M8 | *What is being built now* |
+| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | #1–#3 deferred infra; #4–#19 the original spec tasks, #89–#91 the M7 tasks and #97–#98 the M8 tasks, all closed; #20+ defects and follow-ups | *What is being built now* |
 | **This repo** | [`docs/guidelines/`](docs/guidelines/README.md) — architecture, development, testing | *How* to build it |
 
 Product documents are **edited in the wiki**, never mirrored here. Guidelines are edited here and reviewed in PRs.
