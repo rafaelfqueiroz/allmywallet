@@ -1,4 +1,5 @@
 import { expect, test } from './support/authenticated';
+import { dismissOnboarding } from './support/onboarding';
 
 /**
  * #37 — the public surface at `/`.
@@ -50,6 +51,11 @@ test.describe('landing page', () => {
   test('sends a signed-in visitor to the application instead of the pitch', async ({
     signedIn,
   }) => {
+    // SPEC-020 BR-020-02 — a user with no import who has not dismissed the
+    // guide is routed on to `/onboarding`; that journey is
+    // `onboarding.spec.ts`'s. Dismissed here so this test keeps asserting only
+    // the middleware's own hop.
+    await dismissOnboarding(signedIn.userId);
     await signedIn.page.goto('/');
 
     // The redirect is `src/middleware.ts`, before the prerendered page is even

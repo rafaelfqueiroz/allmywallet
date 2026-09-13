@@ -249,29 +249,48 @@ test('the three extracts upload together, in whatever order they were picked', a
 });
 
 /**
- * SPEC-005 AC-1 — "guided onboarding walks a first-run user through exporting
- * all three files, **with screenshots**".
+ * SPEC-005 AC-1 / SPEC-020 BR-020-20/23/24/31 — "guided onboarding walks a
+ * first-run user through exporting all three files."
  *
- * The screenshots were the last thing outstanding on #8 and the reason is
- * DV-24: a full capture of investidor.b3.com.br carries the account holder's
- * name and every position they hold. What ships is the chrome band — the tab,
- * the period selector and the download button — and this asserts all three are
- * actually reachable, because a broken path or a missing file renders as a
- * silent gap in the one screen that has to teach.
+ * **This replaces the old screenshot test, not merely renames it.** #8
+ * shipped cropped screenshots of investidor.b3.com.br's chrome band; #97
+ * (SPEC-020 BR-020-23/DL-020-06) removed every image of a third-party
+ * interface from this repository — B3 redesigns its exports (R2), and a stale
+ * screenshot walks a user confidently to a button that has moved. What ships
+ * instead is a diagram this project draws itself
+ * (`src/components/onboarding/extract-diagram.tsx`), one guide body shared
+ * with `/onboarding` (`ExportGuideContent`), and a "verified against B3 as
+ * of" stamp. This test asserts the three replacements: a diagram per extract,
+ * the ordered text steps that convey the same instructions in words
+ * (BR-020-31 — `onboarding.spec.ts`'s own test additionally proves they
+ * survive with every diagram hidden), and the stamp's dd/mm/yyyy date.
  */
-test('the export guide shows a screenshot for each of the three extracts', async ({ signedIn }) => {
+test('the export guide shows a diagram, the ordered steps, and the verification stamp for each extract', async ({
+  signedIn,
+}) => {
   const { page } = signedIn;
 
   await page.goto('/import');
   await expect(page.getByRole('heading', { name: /como exportar/i })).toBeVisible();
 
-  for (const step of ['Movimentação', 'Negociação', 'Posição']) {
-    const image = page.getByRole('img', { name: new RegExp(`aba ${step}`, 'i') });
-    await expect(image).toBeVisible();
-
-    // Rendered, not merely present: a 404 leaves an <img> in the DOM with no
-    // pixels, which `toBeVisible` alone would accept.
-    const width = await image.evaluate((node) => (node as HTMLImageElement).naturalWidth);
-    expect(width).toBeGreaterThan(0);
+  // Decorative diagrams — `ExtractDiagram`'s own `role="img"` marker, one per
+  // extract, `aria-hidden` because the text beside it is what actually has to
+  // carry the instructions.
+  const diagrams = page.locator('svg[role="img"]');
+  await expect(diagrams).toHaveCount(3);
+  for (const diagram of await diagrams.all()) {
+    await expect(diagram).toHaveAttribute('aria-hidden', 'true');
   }
+
+  for (const path of [
+    'Extratos → Movimentação → Baixar',
+    'Extratos → Negociação → Baixar',
+    'Minha carteira → Investimentos → Posição → Baixar',
+  ]) {
+    await expect(page.getByText(path)).toBeVisible();
+  }
+
+  // BR-016-18 — dd/mm/yyyy, never the ISO string B3_GUIDE_VERIFIED_AS_OF is
+  // stored as.
+  await expect(page.getByText(/Verificado na B3 em \d{2}\/\d{2}\/\d{4}/)).toBeVisible();
 });

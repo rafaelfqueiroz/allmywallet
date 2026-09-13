@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { fixedIncomeContracts } from '@/db/schema/import-rows';
 import { withTenant, type Tx } from '@/db/tenant';
 import type { Database } from '@/db/client';
@@ -12,6 +12,7 @@ import type {
   FixedIncomeContractPort,
   FixedIncomeIndexer,
 } from '@/core/valuation/ports';
+import type { ContractTermsPort } from '@/core/valuation/supply-contract-terms';
 import type { FixedIncomeContractWriterPort } from '@/core/ingestion/ports';
 
 /**
@@ -32,7 +33,7 @@ import type { FixedIncomeContractWriterPort } from '@/core/ingestion/ports';
  * ignores it and relies on RLS.
  */
 export class DrizzleFixedIncomeContractRepository
-  implements FixedIncomeContractPort, FixedIncomeContractWriterPort
+  implements FixedIncomeContractPort, FixedIncomeContractWriterPort, ContractTermsPort
 {
   constructor(
     private readonly tx: Tx | Database,
@@ -47,7 +48,22 @@ export class DrizzleFixedIncomeContractRepository
     return row ? toDomain(row) : null;
   }
 
-  /** AR-19: `ON CONFLICT (user_id, asset_id)` — a retried commit updates the one row rather than duplicating it. */
+  /**
+   * AR-19: `ON CONFLICT (user_id, asset_id)` — a retried commit updates the
+   * one row rather than duplicating it.
+   *
+   * SPEC-020 BR-020-19 — `indexer`/`rate` use `COALESCE(new, existing)`
+   * rather than a plain overwrite. Without it, a user who supplies the rate
+   * `supplyContractTermsFor` was built for and then re-imports the same
+   * Posição — ordinary usage, not an edge case: BR-020-21 has them import
+   * their whole history, and a bank statement's fixed-income tab does not
+   * always carry a readable indexer — would have the re-import silently
+   * write the extract's `null` back over the value the user just typed,
+   * reopening the exact gate they had just closed. Every other column keeps
+   * the previous plain-overwrite behaviour: `issueDate`/`maturityDate`/
+   * `principal`/`source` are B3's own data, not something a user supplies by
+   * hand, so the newer extract is still the more trustworthy source for them.
+   */
   async upsertByAsset(input: {
     assetId: AssetId;
     indexer: FixedIncomeIndexer | null;
@@ -75,8 +91,18 @@ export class DrizzleFixedIncomeContractRepository
       .onConflictDoUpdate({
         target: [fixedIncomeContracts.userId, fixedIncomeContracts.assetId],
         set: {
-          indexer: input.indexer,
-          rate: input.ratePercent,
+          // The indexer and the rate are one fact — "110" means nothing without
+          // "% do CDI". Three cases, in order:
+          //  1. the extract carries both → it replaces the pair;
+          //  2. the stored pair is complete (read earlier, or supplied on
+          //     `/fixed-income/[assetId]`) → it is kept whole. A per-column
+          //     merge let an extract's lone "CDI" land beside a user's IPCA + 6,
+          //     producing 6% of CDI with no gate left to reveal it;
+          //  3. the stored pair is incomplete → take whatever the extract could
+          //     read, column by column, so a readable indexer is not thrown
+          //     away and the rate form opens pre-filled with it.
+          indexer: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.indexer WHEN ${fixedIncomeContracts.indexer} IS NOT NULL AND ${fixedIncomeContracts.rate} IS NOT NULL THEN ${fixedIncomeContracts.indexer} ELSE COALESCE(excluded.indexer, ${fixedIncomeContracts.indexer}) END`,
+          rate: sql`CASE WHEN excluded.indexer IS NOT NULL AND excluded.rate IS NOT NULL THEN excluded.rate WHEN ${fixedIncomeContracts.indexer} IS NOT NULL AND ${fixedIncomeContracts.rate} IS NOT NULL THEN ${fixedIncomeContracts.rate} ELSE COALESCE(excluded.rate, ${fixedIncomeContracts.rate}) END`,
           issueDate: input.issueDate,
           maturityDate: input.maturityDate,
           principal: input.principal,
@@ -84,6 +110,24 @@ export class DrizzleFixedIncomeContractRepository
           updatedAt: new Date(),
         },
       });
+  }
+
+  /**
+   * SPEC-020 BR-020-19 / `ContractTermsPort` — the write behind the
+   * fixed-income gate's resolution screen. Unlike `upsertByAsset`, this is a
+   * plain overwrite: the user is supplying the terms directly, not an
+   * extract that might carry a `null`, so there is nothing to preserve
+   * against.
+   */
+  async updateTerms(input: {
+    readonly assetId: AssetId;
+    readonly indexer: FixedIncomeIndexer;
+    readonly ratePercent: Quantity;
+  }): Promise<void> {
+    await this.tx
+      .update(fixedIncomeContracts)
+      .set({ indexer: input.indexer, rate: input.ratePercent, updatedAt: new Date() })
+      .where(eq(fixedIncomeContracts.assetId, input.assetId));
   }
 }
 

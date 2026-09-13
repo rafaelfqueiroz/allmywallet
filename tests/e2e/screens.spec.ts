@@ -21,6 +21,10 @@ const ROUTES = [
   // every other route; the populated page's own axe pass is
   // `dashboard.spec.ts`, which can sign in.
   '/dashboard',
+  // #97 (SPEC-020) — the guided first run. Same reasoning as `/dashboard`
+  // immediately above: the signed-in guide's own axe pass is
+  // `onboarding.spec.ts`.
+  '/onboarding',
   '/wallets',
   // SPEC-006 #9 — added when the ledger got a surface. Both render their
   // signed-out state here, which is the state this suite runs in.

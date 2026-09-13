@@ -114,4 +114,50 @@ describe('AppShell', () => {
 
     expect(await audit(baseElement)).toHaveNoViolations();
   });
+
+  /**
+   * SPEC-020 BR-020-13 — the help entry point. `helpAction` is optional so a
+   * shell rendered with none (a test, a future route group) does not gain a
+   * dead button; every real render (`authenticated-frame.tsx`) always passes
+   * one.
+   */
+  describe('the help entry point (SPEC-020 BR-020-13)', () => {
+    it('renders no help entry when no action is supplied', () => {
+      pathname.current = '/wallets';
+      render(<AppShell>conteúdo</AppShell>);
+      expect(
+        screen.queryByRole('button', { name: 'Guia de primeiros passos' }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('submits the action rather than navigating, so reopening is never a GET', async () => {
+      pathname.current = '/wallets';
+      const user = userEvent.setup();
+      const helpAction = vi.fn().mockResolvedValue(undefined);
+      render(<AppShell helpAction={helpAction}>conteúdo</AppShell>);
+
+      const button = screen.getByRole('button', { name: 'Guia de primeiros passos' });
+      expect(button.closest('form')).toBeInTheDocument();
+      expect(button).not.toHaveAttribute('href');
+
+      await user.click(button);
+      await waitFor(() => expect(helpAction).toHaveBeenCalled());
+    });
+
+    it('keeps the label reachable by a screen reader when the sidebar is collapsed', async () => {
+      pathname.current = '/wallets';
+      const user = userEvent.setup();
+      render(<AppShell helpAction={vi.fn()}>conteúdo</AppShell>);
+
+      await user.click(screen.getByRole('button', { name: 'Recolher menu lateral' }));
+
+      expect(screen.getByRole('button', { name: 'Guia de primeiros passos' })).toBeInTheDocument();
+    });
+
+    it('has no axe violations with the help entry present', async () => {
+      pathname.current = '/wallets';
+      const { container } = render(<AppShell helpAction={vi.fn()}>conteúdo</AppShell>);
+      expect(await audit(container)).toHaveNoViolations();
+    });
+  });
 });

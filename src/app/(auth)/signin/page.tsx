@@ -25,12 +25,16 @@ export default function SignInPage() {
     // #37 the root is a marketing page, and landing a user who has just signed
     // in on the pitch that persuaded them to is a dead end.
     //
-    // **This is the whole landing for now, on purpose.** BR-001-04's exact
-    // words are "routes to onboarding", and #97 (SPEC-020) adds that
-    // divergence — first sign-in to the guided flow, returning users straight
-    // here. #98 deliberately makes the dashboard everyone's landing first, so
-    // the two changes stay separable and the four rules that need a dashboard
-    // stop waiting on the onboarding flow to be built.
+    // **The onboarding divergence lives one hop downstream, not here.**
+    // BR-001-04's exact words are "routes to onboarding", and #97 (SPEC-020)
+    // meets that in `(app)/dashboard/page.tsx`: every sign-in still lands on
+    // `/dashboard`, which redirects on to `/onboarding` when
+    // `loadOnboardingStatus` says `shouldGuide` — a first run with no
+    // dismissal. A returning user, or one who dismissed the guide, falls
+    // straight through. Keeping the divergence there rather than here is what
+    // let #98 land the dashboard as everyone's landing first and #97 add the
+    // branch afterwards without this file, or BR-001-04's own redirect target,
+    // changing at all.
     await signIn('google', { redirectTo: '/dashboard' });
   }
 

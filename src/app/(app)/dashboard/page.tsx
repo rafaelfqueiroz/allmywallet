@@ -1,7 +1,9 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { formatBusinessDate, formatDateTime } from '@/i18n/format';
 import { loadDashboard } from '@/app/(app)/dashboard/data';
+import { loadOnboardingStatus } from '@/app/(app)/onboarding/data';
 import { tryUserId } from '@/lib/session';
 import { AttentionQueue } from '@/app/(app)/dashboard/_components/AttentionQueue';
 import { ReconciliationStatus } from '@/app/(app)/dashboard/_components/ReconciliationStatus';
@@ -52,6 +54,21 @@ export default async function DashboardPage() {
       </PageShell>
     );
   }
+
+  /**
+   * SPEC-020 BR-020-02/BR-001-04 — "first successful sign-in routes to
+   * onboarding." `shouldGuide` is `!complete && !dismissed` (BR-020-03,
+   * BR-020-12): a returning user who already has a committed import, and a
+   * user who dismissed the guide, both fall straight through to the dashboard
+   * built below — this redirect fires only for the genuine first run.
+   *
+   * Checked ahead of `loadDashboard` rather than after: the two loaders read
+   * an overlapping but different slice of the same tenant, and a page that
+   * built the whole dashboard body before deciding to leave would pay that
+   * cost on every first sign-in for nothing rendered.
+   */
+  const onboarding = await loadOnboardingStatus(userId);
+  if (onboarding.shouldGuide) redirect('/onboarding');
 
   const { summary } = await loadDashboard(userId);
   const { portfolio, freshness, reconciliation, attention, attentionTotal } = summary;

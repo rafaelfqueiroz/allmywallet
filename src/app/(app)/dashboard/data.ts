@@ -11,6 +11,7 @@ import {
 } from '@/core/dashboard/summary';
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
 import { DrizzleImportRowRepository } from '@/adapters/db/import-row-repository';
+import { DrizzleOnboardingFactsRepository } from '@/adapters/db/onboarding-repository';
 import { DrizzleReportDataPort } from '@/app/(app)/reports/data';
 import { buildWalletDeps } from '@/app/(app)/wallets/composition';
 import { db } from '@/db/client';
@@ -100,6 +101,7 @@ export async function loadDashboard(
       const port = new DrizzleReportDataPort(tx, userId, clock);
       const batches = new DrizzleImportBatchRepository(tx, userId);
       const rows = new DrizzleImportRowRepository(tx, userId);
+      const onboardingFacts = new DrizzleOnboardingFactsRepository(tx);
       const walletDeps = buildWalletDeps(tx, userId);
 
       const [
@@ -110,6 +112,7 @@ export async function loadDashboard(
         hasEverHeldAnything,
         delayMinutes,
         thresholdDays,
+        onboarding,
       ] = await Promise.all([
         batches.listCommitted(),
         rows.countNeedsAttentionByBatch(),
@@ -125,6 +128,9 @@ export async function loadDashboard(
         // setting wins over the deployment default here exactly as it does on
         // `/import` and in the reminder job.
         resolveConfig('import.staleness_days', { db: tx, userId }),
+        // SPEC-020 BR-020-16/19 — counts only (no ledger replay), same as
+        // every other read on this screen.
+        onboardingFacts.readFacts(),
       ]);
 
       /**
@@ -185,6 +191,7 @@ export async function loadDashboard(
           reconciliation: latestReconciliation(committed),
           pending,
           unclassified,
+          contractsMissingRate: onboarding.contractsMissingRate,
           assetLabels,
         }),
       };

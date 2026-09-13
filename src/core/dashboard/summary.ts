@@ -6,6 +6,7 @@ import type { ReportHolding } from '@/core/reporting/ports';
 import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import { daysSinceImport, isImportStale } from '@/core/ingestion/staleness';
+import type { ContractMissingRate } from '@/core/onboarding/ports';
 import type { PendingAllocation } from '@/core/wallets/pending';
 
 /**
@@ -311,6 +312,18 @@ export type AttentionItem =
       readonly count: number;
     }
   | {
+      /**
+       * SPEC-020 BR-020-16/19 — a held fixed-income contract whose indexer or
+       * rate could not be read. Valued at cost (SPEC-009 BR-009-13), so the
+       * headline above is understated until the user supplies it.
+       */
+      readonly kind: 'fixed_income_rate';
+      readonly assetId: AssetId;
+      readonly assetCode: string | null;
+      /** `false` when no position has been imported yet — see `ContractMissingRate.held`. */
+      readonly held: boolean;
+    }
+  | {
       readonly kind: 'pending_allocation';
       readonly assetId: AssetId;
       /**
@@ -366,7 +379,9 @@ export interface DashboardSummary {
 }
 
 /**
- * How many queue items the dashboard shows before deferring to `/wallets`.
+ * How many **purchases awaiting allocation** the dashboard shows before
+ * deferring to `/wallets`. Data-quality gates are never capped: see
+ * `attentionQueue` for why.
  *
  * **A cap is necessary here and nowhere else**, because the ordinary first-week
  * state produces one item per held asset: a user who has imported a full
@@ -408,6 +423,13 @@ export interface DashboardSummaryInput {
   readonly reconciliation: ReconciliationSource | null;
   readonly pending: readonly PendingAllocation[];
   readonly unclassified: readonly ImportRowAttentionCount[];
+  /**
+   * SPEC-020 BR-020-16/19 — held fixed-income contracts with no readable
+   * indexer or rate. `core/onboarding`'s own read (BR-020-07's query), passed
+   * in rather than re-derived here, for the same reason `unclassified` and
+   * `pending` are: this module assembles a queue, it does not compute one.
+   */
+  readonly contractsMissingRate: readonly ContractMissingRate[];
   /** Asset code and name for the queue's labels, keyed by id. */
   readonly assetLabels: ReadonlyMap<AssetId, AssetLabel>;
 }
@@ -415,46 +437,68 @@ export interface DashboardSummaryInput {
 /**
  * BR-010-12's queue, assembled.
  *
- * **Unclassified rows lead, and the order is an argument rather than a
- * preference.** A row left `unclassified` is stored and inert everywhere else
- * (SPEC-006 DL-006-06): it is excluded from the replay that produced the
- * positions, so it makes *every figure on this screen* understated, including
- * the headline directly above the queue. A holding awaiting allocation is
- * already inside that total and is only missing a filing decision — nothing on
- * the screen is wrong because of it. So the item that changes the numbers is
- * listed before the item that does not.
+ * **Outstanding import rows and unpriced fixed-income contracts lead, in that
+ * order, and the order is an argument rather than a preference.** Both make
+ * the figures directly above the queue wrong: a row left `unclassified` or
+ * `invalid` is stored and inert everywhere else (SPEC-006 DL-006-06), excluded
+ * from the replay that produced the positions — in a direction nobody can
+ * know, since it is precisely the row that could not be read — and a contract
+ * with no readable rate cannot be accrued (SPEC-009 BR-009-13) and sits at
+ * cost instead (SPEC-020 BR-020-19). A holding awaiting allocation is already
+ * inside that total and is only missing a filing decision — nothing on the
+ * screen is wrong because of it. So the two kinds that change the numbers are
+ * listed before the kind that does not; between the two, import rows lead
+ * because they are what SPEC-005 already surfaced first, on
+ * `/import/[batchId]`.
  *
  * Zero-count batches are dropped rather than rendered as "0 linhas": an empty
  * queue must be able to mean "nothing to do", and a row saying there is nothing
  * to do in it is the same noise the queue exists to remove.
  *
- * The full list is built and then capped, so `total` is the honest count rather
- * than "five or fewer" — and because the cap is applied *after* the ordering
- * above, the items that make the figures wrong can never be the ones pushed
- * out.
+ * **Only pending allocations are capped.** The cap exists for the first-week
+ * flood of one allocation per holding, and its overflow link goes to
+ * `/wallets`, which is where those are resolved. A gate hidden behind that link
+ * would be a gate with no route to the one screen that resolves it (SPEC-020
+ * BR-020-18) — `/wallets` cannot supply a rate or classify a row. Gates are few
+ * by nature (one per batch, one per unreadable contract), so all of them are
+ * listed and the allocations fill whatever room is left. `total` stays the
+ * honest count.
  */
 function attentionQueue(input: DashboardSummaryInput): {
   readonly items: readonly AttentionItem[];
   readonly total: number;
 } {
-  const items: AttentionItem[] = [];
+  const gates: AttentionItem[] = [];
 
   for (const batch of input.unclassified) {
     if (batch.count <= 0) continue;
-    items.push({ kind: 'import_rows', batchId: batch.batchId, count: batch.count });
+    gates.push({ kind: 'import_rows', batchId: batch.batchId, count: batch.count });
   }
 
-  for (const pending of input.pending) {
-    items.push({
-      kind: 'pending_allocation',
-      assetId: pending.assetId,
-      assetCode: input.assetLabels.get(pending.assetId)?.code ?? null,
-      quantity: pending.unassignedQuantity,
-      reason: pending.reason,
+  for (const contract of input.contractsMissingRate) {
+    // The contract's own code, not `assetLabels`: an asset with no position
+    // yet is not in the holding set the labels come from.
+    gates.push({
+      kind: 'fixed_income_rate',
+      assetId: contract.assetId,
+      assetCode: contract.assetCode,
+      held: contract.held,
     });
   }
 
-  return { items: items.slice(0, ATTENTION_QUEUE_LIMIT), total: items.length };
+  const pending: AttentionItem[] = input.pending.map((item) => ({
+    kind: 'pending_allocation',
+    assetId: item.assetId,
+    assetCode: input.assetLabels.get(item.assetId)?.code ?? null,
+    quantity: item.unassignedQuantity,
+    reason: item.reason,
+  }));
+
+  const room = Math.max(ATTENTION_QUEUE_LIMIT - gates.length, 0);
+  return {
+    items: [...gates, ...pending.slice(0, room)],
+    total: gates.length + pending.length,
+  };
 }
 
 /**

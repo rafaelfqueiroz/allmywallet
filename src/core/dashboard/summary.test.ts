@@ -17,6 +17,7 @@ import {
 } from '@/core/reporting/test-support';
 import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
 import type { Discrepancy, ReconciliationReport } from '@/core/ingestion/reconcile';
+import type { ContractMissingRate } from '@/core/onboarding/ports';
 import type { PendingAllocation } from '@/core/wallets/pending';
 import {
   ATTENTION_QUEUE_LIMIT,
@@ -96,6 +97,7 @@ function input(overrides: Partial<DashboardSummaryInput> & { query: ReportQueryR
     reconciliation: null,
     pending: [] as readonly PendingAllocation[],
     unclassified: [] as readonly ImportRowAttentionCount[],
+    contractsMissingRate: [] as readonly ContractMissingRate[],
     assetLabels: LABELS,
     ...overrides,
   } satisfies DashboardSummaryInput;
@@ -592,6 +594,61 @@ describe('needs attention (BR-010-12)', () => {
     ]);
   });
 
+  /**
+   * SPEC-020 BR-020-16/19 — a held fixed-income contract with no readable
+   * rate understates the headline exactly as an unclassified row does, so it
+   * sits between `import_rows` and `pending_allocation` in the ordering —
+   * never a second queue (BR-020-15).
+   */
+  it('lists a missing fixed-income rate between import rows and pending allocations', async () => {
+    const query = await queryFor([{ assetId: PETR }, { assetId: VALE }]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        unclassified: [{ batchId: BATCH, count: 3 }],
+        contractsMissingRate: [{ assetId: VALE, assetCode: 'VALE3', held: true }],
+        pending: [
+          { assetId: PETR, unassignedQuantity: Quantity.fromString('40'), reason: 'no_wallet' },
+        ],
+      }),
+    );
+
+    expect(summary.attention).toEqual([
+      { kind: 'import_rows', batchId: BATCH, count: 3 },
+      { kind: 'fixed_income_rate', assetId: VALE, assetCode: 'VALE3', held: true },
+      {
+        kind: 'pending_allocation',
+        assetId: PETR,
+        assetCode: 'PETR4',
+        quantity: Quantity.fromString('40'),
+        reason: 'no_wallet',
+      },
+    ]);
+  });
+
+  /**
+   * PR #102 review — a Posição committed before the Movimentação carrying the
+   * application leaves a contract with no position, so the holding set has no
+   * label for it. The contract's own code is used, and `held` travels with
+   * the item so the queue can state the right consequence.
+   */
+  it('labels a missing rate from the contract when the asset is not in the holding set', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        assetLabels: new Map(),
+        contractsMissingRate: [{ assetId: VALE, assetCode: 'CDB-POSICAO', held: false }],
+      }),
+    );
+
+    expect(summary.attention).toEqual([
+      { kind: 'fixed_income_rate', assetId: VALE, assetCode: 'CDB-POSICAO', held: false },
+    ]);
+  });
+
   it('carries each pending reason so the queue can say why', async () => {
     const query = await queryFor([{ assetId: PETR }, { assetId: VALE }]);
 
@@ -647,9 +704,35 @@ describe('needs attention (BR-010-12)', () => {
     expect(summary.attentionTotal).toBe(40);
   });
 
+  /**
+   * SPEC-020 BR-020-18 — the overflow link goes to `/wallets`, which resolves
+   * allocations and nothing else. A gate hidden behind it would have no route
+   * to the one screen that fixes it, so gates are never capped.
+   */
+  it('lists every gate even past the cap, and caps only pending allocations', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+    const contractsMissingRate = Array.from({ length: 6 }, (_, index) => ({
+      assetId: assetIdOf(String(index + 60)),
+      assetCode: `CDB${index}`,
+      held: true,
+    }));
+    const pending = Array.from({ length: 4 }, (_, index) => ({
+      assetId: assetIdOf(String(index + 10)),
+      unassignedQuantity: Quantity.fromString('1'),
+      reason: 'no_wallet' as const,
+    }));
+
+    const summary = buildDashboardSummary(input({ query, contractsMissingRate, pending }));
+
+    expect(summary.attention.map((item) => item.kind)).toEqual(
+      Array.from({ length: 6 }, () => 'fixed_income_rate'),
+    );
+    expect(summary.attentionTotal).toBe(10);
+  });
+
   it('never lets the cap push out the items that make the figures wrong', async () => {
     // An unclassified row is excluded from the replay behind every position, so
-    // it understates the headline; a pending allocation is already inside that
+    // the headline may be wrong; a pending allocation is already inside that
     // total. If the cap could drop the first kind in favour of the second, the
     // ordering above would be decorative.
     const query = await queryFor([{ assetId: PETR }]);

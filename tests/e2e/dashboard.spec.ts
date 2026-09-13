@@ -3,6 +3,12 @@ import { Pool } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
+import {
+  dismissOnboarding,
+  seedCommittedImportBatch,
+  seedUnclassifiedImportRows,
+} from './support/onboarding';
+import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
 
 /**
  * #98 — the authenticated landing screen, over the real stack.
@@ -16,6 +22,18 @@ import { seedHoldings } from './support/holdings';
  *
  * TS-25: user-visible outcomes only. The read model's own branches are
  * `src/core/dashboard/summary.test.ts` and `tests/integration/dashboard.test.ts`.
+ *
+ * **SPEC-020 BR-020-02 changed who reaches this page at all.** A signed-in
+ * fresh tenant now redirects to `/onboarding` before this file's dashboard
+ * ever renders — `tests/e2e/onboarding.spec.ts` is where that redirect and
+ * the guided flow it leads to are asserted. Every test below is about the
+ * dashboard itself, not about onboarding, so each one seeds whichever of the
+ * two facts that stop the redirect (`dismissOnboarding` or
+ * `seedCommittedImportBatch`, `support/onboarding.ts`) actually matches its
+ * own intent — a committed import for "a returning user", a dismissal for
+ * everything that is testing the dashboard's *own* empty state or its
+ * populated rendering, per BR-020-14: "a dismissed guide with no import still
+ * shows the dashboard empty state."
  */
 
 const MIGRATION_URL =
@@ -53,10 +71,16 @@ test.describe('the dashboard', () => {
    * destination `signIn()` is configured with and the only half of the OAuth
    * flow this suite can drive (TS-26, and `support/authenticated.ts`'s header on
    * why the handshake itself cannot be tested here).
+   *
+   * A *returning* user (SPEC-020 BR-020-03: a committed import), so the claim
+   * under test — "not the ledger" — is not confounded with BR-020-02's
+   * separate first-run redirect to `/onboarding`, which
+   * `onboarding.spec.ts`'s own root-redirect test covers.
    */
   test('a signed-in visitor to the root lands on the dashboard, not the ledger', async ({
     signedIn,
   }) => {
+    await seedCommittedImportBatch(signedIn.userId);
     await signedIn.page.goto('/');
 
     await expect(signedIn.page).toHaveURL(/\/dashboard$/);
@@ -76,6 +100,10 @@ test.describe('the dashboard', () => {
    * of them is the real claim: nothing on this screen states an amount.
    */
   test('a first-run user meets an explanation, and no figure at all', async ({ signedIn }) => {
+    // BR-020-14 — a dismissed guide with no import still shows this exact
+    // empty state; a fresh, non-dismissed visit is BR-020-02's onboarding
+    // redirect instead, asserted in `onboarding.spec.ts`.
+    await dismissOnboarding(signedIn.userId);
     await signedIn.page.goto('/dashboard');
 
     await expect(signedIn.page.getByRole('status').first()).toBeVisible();
@@ -96,6 +124,10 @@ test.describe('the dashboard', () => {
     await seedHoldings(signedIn.userId, [
       { code: 'DASH', quantity: '10', averageCost: '20.00', price: '25.00' },
     ]);
+    // BR-020-02 — this tenant never imported (the holding was seeded directly
+    // into the position cache), so without a dismissal it would redirect to
+    // `/onboarding` before any of this screen rendered.
+    await dismissOnboarding(signedIn.userId);
 
     await signedIn.page.goto('/dashboard');
 
@@ -123,6 +155,7 @@ test.describe('the dashboard', () => {
     const [code] = await seedHoldings(signedIn.userId, [
       { code: 'PEND', quantity: '10', averageCost: '20.00', price: '25.00' },
     ]);
+    await dismissOnboarding(signedIn.userId);
 
     await signedIn.page.goto('/dashboard');
 
@@ -131,6 +164,72 @@ test.describe('the dashboard', () => {
     ).toBeVisible();
     await expect(signedIn.page.getByText(code!)).toBeVisible();
     await expect(signedIn.page.getByText('Nenhuma carteira reivindicou este ativo.')).toBeVisible();
+  });
+
+  /**
+   * SPEC-020 BR-020-16/18/19 — the third "Needs attention" kind #97 added: a
+   * held fixed-income contract whose rate could not be read. Every gate has
+   * to state its cause, its consequence, and a link to the one screen that
+   * resolves it (`describeGate`) — asserted here against the rendered queue,
+   * not only in `core/onboarding/gates.test.ts`, because the mapping from
+   * `GateResolution` to a route lives in `AttentionQueue.tsx` itself
+   * (`core/` never names routes) and has no other test that can see it.
+   */
+  test('shows the fixed-income rate gate with its consequence and a link to the rate form', async ({
+    signedIn,
+  }) => {
+    const { assetId, code } = await seedHeldFixedIncomeWithMissingRate(signedIn.userId, 'CDBQ');
+    await dismissOnboarding(signedIn.userId);
+
+    await signedIn.page.goto('/dashboard');
+
+    await expect(
+      signedIn.page.getByRole('heading', { name: 'Precisa da sua atenção' }),
+    ).toBeVisible();
+    // Scoped to the gate's own row: a held CDB in no wallet is *also* awaiting
+    // allocation, so its code legitimately appears twice in the one queue.
+    const gate = signedIn.page
+      .getByRole('listitem')
+      .filter({ has: signedIn.page.getByRole('link', { name: 'Informar taxa' }) });
+    await expect(gate).toHaveCount(1);
+    // The cause: which asset.
+    await expect(gate.getByText(code)).toBeVisible();
+    // BR-020-19 — the consequence, stated plainly.
+    await expect(
+      gate.getByText(/patrimônio acima está subestimado até você informá-la/),
+    ).toBeVisible();
+    // The resolution: one link, to the one screen that fixes it.
+    const link = gate.getByRole('link', { name: 'Informar taxa' });
+    await expect(link).toHaveAttribute('href', `/fixed-income/${assetId}`);
+
+    await link.click();
+    await expect(signedIn.page).toHaveURL(`/fixed-income/${assetId}`);
+    await expect(signedIn.page.getByRole('heading', { level: 1 })).toBeVisible();
+  });
+
+  /**
+   * SPEC-020 AC-10 / BR-020-18 — the import-rows gate carries the same three
+   * elements as the fixed-income one, asserted on the rendered row. Its
+   * consequence claims unreliability, never a direction: an excluded row may
+   * be a purchase or an outflow.
+   */
+  test('shows the import-rows gate with its consequence and a link to the batch', async ({
+    signedIn,
+  }) => {
+    const { batchId } = await seedUnclassifiedImportRows(signedIn.userId, 2);
+
+    await signedIn.page.goto('/dashboard');
+
+    const gate = signedIn.page
+      .getByRole('listitem')
+      .filter({ has: signedIn.page.getByRole('link', { name: 'Revisar' }) });
+    await expect(gate).toHaveCount(1);
+    await expect(gate.getByText('2 linhas importadas precisam de revisão')).toBeVisible();
+    await expect(gate.getByText(/podem estar incorretos, para mais ou para menos/)).toBeVisible();
+    await expect(gate.getByRole('link', { name: 'Revisar' })).toHaveAttribute(
+      'href',
+      `/import/${batchId}`,
+    );
   });
 
   /**
@@ -143,6 +242,9 @@ test.describe('the dashboard', () => {
     await seedHoldings(signedIn.userId, [
       { code: 'RECO', quantity: '10', averageCost: '20.00', price: '25.00' },
     ]);
+    // Not yet a committed batch at this point (that happens below), so a
+    // dismissal is what keeps this first `goto` off the onboarding redirect.
+    await dismissOnboarding(signedIn.userId);
 
     await signedIn.page.goto('/dashboard');
     await expect(signedIn.page.getByText('Nunca conferido')).toBeVisible();
@@ -179,6 +281,10 @@ test.describe('the dashboard', () => {
    * on the screen a user lands on, that is the whole product's front door.
    */
   test('is navigable by keyboard alone', async ({ signedIn }) => {
+    // BR-020-02 — otherwise a fresh, non-dismissed visit redirects to
+    // `/onboarding` before this screen renders at all; that keyboard pass is
+    // `onboarding.spec.ts`'s own.
+    await dismissOnboarding(signedIn.userId);
     await signedIn.page.goto('/dashboard');
 
     await signedIn.page.keyboard.press('Tab');

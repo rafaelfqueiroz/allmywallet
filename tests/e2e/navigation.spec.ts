@@ -45,4 +45,23 @@ test.describe('application navigation', () => {
     await page.keyboard.press('Tab');
     await expect(page.getByRole('link', { name: 'Pular para o conteúdo' })).toBeFocused();
   });
+
+  /**
+   * SPEC-020 BR-020-13 — the help entry point reopens the guide for a signed-in
+   * account. This suite runs signed out (no `signedIn` fixture — every route in
+   * `(app)/` renders regardless of session, per `screens.spec.ts`'s own
+   * header), so its absence here is the other half of that rule: nothing on
+   * this shell should offer to reopen a guide for a visitor who has not signed
+   * in to have one, and `reopenOnboardingAction`'s `requireUserId()` would
+   * simply throw if it did (`authenticated-frame.tsx`'s own comment).
+   */
+  test('offers no help entry to a visitor with no session', async ({ page, viewport }) => {
+    await page.goto('/wallets');
+
+    if (viewport && isMobile(viewport.width)) {
+      await page.getByRole('button', { name: 'Abrir menu' }).click();
+    }
+
+    await expect(page.getByRole('button', { name: 'Guia de primeiros passos' })).not.toBeVisible();
+  });
 });
