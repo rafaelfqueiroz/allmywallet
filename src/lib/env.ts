@@ -74,6 +74,16 @@ const envSchema = z.object({
    * none) — files are named by `batchId` alone.
    */
   IMPORT_UPLOAD_DIR: z.string().default('.data/imports'),
+
+  /**
+   * SPEC-021 BR-021-34 — the transactional email provider's credential and
+   * sender. Secrets, so here rather than in the registry (AR-43); *which*
+   * provider sends is `notifications.email_provider`, which is registry config.
+   * Optional because only a deployment that selects `resend` needs them —
+   * `buildOpportunityNotifier` refuses to build that adapter without both.
+   */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().min(3).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

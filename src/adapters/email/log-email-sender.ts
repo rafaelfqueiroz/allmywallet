@@ -2,9 +2,9 @@ import type { Clock } from '@/core/shared/clock';
 import type { UserId } from '@/core/shared/ids';
 import type { OpportunityAlert, OpportunityNotifier } from '@/core/opportunity/ports';
 import { hashUserId, logger } from '@/lib/logger';
-import { env } from '@/lib/env';
 import { signUnsubscribeToken } from '@/lib/unsubscribe-token';
 import { renderOpportunityEmail } from '@/adapters/email/opportunity-email';
+import { appOrigin } from '@/adapters/email/app-origin';
 
 /**
  * SPEC-018 BR-018-25/DL-018-07 — the interim implementation, in the exact
@@ -60,24 +60,4 @@ export class LogEmailSender implements OpportunityNotifier {
       'SPEC-018 BR-018-25/DL-018-07: opportunity state change — email rendered, not sent (no email provider configured)',
     );
   }
-}
-
-/**
- * `AUTH_URL` (SPEC-001 #42) is `https://host/api/auth` — `URL.origin` strips
- * the path, which is exactly the canonical public origin a link in an email
- * needs. Falls back to a local default outside production, where `AUTH_URL`
- * is legitimately unset (`src/lib/trusted-host.ts`).
- */
-function appOrigin(): string {
-  const authUrl = env().AUTH_URL;
-  if (authUrl !== undefined) {
-    try {
-      return new URL(authUrl).origin;
-    } catch {
-      // Falls through to the local default below — an unparsable AUTH_URL is
-      // already a startup-time failure elsewhere (`assertTrustedHostConfigured`);
-      // this function only ever renders a link, it does not gate a deploy.
-    }
-  }
-  return 'http://localhost:3000';
 }

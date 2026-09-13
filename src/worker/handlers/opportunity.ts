@@ -21,7 +21,7 @@ import {
   DrizzleHeldAssetReader,
   DrizzleStoredQuoteReader,
 } from '@/adapters/db/opportunity-read-adapters';
-import { LogEmailSender } from '@/adapters/email/log-email-sender';
+import { buildOpportunityNotifier } from '@/adapters/email/select-notifier';
 
 /**
  * SPEC-018 `opportunity.evaluate` — BR-018-11/DL-018-04. AR-04: a thin
@@ -71,7 +71,7 @@ export interface OpportunityHandlerDeps {
    * own doc comment for why an email must not be sent from inside something
    * that can still roll back.
    */
-  readonly notifier: OpportunityNotifier;
+  readonly notifier: OpportunityNotifier | undefined;
 }
 
 function resolveDeps(overrides?: Partial<OpportunityHandlerDeps>): OpportunityHandlerDeps {
@@ -85,13 +85,14 @@ function resolveDeps(overrides?: Partial<OpportunityHandlerDeps>): OpportunityHa
   // a call argument, not a constructor one.
   const quotes = new DrizzleStoredQuoteReader(database);
   const catalog = new DrizzleAssetCatalogRepository(database);
-  const notifier = new LogEmailSender(clock);
 
   return {
     database,
     clock,
     calendar,
-    notifier: overrides?.notifier ?? notifier,
+    // SPEC-021 BR-021-34: the real transport is chosen by config, which is an
+    // async read — so the default is resolved in the handler, not here.
+    notifier: overrides?.notifier,
     depsFor:
       overrides?.depsFor ??
       ((tx, userId) => ({
@@ -123,9 +124,11 @@ export async function handleOpportunityEvaluate(
   payload: OpportunityEvaluateJobPayload,
   overrides?: Partial<OpportunityHandlerDeps>,
 ): Promise<void> {
-  const { database, clock, calendar, depsFor, notifier } = resolveDeps(overrides);
+  const resolved = resolveDeps(overrides);
+  const { database, clock, calendar, depsFor } = resolved;
   const assetIds = payload.assetIds.map((id) => AssetId.of(id));
   if (assetIds.length === 0) return;
+  const notifier = resolved.notifier ?? (await buildOpportunityNotifier(database, clock));
 
   const now = clock.now();
   const sessionOpen = calendar.isSessionOpen(now);

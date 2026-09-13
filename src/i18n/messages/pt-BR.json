@@ -1,7 +1,13 @@
 {
   "app": {
     "name": "AllMyWallet",
-    "tagline": "Seus investimentos, em um só lugar"
+    "tagline": "Seus investimentos, em um só lugar",
+    "backupNotice": {
+      "title": "O último backup falhou",
+      "withLastSuccess": "O backup de {failedAt} não foi concluído: {reason}. O último backup bem-sucedido foi em {lastSuccessAt}.",
+      "withoutSuccess": "O backup de {failedAt} não foi concluído: {reason}. Ainda não existe nenhum backup bem-sucedido.",
+      "action": "Corrija a causa e rode scripts/personal/backup.sh — este aviso some quando um backup for concluído."
+    }
   },
   "marketing": {
     "meta": {

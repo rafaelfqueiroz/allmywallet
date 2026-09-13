@@ -40,7 +40,9 @@ export async function runPersonalCommand(argv: readonly string[]): Promise<strin
     return `recorded ${status}`;
   }
 
-  throw new Error(`unknown command "${command ?? ''}" — expected backup-retain-count or backup-record`);
+  throw new Error(
+    `unknown command "${command ?? ''}" — expected backup-retain-count or backup-record`,
+  );
 }
 
 if (process.argv[1]?.includes('ops') || process.argv[1]?.includes('personal-cli')) {

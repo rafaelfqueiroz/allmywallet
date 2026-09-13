@@ -113,7 +113,10 @@ export async function resetConsents(migrationUrl: string): Promise<void> {
 const OPPORTUNITY_TABLES = ['opportunity_notifications', 'opportunity_rules'] as const;
 
 export async function resetOpportunity(migrationUrl: string): Promise<void> {
-  await truncate(migrationUrl, `TRUNCATE ${OPPORTUNITY_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+  await truncate(
+    migrationUrl,
+    `TRUNCATE ${OPPORTUNITY_TABLES.join(', ')} RESTART IDENTITY CASCADE`,
+  );
 }
 
 /**

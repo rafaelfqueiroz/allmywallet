@@ -4,6 +4,8 @@ import { ThemeSync } from '@/components/patterns/theme';
 import { loadThemePreference } from '@/app/theme-data';
 import { reopenOnboardingAction } from '@/app/(app)/onboarding/actions';
 import { tryUserId } from '@/lib/session';
+import { loadFailedBackup } from '@/app/backup-status';
+import { BackupNotice } from '@/app/backup-notice';
 
 /**
  * What every signed-in route group renders around its pages: the navigation
@@ -33,12 +35,20 @@ import { tryUserId } from '@/lib/session';
  * gating on it here costs nothing further.
  */
 export async function AuthenticatedFrame({ children }: { children: ReactNode }) {
-  const [theme, userId] = await Promise.all([loadThemePreference(), tryUserId()]);
+  const [theme, userId, failedBackup] = await Promise.all([
+    loadThemePreference(),
+    tryUserId(),
+    loadFailedBackup(),
+  ]);
 
   return (
     <>
       {theme && <ThemeSync theme={theme} />}
-      <AppShell helpAction={userId ? reopenOnboardingAction : undefined}>{children}</AppShell>
+      <AppShell helpAction={userId ? reopenOnboardingAction : undefined}>
+        {/* SPEC-021 BR-021-20: shown on every signed-in screen until a backup succeeds. */}
+        {failedBackup && <BackupNotice failure={failedBackup} />}
+        {children}
+      </AppShell>
     </>
   );
 }

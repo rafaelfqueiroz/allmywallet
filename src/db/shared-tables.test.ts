@@ -27,6 +27,7 @@ describe('shared table declaration', () => {
     // why, rather than appending a string and watching the suite stay green.
     expect([...SHARED_TABLES].sort()).toEqual([
       'assets',
+      'backup_runs',
       'index_series',
       'institutions',
       'latest_quotes',
