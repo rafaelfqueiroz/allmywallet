@@ -35,7 +35,11 @@ export function AppShell({
   helpAction,
 }: {
   children: ReactNode;
-  helpAction?: (formData: FormData) => Promise<void>;
+  // `| undefined` explicit (DV-01/`exactOptionalPropertyTypes`): the caller
+  // computes this conditionally (signed in or not) and passes the result
+  // straight through, rather than being forced into a conditional spread for
+  // every render site.
+  helpAction?: ((formData: FormData) => Promise<void>) | undefined;
 }) {
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
