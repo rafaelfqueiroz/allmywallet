@@ -1,9 +1,14 @@
-import { and, asc, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, max } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import { latestQuotes, priceQuotes } from '@/db/schema/market';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
-import type { LatestQuote, PriceQuote, QuoteRepositoryPort } from '@/core/quotes/ports';
+import type {
+  LatestCloseDatePort,
+  LatestQuote,
+  PriceQuote,
+  QuoteRepositoryPort,
+} from '@/core/quotes/ports';
 import type { PriceHistoryPort } from '@/core/valuation/ports';
 
 /**
@@ -18,8 +23,26 @@ import type { PriceHistoryPort } from '@/core/valuation/ports';
  * what "the close" means; the ports stay separate so `core/valuation` depends
  * on the two methods it uses rather than on the write surface it must not.
  */
-export class DrizzleQuoteRepository implements QuoteRepositoryPort, PriceHistoryPort {
+export class DrizzleQuoteRepository
+  implements QuoteRepositoryPort, PriceHistoryPort, LatestCloseDatePort
+{
   constructor(private readonly db: Database) {}
+
+  /**
+   * SPEC-021 BR-021-28 — "the last recorded close capture", measured over the
+   * assets the caller polls. Restricted to those assets rather than the whole
+   * table because `tesouro.sync` writes Tesouro prices here too, on its own
+   * schedule: a Tesouro row from this morning must not make yesterday's
+   * missed equity close look captured.
+   */
+  async latestCloseDateAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null> {
+    if (assetIds.length === 0) return null;
+    const [row] = await this.db
+      .select({ latest: max(priceQuotes.date) })
+      .from(priceQuotes)
+      .where(inArray(priceQuotes.assetId, [...assetIds]));
+    return row?.latest ? BusinessDate.of(row.latest) : null;
+  }
 
   async getLatestQuote(assetId: AssetId): Promise<LatestQuote | null> {
     const [row] = await this.db

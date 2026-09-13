@@ -39,6 +39,13 @@ export const SHARED_TABLES: readonly string[] = [
   // process identity string and a timestamp, nothing derived from any
   // tenant's data. Same "holds no personal data" test as `runtime_state`.
   'worker_heartbeats',
+  // Added by SPEC-021 (BR-021-31), same reviewed-addition path as
+  // `quote_budget_usage` above. `price_quote_gaps` records that a market close
+  // for an asset on a date could not be recovered, and why — an asset id, a
+  // date and a reason code. It is the negative counterpart of `price_quotes`,
+  // which AR-15 already names shared: the same key, no user column, nothing
+  // derived from anyone's holdings.
+  'price_quote_gaps',
 ];
 
 /**

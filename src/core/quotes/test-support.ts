@@ -10,6 +10,10 @@ import type {
   BudgetCounterPort,
   BudgetKind,
   BudgetUsage,
+  CloseGap,
+  CloseGapRepositoryPort,
+  HistoricalClosesResult,
+  LatestCloseDatePort,
   HeldAssetsPort,
   IndexSeriesCode,
   IndexSeriesPointRecord,
@@ -123,9 +127,23 @@ export class FakeHeldAssetsPort implements HeldAssetsPort {
   }
 }
 
-export class FakeQuoteRepository implements QuoteRepositoryPort {
+export class FakeQuoteRepository implements QuoteRepositoryPort, LatestCloseDatePort {
   private readonly latest = new Map<AssetId, LatestQuote>();
   private readonly closes = new Map<string, PriceQuote>();
+
+  /** Every close written, in write order — lets a test assert *what* was written, not only the end state. */
+  readonly closeWrites: PriceQuote[] = [];
+
+  async latestCloseDateAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null> {
+    const wanted = new Set(assetIds);
+    let latest: BusinessDate | null = null;
+    for (const quote of this.closes.values()) {
+      if (wanted.has(quote.assetId) && (latest === null || quote.date > latest)) {
+        latest = quote.date;
+      }
+    }
+    return latest;
+  }
 
   async getLatestQuote(assetId: AssetId): Promise<LatestQuote | null> {
     return this.latest.get(assetId) ?? null;
@@ -141,20 +159,66 @@ export class FakeQuoteRepository implements QuoteRepositoryPort {
 
   async upsertClosePrice(quote: PriceQuote): Promise<void> {
     this.closes.set(`${quote.assetId}:${quote.date}`, quote);
+    this.closeWrites.push(quote);
+  }
+}
+
+/** SPEC-021 BR-021-31 — gaps keyed `(assetId, date)`, the same key the table uses. */
+export class FakeCloseGapRepository implements CloseGapRepositoryPort {
+  readonly gaps = new Map<string, CloseGap>();
+  readonly cleared: string[] = [];
+
+  async recordGap(gap: CloseGap): Promise<void> {
+    this.gaps.set(`${gap.assetId}:${gap.date}`, gap);
+  }
+
+  async clearGap(assetId: AssetId, date: BusinessDate): Promise<void> {
+    this.cleared.push(`${assetId}:${date}`);
+    this.gaps.delete(`${assetId}:${date}`);
   }
 }
 
 export class FakeQuoteProvider implements QuoteProvider {
+  /** Every provider request, live or historical — the figure budget assertions care about. */
   callCount = 0;
   calledTickers: string[] = [];
+  historicalCalls: { ticker: string; from: BusinessDate; to: BusinessDate }[] = [];
+  /** SPEC-021 BR-021-33 — lets a catch-up test prove the live-quote path was never asked. */
+  liveCallCount = 0;
   private readonly results = new Map<string, () => Result<QuoteProviderResult, DomainError>>();
+  private readonly histories = new Map<
+    string,
+    (from: BusinessDate, to: BusinessDate) => Result<HistoricalClosesResult, DomainError>
+  >();
 
   set(ticker: string, factory: () => Result<QuoteProviderResult, DomainError>): void {
     this.results.set(ticker, factory);
   }
 
+  setHistory(
+    ticker: string,
+    factory: (from: BusinessDate, to: BusinessDate) => Result<HistoricalClosesResult, DomainError>,
+  ): void {
+    this.histories.set(ticker, factory);
+  }
+
+  async fetchHistoricalCloses(
+    ticker: string,
+    from: BusinessDate,
+    to: BusinessDate,
+  ): Promise<Result<HistoricalClosesResult, DomainError>> {
+    this.callCount += 1;
+    this.historicalCalls.push({ ticker, from, to });
+    const factory = this.histories.get(ticker);
+    if (!factory) {
+      return err(domainError(QuoteProviderErrorCode.NOT_FOUND, { ticker }));
+    }
+    return factory(from, to);
+  }
+
   async fetchQuote(ticker: string): Promise<Result<QuoteProviderResult, DomainError>> {
     this.callCount += 1;
+    this.liveCallCount += 1;
     this.calledTickers.push(ticker);
     const factory = this.results.get(ticker);
     if (!factory) {

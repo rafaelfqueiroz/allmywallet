@@ -120,6 +120,13 @@
       "when": 1789236856339,
       "tag": "0016_users_onboarding_dismissed_at",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1789330365403,
+      "tag": "0017_price_quote_gaps",
+      "breakpoints": true
     }
   ]
 }
