@@ -90,7 +90,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
   const provisional = fromSearchParams(params, 'asset_class');
   const state = fromSearchParams(params, defaultGroupingFor(provisional.scope, undefined));
 
-  const { wallets, query, report } = await loadPatrimonio(userId, state);
+  const { wallets, query, report, closeGapDates } = await loadPatrimonio(userId, state);
 
   /**
    * SPEC-011 BR-011-02 / ADR-002 — the snapshot-derived half of the report,
@@ -236,16 +236,28 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                   <ValueChart
                     title={tp('chart.title')}
                     summary={<SeriesSummary points={history.series} label={tp('chart.summary')} />}
-                    points={history.series.map((point) => ({
-                      date: point.date,
-                      value: plot(point.value),
-                      estimated: point.estimated,
-                    }))}
+                    points={history.series.map((point) => {
+                      // SPEC-021 BR-021-31: a day whose close could not be
+                      // recovered is plotted as a break, not as the snapshot's
+                      // carried-forward figure. The table below still states
+                      // that figure, labelled by its basis.
+                      const gap = closeGapDates.has(point.date);
+                      return {
+                        date: point.date,
+                        value: gap ? null : plot(point.value),
+                        estimated: point.estimated,
+                        gap,
+                      };
+                    })}
                   />
                   {history.series.some((point) => point.estimated) && (
                     // BR-013-07 / DL-013-04: the marker sits with the chart, not in
                     // a footnote read once and forgotten.
                     <Badge variant="outline">{tp('estimated.badge')}</Badge>
+                  )}
+                  {history.series.some((point) => closeGapDates.has(point.date)) && (
+                    // SPEC-021 BR-021-31: the break in the line says *where*; this says *why*.
+                    <Badge variant="outline">{tp('gap.badge')}</Badge>
                   )}
                 </Stack>
               </Section>
