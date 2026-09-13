@@ -6,9 +6,9 @@ Loaded at the start of every session. Orientation and the rules that are expensi
 
 **AllMyWallet** — a web app for Brazilian retail investors to consolidate stocks, FIIs, BDRs, ETFs, Tesouro Direto, CDB, LCI and LCA into one ledger, group holdings into purpose-driven wallets, and report on performance, portfolio value, earnings and composition.
 
-**Current state: M0–M8 built.** Every PRD milestone through M8 is closed, including onboarding (SPEC-020, #97) and the dashboard (#98). The next milestone is **M9 — personal deployment** ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), [#104](https://github.com/rafaelfqueiroz/allmywallet/issues/104)): the product is not released, and runs as loopback-only **personal production** on its owner's laptop.
+**Current state: M0–M9 built.** Every PRD milestone is closed, including M9 — **personal deployment** ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), [#104](https://github.com/rafaelfqueiroz/allmywallet/issues/104)): the product is not released, and runs as loopback-only **personal production** on its owner's laptop, through `scripts/personal/` ([runbook](docs/runbooks/personal-instance.md)).
 
-**Do not load real data until #104 lands.** The refusal guard that stops `tests/support/reset.ts` truncating a real database does not exist yet, and the published image cannot run migrations. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written, for development.
+**The personal database is real data.** It carries the `allmywallet.instance_role = 'personal'` marker, and test reuse, resets and seeds refuse it (AR-72) — but never load the personal env file into a development shell. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) are for development.
 
 ## Where the artifacts live
 
@@ -17,7 +17,7 @@ Three surfaces, each with one job. **Do not duplicate content between them** —
 | Surface | Holds | Source of truth for |
 |---|---|---|
 | **[Wiki](https://github.com/rafaelfqueiroz/allmywallet/wiki)** | [PRD](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD), [21 specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs), [Spec-Template](https://github.com/rafaelfqueiroz/allmywallet/wiki/Spec-Template) | *What* to build and why |
-| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | #1–#3 deferred infra; #4–#19, #89–#91 and the M8 tasks closed; #20+ defects and follow-ups; **#104 open for M9** | *What is being built now* |
+| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | #1–#3 deferred infra; #4–#19, #89–#91, the M8 tasks and #104 closed; #20+ defects and follow-ups | *What is being built now* |
 | **This repo** | [`docs/guidelines/`](docs/guidelines/README.md) — architecture, development, testing | *How* to build it |
 
 Product documents are **edited in the wiki**, never mirrored here. Guidelines are edited here and reviewed in PRs.

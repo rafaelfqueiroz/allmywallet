@@ -78,7 +78,20 @@ pnpm worker:dev               # worker, separate terminal
 
 `pnpm` is the package manager; the lockfile is committed and CI uses `--frozen-lockfile`.
 
-> **This setup is development, and its database is disposable.** Your real portfolio runs separately, as the personal production instance ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), ARCHITECTURE AR-71–AR-75). Never load the personal env file into a development shell: `startTestDatabase` reuses whatever `DATABASE_MIGRATION_URL` it finds, and `tests/support/reset.ts` truncates through it. The refusal guard (AR-72) is the second barrier, not the first. Commands for the personal instance are documented here once [#104](https://github.com/rafaelfqueiroz/allmywallet/issues/104) lands them.
+> **This setup is development, and its database is disposable.** Your real portfolio runs separately, as the personal production instance ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), ARCHITECTURE AR-71–AR-75). Never load the personal env file into a development shell: `startTestDatabase` reuses whatever `DATABASE_MIGRATION_URL` it finds. The refusal guard (AR-72) — which makes test database reuse, every `tests/support/reset.ts` helper, `db:seed:reference`, the E2E setup and the performance suite refuse a database marked `allmywallet.instance_role = 'personal'` — is the second barrier, not the first.
+
+### The personal instance
+
+Its own Compose project (`allmywallet-personal`), on `127.0.0.1` only, with its env file at `~/.config/allmywallet/personal.env`. The procedure, including what to do when a start fails, is [docs/runbooks/personal-instance.md](../runbooks/personal-instance.md).
+
+| Command | Does |
+|---|---|
+| `scripts/personal/init.sh` | Once. Refuses with FileVault off; writes the env file outside the repo; pulls, migrates, marks the database, first backup, starts |
+| `scripts/personal/start.sh` | Every start. Upgrades when `:latest` moved — backup → pull → gated migration → health check → last-known-good or rollback; starts the current image offline |
+| `scripts/personal/backup.sh` | `pg_dump` → `age` to `BACKUP_DIR`; refuses the Postgres data volume; prunes to `backup.retain_count` only after success |
+| `scripts/personal/restore-drill.sh <identity>` | Quarterly. Restores the newest dump into a throwaway container and compares row counts |
+
+The image also carries `node dist/migrate.js` (`pnpm build:migrate`) and `node dist/ops.js` (`pnpm build:ops`), which the scripts call.
 
 | Script | Does |
 |---|---|
@@ -278,6 +291,7 @@ their own known gaps rather than implying a readiness the project does not have.
 | Runbook | When |
 |---|---|
 | [incident-response.md](../runbooks/incident-response.md) | Any unauthorised access, loss or disclosure of personal data. Carries the ANPD notification path and its 3-business-day deadline (SPEC-004 BR-004-19). |
+| [personal-instance.md](../runbooks/personal-instance.md) | Setting up, starting, backing up, drilling and restoring the personal production instance (SPEC-021), and what each failed start means. |
 
 ## 10. Definition of done
 

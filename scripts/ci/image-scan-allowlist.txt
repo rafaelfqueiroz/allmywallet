@@ -1,0 +1,10 @@
+# Reviewed false positives for scripts/ci/scan-image.sh — path regexes, matched
+# against "<kind>: ./<layer>/<path>". Each needs a reason; never allowlist a
+# directory wholesale.
+
+# Alpine's public CA certificate bundles (base image). Public certificates, no key.
+^name: \./[0-9]+/etc/ssl(1\.1)?/cert\.pem$
+# npm's own default config, shipped inside the node:22-alpine base image's global npm. No token.
+^name: \./[0-9]+/usr/local/lib/node_modules/npm/\.npmrc$
+# A dependency's third-party licence inventory (package, licence, origin). No data.
+^name: \./[0-9]+/app/node_modules/\.pnpm/import-in-the-middle@[^/]+/node_modules/import-in-the-middle/LICENSE-3rdparty\.csv$

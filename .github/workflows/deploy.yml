@@ -82,6 +82,18 @@ jobs:
       packages: write
     outputs:
       image_tag: ${{ steps.meta.outputs.sha }}
+    # The empty database the image's migrator is proven against, below.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: allmywallet_migrator
+          POSTGRES_PASSWORD: allmywallet
+          POSTGRES_DB: allmywallet
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U allmywallet_migrator -d allmywallet"
+          --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -102,15 +114,41 @@ jobs:
 
       # AR-58: images are built in CI, never on the VPS. This is what keeps a
       # 2-vCPU box viable — it only pulls and runs.
+      #
+      # SPEC-021: built and LOADED first, pushed only after the two checks
+      # below. The personal instance upgrades itself to :latest on its next
+      # start (BR-021-23), so an image that cannot migrate or that carries a
+      # secret must never reach the registry — once public, it stays public
+      # (DL-021-11).
       - uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          load: true
+          push: false
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # SPEC-021 BR-021-13 (AR-73): the image's own migrator, from the image
+      # itself, against the empty service database — the step the deploy job
+      # below and scripts/personal/start.sh both depend on.
+      - name: The image's migrator applies every migration to an empty database
+        run: |
+          docker run --rm --network host \
+            -e DATABASE_MIGRATION_URL=postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet \
+            "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}" node dist/migrate.js
+
+      # SPEC-021 BR-021-14: every layer, not just the merged filesystem.
+      - name: Image layers carry no secret or personal data
+        run: bash scripts/ci/scan-image.sh "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}"
+
+      # BR-021-15: both tags, on every merge.
+      - name: Push :<sha> and :latest
+        run: |
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.sha }}"
+          docker push "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
   deploy:
     name: Migrate and release
@@ -147,7 +185,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_ed25519 "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
             "cd /srv/allmywallet && IMAGE_TAG=${{ needs.build-image.outputs.image_tag }} \
-             docker compose run --rm --no-deps web node_modules/.bin/tsx src/db/migrate.ts"
+             docker compose run --rm --no-deps web node dist/migrate.js"
 
       - name: Restart web and worker
         run: |
