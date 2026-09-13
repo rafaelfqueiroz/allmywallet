@@ -80,7 +80,7 @@ So the refusals are the answer, not a gap: each names the missing dimension rath
 |---|---|
 | **Host** | Hostinger **KVM 2** — 2 vCPU, 8 GB RAM, 100 GB NVMe, **São Paulo** |
 | **Backups** | ⏳ **Deferred — [BL-001](https://github.com/rafaelfqueiroz/allmywallet/issues/1).** Cloudflare R2 decided; trigger is the first real user account |
-| **Environments** | Production only. **No staging, and none planned** — [BL-003](https://github.com/rafaelfqueiroz/allmywallet/issues/3) |
+| **Environments** | **Personal production on the owner's laptop** — no hosted production and no staging ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), AR-71–AR-75). The hosted design stays intact — [BL-003](https://github.com/rafaelfqueiroz/allmywallet/issues/3) |
 | **Observability** | Sentry + Pino + Uptime Kuma from M0; metrics stack deferred to M4 — [BL-002](https://github.com/rafaelfqueiroz/allmywallet/issues/2) |
 
 Sizing rationale in [ARCHITECTURE §14](ARCHITECTURE.md#14-host-sizing), backup requirements in [§15](ARCHITECTURE.md#15-backup-and-restore), environments in [§16](ARCHITECTURE.md#16-environments).

@@ -6,9 +6,9 @@ Loaded at the start of every session. Orientation and the rules that are expensi
 
 **AllMyWallet** — a web app for Brazilian retail investors to consolidate stocks, FIIs, BDRs, ETFs, Tesouro Direto, CDB, LCI and LCA into one ledger, group holdings into purpose-driven wallets, and report on performance, portfolio value, earnings and composition.
 
-**Current state: M0–M8 built — every PRD milestone.** The sixteen original spec tasks (#4–#19) are closed — auth, config, isolation, LGPD, import, ledger, cost basis, market data, valuation, wallets, the reporting framework and all four reports — and so are M7 (balancing #89, opportunity #90, goals #91) and M8: the authenticated dashboard (#98) and guided onboarding ([SPEC-020](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-020-User-Onboarding), #97).
+**Current state: M0–M8 built.** Every PRD milestone through M8 is closed, including onboarding (SPEC-020, #97) and the dashboard (#98). The next milestone is **M9 — personal deployment** ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), [#104](https://github.com/rafaelfqueiroz/allmywallet/issues/104)): the product is not released, and runs as loopback-only **personal production** on its owner's laptop.
 
-**No milestone is next in the PRD.** Open work is defects and follow-ups — #94 (report reads deadlock under concurrency), #76 (large-import query count), #64, #62, #61 — and the pre-launch items #47 (domain and privacy contact) and #1–#3 (backups, metrics, staging). Onboarding makes a first real account likely, which is BL-001's trigger for backups. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written.
+**Do not load real data until #104 lands.** The refusal guard that stops `tests/support/reset.ts` truncating a real database does not exist yet, and the published image cannot run migrations. Setup commands in [DEVELOPMENT §5](docs/guidelines/DEVELOPMENT.md#5-local-setup) work as written, for development.
 
 ## Where the artifacts live
 
@@ -16,8 +16,8 @@ Three surfaces, each with one job. **Do not duplicate content between them** —
 
 | Surface | Holds | Source of truth for |
 |---|---|---|
-| **[Wiki](https://github.com/rafaelfqueiroz/allmywallet/wiki)** | [PRD](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD), [20 specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs), [Spec-Template](https://github.com/rafaelfqueiroz/allmywallet/wiki/Spec-Template) | *What* to build and why |
-| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | #1–#3 deferred infra; #4–#19 the original spec tasks, #89–#91 the M7 tasks and #97–#98 the M8 tasks, all closed; #20+ defects and follow-ups | *What is being built now* |
+| **[Wiki](https://github.com/rafaelfqueiroz/allmywallet/wiki)** | [PRD](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD), [21 specs](https://github.com/rafaelfqueiroz/allmywallet/wiki/Specs), [Spec-Template](https://github.com/rafaelfqueiroz/allmywallet/wiki/Spec-Template) | *What* to build and why |
+| **[Board](https://github.com/users/rafaelfqueiroz/projects/3/views/1)** | #1–#3 deferred infra; #4–#19, #89–#91 and the M8 tasks closed; #20+ defects and follow-ups; **#104 open for M9** | *What is being built now* |
 | **This repo** | [`docs/guidelines/`](docs/guidelines/README.md) — architecture, development, testing | *How* to build it |
 
 Product documents are **edited in the wiki**, never mirrored here. Guidelines are edited here and reviewed in PRs.
@@ -146,8 +146,8 @@ Worth knowing before proposing anything that contradicts them.
 - **The quote tier is free**: 15,000 requests/month, one ticker per call, ~30 min delay, **no dividend data**. That is a ceiling of roughly 51 distinct assets at a 30-minute cadence (PRD R5). Forward-looking earnings ship degraded and say so.
 - **Transactions are the single append-only source of truth.** Positions, valuations and every report figure derive from them and must always be rebuildable. Wallets are views over the ledger; they never duplicate transactions.
 - **"Patrimônio" is *Portfolio Value* in English**, never "Net Worth" — net worth is assets minus liabilities, and this product tracks no liabilities.
-- **Production only, no staging, none planned** ([BL-003](https://github.com/rafaelfqueiroz/allmywallet/issues/3)). This makes expand/contract migrations mandatory (AR-69), not a preference.
-- **Backups are deferred** ([BL-001](https://github.com/rafaelfqueiroz/allmywallet/issues/1), Cloudflare R2 decided). Safe while there is no data; the trigger is **the first real user account**, which is earlier than "before launch".
+- **No hosted production and no staging — personal production on the owner's laptop** ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), AR-71–AR-75). Start upgrades automatically, and a health-check rollback runs the previous image on the new schema, so expand/contract (AR-69) is absolute rather than a preference.
+- **Backups are local and encrypted** (SPEC-021): before every migration and once a day on start, to a different volume from the database. BL-001's R2 design stands only for a future hosted production.
 - **Configurability is a requirement, not a nicety** (SPEC-002). Cadences, thresholds and budgets are config-registry keys, never constants.
 
 ## Conventions
@@ -187,7 +187,7 @@ Performance budgets are **nightly and advisory**, not blocking — but the cheap
 
 ## Notes for agents
 
-- **Ask before creating a new spec or PRD section.** The PRD is traceability-checked — 278 requirements mapped to 20 specs, with no orphans. Adding requirements without updating [PRD §12](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD) breaks that.
+- **Ask before creating a new spec or PRD section.** The PRD is traceability-checked — 302 requirements mapped to 21 specs, with no orphans. Adding requirements without updating [PRD §12](https://github.com/rafaelfqueiroz/allmywallet/wiki/PRD) breaks that.
 - **`gh` is authenticated as `rafaelfqueiroz`** with the `project` scope. Board and wiki edits go through it.
 - **The wiki is a separate git repository** — `allmywallet.wiki.git`, cloned separately from the code repo.
 - **This machine runs bash 3.2.57**, which mis-parses heredocs nested inside `$( )` and `bash -n` does not catch it. Use `--body-file` with a top-level heredoc when writing issue or PR bodies.
