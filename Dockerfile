@@ -44,6 +44,9 @@ ENV AUTH_GOOGLE_SECRET=docker-build-placeholder-google-client-secret
 ENV AUTH_TRUST_HOST=true
 RUN pnpm build
 RUN pnpm build:worker
+# SPEC-021 BR-021-13 (AR-73): the migrator ships in the image, bundled like the
+# worker, so the schema applied always matches the code that runs on it.
+RUN pnpm build:migrate && pnpm build:ops
 
 # --- runtime -------------------------------------------------------------------
 FROM base AS runner
@@ -67,6 +70,9 @@ COPY --from=builder /app/public* ./public
 # web-server-scoped trace (see the ADR).
 COPY --from=builder /app/dist ./dist
 COPY --from=prod-deps /app/node_modules ./node_modules
+# `dist/migrate.js` resolves `../src/db/migrations` from its own location. Only
+# the SQL and drizzle's journal — no other source enters the runtime image.
+COPY --from=builder /app/src/db/migrations ./src/db/migrations
 # Not copying the root package.json over Next's own standalone-generated one
 # (already present under ./ from the first COPY above) — it already carries
 # `"type": "module"`, which is what makes Node treat dist/worker.js as ESM

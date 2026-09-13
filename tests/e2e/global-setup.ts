@@ -1,3 +1,4 @@
+import { assertNotPersonalDatabase } from '../../src/db/personal-guard';
 import { startWorker } from './support/worker-process';
 
 /**
@@ -35,7 +36,16 @@ function selectedProjects(): string[] {
   return names;
 }
 
-export default function globalSetup(): void {
+export default async function globalSetup(): Promise<void> {
+  // SPEC-021 BR-021-08 (AR-72): the E2E fixtures insert users and sessions
+  // through `DATABASE_MIGRATION_URL`, so a run pointed at the personal
+  // instance would write test tenants into real data. Refused before anything
+  // starts, for visual runs too — they share the same server and database.
+  const migrationUrl =
+    process.env.DATABASE_MIGRATION_URL ??
+    'postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet';
+  await assertNotPersonalDatabase(migrationUrl);
+
   const selected = selectedProjects();
   const runsE2E = selected.length === 0 || selected.some((name) => name.startsWith('e2e'));
 

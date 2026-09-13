@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import { getPool } from '@/db/client';
 import { db } from '@/db/client';
 import { resolveConfig } from '@/config/resolve';
-import { aggregateStatus, checkDatabase, checkQuoteSync, checkWorkerLiveness } from '@/lib/health';
+import {
+  aggregateStatus,
+  checkBackup,
+  checkDatabase,
+  checkQuoteSync,
+  checkWorkerLiveness,
+} from '@/lib/health';
 
 /**
  * AR-33/AR-50: a route handler, not a server action — health probes are
@@ -22,19 +28,21 @@ export async function GET(): Promise<NextResponse> {
     await resolveConfig('observability.worker_heartbeat_stale_seconds', { db })
   ).value;
 
-  const [database, worker, quoteSync] = await Promise.all([
+  const [database, worker, quoteSync, backup] = await Promise.all([
     checkDatabase(pool),
     checkWorkerLiveness(pool, staleAfterSeconds),
     checkQuoteSync(pool),
+    // SPEC-021 BR-021-20: degraded until the next success, never down.
+    checkBackup(pool),
   ]);
 
-  const status = aggregateStatus([database, worker, quoteSync]);
+  const status = aggregateStatus([database, worker, quoteSync, backup]);
 
   return NextResponse.json(
     {
       status,
       checkedAt: new Date().toISOString(),
-      components: { database, worker, quoteSync },
+      components: { database, worker, quoteSync, backup },
     },
     // 'unknown' components (quote sync before SPEC-008/#11 lands) never pull
     // the HTTP status down — only a genuine 'down' does, which is what keeps

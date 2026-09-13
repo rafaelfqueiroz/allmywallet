@@ -32,7 +32,7 @@ describe('registry', () => {
     // `notifications.quiet_hours` (BR-018-27, the band inside market hours
     // that stays silent) — both are the tunables DL-018-05's accepted trade
     // is adjusted through, which is precisely why they are not constants.
-    expect(CONFIG_KEYS).toHaveLength(27);
+    expect(CONFIG_KEYS).toHaveLength(29);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {

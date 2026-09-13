@@ -380,6 +380,24 @@ export const REGISTRY = {
       '/api/health reports the worker unhealthy once its heartbeat is older than this (AR-50).',
     range: 'integer seconds, 5–7200',
   },
+  'backup.retain_count': {
+    key: 'backup.retain_count',
+    schema: z.number().int().min(1).max(365),
+    default: 14,
+    levels: ['deployment'],
+    description:
+      'Encrypted database dumps the personal instance keeps; older ones are pruned only after a new backup succeeds (SPEC-021 BR-021-19).',
+    range: 'integer, 1–365',
+  },
+  'notifications.email_provider': {
+    key: 'notifications.email_provider',
+    schema: z.enum(['log', 'resend']),
+    default: 'log',
+    levels: ['deployment'],
+    description:
+      'Transport for opportunity emails: log renders and logs without sending; resend delivers through the Resend API with RESEND_API_KEY (SPEC-021 BR-021-34).',
+    range: 'log | resend',
+  },
 } as const satisfies Record<string, RegistryEntryDef>;
 
 export type ConfigKey = keyof typeof REGISTRY;

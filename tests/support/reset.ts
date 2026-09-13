@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { assertNotPersonalDatabase } from '@/db/personal-guard';
 
 /**
  * TS-03: every test is independent and order-agnostic.
@@ -19,12 +20,7 @@ import { Pool } from 'pg';
 const CONFIG_TABLES = ['config_overrides', 'runtime_state', 'audit_log'] as const;
 
 export async function resetConfigState(migrationUrl: string): Promise<void> {
-  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
-  try {
-    await pool.query(`TRUNCATE ${CONFIG_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
-  } finally {
-    await pool.end();
-  }
+  await truncate(migrationUrl, `TRUNCATE ${CONFIG_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
 }
 
 /**
@@ -33,12 +29,7 @@ export async function resetConfigState(migrationUrl: string): Promise<void> {
  * holds.
  */
 export async function resetUsers(migrationUrl: string): Promise<void> {
-  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
-  try {
-    await pool.query('TRUNCATE users RESTART IDENTITY CASCADE');
-  } finally {
-    await pool.end();
-  }
+  await truncate(migrationUrl, 'TRUNCATE users RESTART IDENTITY CASCADE');
 }
 
 /**
@@ -65,12 +56,7 @@ const LEDGER_TABLES = [
 ] as const;
 
 export async function resetLedger(migrationUrl: string): Promise<void> {
-  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
-  try {
-    await pool.query(`TRUNCATE ${LEDGER_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
-  } finally {
-    await pool.end();
-  }
+  await truncate(migrationUrl, `TRUNCATE ${LEDGER_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
 }
 
 /**
@@ -102,12 +88,7 @@ const WALLET_TABLES = [
 ] as const;
 
 export async function resetWallets(migrationUrl: string): Promise<void> {
-  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
-  try {
-    await pool.query(`TRUNCATE ${WALLET_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
-  } finally {
-    await pool.end();
-  }
+  await truncate(migrationUrl, `TRUNCATE ${WALLET_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
 }
 
 /**
@@ -117,12 +98,7 @@ export async function resetWallets(migrationUrl: string): Promise<void> {
  * file's seeded tenants on the shared CI database (TS-03/TS-33/TS-34).
  */
 export async function resetConsents(migrationUrl: string): Promise<void> {
-  const pool = new Pool({ connectionString: migrationUrl, max: 1 });
-  try {
-    await pool.query('TRUNCATE consents RESTART IDENTITY CASCADE');
-  } finally {
-    await pool.end();
-  }
+  await truncate(migrationUrl, 'TRUNCATE consents RESTART IDENTITY CASCADE');
 }
 
 /**
@@ -137,9 +113,19 @@ export async function resetConsents(migrationUrl: string): Promise<void> {
 const OPPORTUNITY_TABLES = ['opportunity_notifications', 'opportunity_rules'] as const;
 
 export async function resetOpportunity(migrationUrl: string): Promise<void> {
+  await truncate(migrationUrl, `TRUNCATE ${OPPORTUNITY_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+}
+
+/**
+ * SPEC-021 BR-021-08 (AR-72): every helper below truncates through this, so no
+ * individual reset can skip the marker check — a test that calls one directly
+ * with a hand-built URL still passes through the guard before `TRUNCATE`.
+ */
+async function truncate(migrationUrl: string, statement: string): Promise<void> {
+  await assertNotPersonalDatabase(migrationUrl);
   const pool = new Pool({ connectionString: migrationUrl, max: 1 });
   try {
-    await pool.query(`TRUNCATE ${OPPORTUNITY_TABLES.join(', ')} RESTART IDENTITY CASCADE`);
+    await pool.query(statement);
   } finally {
     await pool.end();
   }

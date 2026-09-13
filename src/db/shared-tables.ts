@@ -39,6 +39,11 @@ export const SHARED_TABLES: readonly string[] = [
   // process identity string and a timestamp, nothing derived from any
   // tenant's data. Same "holds no personal data" test as `runtime_state`.
   'worker_heartbeats',
+  // Added by SPEC-021 (BR-021-20): the personal instance's backup outcomes —
+  // a status, a timestamp, a dump file name and a failure reason written by
+  // scripts/personal/backup.sh. The dump's *contents* never touch this table.
+  // Same "holds no personal data" test as `worker_heartbeats`.
+  'backup_runs',
 ];
 
 /**

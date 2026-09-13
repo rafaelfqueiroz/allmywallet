@@ -67,6 +67,21 @@ describe('assertTrustedHostConfigured (#42)', () => {
       ).toThrow(/must be https/);
     });
 
+    // SPEC-021 BR-021-10/11: the personal instance publishes on loopback
+    // only, with no TLS terminator in front of it.
+    it.each(['http://localhost:3100/api/auth', 'http://127.0.0.1:3100/api/auth'])(
+      'accepts a plain-http loopback AUTH_URL (%s)',
+      (url) => {
+        expect(() => assertTrustedHostConfigured({ ...base, AUTH_URL: url })).not.toThrow();
+      },
+    );
+
+    it('still rejects plain http on a hostname that merely starts with localhost', () => {
+      expect(() =>
+        assertTrustedHostConfigured({ ...base, AUTH_URL: 'http://localhost.example.com/api/auth' }),
+      ).toThrow(/must be https/);
+    });
+
     // A pinned origin wins outright: `reqWithEnvURL` rewrites the request
     // origin before Auth.js sees it, so the header cannot reach a callback
     // URL whatever AUTH_TRUST_HOST says. Asserting it does not throw is the

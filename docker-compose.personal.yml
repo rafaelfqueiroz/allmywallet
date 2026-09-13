@@ -1,0 +1,49 @@
+# SPEC-021 — personal production (AR-71). An OVERRIDE of docker-compose.yml,
+# never a fork (BR-021-12): the hosted definition keeps working unchanged, so a
+# VPS later needs no reconstruction.
+#
+# Always run through scripts/personal/*.sh, which pass this exact invocation:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.personal.yml \
+#     --env-file "$ALLMYWALLET_ENV_FILE" --profile app …
+#
+# `!override` replaces a list instead of appending to it. Without it Compose
+# MERGES port lists, and the base file's '5432:5432' — every interface — would
+# survive underneath the loopback binding.
+
+# BR-021-06: its own Compose project, so its containers, network and volumes
+# never collide with the development `allmywallet` project on this machine.
+name: allmywallet-personal
+
+services:
+  postgres:
+    # BR-021-10: loopback only, on a non-default port so development's
+    # localhost:5432 can never reach it by accident (BR-021-06).
+    ports: !override
+      - '127.0.0.1:${PERSONAL_POSTGRES_PORT:-55432}:5432'
+    # BR-021-09: the personal env file lives outside the working tree.
+    env_file: !override
+      - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
+
+  web:
+    # The image is only ever pulled deliberately, by scripts/personal/start.sh,
+    # after a backup. `up` must never fetch a newer :latest on its own.
+    pull_policy: never
+    env_file: !override
+      - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
+    # The base file publishes no web port (Caddy fronts it). Here the browser
+    # reaches it directly, on loopback only (BR-021-10/11). AUTH_URL comes from
+    # the env file as http://localhost:<this port>/api/auth.
+    ports:
+      - '127.0.0.1:${PERSONAL_WEB_PORT:-3100}:3000'
+
+  worker:
+    pull_policy: never
+    env_file: !override
+      - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
+
+  caddy:
+    # BR-021-11: no Caddy. Moved out of the `app` profile rather than deleted,
+    # so the base file is untouched; nothing ever enables `hosted-only` here.
+    profiles: !override ['hosted-only']
+    ports: !reset []

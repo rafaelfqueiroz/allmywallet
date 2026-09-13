@@ -2,6 +2,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { Pool } from 'pg';
+import { assertNotPersonalDatabase } from '@/db/personal-guard';
 
 /**
  * TESTING §1: three things cannot be tested against a mock, and are therefore
@@ -30,6 +31,12 @@ export async function startTestDatabase(): Promise<TestDatabase> {
   const existing = process.env.DATABASE_MIGRATION_URL;
   if (existing) {
     const appUrl = process.env.DATABASE_URL ?? existing;
+    // SPEC-021 BR-021-08 (AR-72): this reuse path is the only route a suite
+    // reaches a database it did not create, so the marker is read here, before
+    // `ensureAppRole` issues its first statement. Both URLs are checked because
+    // nothing forces them to name the same database.
+    await assertNotPersonalDatabase(existing);
+    if (appUrl !== existing) await assertNotPersonalDatabase(appUrl);
     await ensureAppRole(existing, appUrl);
     return { migrationUrl: existing, appUrl, stop: async () => {} };
   }

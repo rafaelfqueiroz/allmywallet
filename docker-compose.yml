@@ -42,7 +42,13 @@ services:
       # of starting a web container that authenticates nobody. The app would
       # refuse to boot anyway (src/lib/trusted-host.ts); failing here names
       # the actual missing value.
-      AUTH_URL: https://${DOMAIN:?DOMAIN is required — Caddy needs it for TLS and Auth.js pins AUTH_URL to it}/api/auth
+      #
+      # SPEC-021 BR-021-11: an explicit AUTH_URL wins, and DOMAIN is then never
+      # evaluated — Compose interpolates the nested default lazily. Compose also
+      # interpolates this file *before* merging an override, so the personal
+      # override cannot replace this line; it sets AUTH_URL in its env file
+      # instead. With AUTH_URL unset, the hosted behaviour is unchanged.
+      AUTH_URL: ${AUTH_URL:-https://${DOMAIN:?DOMAIN is required — Caddy needs it for TLS and Auth.js pins AUTH_URL to it}/api/auth}
       # SPEC-005: `web` receives the uploaded .xlsx and `worker` parses it, so
       # the two must name the *same directory on the same filesystem*. The
       # default is the relative `.data/imports` (src/lib/env.ts), which
