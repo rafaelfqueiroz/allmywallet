@@ -3,7 +3,11 @@ import { Pool } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
-import { dismissOnboarding, seedCommittedImportBatch } from './support/onboarding';
+import {
+  dismissOnboarding,
+  seedCommittedImportBatch,
+  seedUnclassifiedImportRows,
+} from './support/onboarding';
 import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
 
 /**
@@ -201,6 +205,31 @@ test.describe('the dashboard', () => {
     await link.click();
     await expect(signedIn.page).toHaveURL(`/fixed-income/${assetId}`);
     await expect(signedIn.page.getByRole('heading', { level: 1 })).toBeVisible();
+  });
+
+  /**
+   * SPEC-020 AC-10 / BR-020-18 — the import-rows gate carries the same three
+   * elements as the fixed-income one, asserted on the rendered row. Its
+   * consequence claims unreliability, never a direction: an excluded row may
+   * be a purchase or an outflow.
+   */
+  test('shows the import-rows gate with its consequence and a link to the batch', async ({
+    signedIn,
+  }) => {
+    const { batchId } = await seedUnclassifiedImportRows(signedIn.userId, 2);
+
+    await signedIn.page.goto('/dashboard');
+
+    const gate = signedIn.page
+      .getByRole('listitem')
+      .filter({ has: signedIn.page.getByRole('link', { name: 'Revisar' }) });
+    await expect(gate).toHaveCount(1);
+    await expect(gate.getByText('2 linhas importadas precisam de revisão')).toBeVisible();
+    await expect(gate.getByText(/podem estar incorretos, para mais ou para menos/)).toBeVisible();
+    await expect(gate.getByRole('link', { name: 'Revisar' })).toHaveAttribute(
+      'href',
+      `/import/${batchId}`,
+    );
   });
 
   /**

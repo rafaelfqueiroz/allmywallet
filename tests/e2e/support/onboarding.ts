@@ -31,6 +31,63 @@ export async function seedCommittedImportBatch(userId: string): Promise<void> {
 }
 
 /**
+ * A staged, not yet committed batch — the guide's `review` stage (BR-020-04).
+ * No rows: the guide reads only the batch's status, and a tenant in this state
+ * has still not onboarded (BR-020-03).
+ */
+export async function seedPreviewedImportBatch(userId: string): Promise<string> {
+  const batchId = randomUUID();
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    await pool.query(
+      `INSERT INTO import_batches (id, user_id, source, status, uploaded_at)
+       VALUES ($1, $2, 'b3_movimentacao', 'previewed', now())`,
+      [batchId, userId],
+    );
+  } finally {
+    await pool.end();
+  }
+  return batchId;
+}
+
+/**
+ * A committed batch that left rows needing a decision — the `import_rows`
+ * "Needs attention" gate (SPEC-020 BR-020-16). The asset is created for the
+ * row's foreign key only; no position is written, so the dashboard shows the
+ * queue beside a "no holdings" state rather than a figure.
+ */
+export async function seedUnclassifiedImportRows(
+  userId: string,
+  count: number,
+): Promise<{ readonly batchId: string }> {
+  const batchId = randomUUID();
+  const assetId = randomUUID();
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    await pool.query(
+      `INSERT INTO import_batches (id, user_id, source, status, uploaded_at, committed_at)
+       VALUES ($1, $2, 'b3_movimentacao', 'committed', now(), now())`,
+      [batchId, userId],
+    );
+    await pool.query(`INSERT INTO assets (id, code, name, class) VALUES ($1, $2, $3, 'cdb')`, [
+      assetId,
+      `UNCL${assetId.slice(0, 6).toUpperCase()}`,
+      'Ativo de linha sem classificação',
+    ]);
+    for (let index = 0; index < count; index += 1) {
+      await pool.query(
+        `INSERT INTO import_rows (id, user_id, batch_id, raw_payload, parsed_payload, classification, asset_id)
+         VALUES ($1, $2, $3, '{}'::jsonb, '{}'::jsonb, 'unclassified', $4)`,
+        [randomUUID(), userId, batchId, assetId],
+      );
+    }
+  } finally {
+    await pool.end();
+  }
+  return { batchId };
+}
+
+/**
  * Writes `users.onboarding_dismissed_at` directly, bypassing the UI — for
  * specs whose subject is not onboarding itself and that only need a tenant
  * past the BR-020-02 redirect (BR-020-14: a dismissed, import-less tenant

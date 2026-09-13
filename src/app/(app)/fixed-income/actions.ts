@@ -23,7 +23,8 @@ import { supplyContractTermsFor } from '@/app/(app)/fixed-income/data';
  */
 
 const SupplyTermsSchema = z.object({
-  assetId: z.string().min(1),
+  // A tampered hidden field is invalid input, not a thrown `AssetId.of`.
+  assetId: z.string().uuid(),
   indexer: z.enum(FIXED_INCOME_INDEXERS),
   ratePercent: z.string(),
 });

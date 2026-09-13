@@ -694,9 +694,33 @@ describe('needs attention (BR-010-12)', () => {
     expect(summary.attentionTotal).toBe(40);
   });
 
+  /**
+   * SPEC-020 BR-020-18 — the overflow link goes to `/wallets`, which resolves
+   * allocations and nothing else. A gate hidden behind it would have no route
+   * to the one screen that fixes it, so gates are never capped.
+   */
+  it('lists every gate even past the cap, and caps only pending allocations', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+    const contractsMissingRate = Array.from({ length: 6 }, (_, index) => ({
+      assetId: assetIdOf(String(index + 60)),
+    }));
+    const pending = Array.from({ length: 4 }, (_, index) => ({
+      assetId: assetIdOf(String(index + 10)),
+      unassignedQuantity: Quantity.fromString('1'),
+      reason: 'no_wallet' as const,
+    }));
+
+    const summary = buildDashboardSummary(input({ query, contractsMissingRate, pending }));
+
+    expect(summary.attention.map((item) => item.kind)).toEqual(
+      Array.from({ length: 6 }, () => 'fixed_income_rate'),
+    );
+    expect(summary.attentionTotal).toBe(10);
+  });
+
   it('never lets the cap push out the items that make the figures wrong', async () => {
     // An unclassified row is excluded from the replay behind every position, so
-    // it understates the headline; a pending allocation is already inside that
+    // the headline may be wrong; a pending allocation is already inside that
     // total. If the cap could drop the first kind in favour of the second, the
     // ordering above would be decorative.
     const query = await queryFor([{ assetId: PETR }]);

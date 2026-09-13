@@ -137,6 +137,10 @@ export async function AttentionQueue({
          * held asset, which at reference scale is a hundred rows that would
          * bury everything else on the screen. `/wallets` is where the work is
          * actually done and shows all of them with the forms to resolve each.
+         *
+         * Only pending allocations are ever hidden (`attentionQueue` never caps
+         * a gate, SPEC-020 BR-020-18), so `/wallets` is the right destination
+         * for everything this link counts.
          */
         <Button asChild variant="link" size="sm">
           <Link href="/wallets">{t('more', { count: hidden })}</Link>

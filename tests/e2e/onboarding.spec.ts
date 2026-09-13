@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './support/authenticated';
-import { seedCommittedImportBatch } from './support/onboarding';
+import { seedCommittedImportBatch, seedPreviewedImportBatch } from './support/onboarding';
 import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
 
 /**
@@ -106,6 +106,30 @@ test.describe('the guided onboarding flow', () => {
   });
 
   /**
+   * BR-020-22 / AC-14 — "together or one at a time, in any order". A user who
+   * sent Movimentação alone is still guided, can still send the other two from
+   * here, and is pointed at the preview waiting for them.
+   */
+  test('with one extract staged, the guide still offers the upload and links to its preview', async ({
+    signedIn,
+  }) => {
+    const batchId = await seedPreviewedImportBatch(signedIn.userId);
+
+    await signedIn.page.goto('/');
+    await expect(signedIn.page).toHaveURL(/\/onboarding$/);
+
+    await expect(signedIn.page.getByText(/pronto para revisão no passo 3/)).toBeVisible();
+    await expect(signedIn.page.getByLabel(/arquivo/i)).toBeVisible();
+    await expect(
+      signedIn.page.getByRole('link', { name: 'Revisar e confirmar importação' }),
+    ).toHaveAttribute('href', `/import/${batchId}`);
+
+    // BR-020-11 — dismissible at any step, not only the first.
+    await signedIn.page.getByRole('button', { name: 'Dispensar o guia' }).click();
+    await expect(signedIn.page).toHaveURL(/\/dashboard$/);
+  });
+
+  /**
    * BR-020-26 — "the guide states that only the three B3 extracts are
    * accepted, and that assets outside B3 custody need manual entry."
    */
@@ -144,30 +168,49 @@ test.describe('the guided onboarding flow', () => {
   });
 
   /**
-   * BR-020-31 — keyboard-only operability of the guide's two real controls:
-   * dismiss, and the upload field `/import`'s `UploadForm` contributes here
-   * unchanged. In the shape of `dashboard.spec.ts`'s own keyboard test: a real
-   * `Tab` press proves the skip link is first, `.focus()` proves the other two
-   * controls are genuinely focusable (rather than tabbing through the whole
-   * nav to reach them), and `Enter` proves dismiss actually activates.
+   * BR-020-31 / AC-19 — keyboard-only operability, by **Tab traversal**, not
+   * `.focus()`: a control with `tabindex=-1` or trapped behind a
+   * non-focusable wrapper accepts programmatic focus and is still unreachable
+   * for a keyboard user. The walk starts at the skip link and records every
+   * control Tab lands on, in whatever order the page puts them, until the
+   * upload field, the upload submit, the link to the B3 portal and dismiss
+   * have all been reached; it then tabs on to dismiss, which `Enter`
+   * activates. The staged-batch test above covers the review link; review and
+   * commit themselves happen on `/import/[batchId]`, whose keyboard behaviour
+   * is SPEC-005's.
    */
-  test('dismiss and the upload control are reachable and operable by keyboard alone', async ({
-    signedIn,
-  }) => {
-    await signedIn.page.goto('/onboarding');
+  test('the guide is traversable and dismissible by keyboard alone', async ({ signedIn }) => {
+    const { page } = signedIn;
+    await page.goto('/onboarding');
 
-    await signedIn.page.keyboard.press('Tab');
-    await expect(signedIn.page.getByRole('link', { name: 'Pular para o conteúdo' })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link', { name: 'Pular para o conteúdo' })).toBeFocused();
 
-    const upload = signedIn.page.getByLabel(/arquivo/i);
-    await upload.focus();
-    await expect(upload).toBeFocused();
+    const upload = page.getByLabel(/arquivo/i);
+    const submit = page.getByRole('button', { name: /^enviar$/i });
+    const portal = page.getByRole('link', { name: /investidor/i }).first();
+    const dismiss = page.getByRole('button', { name: 'Dispensar o guia' });
+    const isFocused = (locator: typeof upload) =>
+      locator.evaluate((node) => node === document.activeElement);
 
-    const dismiss = signedIn.page.getByRole('button', { name: 'Dispensar o guia' });
-    await dismiss.focus();
+    const reached = { upload: false, submit: false, portal: false, dismiss: false };
+    const allReached = () => Object.values(reached).every(Boolean);
+    for (let press = 0; press < 200 && !allReached(); press += 1) {
+      await page.keyboard.press('Tab');
+      if (await isFocused(upload)) reached.upload = true;
+      if (await isFocused(submit)) reached.submit = true;
+      if (await isFocused(portal)) reached.portal = true;
+      if (await isFocused(dismiss)) reached.dismiss = true;
+    }
+    expect(reached).toEqual({ upload: true, submit: true, portal: true, dismiss: true });
+
+    // Tab on (wrapping if dismiss came earlier in the order) until it has focus.
+    for (let press = 0; press < 200 && !(await isFocused(dismiss)); press += 1) {
+      await page.keyboard.press('Tab');
+    }
     await expect(dismiss).toBeFocused();
-    await signedIn.page.keyboard.press('Enter');
-    await expect(signedIn.page).toHaveURL(/\/dashboard$/);
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/dashboard$/);
   });
 
   /** AC-19 — axe at WCAG 2.1 AA on the guide itself. */

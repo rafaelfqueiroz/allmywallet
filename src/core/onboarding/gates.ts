@@ -7,8 +7,12 @@ import type { AttentionItem } from '@/core/dashboard/summary';
  * The UI maps `GateResolution` to a route; core never names routes.
  */
 export type GateConsequence =
-  /** Unclassified rows are excluded from replay — every figure is understated. */
-  | 'figures_understated'
+  /**
+   * Unclassified or invalid rows are excluded from replay, so every figure may
+   * be wrong — in either direction: an excluded purchase understates, an
+   * excluded transfer out or redemption overstates.
+   */
+  | 'figures_unreliable'
   /** BR-020-19 — the contract cannot be valued; portfolio value is understated until supplied. */
   | 'portfolio_value_understated'
   /** Already inside the total; only the wallet filing is missing. */
@@ -32,12 +36,14 @@ export interface GateDescription {
  */
 export function describeGate(item: AttentionItem): GateDescription {
   switch (item.kind) {
-    // SPEC-020 BR-020-16: a row a committed import left unclassified is
-    // excluded from the replay behind every position — every figure on the
-    // dashboard, not only this one, is understated until it is resolved.
+    // SPEC-020 BR-020-16/18: a row a committed import left unclassified or
+    // invalid is excluded from the replay behind every position (SPEC-006
+    // BR-006-03). The direction is unknowable here — the row is exactly the
+    // one nobody could read — so the consequence claims unreliability, never
+    // "understated": an excluded outflow leaves units the user no longer holds.
     case 'import_rows':
       return {
-        consequence: 'figures_understated',
+        consequence: 'figures_unreliable',
         resolution: { screen: 'import_batch', batchId: item.batchId },
       };
     // SPEC-020 BR-020-16/19: a held fixed-income contract with no readable

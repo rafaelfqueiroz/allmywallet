@@ -155,10 +155,10 @@
       "title": "Precisa da sua atenção",
       "description": "Tudo o que está esperando uma decisão sua, em um lugar só.",
       "empty": "Nada esperando por você.",
-      "more": "{count, plural, one {mais # item em Carteiras} other {mais # itens em Carteiras}}",
+      "more": "{count, plural, one {mais # compra a distribuir em Carteiras} other {mais # compras a distribuir em Carteiras}}",
       "importRows": {
-        "label": "{count, plural, one {# linha importada sem classificação} other {# linhas importadas sem classificação}}",
-        "action": "Classificar"
+        "label": "{count, plural, one {# linha importada precisa de revisão} other {# linhas importadas precisam de revisão}}",
+        "action": "Revisar"
       },
       "pending": {
         "unknownAsset": "Ativo",
@@ -171,7 +171,7 @@
         "action": "Informar taxa"
       },
       "consequence": {
-        "figures_understated": "Enquanto não forem classificadas, essas linhas ficam de fora do cálculo — o patrimônio acima está subestimado.",
+        "figures_unreliable": "Enquanto não forem revisadas, essas linhas ficam de fora do cálculo — o patrimônio e as posições acima podem estar incorretos, para mais ou para menos.",
         "portfolio_value_understated": "Sem a taxa contratada, este contrato não pode ser avaliado — o patrimônio acima está subestimado até você informá-la.",
         "allocation_missing": "O valor já está no total acima; falta decidir de qual carteira ele faz parte."
       }
@@ -1307,12 +1307,6 @@
     "signedOut": "Entre na sua conta para ver o guia de primeiros passos.",
     "dismiss": "Dispensar o guia",
     "queueNote": "Itens que precisam da sua atenção — como uma taxa de renda fixa não informada — aparecem no painel, na lista \"Precisa da sua atenção\".",
-    "stepState": {
-      "current": "Passo atual",
-      "done": "Concluído",
-      "upcoming": "Próximo passo",
-      "processing": "Em processamento"
-    },
     "steps": {
       "export": {
         "title": "1. Exporte os três extratos",
@@ -1387,9 +1381,7 @@
         }
       },
       "filtrar": "Filtrar",
-      "baixar": "Baixar",
-      "calloutFilter": "1. Filtrar — escolha a data inicial mais antiga",
-      "calloutDownload": "2. Baixar o arquivo"
+      "baixar": "Baixar"
     }
   },
   "fixedIncome": {

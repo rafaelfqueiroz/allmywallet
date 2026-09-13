@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { AssetId } from '@/core/shared/ids';
+import { AssetId, isUuid } from '@/core/shared/ids';
 import { loadContractTermsForm } from '@/app/(app)/fixed-income/data';
 import { supplyContractTermsAction } from '@/app/(app)/fixed-income/actions';
 import { ContractTermsForm } from '@/app/(app)/fixed-income/_components/ContractTermsForm';
@@ -40,6 +40,9 @@ export default async function FixedIncomeContractPage({ params }: PageProps) {
   }
 
   const { assetId: rawAssetId } = await params;
+  // A malformed id in the URL is a page that does not exist, not a fault:
+  // `AssetId.of` throws on a non-UUID, which would render a 500.
+  if (!isUuid(rawAssetId)) notFound();
   const assetId = AssetId.of(rawAssetId);
   const form = await loadContractTermsForm(userId, assetId);
 

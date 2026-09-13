@@ -30,7 +30,7 @@ describe('describeGate (BR-020-16..19)', () => {
     const description = describeGate({ kind: 'import_rows', batchId: BATCH, count: 3 });
 
     expect(description).toEqual({
-      consequence: 'figures_understated',
+      consequence: 'figures_unreliable',
       resolution: { screen: 'import_batch', batchId: BATCH },
     });
   });
