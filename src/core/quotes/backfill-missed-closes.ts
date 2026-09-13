@@ -77,7 +77,9 @@ export async function backfillMissedCloses(
 
   // Determinism: the same holdings always spend the budget in the same order,
   // so which asset a nearly-exhausted budget covers is reproducible.
-  const ordered = [...assets].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+  // `code` is unique in the catalog (`assets_code_unique`), so two assets never
+  // compare equal and no tie-break is needed.
+  const ordered = [...assets].sort((a, b) => (a.code < b.code ? -1 : 1));
   const ascendingDays = [...days].sort();
 
   for (const asset of ordered) {
