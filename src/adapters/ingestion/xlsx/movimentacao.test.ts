@@ -107,16 +107,42 @@ describe('SPEC-005 — parseMovimentacao', () => {
       return record;
     }
 
-    it("an event with no price (B3's `-`) parses with a zero unit price rather than failing the file", () => {
+    it("an event with no price (B3's `-`) parses, flagged as priceless, rather than failing the file", () => {
       const record = parseOne({
         data: '10/01/2026',
-        movimentacao: 'Desdobro',
+        movimentacao: 'Transferência',
         produto: 'PETR4 - Petrobras PN',
         quantidade: '100',
         precoUnitario: '-',
         valorOperacao: '-',
       });
+      // A placeholder, not a price: stage-batch keeps a priceless transfer out
+      // of the ledger instead of opening a lot at zero cost.
       expect(record.unitPrice.toString()).toBe('0');
+      expect(record.priceStated).toBe(false);
+    });
+
+    it('a stated price is flagged as stated', () => {
+      const record = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'PETR4 - Petrobras PN',
+        quantidade: '100',
+        precoUnitario: '0,50',
+      });
+      expect(record.priceStated).toBe(true);
+    });
+
+    it('a `-` in a required column still fails loudly instead of dropping the row', () => {
+      const rows = rowsFor([
+        movimentacaoRow({
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '-',
+        }),
+      ]);
+      expect(() => parseMovimentacao(rows, structureOf(rows))).toThrow(/quantidade/);
     });
 
     it('a Tesouro title keeps Produto as its code and is guessed as Tesouro Direto', () => {

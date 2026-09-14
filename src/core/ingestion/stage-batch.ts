@@ -13,6 +13,7 @@ import {
 } from '@/core/ingestion/occurrence';
 import { classifyMovement } from '@/core/ingestion/movement-map';
 import type {
+  ExtractType,
   ImportBatch,
   ImportRow,
   ImportRowCounts,
@@ -37,6 +38,31 @@ import type {
  * This is what lets the two kinds be handled as two separate, simple passes
  * below rather than one pass interleaving both.
  */
+/**
+ * #108 — ledger types whose effect depends on `unitPrice`: a buy, sell or
+ * subscription moves cost basis at the price (SPEC-007 BR-007-02/03/06), a
+ * `transfer_in` opens the destination lot at the cost carried on the price
+ * (`core/positions/apply-transaction.ts`), and proventos are quantity × price.
+ *
+ * The real Movimentação leaves the price as `-` on 146 such rows, custody
+ * transfers above all. Committed at the placeholder zero, a transfer would open
+ * a lot at no cost and a dividend would pay nothing, both silently. So such a
+ * row is staged `unclassified` instead (BR-005-19): stored, excluded from
+ * calculations, and in Needs attention. `bonificacao` is absent because
+ * BR-007-05 allows a zero attributed value; `transfer_out`, `split` and
+ * `grupamento` never read the price.
+ */
+const PRICE_BEARING_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
+  'buy',
+  'sell',
+  'subscription',
+  'transfer_in',
+  'dividend',
+  'jcp',
+  'rendimento',
+  'amortization',
+]);
+
 export interface StageBatchInput {
   readonly batchId: ImportBatchId;
   readonly extract: ParsedExtract;
@@ -76,7 +102,12 @@ export async function stageBatch(
   const rows: ImportRow[] =
     input.extract.extractType === 'b3_posicao'
       ? await stagePositionRows(deps, batch.id, input.extract.records)
-      : await stageTransactionRows(deps, batch.id, input.extract.records);
+      : await stageTransactionRows(
+          deps,
+          batch.id,
+          input.extract.extractType,
+          input.extract.records,
+        );
 
   await deps.rows.insertMany(rows);
 
@@ -119,6 +150,7 @@ async function stagePositionRows(
       assetClass: parsed.record.assetClass,
       // #108 (SPEC-005 BR-005-06a): Posição states the class, by its tab.
       classStated: true,
+      nameStated: true,
     });
     const institutionId =
       parsed.record.institutionName === null
@@ -144,6 +176,7 @@ async function stagePositionRows(
 async function stageTransactionRows(
   deps: IngestionDependencies,
   batchId: ImportBatchId,
+  extractType: ExtractType,
   records: readonly ParsedRecord[],
 ): Promise<ImportRow[]> {
   interface Resolved {
@@ -168,6 +201,8 @@ async function stageTransactionRows(
       assetClass: record.assetClass,
       // #108: Movimentação and Negociação only guess the class from the ticker.
       classStated: false,
+      // Movimentação's `Produto` states a name; Negociação has only the ticker.
+      nameStated: extractType === 'b3_movimentacao',
     });
     const institutionId =
       record.institutionName === null
@@ -179,7 +214,8 @@ async function stageTransactionRows(
     // (`occurrence.ts`), not rejected. `direction` disambiguates a handful of
     // Movimentação strings that mean opposite things by Entrada/Saída.
     const resolvedType = classifyMovement(record.b3Type, record.direction);
-    const isUnclassified = resolvedType === null;
+    const isUnclassified =
+      resolvedType === null || (!record.priceStated && PRICE_BEARING_TYPES.has(resolvedType));
     const ledgerType = resolvedType ?? UNCLASSIFIED_PLACEHOLDER_TYPE;
 
     const naturalKey = importNaturalKeyFor(

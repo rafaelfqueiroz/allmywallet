@@ -24,9 +24,9 @@ export class DrizzleAssetResolver implements AssetResolverPort {
   /**
    * AR-19: `ON CONFLICT (code)` — a retried commit for a ticker already onboarded never creates a duplicate.
    *
-   * #108: only a *stated* class and name overwrite the catalog's; a guess
-   * (`classStated: false`) leaves an existing asset as it is. The conflict
-   * still updates, so `RETURNING` yields the id either way.
+   * #108: only a *stated* class or name overwrites the catalog's; a guess
+   * leaves that column of an existing asset as it is. The conflict always
+   * updates `updated_at`, so `RETURNING` yields the id either way.
    */
   async resolve(input: AssetResolveInput): Promise<AssetId> {
     const [row] = await this.db
@@ -39,9 +39,11 @@ export class DrizzleAssetResolver implements AssetResolverPort {
       })
       .onConflictDoUpdate({
         target: assets.code,
-        set: input.classStated
-          ? { name: input.name, assetClass: input.assetClass, updatedAt: new Date() }
-          : { updatedAt: new Date() },
+        set: {
+          ...(input.nameStated ? { name: input.name } : {}),
+          ...(input.classStated ? { assetClass: input.assetClass } : {}),
+          updatedAt: new Date(),
+        },
       })
       .returning({ id: assets.id });
     if (!row) throw new Error('DrizzleAssetResolver.resolve: upsert returned no row');

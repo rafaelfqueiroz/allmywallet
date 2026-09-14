@@ -153,6 +153,7 @@ describe('#98 — the dashboard read model (integration)', () => {
         batchId,
         JSON.stringify({
           kind: 'transaction',
+          priceStated: true,
           b3Type: 'Desconhecido',
           direction: null,
           assetCode: 'PETR4',

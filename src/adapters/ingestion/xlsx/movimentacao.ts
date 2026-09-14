@@ -35,7 +35,11 @@ export function parseMovimentacao(
 
     const { code, name } = splitProduct(produto);
     const b3Type = cellAt(row, structure.columns, 'movimentacao') ?? '';
-    const precoText = cellAt(row, structure.columns, 'preco unitario');
+    // #108: B3 writes a lone `-` where an event carries no price (custody
+    // transfers, rights, splits). Read only here, not in `cellAt`: in a
+    // required column a `-` must still fail the file rather than drop the row.
+    const precoText = cellAt(row, structure.columns, 'preco unitario')?.trim() ?? null;
+    const priceStated = precoText !== null && precoText !== '' && precoText !== '-';
     const direction = parseDirection(cellAt(row, structure.columns, 'entrada/saida'));
 
     const record: NormalizedTransactionRecord = {
@@ -49,9 +53,8 @@ export function parseMovimentacao(
       tradeDate: parseBrDate(dataText, 'data'),
       quantity: parseQuantity(quantidadeText, 'quantidade'),
       unitPrice:
-        precoText === null || precoText === ''
-          ? Money.zero()
-          : parseMoney(precoText, 'preco unitario'),
+        priceStated && precoText !== null ? parseMoney(precoText, 'preco unitario') : Money.zero(),
+      priceStated,
       // Movimentação carries no distinct fee column — see `negociacao.ts` for
       // where B3 actually states fees (BR-005-01's "authoritative trade
       // record"). Corretagem/nota-de-corretagem parsing is explicitly out of
@@ -77,9 +80,11 @@ function parseDirection(text: string | null): 'credit' | 'debit' | null {
 /**
  * `"PETR4 - Petrobras PN"` → `{ code: "PETR4", name: "Petrobras PN" }`. Falls back to the whole string when there is no separator.
  *
- * #108: bank paper (`"CDB - BANCO INTER S/A"`) keeps the whole string as its
+ * #108: bank paper (`"CDB - BANCO EXEMPLO S/A"`) keeps the whole string as its
  * code. Split like a ticker, every CDB, LCI and LCA at every bank became one
- * asset called `CDB`.
+ * asset called `CDB`. This does not make it meet Posição, which codes the same
+ * paper by its `Código`; bank paper still reconciles as missing history (#108
+ * Decision log 17).
  */
 function splitProduct(produto: string): { code: string; name: string } {
   const separatorIndex = produto.indexOf(' - ');
@@ -98,7 +103,7 @@ function splitProduct(produto: string): { code: string; name: string } {
  * a ticker ending `11` is a FII/unit, an ending like `34`/`35` reads as a
  * BDR, everything else defaults to `stock`. Tesouro titles and bank paper are
  * recognised by their `Produto` shape (#108). Still wrong for an ETF or a unit
- * (`KLBN11` reads as a FII) — acceptable because it is only ever a *guess*:
+ * (`TAEE11` reads as a FII) — acceptable because it is only ever a *guess*:
  * `AssetResolverPort` never lets a guess overwrite a class already stated, and
  * Posição, which states classes, always overwrites a guess (#108).
  */

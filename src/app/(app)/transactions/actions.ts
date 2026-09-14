@@ -325,6 +325,7 @@ async function resolveAsset(
       assetClass: input.assetClass ?? 'stock',
       // #108: the user chose it, so it corrects whatever an import guessed.
       classStated: true,
+      nameStated: true,
     });
   }
   return input.assetId === null ? null : AssetId.of(input.assetId);

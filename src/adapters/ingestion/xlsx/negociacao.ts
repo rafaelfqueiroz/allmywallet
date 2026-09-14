@@ -63,6 +63,7 @@ export function parseNegociacao(
       tradeDate: parseBrDate(dataText, 'data do negocio'),
       quantity: parseQuantity(quantidadeText, 'quantidade'),
       unitPrice: parseMoney(precoText, 'preco'),
+      priceStated: true,
       fees: Money.zero(),
       ratio: null,
     };

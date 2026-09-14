@@ -157,6 +157,7 @@ describe('#98 — dashboard surface tenant isolation', () => {
             batchId,
             JSON.stringify({
               kind: 'transaction',
+              priceStated: true,
               b3Type: 'Desconhecido',
               direction: null,
               assetCode: 'VALE3',

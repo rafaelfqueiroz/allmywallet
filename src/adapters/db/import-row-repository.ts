@@ -171,6 +171,7 @@ function serializeRecord(record: NormalizedRecord): Record<string, unknown> {
       quantity: record.quantity.toString(),
       unitPrice: record.unitPrice.toString(),
       fees: record.fees.toString(),
+      priceStated: record.priceStated,
       ratio: record.ratio === null ? null : record.ratio.toString(),
     };
   }
@@ -219,6 +220,8 @@ function deserializeRecord(raw: Record<string, unknown>): NormalizedRecord {
       quantity: Quantity.fromString(String(raw['quantity'])),
       unitPrice: Money.fromString(String(raw['unitPrice'])),
       fees: Money.fromString(String(raw['fees'])),
+      // #108: rows staged before `priceStated` existed always had a price.
+      priceStated: raw['priceStated'] !== false,
       ratio: raw['ratio'] === null ? null : Quantity.fromString(String(raw['ratio'])),
     };
   }

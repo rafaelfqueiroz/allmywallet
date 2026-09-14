@@ -18,6 +18,7 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
       name: 'CSHG Logística',
       assetClass: 'fii',
       classStated: true,
+      nameStated: true,
     });
 
     const positionRecord: NormalizedPositionRecord = {
@@ -99,6 +100,7 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
         name: 'X',
         assetClass: 'stock',
         classStated: true,
+        nameStated: true,
       }),
       institutionId: null,
     });

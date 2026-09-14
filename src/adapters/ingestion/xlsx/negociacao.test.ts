@@ -99,16 +99,16 @@ describe('SPEC-005 — parseNegociacao', () => {
       ).toBe('B3SA3');
     });
 
-    it('leaves a unit ticker alone (KLBN11 has no F)', () => {
+    it('leaves a unit ticker alone (TAEE11 has no F)', () => {
       expect(
         parseOne({
           data: '10/01/2026',
           tipo: 'Compra',
-          codigo: 'KLBN11',
+          codigo: 'TAEE11',
           quantidade: '1',
           preco: '1',
         }).assetCode,
-      ).toBe('KLBN11');
+      ).toBe('TAEE11');
     });
 
     it('a term trade (Prazo/Vencimento set) and an auction row parse as ordinary trades', () => {

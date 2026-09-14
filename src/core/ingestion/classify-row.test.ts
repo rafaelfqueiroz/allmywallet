@@ -16,6 +16,7 @@ const userId = UserId.generate();
 function unmapped(): { raw: Record<string, string>; record: NormalizedTransactionRecord } {
   const record: NormalizedTransactionRecord = {
     kind: 'transaction',
+    priceStated: true,
     b3Type: 'Um Tipo Novo',
     direction: null,
     assetCode: 'PETR4',
