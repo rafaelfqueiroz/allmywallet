@@ -28,6 +28,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The installed image, never whatever `:latest` happens to be locally — after a
+# rolled-back upgrade that is the image that failed its health check. start.sh
+# and init.sh export IMAGE_TAG; a manual run reads the recorded tag.
+: "${IMAGE_TAG:=$(cat "$ALLMYWALLET_STATE_DIR/current-tag" 2>/dev/null || true)}"
+[ -n "$IMAGE_TAG" ] || die "no installed image recorded in $ALLMYWALLET_STATE_DIR — run scripts/personal/init.sh first"
+export IMAGE_TAG
+
 ops() {
   personal_compose run --rm --no-deps -T web node dist/ops.js "$@"
 }
@@ -118,9 +125,12 @@ ops backup-record succeeded "$(basename "$final")" >/dev/null ||
 
 # BR-021-19: prune only now, after success — and never on an unreadable count,
 # since pruning on a guess is how the one surviving copy gets deleted.
-if retain=$(ops backup-retain-count 2>/dev/null | tail -1); then
-  prune_backups "$BACKUP_DIR" "$retain"
-  log "kept the newest $retain backups"
-else
-  log "could not resolve backup.retain_count — nothing pruned"
-fi
+# The count is the one all-digit line: the app's logger also writes to stdout.
+retain=$(ops backup-retain-count 2>/dev/null | grep -E '^[0-9]+$' | tail -1 || true)
+case "$retain" in
+  '' | 0) log "could not resolve backup.retain_count — nothing pruned" ;;
+  *)
+    prune_backups "$BACKUP_DIR" "$retain"
+    log "kept the newest $retain backups"
+    ;;
+esac

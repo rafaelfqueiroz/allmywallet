@@ -125,6 +125,21 @@ printf '%s\n' "$digest" >"$ALLMYWALLET_STATE_DIR/current-digest"
 "$REPO_ROOT/scripts/personal/backup.sh" || log "the first backup failed — fix it before importing anything (see /api/health)"
 personal_compose up -d web worker
 
+# BR-021-23/BR-021-16: "on start" has to mean every start, not only the ones
+# remembered. A per-user launchd agent runs start.sh at login and once a day
+# (launchd runs a calendar interval missed during sleep on wake).
+agent="$HOME/Library/LaunchAgents/com.allmywallet.personal.plist"
+mkdir -p "$(dirname "$agent")" "$HOME/Library/Logs"
+sed \
+  -e "s|__START_SCRIPT__|$REPO_ROOT/scripts/personal/start.sh|g" \
+  -e "s|__PATH__|$PATH|g" \
+  -e "s|__LOG__|$HOME/Library/Logs/allmywallet-personal.log|g" \
+  -e "s|__ENV_FILE__|$ALLMYWALLET_ENV_FILE|g" \
+  "$REPO_ROOT/scripts/personal/launchd.plist.template" >"$agent"
+LAUNCHCTL=${LAUNCHCTL:-launchctl}
+"$LAUNCHCTL" bootout "gui/$(id -u)" "$agent" >/dev/null 2>&1 || true
+"$LAUNCHCTL" bootstrap "gui/$(id -u)" "$agent" || log "could not load $agent — run scripts/personal/start.sh by hand at each start"
+
 port=${PERSONAL_WEB_PORT:-3100}
 log "initialised. Open http://localhost:$port"
 log "register this redirect URI on the Google OAuth client: http://localhost:$port/api/auth/callback/google"

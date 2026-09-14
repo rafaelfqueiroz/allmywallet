@@ -24,6 +24,8 @@ Real email: set `RESEND_API_KEY` and `EMAIL_FROM` in the env file, and the deplo
 
 ## Every day
 
+Nothing to do: `init.sh` installs a launchd agent (`~/Library/LaunchAgents/com.allmywallet.personal.plist`) that runs `scripts/personal/start.sh` at login and daily at 09:00, logging to `~/Library/Logs/allmywallet-personal.log`. Web and worker no longer restart on their own when Docker starts, so every start goes through it. By hand:
+
 ```bash
 scripts/personal/start.sh
 ```

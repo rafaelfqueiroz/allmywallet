@@ -116,6 +116,12 @@ describe('backup.sh', () => {
       join(sandbox, 'migrator.env'),
       'POSTGRES_USER=allmywallet_migrator\nPOSTGRES_DB=allmywallet\n',
     );
+    // backup.sh runs the installed image, which state records.
+    mkdirSync(join(sandbox, '.local', 'state', 'allmywallet'), { recursive: true });
+    writeFileSync(
+      join(sandbox, '.local', 'state', 'allmywallet', 'current-tag'),
+      'local-current\n',
+    );
     return path;
   }
 

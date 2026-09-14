@@ -32,6 +32,13 @@ HEALTH_INTERVAL=${HEALTH_INTERVAL:-4}
 WEB_PORT=${PERSONAL_WEB_PORT:-3100}
 
 mkdir -p "$ALLMYWALLET_STATE_DIR"
+
+# launchd runs this at login and daily; a manual run may overlap it. Two
+# concurrent upgrades would back up, pull and migrate twice over one database.
+lock="$ALLMYWALLET_STATE_DIR/start.lock"
+mkdir "$lock" 2>/dev/null || die "another start is running (remove $lock if it is stale)"
+trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+
 read_state() { cat "$ALLMYWALLET_STATE_DIR/$1" 2>/dev/null || true; }
 write_state() { printf '%s\n' "$2" >"$ALLMYWALLET_STATE_DIR/$1"; }
 

@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { aggregateStatus, checkBackup } from '@/lib/health';
+import { readFailedBackup } from '@/app/backup-status';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 
 /**
@@ -68,7 +69,15 @@ describe('backup health (SPEC-021 BR-021-20)', () => {
     await record('failed', '2026-09-12T10:00:00Z', 'second');
     expect((await checkBackup(appPool)).status).toBe('degraded');
 
+    // The in-app notice reads the same state.
+    expect(await readFailedBackup(appPool)).toEqual({
+      failedAt: new Date('2026-09-12T10:00:00Z'),
+      reason: 'second',
+      lastSuccessAt: null,
+    });
+
     await record('succeeded', '2026-09-13T10:00:00Z');
+    expect(await readFailedBackup(appPool)).toBeNull();
     const health = await checkBackup(appPool);
     expect(health.status).toBe('ok');
     expect(health.lastSuccessfulBackupAt).toBe('2026-09-13T10:00:00.000Z');

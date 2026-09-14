@@ -43,12 +43,13 @@ services:
       # refuse to boot anyway (src/lib/trusted-host.ts); failing here names
       # the actual missing value.
       #
-      # SPEC-021 BR-021-11: an explicit AUTH_URL wins, and DOMAIN is then never
-      # evaluated — Compose interpolates the nested default lazily. Compose also
-      # interpolates this file *before* merging an override, so the personal
-      # override cannot replace this line; it sets AUTH_URL in its env file
-      # instead. With AUTH_URL unset, the hosted behaviour is unchanged.
-      AUTH_URL: ${AUTH_URL:-https://${DOMAIN:?DOMAIN is required — Caddy needs it for TLS and Auth.js pins AUTH_URL to it}/api/auth}
+      # SPEC-021 BR-021-11: PERSONAL_AUTH_URL, set only by the personal env
+      # file, wins — and DOMAIN is then never evaluated, since Compose
+      # interpolates the nested default lazily. Compose interpolates this file
+      # *before* merging an override, so the override cannot replace this line.
+      # Deliberately not `AUTH_URL`: a stray AUTH_URL in a VPS .env must not
+      # quietly override the DOMAIN derivation and bring back #42's drift.
+      AUTH_URL: ${PERSONAL_AUTH_URL:-https://${DOMAIN:?DOMAIN is required — Caddy needs it for TLS and Auth.js pins AUTH_URL to it}/api/auth}
       # SPEC-005: `web` receives the uploaded .xlsx and `worker` parses it, so
       # the two must name the *same directory on the same filesystem*. The
       # default is the relative `.data/imports` (src/lib/env.ts), which

@@ -33,6 +33,11 @@ services:
     # The image is only ever pulled deliberately, by scripts/personal/start.sh,
     # after a backup. `up` must never fetch a newer :latest on its own.
     pull_policy: never
+    # BR-021-23/BR-021-16: `unless-stopped` would have Docker restart the old
+    # image at boot, skipping start.sh — no upgrade check, no daily backup.
+    # `on-failure` still restarts a crash, but a Docker restart leaves web and
+    # worker down until start.sh (run at login by launchd) brings them up.
+    restart: on-failure
     # BR-021-09: outside the working tree. The runtime file only — it holds no
     # migrator credential (see scripts/personal/lib.sh).
     env_file: !override
@@ -45,6 +50,7 @@ services:
 
   worker:
     pull_policy: never
+    restart: on-failure
     env_file: !override
       - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
 

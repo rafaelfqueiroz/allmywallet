@@ -31,7 +31,7 @@ describe.skipIf(!hasDocker)('docker compose definitions (SPEC-021)', () => {
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'amw-compose-'));
     envFile = join(dir, 'personal.env');
-    writeFileSync(envFile, 'AUTH_URL=http://localhost:3100/api/auth\n');
+    writeFileSync(envFile, 'PERSONAL_AUTH_URL=http://localhost:3100/api/auth\n');
   });
 
   afterAll(() => {
@@ -125,6 +125,24 @@ describe.skipIf(!hasDocker)('docker compose definitions (SPEC-021)', () => {
     const parsed = JSON.parse(withDomain) as ComposeConfig;
     expect(parsed.services.web?.environment?.AUTH_URL).toBe('https://example.com/api/auth');
     expect(Object.keys(parsed.services)).toContain('caddy');
+
+    // #42: an AUTH_URL in the hosted .env/shell never displaces the DOMAIN derivation.
+    const withStrayAuthUrl = execFileSync(
+      'docker',
+      ['compose', '--profile', 'app', 'config', '--format', 'json'],
+      {
+        cwd: hosted,
+        env: {
+          ...process.env,
+          DOMAIN: 'example.com',
+          AUTH_URL: 'https://elsewhere.example/api/auth',
+        },
+        encoding: 'utf-8',
+      },
+    );
+    expect(
+      (JSON.parse(withStrayAuthUrl) as ComposeConfig).services.web?.environment?.AUTH_URL,
+    ).toBe('https://example.com/api/auth');
 
     const { DOMAIN: _domain, ...withoutDomain } = process.env;
     const failed = spawnSync('docker', ['compose', '--profile', 'app', 'config', '-q'], {
