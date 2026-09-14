@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
-import { enumerateCatchUpDays, lastDueCloseDate } from './catch-up-days';
+import {
+  CLOSE_CAPTURE_CRON,
+  closeCaptureInstant,
+  enumerateCatchUpDays,
+  lastDueCloseDate,
+} from './catch-up-days';
 import { FakeTradingCalendar } from './test-support';
 
 /**
@@ -54,9 +59,9 @@ describe('enumerateCatchUpDays (SPEC-021 BR-021-28)', () => {
     expect(result.beyondCap).toBe(0);
   });
 
-  it('skips B3 holidays, and includes today once its session has closed', () => {
+  it('skips B3 holidays, and includes today once its 17:05 close capture has passed', () => {
     // Last capture Thu 12 Feb. Now Thu 19 Feb at 18:00 São Paulo (21:00Z),
-    // after the 20:00Z close.
+    // after the 20:05Z capture that a stopped worker missed.
     //   Fri 13 ✓  Sat/Sun ✗  Mon 16 Carnaval ✗  Tue 17 Carnaval ✗  Wed 18 ✓  Thu 19 ✓ (closed)
     const result = enumerateCatchUpDays({
       calendar: CARNIVAL,
@@ -129,14 +134,22 @@ describe('enumerateCatchUpDays (SPEC-021 BR-021-28)', () => {
 });
 
 describe('lastDueCloseDate', () => {
-  it('is today exactly at the close instant', () => {
-    expect(lastDueCloseDate(MARCH, new Date('2026-03-17T20:00:00Z'), d('2026-03-17'))).toBe(
+  // quotes.close-capture fires at 17:05 São Paulo = 20:05Z (fixed UTC−3).
+  it('is today exactly at the close-capture instant', () => {
+    expect(lastDueCloseDate(MARCH, new Date('2026-03-17T20:05:00Z'), d('2026-03-17'))).toBe(
       '2026-03-17',
     );
   });
 
-  it('is yesterday one millisecond before the close', () => {
-    expect(lastDueCloseDate(MARCH, new Date('2026-03-17T19:59:59.999Z'), d('2026-03-17'))).toBe(
+  it('is yesterday one millisecond before the close-capture instant', () => {
+    expect(lastDueCloseDate(MARCH, new Date('2026-03-17T20:04:59.999Z'), d('2026-03-17'))).toBe(
+      '2026-03-16',
+    );
+  });
+
+  it('the race window: at 17:02 the session has closed (17:00) but the 17:05 capture will still run, so today is not missed', () => {
+    // 17:02 São Paulo = 20:02Z — after FakeTradingCalendar's 20:00Z close.
+    expect(lastDueCloseDate(MARCH, new Date('2026-03-17T20:02:00Z'), d('2026-03-17'))).toBe(
       '2026-03-16',
     );
   });
@@ -152,5 +165,15 @@ describe('lastDueCloseDate', () => {
     expect(lastDueCloseDate(MARCH, new Date('2026-03-01T12:00:00Z'), d('2026-03-01'))).toBe(
       '2026-02-28',
     );
+  });
+});
+
+describe('close-capture schedule — one source for the cron and the window', () => {
+  it('the cron expression is 17:05 on weekdays', () => {
+    expect(CLOSE_CAPTURE_CRON).toBe('5 17 * * 1-5');
+  });
+
+  it('the capture instant is 17:05 São Paulo, i.e. 20:05Z', () => {
+    expect(closeCaptureInstant(d('2026-03-17')).toISOString()).toBe('2026-03-17T20:05:00.000Z');
   });
 });

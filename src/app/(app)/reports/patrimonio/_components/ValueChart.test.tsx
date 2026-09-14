@@ -1,4 +1,5 @@
 import { cloneElement, type ReactElement } from 'react';
+import type * as Recharts from 'recharts';
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '@/components/test-utils';
 import { ValueChart } from './ValueChart';
@@ -17,7 +18,7 @@ import { ValueChart } from './ValueChart';
  * this test fails.
  */
 vi.mock('recharts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('recharts')>();
+  const actual = await importOriginal<typeof Recharts>();
   return {
     ...actual,
     ResponsiveContainer: ({ children }: { children: ReactElement }) =>

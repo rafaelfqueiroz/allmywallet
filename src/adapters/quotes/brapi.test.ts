@@ -181,6 +181,37 @@ describe('BrapiQuoteProvider.fetchHistoricalCloses (SPEC-021 BR-021-29)', () => 
     if (!result.ok) expect(result.error.code).toBe(QuoteProviderErrorCode.UNAVAILABLE);
   });
 
+  it('SPEC-021 BR-021-28: a request that hangs is abandoned after historyTimeoutMs as UNAVAILABLE', async () => {
+    // A fetch that never answers on its own — it settles only when aborted,
+    // which is exactly how a real fetch behaves behind a captive portal.
+    const fetchMock = vi.fn(
+      (_url: URL, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason));
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new BrapiQuoteProvider({ source: 'brapi_free', historyTimeoutMs: 20 });
+
+    const result = await provider.fetchHistoricalCloses('PETR4', d('2026-03-12'), d('2026-03-16'));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe(QuoteProviderErrorCode.UNAVAILABLE);
+    expect(fetchMock.mock.calls[0]?.[1].signal.aborted).toBe(true);
+  });
+
+  it('bounds the request by default, with no timeout configured', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ status: 200, text: () => Promise.resolve(RECORDED_HISTORY_RESPONSE) });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
+
+    await provider.fetchHistoricalCloses('PETR4', d('2026-03-12'), d('2026-03-16'));
+
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
   it('a network failure or malformed JSON is UNAVAILABLE', async () => {
     const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));

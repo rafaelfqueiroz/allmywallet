@@ -15,11 +15,7 @@ import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptySta
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { tryUserId } from '@/lib/session';
 import { loadPatrimonio } from '@/app/(app)/reports/patrimonio/data';
-import {
-  basisOf,
-  plot,
-  toValueChartPoints,
-} from '@/app/(app)/reports/patrimonio/value-series';
+import { basisOf, plot, toValueChartPoints } from '@/app/(app)/reports/patrimonio/value-series';
 import { ValueChart } from '@/app/(app)/reports/patrimonio/_components/ValueChart';
 import { ContributionChart } from '@/app/(app)/reports/patrimonio/_components/ContributionChart';
 import { StackedChart } from '@/app/(app)/reports/patrimonio/_components/StackedChart';
@@ -60,7 +56,6 @@ export const dynamic = 'force-dynamic';
 interface PageProps {
   readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
-
 
 export default async function PatrimonioPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
@@ -474,10 +469,7 @@ function SeriesTable({
 }: {
   points: readonly ValuePoint[];
   gapDates: ReadonlySet<string>;
-  labels: Record<
-    'caption' | 'date' | 'value' | 'basis' | 'observed' | 'estimated' | 'gap',
-    string
-  >;
+  labels: Record<'caption' | 'date' | 'value' | 'basis' | 'observed' | 'estimated' | 'gap', string>;
 }) {
   return (
     <Table>
