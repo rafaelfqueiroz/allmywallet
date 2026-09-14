@@ -1,6 +1,8 @@
-import type { Pool } from 'pg';
 import { getPool } from '@/db/client';
 import { tryUserId } from '@/lib/session';
+import { readFailedBackup, type FailedBackup } from '@/lib/health';
+
+export type { FailedBackup };
 
 /**
  * SPEC-021 BR-021-20 — "shown in the app until a backup succeeds". AR-31/AR-35
@@ -12,11 +14,6 @@ import { tryUserId } from '@/lib/session';
  * visitor is told: an anonymous page saying "the backup failed" discloses
  * something about the instance to someone who has no account on it.
  */
-export interface FailedBackup {
-  readonly failedAt: Date;
-  readonly reason: string | null;
-  readonly lastSuccessAt: Date | null;
-}
 
 export async function loadFailedBackup(): Promise<FailedBackup | null> {
   if (!(await tryUserId())) return null;
@@ -26,21 +23,4 @@ export async function loadFailedBackup(): Promise<FailedBackup | null> {
     // A notice must never take a page down; /api/health reports the probe failure.
     return null;
   }
-}
-
-/** The newest run, when it failed — split out so it is testable against a real database. */
-export async function readFailedBackup(pool: Pool): Promise<FailedBackup | null> {
-  const { rows } = await pool.query<{
-    status: string;
-    detail: string | null;
-    finished_at: Date;
-    last_success: Date | null;
-  }>(
-    `SELECT latest.status, latest.detail, latest.finished_at,
-            (SELECT max(finished_at) FROM backup_runs WHERE status = 'succeeded') AS last_success
-       FROM (SELECT status, detail, finished_at FROM backup_runs ORDER BY finished_at DESC LIMIT 1) AS latest`,
-  );
-  const row = rows[0];
-  if (!row || row.status !== 'failed') return null;
-  return { failedAt: row.finished_at, reason: row.detail, lastSuccessAt: row.last_success };
 }

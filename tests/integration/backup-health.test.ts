@@ -1,7 +1,6 @@
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { aggregateStatus, checkBackup } from '@/lib/health';
-import { readFailedBackup } from '@/app/backup-status';
+import { aggregateStatus, checkBackup, readFailedBackup } from '@/lib/health';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 
 /**

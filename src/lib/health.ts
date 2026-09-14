@@ -213,3 +213,30 @@ export async function checkBackup(pool: Pool): Promise<BackupHealth> {
     };
   }
 }
+
+export interface FailedBackup {
+  readonly failedAt: Date;
+  readonly reason: string | null;
+  readonly lastSuccessAt: Date | null;
+}
+
+/**
+ * SPEC-021 BR-021-20 — the in-app notice's read: the newest run, when it
+ * failed. Beside `checkBackup` because both read the same state, and outside
+ * `src/app/` so it is testable without the session module.
+ */
+export async function readFailedBackup(pool: Pool): Promise<FailedBackup | null> {
+  const { rows } = await pool.query<{
+    status: string;
+    detail: string | null;
+    finished_at: Date;
+    last_success: Date | null;
+  }>(
+    `SELECT latest.status, latest.detail, latest.finished_at,
+            (SELECT max(finished_at) FROM backup_runs WHERE status = 'succeeded') AS last_success
+       FROM (SELECT status, detail, finished_at FROM backup_runs ORDER BY finished_at DESC LIMIT 1) AS latest`,
+  );
+  const row = rows[0];
+  if (!row || row.status !== 'failed') return null;
+  return { failedAt: row.finished_at, reason: row.detail, lastSuccessAt: row.last_success };
+}
