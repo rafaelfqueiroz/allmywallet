@@ -3,6 +3,7 @@ import type { SQL } from 'drizzle-orm';
 import { BusinessDate } from '@/core/shared/clock';
 import { AssetId, ImportBatchId, InstitutionId, TransactionId, UserId } from '@/core/shared/ids';
 import type {
+  OccurrenceTally,
   Pagination,
   TransactionFilter,
   TransactionListItem,
@@ -161,19 +162,25 @@ export class DrizzleTransactionRepository implements TransactionRepository {
    * SPEC-005's bulk-import counterpart to `nextOccurrence`: one grouped query
    * for every natural key a staged batch touches (typically thousands), so a
    * 10.000-row commit is not 10.000 round trips (BR-005-13's 60s budget).
-   * `max(occurrence)` doubles as the existing *count* only because occurrence
-   * assignment is always sequential from 1 with no gaps — every writer
-   * (`createTransaction`, this repository's own `insert`) goes through
-   * `nextOccurrence`/`occurrenceCounts`, never a hand-picked number.
+   * #110: a true `count(*)` beside `max(occurrence)` — occurrences can have
+   * gaps (see `OccurrenceTally`), so the maximum is not a count.
    */
-  async occurrenceCounts(naturalKeys: readonly string[]): Promise<ReadonlyMap<string, number>> {
+  async occurrenceTallies(
+    naturalKeys: readonly string[],
+  ): Promise<ReadonlyMap<string, OccurrenceTally>> {
     if (naturalKeys.length === 0) return new Map();
     const rows = await this.tx
-      .select({ naturalKey: transactions.naturalKey, highest: max(transactions.occurrence) })
+      .select({
+        naturalKey: transactions.naturalKey,
+        highest: max(transactions.occurrence),
+        count: count(),
+      })
       .from(transactions)
       .where(inArray(transactions.naturalKey, [...naturalKeys]))
       .groupBy(transactions.naturalKey);
-    return new Map(rows.map((row) => [row.naturalKey, row.highest ?? 0]));
+    return new Map(
+      rows.map((row) => [row.naturalKey, { count: row.count, highest: row.highest ?? 0 }]),
+    );
   }
 
   private baseQuery(where: SQL | undefined) {

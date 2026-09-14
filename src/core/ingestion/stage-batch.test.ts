@@ -11,7 +11,6 @@ import { Money, Quantity } from '@/core/shared/money';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import type { Transaction } from '@/core/ledger/transaction';
 import { aTransaction } from '@/core/ledger/test-support/transaction-builder';
-import { commitBatch } from '@/core/ingestion/commit-batch';
 import { UNCLASSIFIED_PLACEHOLDER_TYPE, importNaturalKeyFor } from '@/core/ingestion/occurrence';
 import type {
   NormalizedTransactionRecord,
@@ -230,7 +229,7 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
       expect(result.value.rows[0]?.classification).toBe('duplicate');
     });
 
-    it('a price-less transfer carries the source cost, and a re-import of the file is a duplicate', async () => {
+    it('BR-005-20a: a price-less transfer credit stages unclassified at B3’s price; its cost is carried at commit', async () => {
       const deps = buildFakeIngestionDeps();
       const credit = transactionRecord({
         b3Type: 'Transferência',
@@ -240,58 +239,88 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
         unitPrice: Money.zero(),
         fees: Money.zero(),
       }).record as NormalizedTransactionRecord;
-      const debitRecord = {
-        ...credit,
-        direction: 'debit',
-        institutionName: 'Corretora Origem',
-      } as const;
-
-      // The source broker's history: 100 bought at 25,00 → preço médio 25,00.
-      const sourceIds = await seedLedgerRow(
-        deps,
-        { ...debitRecord, tradeDate: BusinessDate.of('2026-01-02') },
-        () => 'seeded-buy',
-        {
-          type: 'buy',
-          status: 'active',
-          unitPrice: Money.fromString('25'),
-          fees: Money.zero(),
-          tradeDate: BusinessDate.of('2026-01-02'),
-        },
-      );
-      const records = [
-        { raw: {}, record: credit },
-        { raw: {}, record: debitRecord },
-      ];
+      const debitRecord = { ...credit, direction: 'debit', institutionName: 'Corretora Origem' };
 
       const batchId = await seedPendingBatch(deps);
-      const first = await stageBatch(deps, userId, {
+      const result = await stageBatch(deps, userId, {
         batchId,
-        extract: { extractType: 'b3_movimentacao', records },
+        extract: {
+          extractType: 'b3_movimentacao',
+          records: [
+            { raw: {}, record: credit },
+            { raw: {}, record: debitRecord as NormalizedTransactionRecord },
+          ],
+        },
       });
-      if (!first.ok) throw new Error('stage failed');
-      const [transferIn, transferOut] = first.value.rows;
-      expect(transferIn).toMatchObject({ classification: 'new', ledgerType: 'transfer_in' });
-      expect(
-        transferIn?.record.kind === 'transaction' &&
-          transferIn.record.unitPrice.equals(Money.fromString('25')),
-      ).toBe(true);
+
+      if (!result.ok) throw new Error('stage failed');
+      const [transferIn, transferOut] = result.value.rows;
+      expect(transferIn).toMatchObject({
+        classification: 'unclassified',
+        ledgerType: 'transfer_in',
+      });
+      expect(transferIn?.naturalKey?.endsWith('|0|transferencia')).toBe(true);
       expect(transferOut).toMatchObject({ classification: 'new', ledgerType: 'transfer_out' });
+      expect(result.value.counts).toMatchObject({ new: 1, needsAttention: 1 });
+    });
 
-      await commitBatch(deps, userId, { batchId });
-      expect(
-        deps.transactions.rows.filter(
-          (t) => t.assetId === sourceIds.assetId && t.status === 'active',
+    it('defect 5: occurrences with a gap across key forms are counted, so a genuine third identical row is new', async () => {
+      const deps = buildFakeIngestionDeps();
+      const aplicacao = transactionRecord({ b3Type: 'APLICAÇÃO', direction: 'credit' })
+        .record as NormalizedTransactionRecord;
+      // v2 stored the first of two identical rows unmapped: U#1.
+      await seedLedgerRow(deps, aplicacao, (ids) =>
+        importNaturalKeyFor(
+          { ...ids, ...priceParts(aplicacao), type: UNCLASSIFIED_PLACEHOLDER_TYPE },
+          'APLICAÇÃO',
         ),
-      ).toHaveLength(3);
+      );
+      // v3 then counted U#1 for the first and stored the second as M#2 — a gap at M#1.
+      await seedLedgerRow(
+        deps,
+        aplicacao,
+        (ids) => naturalKeyFor({ ...ids, ...priceParts(aplicacao), type: 'buy' }),
+        { type: 'buy', status: 'active', occurrence: 2 },
+      );
 
-      const again = await seedPendingBatch(deps);
-      const second = await stageBatch(deps, userId, {
-        batchId: again,
-        extract: { extractType: 'b3_movimentacao', records },
+      const batchId = await seedPendingBatch(deps);
+      const record = { raw: {}, record: aplicacao };
+      const result = await stageBatch(deps, userId, {
+        batchId,
+        extract: { extractType: 'b3_movimentacao', records: [record, record, record] },
       });
-      if (!second.ok) throw new Error('stage failed');
-      expect(second.value.rows.map((row) => row.classification)).toEqual([
+
+      if (!result.ok) throw new Error('stage failed');
+      // Two stored rows (U#1, M#2) cover ordinals 1 and 2; summed maxima (1 + 2 = 3) would swallow 3.
+      expect(result.value.rows.map((row) => row.classification)).toEqual([
+        'duplicate',
+        'duplicate',
+        'new',
+      ]);
+      expect(result.value.rows[2]?.occurrence).toBe(3);
+    });
+
+    it('defect 5: a deleted earlier occurrence never makes a new row reuse a stored occurrence', async () => {
+      const deps = buildFakeIngestionDeps();
+      const compra = transactionRecord().record as NormalizedTransactionRecord;
+      // K#1 and K#2 were stored, and the user deleted K#1: count 1, highest 2.
+      await seedLedgerRow(
+        deps,
+        compra,
+        (ids) => naturalKeyFor({ ...ids, ...priceParts(compra), type: 'buy' }),
+        { type: 'buy', status: 'active', occurrence: 2 },
+      );
+
+      const batchId = await seedPendingBatch(deps);
+      const record = { raw: {}, record: compra };
+      const result = await stageBatch(deps, userId, {
+        batchId,
+        extract: { extractType: 'b3_movimentacao', records: [record, record] },
+      });
+
+      if (!result.ok) throw new Error('stage failed');
+      // Ordinal 2 as `new` would collide with the stored K#2 on (natural_key, occurrence).
+      expect(result.value.rows.map((row) => row.classification)).toEqual([
         'duplicate',
         'duplicate',
       ]);

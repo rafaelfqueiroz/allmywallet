@@ -4,6 +4,7 @@ import { TransactionId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { editTransaction } from '@/core/ledger/edit-transaction';
+import { naturalKeyFor } from '@/core/ledger/natural-key';
 import { TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
 import {
   FakePositionRepository,
@@ -120,6 +121,79 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.transaction.naturalKey).not.toBe(row.naturalKey);
+  });
+
+  describe('SPEC-005 BR-005-17 (#110) — an imported row keyed by its B3 source', () => {
+    /** Keyed as staging keys a price-less transfer: at B3's stated price, with the raw type. */
+    function importKeyedRow() {
+      const row = aTransaction()
+        .transferIn()
+        .imported('batch-a')
+        .at('Destino')
+        .quantity('100')
+        .price('10')
+        .build();
+      return {
+        ...row,
+        naturalKey: `${naturalKeyFor({ ...row, unitPrice: Money.zero() })}|transferencia`,
+      };
+    }
+
+    it('keeps its key on a fees- or price-only edit', async () => {
+      const row = importKeyedRow();
+      const state = deps([row]);
+
+      const result = await editTransaction(state, row.id, {
+        assetId: row.assetId,
+        institutionId: row.institutionId,
+        type: row.type,
+        tradeDate: row.tradeDate,
+        quantity: Quantity.fromString('100.0'),
+        unitPrice: Money.fromString('11'),
+        fees: Money.fromString('1'),
+      });
+
+      expect(result.ok && result.value.transaction.naturalKey).toBe(row.naturalKey);
+    });
+
+    it.each([
+      ['quantity', { quantity: Quantity.fromString('90') }],
+      ['type', { type: 'buy' as const }],
+      ['trade date', { tradeDate: BusinessDate.of('2026-01-06') }],
+      ['institution', { institutionId: null }],
+      ['asset', { assetId: assetIdFor('VALE3') }],
+    ])('rederives its key when the %s changes', async (_label, change) => {
+      const row = importKeyedRow();
+      const state = deps([row]);
+
+      const result = await editTransaction(state, row.id, change);
+
+      expect(result.ok && result.value.transaction.naturalKey).not.toBe(row.naturalKey);
+    });
+
+    it('an imported row keyed by its own fields still rederives on a price edit (BR-006-04)', async () => {
+      const built = aTransaction().buy().imported('batch-a').quantity('100').price('10').build();
+      const row = { ...built, naturalKey: naturalKeyFor(built) };
+      const state = deps([row]);
+
+      const result = await editTransaction(state, row.id, { unitPrice: Money.fromString('11') });
+
+      expect(result.ok && result.value.transaction.naturalKey).toBe(
+        naturalKeyFor({ ...row, unitPrice: Money.fromString('11') }),
+      );
+    });
+
+    it('flagUserModified: false leaves the provenance flag as it was', async () => {
+      const row = importKeyedRow();
+      const state = deps([row]);
+
+      const result = await editTransaction(state, row.id, {
+        unitPrice: Money.fromString('12'),
+        flagUserModified: false,
+      });
+
+      expect(result.ok && result.value.transaction.isUserModified).toBe(false);
+    });
   });
 
   it('leaves untouched fields exactly as they were', async () => {

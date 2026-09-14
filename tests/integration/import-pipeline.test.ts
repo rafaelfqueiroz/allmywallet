@@ -1083,6 +1083,104 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(staged).toEqual([{ classification: 'unclassified' }]);
   });
 
+  /**
+   * SPEC-005 BR-005-20a (#110) — import order must not decide the outcome.
+   * A transfer imported before its source broker's history commits
+   * `unclassified`; once the history is in, re-importing the same file gives
+   * that transaction its carried cost in place rather than adding a copy.
+   */
+  it('BR-005-20a (#110): a transfer imported before its source history is promoted in place on re-import', async () => {
+    const transferFile = [
+      {
+        entradaSaida: 'Credito',
+        data: '10/03/2026',
+        movimentacao: 'Transferência',
+        produto: 'PETR4 - Petrobras PN',
+        instituicao: 'CORRETORA DESTINO',
+        quantidade: '100',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      },
+      {
+        entradaSaida: 'Debito',
+        data: '10/03/2026',
+        movimentacao: 'Transferência',
+        produto: 'PETR4 - Petrobras PN',
+        instituicao: 'CORRETORA ORIGEM',
+        quantidade: '100',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      },
+    ];
+    async function importFile(rows: Parameters<typeof buildMovimentacaoXlsx>[0]) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+
+    // No source history yet: the debit cannot leave ORIGEM, the credit waits.
+    const first = await importFile(transferFile);
+    const { rows: waiting } = await migratorPool.query(
+      "SELECT id, natural_key, status FROM transactions WHERE type = 'transfer_in'",
+    );
+    expect(waiting).toEqual([expect.objectContaining({ status: 'unclassified' })]);
+
+    // ORIGEM's history: 100 bought at 10,00, no fees → cost 1.000,00, preço médio 10,00.
+    await importFile([
+      {
+        entradaSaida: 'Credito',
+        data: '05/01/2026',
+        movimentacao: 'Compra',
+        produto: 'PETR4 - Petrobras PN',
+        instituicao: 'CORRETORA ORIGEM',
+        quantidade: '100',
+        precoUnitario: '10,00',
+      },
+    ]);
+
+    await importFile(transferFile);
+
+    const { rows: promoted } = await migratorPool.query(
+      "SELECT id, natural_key, occurrence, status, unit_price, is_user_modified FROM transactions WHERE type = 'transfer_in'",
+    );
+    expect(promoted).toHaveLength(1);
+    expect(promoted[0]).toMatchObject({
+      id: waiting[0]?.id,
+      natural_key: waiting[0]?.natural_key,
+      status: 'active',
+      is_user_modified: false,
+      unit_price: '10.00000000',
+    });
+    const { rows: total } = await migratorPool.query('SELECT count(*)::int AS n FROM transactions');
+    // The buy, the debit written on re-import, and the one promoted credit.
+    expect(Number(total[0]?.n)).toBe(3);
+
+    // DESTINO: 100 × 10,00 = 1.000,00.
+    const { rows: destination } = await migratorPool.query(
+      'SELECT quantity, average_cost, total_cost FROM positions WHERE institution_id = $1',
+      [promoted[0]?.institution_id ?? (await transferInInstitution())],
+    );
+    expect(destination).toEqual([
+      { quantity: '100.00000000', average_cost: '10.00000000', total_cost: '1000.00000000' },
+    ]);
+
+    // The row that first staged it has left Needs attention.
+    const { rows: origin } = await migratorPool.query(
+      'SELECT classification FROM import_rows WHERE batch_id = $1 AND transaction_id = $2',
+      [first, waiting[0]?.id],
+    );
+    expect(origin).toEqual([{ classification: 'new' }]);
+
+    async function transferInInstitution() {
+      const { rows } = await migratorPool.query(
+        "SELECT institution_id FROM transactions WHERE type = 'transfer_in'",
+      );
+      return rows[0]?.institution_id as string;
+    }
+  });
+
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {
     const batchId = await newPendingBatch('b3_movimentacao');
     // Default metadata block embeds SYNTHETIC_CPF, a checksum-valid CPF.

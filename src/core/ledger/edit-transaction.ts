@@ -56,6 +56,14 @@ export interface EditTransactionInput {
    * the unclassified key, matches nothing, and inserts the row a second time.
    */
   readonly preserveNaturalKey?: boolean | undefined;
+  /**
+   * BR-006-16 — `false` for the one edit no human made: import promoting its
+   * own unclassified transfer once the carried cost resolves (SPEC-005
+   * BR-005-20a, #110). The row gains information from its B3 source rather
+   * than a correction, so it is not badged as user-modified. Defaults to
+   * flagging.
+   */
+  readonly flagUserModified?: boolean | undefined;
 }
 
 export interface EditTransactionResult {
@@ -178,7 +186,7 @@ function applyEdit(original: Transaction, input: EditTransactionInput, now: Date
     // key in place would make a re-import match this row against a trade it is
     // no longer a record of.
     naturalKey:
-      input.preserveNaturalKey === true
+      input.preserveNaturalKey === true || keepsImportKey(original, input)
         ? original.naturalKey
         : naturalKeyFor({ assetId, institutionId, type, tradeDate, quantity, unitPrice }),
     /**
@@ -189,9 +197,38 @@ function applyEdit(original: Transaction, input: EditTransactionInput, now: Date
      * decided this value" is worth more than one that means "a human decided
      * this value, but only on rows we happened to import".
      */
-    isUserModified: true,
+    isUserModified: input.flagUserModified === false ? original.isUserModified : true,
     updatedAt: now,
   };
+}
+
+/**
+ * SPEC-005 BR-005-17 (#110) — an imported row whose key is **not** derived
+ * from its own fields keeps that key while the B3 row it records is still the
+ * same row: same asset, institution, type, date and quantity.
+ *
+ * Two kinds of imported row are keyed that way. A row staged `unclassified`
+ * carries the raw B3 type in its key (`importNaturalKeyFor`), and a carried
+ * transfer is keyed at the price B3 stated — none — while it stores the
+ * carried cost (BR-005-20a). Rederiving either key on a fees-only or
+ * price-only edit produced a key no re-import computes, and the next import of
+ * the file wrote the row a second time.
+ *
+ * A manual row, and an imported row keyed by `naturalKeyFor` itself, are
+ * untouched: for them this is never true, and BR-006-04 applies as before.
+ */
+function keepsImportKey(original: Transaction, input: EditTransactionInput): boolean {
+  if (original.importBatchId === null) return false;
+  const derived = naturalKeyFor(original);
+  if (original.naturalKey === derived) return false;
+  return (
+    (input.assetId ?? original.assetId) === original.assetId &&
+    (input.institutionId === undefined ? original.institutionId : input.institutionId) ===
+      original.institutionId &&
+    (input.type ?? original.type) === original.type &&
+    (input.tradeDate ?? original.tradeDate) === original.tradeDate &&
+    (input.quantity ?? original.quantity).equals(original.quantity)
+  );
 }
 
 function earlier(a: BusinessDate, b: BusinessDate): BusinessDate {

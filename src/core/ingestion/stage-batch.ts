@@ -12,7 +12,7 @@ import {
   planOccurrences,
 } from '@/core/ingestion/occurrence';
 import { classifyMovement, isIgnoredMovement } from '@/core/ingestion/movement-map';
-import { carriedTransferCosts } from '@/core/ingestion/transfer-cost';
+import type { OccurrenceTally } from '@/core/ledger/ports';
 import type {
   ExtractType,
   ImportBatch,
@@ -192,7 +192,6 @@ async function stageTransactionRows(
     readonly naturalKey: string;
     /** Every other key this same B3 row has had or could have — see `keyForms`. */
     readonly otherKeys: readonly string[];
-    readonly keyForms: KeyForms | null;
   }
 
   const resolved: Resolved[] = [];
@@ -275,53 +274,34 @@ async function stageTransactionRows(
       ledgerType,
       naturalKey,
       otherKeys: forms === null ? [] : otherKeysThan(forms, naturalKey),
-      keyForms: forms,
     });
   }
 
-  // #110: a price-less custody transfer takes the source broker's average cost.
-  const carried = await carriedTransferCosts(
-    deps.transactions,
-    resolved.map((row) => ({
-      assetId: row.assetId,
-      institutionId: row.institutionId,
-      tradeDate: row.record.tradeDate,
-      quantity: row.record.quantity,
-      ledgerType: row.ledgerType,
-      needsCarriedCost:
-        row.isUnclassified && row.ledgerType === 'transfer_in' && !row.record.priceStated,
-    })),
-  );
-  const withCosts = resolved.map((row, index): Resolved => {
-    const cost = carried.get(index);
-    if (cost === undefined || row.keyForms === null) return row;
-    // The key keeps what B3 stated (no price), so a re-import keys it the same.
-    return {
-      ...row,
-      record: { ...row.record, unitPrice: cost },
-      isUnclassified: false,
-      naturalKey: row.keyForms.mapped,
-      otherKeys: otherKeysThan(row.keyForms, row.keyForms.mapped),
-    };
-  });
+  // SPEC-005 BR-005-20a (#110): a price-less `Transferência` credit stays
+  // `unclassified` here, keyed at the price B3 stated. Its cost is carried at
+  // commit (`commit-batch.ts`), where the source's history includes this
+  // batch's own rows — so the preview counts it as needing attention, and
+  // commit reports what it became.
 
   // BR-005-15/16/17: one grouped occurrence query for the whole batch.
   //
   // #110 — a row's key depends on how it was classified, and that changes
-  // between map versions (v2's unmapped `APLICAÇÃO` is v3's `buy`) and between
-  // imports (a transfer whose cost could not be carried last time can be now).
-  // An occurrence already in the ledger under any other form of the same B3
-  // row counts towards this one, so the row stages as a duplicate rather than
-  // a second copy of something the user may already have classified by hand.
+  // between map versions (v2's unmapped `APLICAÇÃO` is v3's `buy`). An
+  // occurrence already in the ledger under any other form of the same B3 row
+  // counts towards this one, so the row stages as a duplicate rather than a
+  // second copy of something the user may already have classified by hand.
   const uniqueKeys = [
     ...new Set([
-      ...withCosts.flatMap((row) => [row.naturalKey, ...row.otherKeys]),
+      ...resolved.flatMap((row) => [row.naturalKey, ...row.otherKeys]),
       ...ignoredInFileOrder.map((row) => row.naturalKey),
     ]),
   ];
-  const existingCounts = await deps.transactions.occurrenceCounts(uniqueKeys);
-  const planned = planOccurrences(withCosts, countsAcrossKeyForms(withCosts, existingCounts));
-  const plannedIgnored = planOccurrences(ignoredInFileOrder, existingCounts);
+  const tallies = await deps.transactions.occurrenceTallies(uniqueKeys);
+  const planned = planOccurrences(resolved, countsAcrossKeyForms(resolved, tallies));
+  const plannedIgnored = planOccurrences(
+    ignoredInFileOrder,
+    new Map([...tallies].map(([key, tally]) => [key, tally.highest])),
+  );
 
   const staged: ImportRow[] = [];
   let ignoredCursor = 0;
@@ -397,13 +377,26 @@ function otherKeysThan(forms: KeyForms, key: string): readonly string[] {
 }
 
 /**
- * Each planned key's existing count plus every distinct other form of it. Two
- * rows can share a key yet differ in their other forms (`Resgate` and
- * `RESGATE ANTECIPADO/` are both `sell`), so the forms are unioned per key.
+ * How many occurrences of each planned key are already stored, across every
+ * form of it. Two rows can share a key yet differ in their other forms
+ * (`Resgate` and `RESGATE ANTECIPADO/` are both `sell`), so the forms are
+ * unioned per key.
+ *
+ * #110 — **rows are counted, not maxima summed.** A key's own occurrences can
+ * have gaps: a v3 file with two identical `APLICAÇÃO` rows, the first already
+ * stored unmapped under v2 as `U#1`, stores the second as `M#2`. Summing the
+ * maxima gives 2 + 1 = 3, and a genuine third identical row (ordinal 3) would
+ * stage as a duplicate (BR-005-16). Counting gives 1 + 1 = 2, and it is new.
+ *
+ * The key's own `highest` is the floor: a user who deleted `M#1` of `{1, 2}`
+ * leaves count 1, and ordinal 2 would otherwise be staged `new` at occurrence
+ * 2 — a unique-constraint violation that fails the whole commit. With the
+ * floor the ordinal of a `new` row is always above every stored occurrence of
+ * its key, which is what `max(occurrence)` guaranteed before.
  */
 function countsAcrossKeyForms(
   rows: readonly { readonly naturalKey: string; readonly otherKeys: readonly string[] }[],
-  existing: ReadonlyMap<string, number>,
+  tallies: ReadonlyMap<string, OccurrenceTally>,
 ): ReadonlyMap<string, number> {
   const forms = new Map<string, Set<string>>();
   for (const row of rows) {
@@ -411,12 +404,10 @@ function countsAcrossKeyForms(
     for (const key of row.otherKeys) set.add(key);
     forms.set(row.naturalKey, set);
   }
-  const counts = new Map(existing);
+  const counts = new Map<string, number>();
   for (const [key, set] of forms) {
-    counts.set(
-      key,
-      [...set].reduce((sum, form) => sum + (existing.get(form) ?? 0), 0),
-    );
+    const counted = [...set].reduce((sum, form) => sum + (tallies.get(form)?.count ?? 0), 0);
+    counts.set(key, Math.max(counted, tallies.get(key)?.highest ?? 0));
   }
   return counts;
 }

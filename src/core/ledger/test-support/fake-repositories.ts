@@ -1,5 +1,6 @@
 import type { AssetId, InstitutionId, TransactionId } from '@/core/shared/ids';
 import type {
+  OccurrenceTally,
   Pagination,
   TransactionFilter,
   TransactionListItem,
@@ -117,15 +118,20 @@ export class FakeTransactionRepository implements TransactionRepository {
     return highest + 1;
   }
 
-  async occurrenceCounts(naturalKeys: readonly string[]): Promise<ReadonlyMap<string, number>> {
+  async occurrenceTallies(
+    naturalKeys: readonly string[],
+  ): Promise<ReadonlyMap<string, OccurrenceTally>> {
     const wanted = new Set(naturalKeys);
-    const counts = new Map<string, number>();
+    const tallies = new Map<string, OccurrenceTally>();
     for (const row of this.#rows) {
       if (!wanted.has(row.naturalKey)) continue;
-      const current = counts.get(row.naturalKey) ?? 0;
-      if (row.occurrence > current) counts.set(row.naturalKey, row.occurrence);
+      const current = tallies.get(row.naturalKey) ?? { count: 0, highest: 0 };
+      tallies.set(row.naturalKey, {
+        count: current.count + 1,
+        highest: Math.max(current.highest, row.occurrence),
+      });
     }
-    return counts;
+    return tallies;
   }
 
   #toListItem(row: Transaction): TransactionListItem {
