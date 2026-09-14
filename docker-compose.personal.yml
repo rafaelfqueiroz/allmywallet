@@ -42,9 +42,12 @@ services:
     # migrator credential (see scripts/personal/lib.sh).
     env_file: !override
       - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
+    # BR-021-11: replaces the base file's DOMAIN-derived https origin (the
+    # scripts pass a placeholder DOMAIN only so that line interpolates).
+    environment:
+      AUTH_URL: ${PERSONAL_AUTH_URL:?PERSONAL_AUTH_URL must be set in the personal env file, e.g. http://localhost:3100/api/auth}
     # The base file publishes no web port (Caddy fronts it). Here the browser
-    # reaches it directly, on loopback only (BR-021-10/11). AUTH_URL comes from
-    # the env file as http://localhost:<this port>/api/auth.
+    # reaches it directly, on loopback only (BR-021-10/11).
     ports:
       - '127.0.0.1:${PERSONAL_WEB_PORT:-3100}:3000'
 

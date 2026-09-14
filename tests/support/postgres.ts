@@ -33,11 +33,15 @@ export async function startTestDatabase(): Promise<TestDatabase> {
     const appUrl = process.env.DATABASE_URL ?? existing;
     // SPEC-021 BR-021-08 (AR-72): this reuse path is the only route a suite
     // reaches a database it did not create, so the marker is read here, before
-    // `ensureAppRole` issues its first statement. Both URLs are checked because
-    // nothing forces them to name the same database.
+    // `ensureAppRole` issues its first statement.
     await assertNotPersonalDatabase(existing);
-    if (appUrl !== existing) await assertNotPersonalDatabase(appUrl);
     await ensureAppRole(existing, appUrl);
+    // The app URL is checked too — nothing forces it to name the same
+    // database — but only now: on a fresh service container `allmywallet_app`
+    // has no password until `ensureAppRole` has set one, so reading its marker
+    // any earlier fails authentication. `ensureAppRole` touched only the
+    // migration URL's database, which was checked above.
+    if (appUrl !== existing) await assertNotPersonalDatabase(appUrl);
     return { migrationUrl: existing, appUrl, stop: async () => {} };
   }
 

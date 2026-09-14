@@ -82,7 +82,14 @@ load_env() {
 }
 
 # The one Compose invocation every personal script uses (BR-021-12).
+#
+# DOMAIN: docker-compose.yml is used unchanged, and Compose interpolates it
+# before merging the override — so its `${DOMAIN:?}` must resolve even though
+# the personal instance runs no Caddy and has no domain (BR-021-11). A reserved
+# `.invalid` placeholder satisfies interpolation only; the override replaces
+# the AUTH_URL derived from it, and nothing else reads DOMAIN here.
 personal_compose() {
+  DOMAIN=${PERSONAL_COMPOSE_DOMAIN_PLACEHOLDER:-personal-instance.invalid} \
   "$DOCKER" compose \
     -f "$REPO_ROOT/docker-compose.yml" \
     -f "$REPO_ROOT/docker-compose.personal.yml" \
