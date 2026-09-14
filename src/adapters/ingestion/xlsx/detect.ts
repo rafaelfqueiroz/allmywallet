@@ -27,11 +27,17 @@ export interface ExtractSchema {
  * BR-005-01: each extract's column set. Order-independent (BR-005-04 — B3
  * changing column order must not break the parser).
  *
- * One schema set covers both a flattened single-sheet Posição and B3's real
- * multi-tab workbook, because detection runs **per sheet** (`index.ts`, #63)
- * and every Posição tab carries the same column set. A workbook's tabs are
- * therefore detected independently, and one that matches no schema — a cover
- * or notes tab — is skipped rather than failing the whole import.
+ * Detection runs **per sheet** (`index.ts`, #63), so a workbook's tabs are
+ * detected independently, and one that matches no schema — a cover or notes
+ * tab — is skipped rather than failing the whole import.
+ *
+ * #108 — Posição's schema is the column core **every** real tab shares
+ * (`Acoes`, `Fundo de Investimento`, `Renda Fixa`, `Tesouro Direto`). The
+ * first version required `Categoria` and `Data de Referência`, which B3's real
+ * export does not have on any tab: it was written against an invented layout,
+ * and every real Posição import failed detection. The per-tab columns
+ * (`Código de Negociação`, `Indexador`, `Vencimento`, …) are read by the
+ * parser, not required here, so one schema still matches all four tabs.
  */
 export const EXTRACT_SCHEMAS: readonly ExtractSchema[] = [
   {
@@ -61,7 +67,14 @@ export const EXTRACT_SCHEMAS: readonly ExtractSchema[] = [
   },
   {
     extractType: 'b3_posicao',
-    requiredHeaders: ['produto', 'instituicao', 'categoria', 'quantidade', 'data de referencia'],
+    requiredHeaders: [
+      'produto',
+      'instituicao',
+      'quantidade',
+      'quantidade disponivel',
+      'quantidade indisponivel',
+      'motivo',
+    ],
   },
 ];
 

@@ -34,6 +34,15 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-08-21'),
     parserFingerprint: '38dda58d53ec45f8083e35084570a72818df31d1b3fc26f31c556f7882dc1730',
   },
+  {
+    // #108: the Posição parser was rewritten for B3's real per-tab layout; the
+    // old layout had been invented, not changed by B3. The owner exported a
+    // real Posição that day via Minha carteira → Investimentos → Posição →
+    // Baixar. Movimentação and Negociação were not re-checked (last seen on
+    // 2026-08-21); that is still open on #108.
+    asOf: BusinessDate.of('2026-09-14'),
+    parserFingerprint: 'cd1fc474859c90ab5d5104143bd872bac740da36ea1ede2a1f7c9d1b91f40c76',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

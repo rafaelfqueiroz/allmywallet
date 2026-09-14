@@ -163,54 +163,135 @@ export async function buildNegociacaoXlsx(
   });
 }
 
-export const POSICAO_HEADERS = [
-  'Produto',
-  'Instituição',
-  'Categoria',
-  'Quantidade',
-  'Data de Referência',
-  'Indexador',
-  'Taxa Contratada',
-  'Data de Emissão',
-  'Vencimento',
-  'Valor Aplicado',
-] as const;
+/**
+ * #108 — B3's **real** Posição layout: one tab per asset class, header on row
+ * 1, no metadata block. Header names only were read off a real export (never
+ * its values — DV-24); the first version of this builder emitted an invented
+ * `Categoria`/`Data de Referência` layout, which is why CI never caught that
+ * real imports failed detection.
+ */
+export const POSICAO_TAB_HEADERS = {
+  Acoes: [
+    'Produto',
+    'Instituição',
+    'Conta',
+    'Código de Negociação',
+    'CNPJ da Empresa',
+    'Código ISIN / Distribuição',
+    'Tipo',
+    'Escriturador',
+    'Quantidade',
+    'Quantidade Disponível',
+    'Quantidade Indisponível',
+    'Motivo',
+    'Preço de Fechamento',
+    'Valor Atualizado',
+  ],
+  'Fundo de Investimento': [
+    'Produto',
+    'Instituição',
+    'Conta',
+    'Código de Negociação',
+    'CNPJ do Fundo',
+    'Código ISIN / Distribuição',
+    'Tipo',
+    'Administrador',
+    'Quantidade',
+    'Quantidade Disponível',
+    'Quantidade Indisponível',
+    'Motivo',
+    'Preço de Fechamento',
+    'Valor Atualizado',
+  ],
+  'Renda Fixa': [
+    'Produto',
+    'Instituição',
+    'Emissor',
+    'Código',
+    'Indexador',
+    'Tipo de regime',
+    'Data de Emissão',
+    'Vencimento',
+    'Quantidade',
+    'Quantidade Disponível',
+    'Quantidade Indisponível',
+    'Motivo',
+    'Contraparte',
+    'Preço Atualizado MTM',
+    'Valor Atualizado MTM',
+    'Preço Atualizado CURVA',
+    'Valor Atualizado CURVA',
+    'Preço Atualizado FECHAMENTO',
+    'Valor Atualizado FECHAMENTO',
+  ],
+  'Tesouro Direto': [
+    'Produto',
+    'Instituição',
+    'Código ISIN',
+    'Indexador',
+    'Vencimento',
+    'Quantidade',
+    'Quantidade Disponível',
+    'Quantidade Indisponível',
+    'Motivo',
+    'Valor Aplicado',
+    'Valor bruto',
+    'Valor líquido',
+    'Valor Atualizado',
+  ],
+} as const;
+
+export type PosicaoTab = keyof typeof POSICAO_TAB_HEADERS;
 
 export interface PosicaoRowInput {
+  /** `"PETR4 - PETROBRAS"`, `"CDB - BANCO TESTE S/A"`, `"Tesouro Selic 2029"` — B3's own shapes. */
   readonly produto: string;
   readonly instituicao?: string;
-  readonly categoria: string;
+  /** `Código de Negociação` on listed tabs, `Código` on Renda Fixa, `Código ISIN` on Tesouro. */
+  readonly codigo?: string;
+  readonly tipo?: string;
   readonly quantidade: string;
-  readonly dataReferencia: string;
   readonly indexador?: string;
-  readonly taxaContratada?: string;
   readonly dataEmissao?: string;
   readonly vencimento?: string;
-  readonly valorAplicado?: string;
 }
 
-export function posicaoRow(input: PosicaoRowInput): Record<string, string> {
-  return {
+export function posicaoRow(tab: PosicaoTab, input: PosicaoRowInput): Record<string, string> {
+  const values: Record<string, string> = {
     Produto: input.produto,
     Instituição: input.instituicao ?? 'Corretora Teste',
-    Categoria: input.categoria,
+    Conta: '123456',
+    'Código de Negociação': input.codigo ?? '',
+    Código: input.codigo ?? '',
+    'Código ISIN': input.codigo ?? '',
+    Tipo: input.tipo ?? '',
     Quantidade: input.quantidade,
-    'Data de Referência': input.dataReferencia,
+    'Quantidade Disponível': input.quantidade,
+    'Quantidade Indisponível': '0',
     Indexador: input.indexador ?? '',
-    'Taxa Contratada': input.taxaContratada ?? '',
     'Data de Emissão': input.dataEmissao ?? '',
     Vencimento: input.vencimento ?? '',
-    'Valor Aplicado': input.valorAplicado ?? '',
+  };
+  return Object.fromEntries(
+    POSICAO_TAB_HEADERS[tab].map((header) => [header, values[header] ?? '']),
+  );
+}
+
+export function posicaoSheet(tab: PosicaoTab, rows: readonly PosicaoRowInput[]): BuildSheetOptions {
+  return {
+    headers: [...POSICAO_TAB_HEADERS[tab]],
+    rows: rows.map((row) => posicaoRow(tab, row)),
+    metadataRows: [],
   };
 }
 
+/** A Posição workbook with one tab per key, in the order given — the real export's shape. */
 export async function buildPosicaoXlsx(
-  rows: readonly PosicaoRowInput[],
-  options: Partial<BuildSheetOptions> = {},
+  tabs: Partial<Record<PosicaoTab, readonly PosicaoRowInput[]>>,
 ): Promise<Uint8Array> {
-  return buildXlsx({
-    headers: [...POSICAO_HEADERS],
-    rows: rows.map(posicaoRow),
-    ...options,
-  });
+  const entries = Object.entries(tabs) as [PosicaoTab, readonly PosicaoRowInput[]][];
+  return buildMultiSheetXlsx(
+    entries.map(([tab, rows]) => posicaoSheet(tab, rows)),
+    entries.map(([tab]) => tab),
+  );
 }

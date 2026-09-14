@@ -4,7 +4,7 @@ import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { db as globalDb, type Database } from '@/db/client';
 import { withTenant, type Tx } from '@/db/tenant';
-import { SystemClock, type Clock } from '@/core/shared/clock';
+import { BusinessDate, SystemClock, type Clock } from '@/core/shared/clock';
 import { ImportBatchId, UserId } from '@/core/shared/ids';
 import type { IngestionPort } from '@/core/ingestion/ports';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
@@ -138,6 +138,12 @@ async function deleteUploadedFile(uploadDir: string, batchId: ImportBatchId): Pr
 export interface ImportJobPayload {
   readonly batchId: string;
   readonly userId: string;
+  /**
+   * `import.commit` only: SPEC-005 BR-005-22's reference date for a Posição
+   * batch, as the user confirmed it (`YYYY-MM-DD`). A string, not a
+   * `BusinessDate` object — AR-21, payloads are JSON.
+   */
+  readonly asOf?: string;
 }
 
 /**
@@ -260,6 +266,7 @@ export async function handleImportCommit(
     async (tx) => {
       const committed = await commitBatch(buildIngestionDeps(tx, userId, deps.clock), userId, {
         batchId,
+        ...(payload.asOf === undefined ? {} : { asOf: BusinessDate.of(payload.asOf) }),
       });
       if (!committed.ok) return committed;
 

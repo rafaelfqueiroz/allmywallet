@@ -19,6 +19,10 @@ export const IngestionUseCaseErrorCode = {
   ROW_NOT_FOUND: 'IMPORT_ROW_NOT_FOUND',
   /** BR-005-20: only an `unclassified` row can be manually classified. */
   ROW_NOT_UNCLASSIFIED: 'IMPORT_ROW_NOT_UNCLASSIFIED',
+  /** BR-005-22 (amended, #108): a Posição batch commits only with the reference date the user confirmed. */
+  REFERENCE_DATE_REQUIRED: 'IMPORT_REFERENCE_DATE_REQUIRED',
+  /** BR-005-22: B3 cannot have reported a position on a day that has not happened. */
+  REFERENCE_DATE_IN_FUTURE: 'IMPORT_REFERENCE_DATE_IN_FUTURE',
 } as const;
 export type IngestionUseCaseErrorCode =
   (typeof IngestionUseCaseErrorCode)[keyof typeof IngestionUseCaseErrorCode];

@@ -185,7 +185,6 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
             assetClass: 'cdb',
             institutionName: 'Banco Teste',
             quantity: Quantity.fromString('1'),
-            asOf: BusinessDate.of('2026-03-01'),
             fixedIncome: {
               indexer: 'cdi_percent',
               ratePercent: Quantity.fromString('110'),
@@ -198,16 +197,106 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
       ],
     });
 
-    const result = await commitBatch(deps, userId, { batchId });
+    const result = await commitBatch(deps, userId, {
+      batchId,
+      asOf: BusinessDate.of('2026-03-01'),
+    });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(deps.fixedIncomeContracts.calls).toHaveLength(1);
     expect(result.value.batch.reconciliation).not.toBeNull();
+    // BR-005-22 (amended, #108): the date the user confirmed, not one read off the file.
+    expect(result.value.batch.reconciliation?.asOf).toBe('2026-03-01');
     // The ledger holds none of this CDB — a clean discrepancy against B3's 1.
     expect(result.value.batch.reconciliation?.status).toBe('discrepancies_found');
     expect(result.value.batch.reconciliation?.discrepancies[0]?.cause).toBe(
       'missing_history_before_import_range',
     );
+  });
+
+  describe('BR-005-22 (amended, #108) — the Posição reference date is confirmed by the user', () => {
+    const position = {
+      raw: { Produto: 'PETR4 - PETROBRAS' },
+      record: {
+        kind: 'position' as const,
+        assetCode: 'PETR4',
+        assetName: 'PETROBRAS',
+        assetClass: 'stock' as const,
+        institutionName: 'Corretora Teste',
+        quantity: Quantity.fromString('100'),
+        fixedIncome: null,
+      },
+    };
+
+    it('refuses a Posição commit with no reference date, writing nothing', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await stagedBatch(deps, { extractType: 'b3_posicao', records: [position] });
+
+      const result = await commitBatch(deps, userId, { batchId });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('IMPORT_REFERENCE_DATE_REQUIRED');
+      expect((await deps.batches.findById(batchId))?.status).toBe('previewed');
+    });
+
+    it('refuses a reference date after today', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await stagedBatch(deps, { extractType: 'b3_posicao', records: [position] });
+
+      const result = await commitBatch(deps, userId, {
+        batchId,
+        asOf: BusinessDate.of('2999-01-01'),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('IMPORT_REFERENCE_DATE_IN_FUTURE');
+    });
+
+    it('sums one asset held in two accounts at the same institution before comparing', async () => {
+      const deps = buildFakeIngestionDeps();
+      const history = await stagedBatch(deps, {
+        extractType: 'b3_movimentacao',
+        records: [buy({ tradeDate: BusinessDate.of('2026-01-10') })],
+      });
+      await commitBatch(deps, userId, { batchId: history });
+
+      const accountA = {
+        ...position,
+        record: { ...position.record, quantity: Quantity.fromString('60') },
+      };
+      const accountB = {
+        ...position,
+        record: { ...position.record, quantity: Quantity.fromString('40') },
+      };
+      const batchId = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [accountA, accountB],
+      });
+
+      const result = await commitBatch(deps, userId, {
+        batchId,
+        asOf: BusinessDate.of('2026-03-01'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // 60 + 40 against a ledger of 100: one clean position, not two discrepancies.
+      expect(result.value.batch.reconciliation?.status).toBe('reconciled');
+      expect(result.value.batch.reconciliation?.discrepancies).toHaveLength(0);
+    });
+
+    it('needs no reference date for a Movimentação batch', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records: [buy()] });
+
+      const result = await commitBatch(deps, userId, { batchId });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.batch.reconciliation).toBeNull();
+    });
   });
 });

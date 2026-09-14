@@ -816,12 +816,13 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     await saveUploadedFile(
       uploadDir,
       cleanBatch,
-      await buildPosicaoXlsx([
-        { produto: 'PETR4', categoria: 'Ações', quantidade: '100', dataReferencia: '20/01/2026' },
-      ]),
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'PETR4 - PETROBRAS', codigo: 'PETR4', quantidade: '100' }],
+      }),
     );
     await handleImportStage({ batchId: cleanBatch, userId }, handlerDeps());
-    await handleImportCommit({ batchId: cleanBatch, userId }, handlerDeps());
+    // BR-005-22 (amended, #108): the reference date the user confirmed.
+    await handleImportCommit({ batchId: cleanBatch, userId, asOf: '2026-01-20' }, handlerDeps());
     const clean = await batchRow(cleanBatch);
     expect((clean?.reconciliation as { status: string } | null)?.status).toBe('reconciled');
 
@@ -832,12 +833,15 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     await saveUploadedFile(
       uploadDir,
       discrepantBatch,
-      await buildPosicaoXlsx([
-        { produto: 'PETR4', categoria: 'Ações', quantidade: '90', dataReferencia: '20/01/2026' },
-      ]),
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'PETR4 - PETROBRAS', codigo: 'PETR4', quantidade: '90' }],
+      }),
     );
     await handleImportStage({ batchId: discrepantBatch, userId }, handlerDeps());
-    await handleImportCommit({ batchId: discrepantBatch, userId }, handlerDeps());
+    await handleImportCommit(
+      { batchId: discrepantBatch, userId, asOf: '2026-01-20' },
+      handlerDeps(),
+    );
     const discrepant = await batchRow(discrepantBatch);
     const reconciliation = discrepant?.reconciliation as {
       status: string;
@@ -854,23 +858,31 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     await saveUploadedFile(
       uploadDir,
       batchId,
-      await buildPosicaoXlsx([
-        {
-          produto: 'CDB Banco Teste',
-          categoria: 'CDB',
-          quantidade: '1',
-          dataReferencia: '20/01/2026',
-          indexador: 'CDI',
-          taxaContratada: '110',
-          dataEmissao: '01/01/2024',
-        },
-      ]),
+      await buildPosicaoXlsx({
+        'Renda Fixa': [
+          {
+            produto: 'CDB - BANCO TESTE S/A',
+            codigo: 'CDB0000TESTE',
+            quantidade: '1',
+            indexador: 'CDI',
+            dataEmissao: '01/01/2024',
+          },
+        ],
+      }),
     );
     await handleImportStage({ batchId, userId }, handlerDeps());
-    await handleImportCommit({ batchId, userId }, handlerDeps());
+
+    // BR-005-22 (amended, #108): a Posição commit without the confirmed
+    // reference date is refused before it writes anything.
+    await expect(handleImportCommit({ batchId, userId }, handlerDeps())).rejects.toThrow(
+      'IMPORT_REFERENCE_DATE_REQUIRED',
+    );
+    expect((await batchRow(batchId))?.status).toBe('previewed');
+
+    await handleImportCommit({ batchId, userId, asOf: '2026-01-20' }, handlerDeps());
 
     const { rows: assetRows } = await migratorPool.query(
-      "SELECT id FROM assets WHERE code = 'CDB Banco Teste'",
+      "SELECT id FROM assets WHERE code = 'CDB0000TESTE'",
     );
     const assetId = assetRows[0]?.id as string;
     expect(assetId).toBeTruthy();
@@ -883,7 +895,9 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       assetId as never,
     );
     expect(contract?.indexer).toBe('cdi_percent');
-    expect(contract?.ratePercent?.toString()).toBe('110');
+    // BR-005-06 (amended, #108): no rate on the real tab — the contract waits
+    // for the user to type it (BR-009-13, valued at cost until then).
+    expect(contract?.ratePercent).toBeNull();
   });
 
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {

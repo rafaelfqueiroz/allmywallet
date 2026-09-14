@@ -3,7 +3,7 @@ import { chunked } from '@/adapters/db/chunk';
 import { importRows } from '@/db/schema/import-rows';
 import { importBatches } from '@/db/schema/transactions';
 import type { Tx } from '@/db/tenant';
-import { BusinessDate } from '@/core/shared/clock';
+import { BusinessDate, SystemClock } from '@/core/shared/clock';
 import {
   AssetId,
   ImportBatchId,
@@ -181,7 +181,11 @@ function serializeRecord(record: NormalizedRecord): Record<string, unknown> {
     assetClass: record.assetClass,
     institutionName: record.institutionName,
     quantity: record.quantity.toString(),
-    asOf: record.asOf,
+    // AR-69 expand/contract (#108): `asOf` left the record, but the previous
+    // image's reader still parses it, so a health-check rollback would throw
+    // on every Posição row staged by this one. Written, never read; drop it one
+    // release after #108.
+    asOf: new SystemClock().today(),
     fixedIncome:
       record.fixedIncome === null
         ? null
@@ -226,7 +230,8 @@ function deserializeRecord(raw: Record<string, unknown>): NormalizedRecord {
     assetClass: raw['assetClass'] as AssetClass,
     institutionName: raw['institutionName'] === null ? null : String(raw['institutionName']),
     quantity: Quantity.fromString(String(raw['quantity'])),
-    asOf: BusinessDate.of(String(raw['asOf'])),
+    // A payload staged before #108 still carries `asOf`; it is ignored — the
+    // reconciliation date is the one confirmed at commit.
     fixedIncome:
       fi === null
         ? null

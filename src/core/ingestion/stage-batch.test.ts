@@ -198,7 +198,6 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
             assetClass: 'cdb',
             institutionName: 'Banco Teste',
             quantity: Quantity.fromString('1'),
-            asOf: BusinessDate.of('2026-03-01'),
             fixedIncome: {
               indexer: 'cdi_percent',
               ratePercent: Quantity.fromString('110'),

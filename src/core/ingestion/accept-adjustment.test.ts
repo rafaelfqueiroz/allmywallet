@@ -26,7 +26,6 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
       assetClass: 'fii',
       institutionName: null,
       quantity: Quantity.fromString('50'),
-      asOf: BusinessDate.of('2026-03-01'),
       fixedIncome: null,
     };
     const batchId = ImportBatchId.generate();
@@ -46,7 +45,10 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
       records: [{ raw: { Produto: 'HGLG11' }, record: positionRecord }],
     };
     await stageBatch(deps, userId, { batchId, extract });
-    const committed = await commitBatch(deps, userId, { batchId });
+    const committed = await commitBatch(deps, userId, {
+      batchId,
+      asOf: BusinessDate.of('2026-03-01'),
+    });
     if (!committed.ok) throw new Error('commit failed in test setup');
     expect(committed.value.batch.reconciliation?.discrepancies).toHaveLength(1);
 
