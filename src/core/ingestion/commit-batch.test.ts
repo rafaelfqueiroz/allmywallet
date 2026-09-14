@@ -85,6 +85,23 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
     expect(deps.positions.upsertCount).toBe(0);
   });
 
+  it('BR-005-19 (amended, #110): an ignored row writes no transaction and blames nothing in reconciliation', async () => {
+    const deps = buildFakeIngestionDeps();
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [buy({ b3Type: 'Transferência - Liquidação', direction: 'credit' }), buy()],
+    });
+
+    const result = await commitBatch(deps, userId, { batchId });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.applied).toBe(1);
+    expect(deps.transactions.rows).toHaveLength(1);
+    const ignored = deps.rows.all.find((row) => row.classification === 'ignored');
+    expect(ignored?.transactionId).toBeNull();
+  });
+
   it('BR-005-15: a duplicate row is skipped — no new transaction, no position write', async () => {
     const deps = buildFakeIngestionDeps();
     const firstBatch = await stagedBatch(deps, {

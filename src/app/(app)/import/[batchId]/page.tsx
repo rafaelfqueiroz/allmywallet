@@ -70,7 +70,26 @@ export default async function ImportBatchDetailPage({
   const detail = await loadImportBatchDetail(userId, batchId);
   if (detail === null) notFound();
 
-  const { batch, rows, needsAttention, summary } = detail;
+  const { batch, rows, needsAttention, ignored, summary } = detail;
+  const classifyForm = (rowId: string) => (
+    <form action={classifyRowAction}>
+      <input type="hidden" name="rowId" value={rowId} />
+      <Cluster gap="sm" align="end">
+        <Field id={`classify-${rowId}`} label={t('classifyLabel')} width="lg">
+          <NativeSelect name="type" required>
+            {TRANSACTION_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {t(`transactionType.${type}`)}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
+        <Button type="submit" size="sm">
+          {t('classifySubmit')}
+        </Button>
+      </Cluster>
+    </form>
+  );
   const walletOptions = summary === null ? [] : await loadWalletOptions(userId);
   const labels =
     summary === null
@@ -111,6 +130,9 @@ export default async function ImportBatchDetailPage({
           <StatCard label={t('countNew')} value={batch.rowCounts.new} />
           <StatCard label={t('countDuplicates')} value={batch.rowCounts.duplicates} />
           <StatCard label={t('countNeedsAttention')} value={batch.rowCounts.needsAttention} />
+          {batch.rowCounts.ignored > 0 && (
+            <StatCard label={t('countIgnored')} value={batch.rowCounts.ignored} />
+          )}
         </Grid>
       )}
 
@@ -234,31 +256,48 @@ export default async function ImportBatchDetailPage({
                   <Text as="span" size="xs" tone="muted">
                     {row.record.kind === 'transaction' ? row.record.b3Type : ''}
                   </Text>
-                  {row.classification === 'unclassified' && (
-                    <form action={classifyRowAction}>
-                      <input type="hidden" name="rowId" value={row.id} />
-                      <Cluster gap="sm" align="end">
-                        <Field id={`classify-${row.id}`} label={t('classifyLabel')} width="lg">
-                          <NativeSelect name="type" required>
-                            {TRANSACTION_TYPES.map((type) => (
-                              <option key={type} value={type}>
-                                {t(`transactionType.${type}`)}
-                              </option>
-                            ))}
-                          </NativeSelect>
-                        </Field>
-                        <Button type="submit" size="sm">
-                          {t('classifySubmit')}
-                        </Button>
-                      </Cluster>
-                    </form>
-                  )}
+                  {row.classification === 'unclassified' && classifyForm(row.id)}
                 </Stack>
               </ListItem>
             ))}
           </List>
         )}
       </Section>
+
+      {/* SPEC-005 BR-005-19 (amended, #110): mirrors of another extract's
+          record — visible, collapsed, and still classifiable once committed
+          (BR-005-20). */}
+      {ignored.length > 0 && (
+        <Section title={t('ignored.title')} description={t('ignored.description')}>
+          <details>
+            <summary className="cursor-pointer text-sm">
+              {t('ignored.show', { count: ignored.length })}
+            </summary>
+            <Stack gap="md">
+              {batch.status === 'committed' && (
+                <Text size="xs" tone="muted">
+                  {t('ignored.classifyHint')}
+                </Text>
+              )}
+              <List gap="md">
+                {ignored.map((row) => (
+                  <ListItem key={row.id} separated>
+                    <Stack gap="sm" align="start">
+                      <span className="font-medium">{row.record.assetCode}</span>
+                      <Text as="span" size="xs" tone="muted">
+                        {row.record.kind === 'transaction'
+                          ? `${row.record.b3Type} · ${row.record.tradeDate}`
+                          : ''}
+                      </Text>
+                      {batch.status === 'committed' && classifyForm(row.id)}
+                    </Stack>
+                  </ListItem>
+                ))}
+              </List>
+            </Stack>
+          </details>
+        </Section>
+      )}
 
       {batch.reconciliation && (
         <Section

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { classifyMovement, normalizeMovementType } from '@/core/ingestion/movement-map';
+import {
+  classifyMovement,
+  isIgnoredMovement,
+  normalizeMovementType,
+} from '@/core/ingestion/movement-map';
 
 describe('SPEC-005 BR-005-18 — classifyMovement', () => {
   it('maps a known B3 string to the internal type', () => {
@@ -55,6 +59,26 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
   it('BR-005-18: split/grupamento are deliberately unmapped — a Movimentação row cannot supply the BR-007-04 ratio', () => {
     expect(classifyMovement('Desdobro')).toBeNull();
     expect(classifyMovement('Grupamento')).toBeNull();
+  });
+
+  it('#110 (v3): Tesouro and bank-paper applications, redemptions and capital returns', () => {
+    expect(classifyMovement('APLICAÇÃO', 'credit')).toBe('buy');
+    expect(classifyMovement('Resgate', 'credit')).toBe('sell');
+    expect(classifyMovement('RESGATE ANTECIPADO/', 'debit')).toBe('sell');
+    expect(classifyMovement('Restituição de Capital', 'credit')).toBe('amortization');
+    expect(classifyMovement('Restituição de Capital em Ações', 'credit')).toBeNull();
+  });
+
+  it('BR-005-19 (amended, #110): mirrors of another extract are ignored in either direction', () => {
+    for (const type of [
+      'Transferência - Liquidação',
+      'Juros Sobre Capital Próprio - Transferido',
+      'DIVIDENDO - TRANSFERIDO',
+    ]) {
+      expect(isIgnoredMovement(type)).toBe(true);
+    }
+    expect(isIgnoredMovement('Transferência')).toBe(false);
+    expect(isIgnoredMovement('Juros Sobre Capital Próprio - Reativado')).toBe(false);
   });
 
   it('normalizeMovementType folds case, accents and whitespace', () => {

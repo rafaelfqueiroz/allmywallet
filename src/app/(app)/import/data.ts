@@ -83,6 +83,8 @@ export interface ImportBatchDetail {
   readonly batch: ImportBatch;
   readonly rows: readonly ImportRow[];
   readonly needsAttention: readonly ImportRow[];
+  /** SPEC-005 BR-005-19 (amended, #110) — stored and visible, outside Needs attention. */
+  readonly ignored: readonly ImportRow[];
   /**
    * SPEC-010 BR-010-15 — `null` until the batch is committed. Before that
    * nothing has been allocated and a summary would be describing a future.
@@ -104,6 +106,7 @@ export async function loadImportBatchDetail(
       needsAttention: rows.filter(
         (row) => row.classification === 'unclassified' || row.classification === 'invalid',
       ),
+      ignored: rows.filter((row) => row.classification === 'ignored'),
     };
   });
 

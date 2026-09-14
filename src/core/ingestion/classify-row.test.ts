@@ -13,11 +13,14 @@ import {
 
 const userId = UserId.generate();
 
-function unmapped(): { raw: Record<string, string>; record: NormalizedTransactionRecord } {
+function unmapped(b3Type = 'Um Tipo Novo'): {
+  raw: Record<string, string>;
+  record: NormalizedTransactionRecord;
+} {
   const record: NormalizedTransactionRecord = {
     kind: 'transaction',
     priceStated: true,
-    b3Type: 'Um Tipo Novo',
+    b3Type,
     direction: null,
     assetCode: 'PETR4',
     assetName: 'Petrobras PN',
@@ -32,7 +35,7 @@ function unmapped(): { raw: Record<string, string>; record: NormalizedTransactio
   return { raw: { Movimentação: record.b3Type }, record };
 }
 
-async function committedUnclassifiedRow(deps: FakeIngestionDeps) {
+async function committedUnclassifiedRow(deps: FakeIngestionDeps, b3Type?: string, commit = true) {
   const batchId = ImportBatchId.generate();
   deps.batches.seed({
     id: batchId,
@@ -45,9 +48,9 @@ async function committedUnclassifiedRow(deps: FakeIngestionDeps) {
     reconciliation: null,
     failureCode: null,
   });
-  const extract: ParsedExtract = { extractType: 'b3_movimentacao', records: [unmapped()] };
+  const extract: ParsedExtract = { extractType: 'b3_movimentacao', records: [unmapped(b3Type)] };
   await stageBatch(deps, userId, { batchId, extract });
-  await commitBatch(deps, userId, { batchId });
+  if (commit) await commitBatch(deps, userId, { batchId });
   const row = deps.rows.all.find((r) => r.batchId === batchId);
   if (!row) throw new Error('row not found in test setup');
   return row;
@@ -71,6 +74,53 @@ describe('SPEC-005 BR-005-20 — classifyImportRow', () => {
 
     const updatedRow = await deps.rows.findById(row.id);
     expect(updatedRow?.classification).toBe('new');
+  });
+
+  describe('BR-005-19 (amended, #110) — an ignored row', () => {
+    it('creates its transaction on classification, attaches it and recalculates', async () => {
+      const deps = buildFakeIngestionDeps();
+      const row = await committedUnclassifiedRow(deps, 'Transferência - Liquidação');
+      expect(row.classification).toBe('ignored');
+      expect(deps.transactions.rows).toHaveLength(0);
+
+      const result = await classifyImportRow(deps, { rowId: row.id, type: 'buy' });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.transaction).toMatchObject({
+        type: 'buy',
+        status: 'active',
+        importBatchId: row.batchId,
+      });
+      expect(deps.transactions.rows).toHaveLength(1);
+      expect(deps.positions.upsertCount).toBeGreaterThan(0);
+      const updated = await deps.rows.findById(row.id);
+      expect(updated).toMatchObject({
+        classification: 'new',
+        transactionId: result.value.transaction.id,
+      });
+    });
+
+    it('refuses while the batch is still a preview, since nothing is in the ledger yet', async () => {
+      const deps = buildFakeIngestionDeps();
+      const row = await committedUnclassifiedRow(deps, 'Dividendo - Transferido', false);
+
+      const result = await classifyImportRow(deps, { rowId: row.id, type: 'dividend' });
+
+      expect(result.ok).toBe(false);
+      expect(deps.transactions.rows).toHaveLength(0);
+    });
+
+    it('surfaces a ledger refusal and leaves the row ignored', async () => {
+      const deps = buildFakeIngestionDeps();
+      const row = await committedUnclassifiedRow(deps, 'Transferência - Liquidação');
+
+      // BR-006-15: selling what was never bought.
+      const result = await classifyImportRow(deps, { rowId: row.id, type: 'sell' });
+
+      expect(result.ok).toBe(false);
+      expect((await deps.rows.findById(row.id))?.classification).toBe('ignored');
+    });
   });
 
   it('refuses to classify a row that is not unclassified', async () => {

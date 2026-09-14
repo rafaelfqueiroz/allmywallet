@@ -90,6 +90,7 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
       new: 1,
       duplicates: 0,
       needsAttention: 1,
+      ignored: 0,
       fromDate: BusinessDate.of('2026-01-05'),
       toDate: BusinessDate.of('2026-01-20'),
     });
@@ -109,6 +110,61 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
     if (!result.ok) return;
     expect(result.value.rows[0]?.classification).toBe('unclassified');
     expect(result.value.unmappedTypes).toEqual(['Baixa Por Liquidação Antecipada']);
+  });
+
+  describe('BR-005-19 (amended, #110) — rows mirroring another extract', () => {
+    it('stages them ignored, in file order, outside Needs attention and the unmapped log', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await seedPendingBatch(deps);
+      const settlement = { b3Type: 'Transferência - Liquidação', priceStated: false } as const;
+      const extract: ParsedExtract = {
+        extractType: 'b3_movimentacao',
+        records: [
+          transactionRecord({ ...settlement, direction: 'credit' }),
+          transactionRecord({ ...settlement, direction: 'debit' }),
+          transactionRecord({ b3Type: 'Dividendo', quantity: Quantity.fromString('7') }),
+          transactionRecord({ b3Type: 'Dividendo - Transferido', direction: 'credit' }),
+        ],
+      };
+
+      const result = await stageBatch(deps, userId, { batchId, extract });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rows.map((row) => row.classification)).toEqual([
+        'ignored',
+        'ignored',
+        'new',
+        'ignored',
+      ]);
+      expect(
+        result.value.rows.map((row) => row.record.kind === 'transaction' && row.record.b3Type),
+      ).toEqual(
+        extract.records.map(
+          (parsed) => parsed.record.kind === 'transaction' && parsed.record.b3Type,
+        ),
+      );
+      expect(result.value.rows[0]?.occurrence).toBeNull();
+      expect(result.value.counts).toMatchObject({ read: 4, new: 1, needsAttention: 0, ignored: 3 });
+      expect(result.value.unmappedTypes).toEqual([]);
+    });
+
+    it('takes no occurrence slot, so the Negociação trade it mirrors is not made a duplicate', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await seedPendingBatch(deps);
+      const extract: ParsedExtract = {
+        extractType: 'b3_movimentacao',
+        records: [
+          transactionRecord({ b3Type: 'Transferência - Liquidação', direction: 'credit' }),
+          transactionRecord(),
+        ],
+      };
+
+      const result = await stageBatch(deps, userId, { batchId, extract });
+
+      if (!result.ok) throw new Error('stage failed');
+      expect(result.value.rows[1]).toMatchObject({ classification: 'new', occurrence: 1 });
+    });
   });
 
   describe('#108 — a mapped row the extract gave no price', () => {

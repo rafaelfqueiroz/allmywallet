@@ -11,7 +11,7 @@ import {
   importNaturalKeyFor,
   planOccurrences,
 } from '@/core/ingestion/occurrence';
-import { classifyMovement } from '@/core/ingestion/movement-map';
+import { classifyMovement, isIgnoredMovement } from '@/core/ingestion/movement-map';
 import type {
   ExtractType,
   ImportBatch,
@@ -192,6 +192,11 @@ async function stageTransactionRows(
   }
 
   const resolved: Resolved[] = [];
+  // Keyed by how many planned rows precede it, so file order survives below.
+  const ignored = new Map<
+    number,
+    Pick<Resolved, 'raw' | 'record' | 'assetId' | 'institutionId' | 'naturalKey'>[]
+  >();
   for (const parsed of records) {
     if (parsed.record.kind !== 'transaction') continue;
     const record = parsed.record;
@@ -208,6 +213,31 @@ async function stageTransactionRows(
       record.institutionName === null
         ? null
         : await deps.institutions.resolve(record.institutionName);
+
+    // BR-005-19 (amended, #110): a mirror of another extract's record takes no
+    // occurrence slot, so it can never turn a real row into a duplicate.
+    if (isIgnoredMovement(record.b3Type)) {
+      const before = ignored.get(resolved.length) ?? [];
+      ignored.set(resolved.length, before);
+      before.push({
+        raw: parsed.raw,
+        record,
+        assetId,
+        institutionId,
+        naturalKey: importNaturalKeyFor(
+          {
+            assetId,
+            institutionId,
+            type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+            tradeDate: record.tradeDate,
+            quantity: record.quantity,
+            unitPrice: record.unitPrice,
+          },
+          record.b3Type,
+        ),
+      });
+      continue;
+    }
 
     // BR-005-18: mapped types are classified; BR-005-19: an unmapped one is
     // never dropped — it is staged `unclassified` with a placeholder type
@@ -246,25 +276,45 @@ async function stageTransactionRows(
   const existingCounts = await deps.transactions.occurrenceCounts(uniqueKeys);
   const planned = planOccurrences(resolved, existingCounts);
 
-  return planned.map((row) => ({
-    id: ImportRowId.generate(),
-    batchId,
-    raw: row.raw,
-    record: row.record,
-    assetId: row.assetId,
-    institutionId: row.institutionId,
-    classification: row.isDuplicate ? 'duplicate' : row.isUnclassified ? 'unclassified' : 'new',
-    naturalKey: row.naturalKey,
-    occurrence: row.occurrence,
-    ledgerType: row.ledgerType,
-    transactionId: null,
-  }));
+  const staged: ImportRow[] = [];
+  const pushIgnored = (index: number) => {
+    for (const row of ignored.get(index) ?? []) {
+      staged.push({
+        id: ImportRowId.generate(),
+        batchId,
+        ...row,
+        classification: 'ignored',
+        occurrence: null,
+        ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE,
+        transactionId: null,
+      });
+    }
+  };
+  planned.forEach((row, index) => {
+    pushIgnored(index);
+    staged.push({
+      id: ImportRowId.generate(),
+      batchId,
+      raw: row.raw,
+      record: row.record,
+      assetId: row.assetId,
+      institutionId: row.institutionId,
+      classification: row.isDuplicate ? 'duplicate' : row.isUnclassified ? 'unclassified' : 'new',
+      naturalKey: row.naturalKey,
+      occurrence: row.occurrence,
+      ledgerType: row.ledgerType,
+      transactionId: null,
+    });
+  });
+  pushIgnored(planned.length);
+  return staged;
 }
 
 function summarize(read: number, rows: readonly ImportRow[]): ImportRowCounts {
   let newCount = 0;
   let duplicateCount = 0;
   let needsAttentionCount = 0;
+  let ignoredCount = 0;
   let fromDate: BusinessDate | null = null;
   let toDate: BusinessDate | null = null;
 
@@ -273,7 +323,7 @@ function summarize(read: number, rows: readonly ImportRow[]): ImportRowCounts {
     else if (row.classification === 'duplicate') duplicateCount += 1;
     else if (row.classification === 'unclassified' || row.classification === 'invalid') {
       needsAttentionCount += 1;
-    }
+    } else if (row.classification === 'ignored') ignoredCount += 1;
 
     if (row.record.kind !== 'transaction') continue;
     const date = row.record.tradeDate;
@@ -286,6 +336,7 @@ function summarize(read: number, rows: readonly ImportRow[]): ImportRowCounts {
     new: newCount,
     duplicates: duplicateCount,
     needsAttention: needsAttentionCount,
+    ignored: ignoredCount,
     fromDate,
     toDate,
   };

@@ -151,7 +151,10 @@ export function TransactionForm({
               <Input name="assetName" autoComplete="off" />
             </Field>
             <Field id="transaction-asset-class" label={t('assetNewClass')} width="md">
-              <NativeSelect name="assetClass" defaultValue="stock">
+              {/* #110: blank states nothing, so typing an existing code never
+                  overwrites the class Posição stated. */}
+              <NativeSelect name="assetClass" defaultValue="">
+                <option value="">{t('assetNewClassUnstated')}</option>
                 {assetClasses.map((value) => (
                   <option key={value} value={value}>
                     {tAssetClass(value)}

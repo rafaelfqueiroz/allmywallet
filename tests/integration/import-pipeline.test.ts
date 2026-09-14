@@ -601,11 +601,69 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(positions).toHaveLength(1);
     expect(positions[0]?.q).toBe('100.00000000');
 
-    // BR-005-19: the settlement row is stored and surfaced, never discarded.
-    const { rows: unclassified } = await migratorPool.query(
-      "SELECT count(*)::int AS n FROM import_rows WHERE classification = 'unclassified'",
+    // BR-005-19 (amended, #110): the settlement row is stored, never discarded,
+    // and ignored — no ledger row, nothing in Needs attention.
+    const { rows: settlement } = await migratorPool.query(
+      'SELECT classification, transaction_id FROM import_rows WHERE batch_id = $1',
+      [movimentacao],
     );
-    expect(Number(unclassified[0]?.n)).toBe(1);
+    expect(settlement).toEqual([{ classification: 'ignored', transaction_id: null }]);
+  });
+
+  /**
+   * BR-005-17 + BR-005-19 (amended, #110) + BR-005-20. A Movimentação-only user
+   * classifies an ignored settlement by hand. Re-importing the identical file
+   * stages it `ignored` again — it never enters the occurrence plan — so the
+   * user's classification is not doubled.
+   */
+  it('BR-005-17/20 (#110): classifying an ignored row then re-importing the same file adds nothing', async () => {
+    const file = [
+      {
+        data: '12/01/2026',
+        movimentacao: 'Transferência - Liquidação',
+        produto: 'PETR4 - Petrobras PN',
+        quantidade: '100',
+        precoUnitario: '38,50',
+      },
+    ];
+
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: first, userId }, handlerDeps());
+    await handleImportCommit({ batchId: first, userId }, handlerDeps());
+
+    const { rows: ignored } = await migratorPool.query(
+      "SELECT id FROM import_rows WHERE classification = 'ignored'",
+    );
+    expect(ignored).toHaveLength(1);
+
+    await withTenant(
+      userId,
+      async (tx) => {
+        const deps = buildIngestionDeps(tx, userId, clock);
+        const classified = await classifyImportRow(deps, {
+          rowId: ImportRowId.of(ignored[0]?.id as string),
+          type: 'buy',
+        });
+        if (!classified.ok) throw new Error(`classify failed: ${classified.error.code}`);
+      },
+      appDb,
+    );
+
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: second, userId }, handlerDeps());
+    await handleImportCommit({ batchId: second, userId }, handlerDeps());
+
+    const { rows: positions } = await migratorPool.query(
+      'SELECT quantity::text AS q FROM positions WHERE user_id = $1',
+      [userId],
+    );
+    expect(positions).toEqual([{ q: '100.00000000' }]);
+    const { rows: txCount } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM transactions',
+    );
+    expect(Number(txCount[0]?.n)).toBe(1);
   });
 
   it('BR-005-16/AC: two genuine identical same-day trades both import; re-importing the same file adds neither again', async () => {
