@@ -67,12 +67,16 @@ describe('the B3 guide stamp is tied to the code that reads B3 (SPEC-020 BR-020-
     ).toBe(computed);
   });
 
-  it('requires every new fingerprint to arrive with a later verification date', () => {
+  it('requires every new fingerprint to arrive with a verification dated no earlier than the last', () => {
+    // #108: two parser changes verified on the same day share a date. A
+    // strictly-later rule forced the second entry to claim tomorrow, which the
+    // guide then showed users (BR-020-24). Moving backwards still fails, and a
+    // reused fingerprint fails below.
     const dates = B3_GUIDE_VERIFICATIONS.map((entry) => entry.asOf);
     for (let index = 1; index < dates.length; index += 1) {
       expect(
-        (dates[index] as string) > (dates[index - 1] as string),
-        'each verification must be dated after the previous one',
+        (dates[index] as string) >= (dates[index - 1] as string),
+        'each verification must be dated no earlier than the previous one',
       ).toBe(true);
     }
     const fingerprints = B3_GUIDE_VERIFICATIONS.map((entry) => entry.parserFingerprint);

@@ -900,6 +900,125 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(contract?.ratePercent).toBeNull();
   });
 
+  /**
+   * #108 — Movimentação and Negociação only *guess* an asset's class from its
+   * ticker; Posição *states* it. `DrizzleAssetResolver` used to overwrite the
+   * class on every resolve, so importing a Movimentação after a Posição turned
+   * a unit like TAEE11 back into a FII and a Negociação replaced its name with
+   * the bare ticker.
+   */
+  it('#108: a Movimentação or Negociação guess never overwrites the class Posição stated, and a bare ticker never replaces a name', async () => {
+    const posicao = await newPendingBatch('b3_posicao');
+    await saveUploadedFile(
+      uploadDir,
+      posicao,
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'TAEE11 - TAESA S.A.', codigo: 'TAEE11', quantidade: '10' }],
+      }),
+    );
+    await handleImportStage({ batchId: posicao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: posicao, userId, asOf: '2026-01-20' }, handlerDeps());
+
+    const movimentacao = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      movimentacao,
+      await buildMovimentacaoXlsx([
+        {
+          data: '15/01/2026',
+          movimentacao: 'Rendimento',
+          produto: 'TAEE11 - TAESA UNT',
+          quantidade: '10',
+          precoUnitario: '0,10',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: movimentacao, userId }, handlerDeps());
+
+    const negociacao = await newPendingBatch('b3_negociacao');
+    await saveUploadedFile(
+      uploadDir,
+      negociacao,
+      await buildNegociacaoXlsx([
+        { data: '10/01/2026', tipo: 'Compra', codigo: 'TAEE11F', quantidade: '10', preco: '20,00' },
+      ]),
+    );
+    await handleImportStage({ batchId: negociacao, userId }, handlerDeps());
+
+    const { rows } = await migratorPool.query(
+      "SELECT class AS asset_class, name FROM assets WHERE code = 'TAEE11'",
+    );
+    // Class: Posição's `stock` survives both guesses (`fii` from the `11`
+    // ending). Name: Movimentação states one, so it may replace Posição's; the
+    // later Negociação has only the ticker and must not replace either.
+    expect(rows).toEqual([{ asset_class: 'stock', name: 'TAESA UNT' }]);
+  });
+
+  it('#108: Movimentação names an asset Negociação created with only its ticker, and keeps the guessed class', async () => {
+    const negociacao = await newPendingBatch('b3_negociacao');
+    await saveUploadedFile(
+      uploadDir,
+      negociacao,
+      await buildNegociacaoXlsx([
+        { data: '10/01/2026', tipo: 'Compra', codigo: 'VALE3', quantidade: '10', preco: '60,00' },
+      ]),
+    );
+    await handleImportStage({ batchId: negociacao, userId }, handlerDeps());
+
+    const movimentacao = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      movimentacao,
+      await buildMovimentacaoXlsx([
+        {
+          data: '15/01/2026',
+          movimentacao: 'Dividendo',
+          produto: 'VALE3 - VALE S.A.',
+          quantidade: '10',
+          precoUnitario: '1,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: movimentacao, userId }, handlerDeps());
+
+    const { rows } = await migratorPool.query(
+      "SELECT class AS asset_class, name FROM assets WHERE code = 'VALE3'",
+    );
+    expect(rows).toEqual([{ asset_class: 'stock', name: 'VALE S.A.' }]);
+  });
+
+  it('#108: a Movimentação transfer with no price stays out of the ledger as unclassified', async () => {
+    const batchId = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      batchId,
+      await buildMovimentacaoXlsx([
+        {
+          entradaSaida: 'Credito',
+          data: '10/01/2026',
+          movimentacao: 'Transferência',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '-',
+          valorOperacao: '-',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId, userId }, handlerDeps());
+    await handleImportCommit({ batchId, userId }, handlerDeps());
+
+    const { rows: positions } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM positions WHERE user_id = $1',
+      [userId],
+    );
+    expect(Number(positions[0]?.n)).toBe(0);
+    const { rows: staged } = await migratorPool.query(
+      'SELECT classification FROM import_rows WHERE batch_id = $1',
+      [batchId],
+    );
+    expect(staged).toEqual([{ classification: 'unclassified' }]);
+  });
+
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {
     const batchId = await newPendingBatch('b3_movimentacao');
     // Default metadata block embeds SYNTHETIC_CPF, a checksum-valid CPF.

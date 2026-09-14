@@ -120,10 +120,17 @@ export async function buildMovimentacaoXlsx(
   });
 }
 
+/**
+ * #108 — B3's **real** Negociação header row (names only, read off a real
+ * export; never its values — DV-24). The invented version had `Tipo` and no
+ * `Instituição` or `Prazo/Vencimento`.
+ */
 export const NEGOCIACAO_HEADERS = [
   'Data do Negócio',
-  'Tipo',
+  'Tipo de Movimentação',
   'Mercado',
+  'Prazo/Vencimento',
+  'Instituição',
   'Código de Negociação',
   'Quantidade',
   'Preço',
@@ -132,8 +139,11 @@ export const NEGOCIACAO_HEADERS = [
 
 export interface NegociacaoRowInput {
   readonly data: string;
+  /** Written to `Tipo de Movimentação`. */
   readonly tipo: string;
   readonly mercado?: string;
+  readonly prazo?: string;
+  readonly instituicao?: string;
   readonly codigo: string;
   readonly quantidade: string;
   readonly preco: string;
@@ -143,8 +153,12 @@ export interface NegociacaoRowInput {
 export function negociacaoRow(input: NegociacaoRowInput): Record<string, string> {
   return {
     'Data do Negócio': input.data,
-    Tipo: input.tipo,
-    Mercado: input.mercado ?? 'Bovespa',
+    'Tipo de Movimentação': input.tipo,
+    Mercado: input.mercado ?? 'Mercado à Vista',
+    'Prazo/Vencimento': input.prazo ?? '-',
+    // The same default `movimentacaoRow` uses, so one trade in both extracts
+    // shares a natural key, as it does in a real account.
+    Instituição: input.instituicao ?? 'Corretora Teste',
     'Código de Negociação': input.codigo,
     Quantidade: input.quantidade,
     Preço: input.preco,

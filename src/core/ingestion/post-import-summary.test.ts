@@ -25,6 +25,7 @@ function row(
     raw: {},
     record: {
       kind: 'transaction',
+      priceStated: true,
       b3Type: 'Compra',
       direction: null,
       assetCode: 'X',

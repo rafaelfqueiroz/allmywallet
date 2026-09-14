@@ -12,6 +12,7 @@ const userId = UserId.generate();
 function buy(overrides: Partial<NormalizedTransactionRecord> = {}) {
   const record: NormalizedTransactionRecord = {
     kind: 'transaction',
+    priceStated: true,
     b3Type: 'Compra',
     direction: null,
     assetCode: 'PETR4',
@@ -149,6 +150,8 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
       code: 'VALE3',
       name: 'Vale ON',
       assetClass: 'stock',
+      classStated: false,
+      nameStated: true,
     });
     const batchId = await stagedBatch(deps, {
       extractType: 'b3_movimentacao',

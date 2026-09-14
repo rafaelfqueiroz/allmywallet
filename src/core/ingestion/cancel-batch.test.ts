@@ -13,6 +13,7 @@ const userId = UserId.generate();
 function buy(): { raw: Record<string, string>; record: NormalizedTransactionRecord } {
   const record: NormalizedTransactionRecord = {
     kind: 'transaction',
+    priceStated: true,
     b3Type: 'Compra',
     direction: null,
     assetCode: 'PETR4',

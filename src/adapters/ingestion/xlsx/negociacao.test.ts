@@ -52,4 +52,84 @@ describe('SPEC-005 — parseNegociacao', () => {
     const records = parseNegociacao(rows, structureOf(rows));
     expect(records).toHaveLength(2);
   });
+
+  describe('#108 — the real layout', () => {
+    function parseOne(input: Parameters<typeof negociacaoRow>[0]) {
+      const rows = rowsFor([negociacaoRow(input)]);
+      const record = parseNegociacao(rows, structureOf(rows))[0]?.record;
+      if (record?.kind !== 'transaction') throw new Error('expected a transaction record');
+      return record;
+    }
+
+    it('reads the trade type from Tipo de Movimentação and the institution from its column', () => {
+      const record = parseOne({
+        data: '10/01/2026',
+        tipo: 'Venda',
+        codigo: 'PETR4',
+        quantidade: '10',
+        preco: '32.15',
+        instituicao: 'CORRETORA EXEMPLO',
+      });
+      expect(record.b3Type).toBe('Venda');
+      expect(record.institutionName).toBe('CORRETORA EXEMPLO');
+    });
+
+    it('a fractional-market ticker is the same asset as its spot ticker', () => {
+      const record = parseOne({
+        data: '10/01/2026',
+        tipo: 'Compra',
+        mercado: 'Mercado Fracionário',
+        codigo: 'PETR4F',
+        quantidade: '7',
+        preco: '32.15',
+      });
+      expect(record.assetCode).toBe('PETR4');
+      expect(record.assetClass).toBe('stock');
+    });
+
+    it('strips the F from a ticker whose root carries a digit (B3SA3F)', () => {
+      expect(
+        parseOne({
+          data: '10/01/2026',
+          tipo: 'Compra',
+          codigo: 'B3SA3F',
+          quantidade: '1',
+          preco: '1',
+        }).assetCode,
+      ).toBe('B3SA3');
+    });
+
+    it('leaves a unit ticker alone (TAEE11 has no F)', () => {
+      expect(
+        parseOne({
+          data: '10/01/2026',
+          tipo: 'Compra',
+          codigo: 'TAEE11',
+          quantidade: '1',
+          preco: '1',
+        }).assetCode,
+      ).toBe('TAEE11');
+    });
+
+    it('a term trade (Prazo/Vencimento set) and an auction row parse as ordinary trades', () => {
+      const term = parseOne({
+        data: '10/01/2026',
+        tipo: 'Compra',
+        prazo: '10/02/2026',
+        codigo: 'VALE3',
+        quantidade: '5',
+        preco: '60',
+      });
+      const auction = parseOne({
+        data: '10/01/2026',
+        tipo: 'Compra',
+        mercado: 'Leilão',
+        codigo: 'VALE3',
+        quantidade: '5',
+        preco: '60',
+      });
+      expect(term.b3Type).toBe('Compra');
+      expect(auction.b3Type).toBe('Compra');
+    });
+  });
 });

@@ -77,6 +77,12 @@ export interface NormalizedTransactionRecord {
   readonly tradeDate: BusinessDate;
   readonly quantity: Quantity;
   readonly unitPrice: Money;
+  /**
+   * #108 — `false` when the extract left the price blank (B3's `-`), so
+   * `unitPrice` is a placeholder zero rather than a price. `stage-batch.ts`
+   * stages such a row `unclassified` when its type's effect depends on price.
+   */
+  readonly priceStated: boolean;
   readonly fees: Money;
   /** BR-007-04 — split/grupamento only. */
   readonly ratio: Quantity | null;
@@ -293,7 +299,28 @@ export interface ImportRowRepository {
 
 /** BR-005-08/BR-005-06: resolves a free-text B3 product name to an asset, creating it if new. */
 export interface AssetResolverPort {
-  resolve(input: { code: string; name: string; assetClass: AssetClass }): Promise<AssetId>;
+  resolve(input: AssetResolveInput): Promise<AssetId>;
+}
+
+export interface AssetResolveInput {
+  readonly code: string;
+  readonly name: string;
+  readonly assetClass: AssetClass;
+  /**
+   * #108 — whether `assetClass` is *stated* by the source or *guessed*.
+   * Posição states it (its tab) and a user states it on manual entry;
+   * Movimentação and Negociação only guess from the ticker. A stated class
+   * overwrites the catalog's; a guess only ever fills a new asset. Without
+   * that, each Movimentação import undid Posição's classes (every Tesouro title
+   * back to `stock`, every unit to `fii`).
+   */
+  readonly classStated: boolean;
+  /**
+   * #108 — the same for `name`. Posição, Movimentação (`"CODE - Name"`) and
+   * manual entry state one; Negociação has none and passes the bare ticker,
+   * which must never replace a real name.
+   */
+  readonly nameStated: boolean;
 }
 
 /** The institution-catalog counterpart — B3 extracts name a broker/bank in free text. */

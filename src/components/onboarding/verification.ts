@@ -13,9 +13,10 @@ import { BusinessDate } from '@/core/shared/clock';
  * run. A change to that code is evidence B3's exports moved (BR-020-25), so
  * when the fingerprint no longer matches the latest entry the test fails until
  * someone re-verifies the guide and **appends** a new entry. The test also
- * requires each entry's date to be later than the one before it and every
- * fingerprint to be new, which is what ties the date to the hash: pasting a
- * fresh hash without a fresh, later date fails.
+ * requires each entry's date to be no earlier than the one before it and every
+ * fingerprint to be new. Same-day entries are allowed because two parser
+ * changes can be verified on one day (#108); a stamp that moves backwards, or
+ * a hash reused under a new date, still fails.
  *
  * Literals rather than computed at import time — this module is read by Server
  * Components on every request, and the value only changes when a human
@@ -42,6 +43,14 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     // 2026-08-21); that is still open on #108.
     asOf: BusinessDate.of('2026-09-14'),
     parserFingerprint: 'cd1fc474859c90ab5d5104143bd872bac740da36ea1ede2a1f7c9d1b91f40c76',
+  },
+  {
+    // #108, the Movimentação/Negociação half: both parsers rewritten for B3's
+    // real exports. The owner exported both via Extratos → Movimentação →
+    // Baixar and Extratos → Negociação → Baixar and confirmed the paths, so
+    // all three guide steps are verified as of this entry.
+    asOf: BusinessDate.of('2026-09-14'),
+    parserFingerprint: '3c568ee6f4525d7623382f305c71634e13315d4d067400891152e8778a3f3607',
   },
 ];
 

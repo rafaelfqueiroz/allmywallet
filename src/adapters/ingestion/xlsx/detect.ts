@@ -57,7 +57,9 @@ export const EXTRACT_SCHEMAS: readonly ExtractSchema[] = [
     extractType: 'b3_negociacao',
     requiredHeaders: [
       'data do negocio',
-      'tipo',
+      // #108: B3's real header is `Tipo de Movimentação`; the invented `Tipo`
+      // made every real Negociação fail detection.
+      'tipo de movimentacao',
       'mercado',
       'codigo de negociacao',
       'quantidade',

@@ -16,6 +16,7 @@ const userId = UserId.generate();
 function transactionRecord(overrides: Partial<NormalizedTransactionRecord> = {}): ParsedRecord {
   const record: NormalizedTransactionRecord = {
     kind: 'transaction',
+    priceStated: true,
     b3Type: 'Compra',
     direction: null,
     assetCode: 'PETR4',
@@ -110,6 +111,42 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
     expect(result.value.unmappedTypes).toEqual(['Baixa Por Liquidação Antecipada']);
   });
 
+  describe('#108 — a mapped row the extract gave no price', () => {
+    async function stageOne(overrides: Partial<NormalizedTransactionRecord>) {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await seedPendingBatch(deps);
+      const result = await stageBatch(deps, userId, {
+        batchId,
+        extract: { extractType: 'b3_movimentacao', records: [transactionRecord(overrides)] },
+      });
+      if (!result.ok) throw new Error('stage failed in test setup');
+      return result.value.rows[0]?.classification;
+    }
+
+    it.each([
+      ['Transferência', 'credit'],
+      ['Compra', null],
+      ['Dividendo', null],
+      ['Direitos de Subscrição - Exercido', null],
+    ] as const)(
+      '%s with no price stages unclassified, never at a zero price',
+      async (b3Type, direction) => {
+        expect(
+          await stageOne({ b3Type, direction, priceStated: false, unitPrice: Money.zero() }),
+        ).toBe('unclassified');
+      },
+    );
+
+    it.each([
+      ['Transferência', 'debit'],
+      ['Bonificação em Ativos', null],
+    ] as const)('%s needs no price and still stages as new', async (b3Type, direction) => {
+      expect(
+        await stageOne({ b3Type, direction, priceStated: false, unitPrice: Money.zero() }),
+      ).toBe('new');
+    });
+  });
+
   it('BR-005-16: two genuine identical same-day trades both stage as new', async () => {
     const deps = buildFakeIngestionDeps();
     const batchId = await seedPendingBatch(deps);
@@ -136,6 +173,8 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
       code: first.record.assetCode,
       name: first.record.assetName,
       assetClass: first.record.assetClass,
+      classStated: false,
+      nameStated: true,
     });
     const institutionId = await deps.institutions.resolve(first.record.institutionName as string);
     const key = naturalKeyFor({
