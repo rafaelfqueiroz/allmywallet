@@ -152,6 +152,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       id,
       credit: aTransaction().transferIn().at(to).on(on).quantity(quantity).price('0').build(),
       debit: aTransaction().transferOut().at(from).on(on).quantity(quantity).price('0').build(),
+      fallback: null,
     };
   }
 
@@ -269,6 +270,46 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       historyOf(history),
     );
     expect(costs.size).toBe(0);
+  });
+
+  describe('#112 — a credit carried before keeps or recomputes its cost', () => {
+    it('recomputes when the source history grew: stored 10,00 becomes (1.000,00 + 2.000,00) ÷ 200 = 15,00', () => {
+      const history = [
+        aTransaction().buy().at('A').on('2026-01-05').quantity('100').price('10').build(),
+        aTransaction().buy().at('A').on('2026-02-01').quantity('100').price('20').build(),
+      ];
+      const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), fallback: money('10') };
+      expect(resolveCarriedCosts([leg], historyOf(history)).get('t')?.toString()).toBe('15');
+    });
+
+    it('keeps the stored cost when the debit is no longer in the ledger', () => {
+      const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), debit: null, fallback: money('10') };
+      expect(resolveCarriedCosts([leg], historyOf([])).get('t')?.toString()).toBe('10');
+    });
+
+    it('keeps the stored cost when the source can no longer carry one', () => {
+      const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), fallback: money('10') };
+      expect(resolveCarriedCosts([leg], historyOf([])).get('t')?.toString()).toBe('10');
+    });
+
+    it('keeps the stored cost through a swap that never unblocks, and a downstream leg reads it', () => {
+      const history = [
+        aTransaction().buy().at('A').on('2026-01-05').quantity('100').price('10').build(),
+        aTransaction().buy().at('B').on('2026-01-05').quantity('100').price('20').build(),
+      ];
+      const aToB = { ...transfer('a-to-b', 'A', 'B', '2026-03-10'), fallback: money('12') };
+      const bToA = transfer('b-to-a', 'B', 'A', '2026-03-10');
+      // B then sends 200 on to C: B's 100 @ 20,00 (2.000,00) + 100 kept @ 12,00
+      // (1.200,00) = 3.200,00 ÷ 200 = 16,00.
+      const bToC = transfer('b-to-c', 'B', 'C', '2026-03-20', '200');
+
+      const costs = resolveCarriedCosts([aToB, bToA, bToC], historyOf(history));
+
+      expect(costs.get('a-to-b')?.toString()).toBe('12');
+      expect(costs.has('b-to-a')).toBe(false);
+      // Still blocked by the swap when the loop ends, so it carries nothing.
+      expect(costs.has('b-to-c')).toBe(false);
+    });
   });
 
   it('withCarriedCost restates the total: 100 × 5,00 + 1,00 = 501,00', () => {

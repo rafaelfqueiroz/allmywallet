@@ -83,6 +83,13 @@ export interface CarryLeg {
   readonly credit: Transaction;
   /** The paired debit as the ledger holds it, or will once this commit writes it. `null` when it will not be in the ledger. */
   readonly debit: Transaction | null;
+  /**
+   * #112 — the cost already stored for a credit carried by an earlier import.
+   * Kept when the carry cannot be resolved now (the debit or the source's
+   * history is gone), so a re-import never takes a cost away; `null` for a
+   * credit that has none yet.
+   */
+  readonly fallback: Money | null;
 }
 
 /** The credit at the carried cost. */
@@ -111,9 +118,9 @@ export function withCarriedCost(credit: Transaction, cost: Money): Transaction {
  * the debit and is still unresolved *blocks* the debit until it is. What never
  * unblocks (a same-day A→B / B→A swap) carries nothing.
  *
- * No carry — the credit stays `unclassified` (BR-005-19) — when the debit is
- * not in the ledger, the source prefix cannot be replayed, it held fewer
- * shares than leave, or it held them at no cost.
+ * No carry — the credit stays `unclassified` (BR-005-19), or keeps its
+ * `fallback` — when the debit is not in the ledger, the source prefix cannot
+ * be replayed, it held fewer shares than leave, or it held them at no cost.
  *
  * Worked example (DV-17): the ledger holds 100 @ 10,00 at A (cost 1.000,00).
  * The batch has a bonificação of 100 at A on 2026-02-01 at zero attributed
@@ -129,13 +136,19 @@ export function resolveCarriedCosts(
   const pending = new Map(legs.map((leg) => [leg.id, leg]));
 
   let progressed = true;
+  const settleLeg = (leg: CarryLeg, cost: Money | null) => {
+    pending.delete(leg.id);
+    progressed = true;
+    const final = cost ?? leg.fallback;
+    if (final !== null) resolved.set(leg.id, final);
+  };
+
   while (progressed) {
     progressed = false;
     for (const leg of [...pending.values()]) {
       const debit = leg.debit;
       if (debit === null) {
-        pending.delete(leg.id);
-        progressed = true;
+        settleLeg(leg, null);
         continue;
       }
       const atSource = (t: Transaction) =>
@@ -149,9 +162,6 @@ export function resolveCarriedCosts(
       );
       if (blocked) continue;
 
-      pending.delete(leg.id);
-      progressed = true;
-
       const carriedIn = legs.flatMap((other) => {
         const cost = resolved.get(other.id);
         return cost === undefined || !atSource(other.credit)
@@ -162,13 +172,17 @@ export function resolveCarriedCosts(
         (t) => compareForReplay(t, debit) < 0,
       );
       const replayed = replayPosition(before);
-      if (!replayed.ok) continue;
-      const { quantity, averageCost } = replayed.value;
-      if (quantity.comparedTo(debit.quantity) < 0 || !averageCost.isPositive()) continue;
-
-      resolved.set(leg.id, averageCost);
+      const carriable =
+        replayed.ok &&
+        replayed.value.quantity.comparedTo(debit.quantity) >= 0 &&
+        replayed.value.averageCost.isPositive();
+      settleLeg(leg, carriable ? replayed.value.averageCost : null);
     }
   }
 
+  // What never unblocked (a same-day swap) keeps whatever it already had.
+  for (const leg of pending.values()) {
+    if (leg.fallback !== null) resolved.set(leg.id, leg.fallback);
+  }
   return resolved;
 }

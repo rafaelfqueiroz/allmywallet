@@ -1181,6 +1181,118 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     }
   });
 
+  describe('BR-005-20a — several carries into one position, and re-carry (#110 review, #112)', () => {
+    const row = (
+      direction: 'Credito' | 'Debito',
+      data: string,
+      instituicao: string,
+      quantidade: string,
+    ) => ({
+      entradaSaida: direction,
+      data,
+      movimentacao: 'Transferência',
+      produto: 'PETR4 - Petrobras PN',
+      instituicao,
+      quantidade,
+      precoUnitario: '-',
+      valorOperacao: '-',
+    });
+    const buyAt = (instituicao: string, data: string, quantidade: string, preco: string) => ({
+      entradaSaida: 'Credito',
+      data,
+      movimentacao: 'Compra',
+      produto: 'PETR4 - Petrobras PN',
+      instituicao,
+      quantidade,
+      precoUnitario: preco,
+    });
+
+    async function importFile(rows: Parameters<typeof buildMovimentacaoXlsx>[0]) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+
+    async function positionOfCreditInto(quantity: string) {
+      const { rows } = await migratorPool.query(
+        `SELECT p.quantity, p.average_cost, p.total_cost FROM positions p
+           JOIN transactions t ON t.institution_id = p.institution_id AND t.asset_id = p.asset_id
+          WHERE t.type = 'transfer_in' AND t.quantity = $1`,
+        [quantity],
+      );
+      return rows[0];
+    }
+
+    it('promotes two credits into one position that a later transfer needs both of, and fixes the first batch’s counts', async () => {
+      const file = [
+        row('Credito', '10/03/2026', 'CORRETORA B', '100'),
+        row('Debito', '10/03/2026', 'CORRETORA A', '100'),
+        row('Credito', '10/03/2026', 'CORRETORA B', '50'),
+        row('Debito', '10/03/2026', 'CORRETORA C', '50'),
+        row('Credito', '12/03/2026', 'CORRETORA D', '150'),
+        row('Debito', '12/03/2026', 'CORRETORA B', '150'),
+      ];
+      const first = await importFile(file);
+
+      // A: 100 @ 10,00 = 1.000,00. C: 50 @ 16,00 = 800,00.
+      await importFile([
+        buyAt('CORRETORA A', '05/01/2026', '100', '10,00'),
+        buyAt('CORRETORA C', '05/01/2026', '50', '16,00'),
+      ]);
+      const again = await importFile(file);
+
+      expect((await batchRow(again))?.status).toBe('committed');
+      const { rows: credits } = await migratorPool.query(
+        "SELECT status FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(credits.map((c) => c.status)).toEqual(['active', 'active', 'active']);
+      // D carries (1.000,00 + 800,00) ÷ 150 = 12,00.
+      expect(await positionOfCreditInto('150')).toEqual({
+        quantity: '150.00000000',
+        average_cost: '12.00000000',
+        total_cost: '1800.00000000',
+      });
+      const counts = (await batchRow(first))?.row_counts as Record<string, number>;
+      expect(counts).toMatchObject({ new: 6, needsAttention: 0 });
+    });
+
+    it('re-imports a transfer after a backdated source buy and corrects the carried 10,00 to 15,00', async () => {
+      const file = [
+        row('Credito', '10/03/2026', 'CORRETORA DESTINO', '100'),
+        row('Debito', '10/03/2026', 'CORRETORA ORIGEM', '100'),
+      ];
+      await importFile([buyAt('CORRETORA ORIGEM', '05/01/2026', '100', '10,00')]);
+      await importFile(file);
+      const { rows: carried } = await migratorPool.query(
+        "SELECT id, natural_key, unit_price FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(carried[0]?.unit_price).toBe('10.00000000');
+
+      await importFile([buyAt('CORRETORA ORIGEM', '01/02/2026', '100', '20,00')]);
+      await importFile(file);
+
+      // ORIGEM before 10/03: (1.000,00 + 2.000,00) ÷ 200 = 15,00.
+      const { rows: recarried } = await migratorPool.query(
+        "SELECT id, natural_key, unit_price, is_user_modified FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(recarried).toEqual([
+        {
+          id: carried[0]?.id,
+          natural_key: carried[0]?.natural_key,
+          unit_price: '15.00000000',
+          is_user_modified: false,
+        },
+      ]);
+      expect(await positionOfCreditInto('100')).toEqual({
+        quantity: '100.00000000',
+        average_cost: '15.00000000',
+        total_cost: '1500.00000000',
+      });
+    });
+  });
+
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {
     const batchId = await newPendingBatch('b3_movimentacao');
     // Default metadata block embeds SYNTHETIC_CPF, a checksum-valid CPF.

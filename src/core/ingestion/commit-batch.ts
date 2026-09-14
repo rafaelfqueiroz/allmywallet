@@ -4,7 +4,7 @@ import { TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
 import type { Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
-import { editTransaction } from '@/core/ledger/edit-transaction';
+import { editTransactions } from '@/core/ledger/edit-transaction';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { validateTransactionDraft } from '@/core/ledger/validate';
 import {
@@ -65,6 +65,8 @@ export interface CommitBatchOutcome {
   readonly applied: number;
   /** BR-005-20a (#110): existing unclassified transfers this commit gave their carried cost. */
   readonly promoted: number;
+  /** BR-005-20a (#112): existing carried transfers whose cost this commit recomputed to a new figure. */
+  readonly recarried: number;
   readonly skippedDuplicates: number;
   readonly invalid: number;
   /**
@@ -92,10 +94,19 @@ interface Candidate {
   readonly transaction: Transaction;
 }
 
-/** A carry leg with the row it came from; `promotesFrom` is set when the credit is an existing unclassified transaction. */
+/**
+ * A carry leg with the row it came from, and what carrying it writes:
+ *
+ * - `insert` — a price-less row staged `unclassified` in this batch;
+ * - `promote` (#110) — a duplicate of an existing unclassified transfer, which
+ *   becomes active at the carried cost; `origin` is the batch that staged it;
+ * - `recarry` (#112) — a duplicate of an existing carried transfer no one has
+ *   edited, whose cost is recomputed and updated when the figure changed.
+ */
 interface PlannedCarry extends CarryLeg {
   readonly row: ImportRow;
-  readonly promotesFrom: ImportBatchId | null;
+  readonly mode: 'insert' | 'promote' | 'recarry';
+  readonly origin: ImportBatchId | null;
 }
 
 interface CarriedCredit {
@@ -134,6 +145,7 @@ export async function commitBatch(
       batch,
       applied: 0,
       promoted: 0,
+      recarried: 0,
       skippedDuplicates: 0,
       invalid: 0,
       committed: [],
@@ -196,6 +208,13 @@ export async function commitBatch(
    * settled together: each round resolves carries, replays every group, and
    * excludes what failed. Exclusions only grow, so the rounds end; in practice
    * the first round is the last.
+   *
+   * A known limit, kept for that termination guarantee: an exclusion is never
+   * reconsidered. Excluding a row at a source can let a stored debit's carry
+   * resolve in a later round, and a destination group excluded earlier for
+   * want of that carry stays excluded (its rows `invalid`). Re-admitting rows
+   * would make the rounds non-monotonic. It needs a backdated unreplayable row
+   * at the source and a dependent row at the destination in the same batch.
    */
   const excluded = new Set<string>();
   const vetoed = new Set<string>();
@@ -220,7 +239,7 @@ export async function commitBatch(
   const positionUpserts: PositionSnapshot[] = [];
   const rowToTransaction = new Map<ImportRowId, TransactionId>();
   const carriedRowIds = new Set<ImportRowId>();
-  const promotions: CarriedCredit[] = [];
+  const inPlace: CarriedCredit[] = [];
 
   for (const group of settlement) {
     // Every group left in the final round replayed.
@@ -230,8 +249,8 @@ export async function commitBatch(
       rowToTransaction.set(c.row.id, c.transaction.id);
     }
     for (const c of group.carried) {
-      if (c.leg.promotesFrom !== null) {
-        promotions.push(c);
+      if (c.leg.mode !== 'insert') {
+        inPlace.push(c);
         continue;
       }
       toInsert.push(c.transaction);
@@ -278,7 +297,7 @@ export async function commitBatch(
     await deps.rows.updateClassification(rowId, 'new');
   }
 
-  const promoted = await promoteTransfers(deps, promotions);
+  const { promoted, recarried } = await updateCarriedInPlace(deps, inPlace);
 
   // BR-005-06: create/update fixed-income contracts from the Posição
   // fixed-income tab before reconciliation reads the ledger.
@@ -328,9 +347,10 @@ export async function commitBatch(
     batch: committedBatch,
     applied: toInsert.length,
     promoted: promoted.length,
+    recarried: recarried.length,
     skippedDuplicates: duplicates.length,
     invalid: invalidRowIds.length,
-    committed: [...toInsert, ...promoted],
+    committed: [...toInsert, ...promoted, ...recarried],
   });
 }
 
@@ -368,10 +388,15 @@ function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undef
  * BR-005-20a — the credits that can take a carried cost in this commit, each
  * with the debit it is paired with (`pairTransfers`).
  *
- * A credit is either a price-less row staged `unclassified`, or — #110, import
- * order must not decide the outcome — a `duplicate` of an **existing**
- * unclassified `transfer_in` that no one has edited: the same B3 row, imported
- * before its source's history was, now able to take its cost.
+ * A credit is a price-less row staged `unclassified`, or — import order must
+ * not decide the outcome — a `duplicate` of an **existing** `transfer_in` no
+ * one has edited (BR-006-16):
+ *
+ * - unclassified (#110): the same B3 row, imported before its source's history
+ *   was, now able to take its cost;
+ * - active (#112): a cost carried by an earlier import, recomputed because the
+ *   source's history may have grown since — a buy imported after the transfer
+ *   changes the average the shares left with.
  */
 function planCarries(
   rows: readonly ImportRow[],
@@ -422,20 +447,26 @@ function planCarries(
     }
 
     let credit: Transaction | null = null;
-    let promotesFrom: ImportBatchId | null = null;
+    let mode: PlannedCarry['mode'] = 'insert';
+    let origin: ImportBatchId | null = null;
     if (creditRow.classification === 'unclassified') {
       credit = buildCandidate(creditRow, batchId, userId, 'active', now, today);
     } else if (creditRow.classification === 'duplicate') {
       const existing = storedCopyOf(stored, creditRow);
       if (
         existing !== undefined &&
-        existing.status === 'unclassified' &&
         existing.type === 'transfer_in' &&
         !existing.isUserModified &&
         existing.importBatchId !== null
       ) {
-        credit = { ...existing, status: 'active' };
-        promotesFrom = existing.importBatchId;
+        if (existing.status === 'unclassified') {
+          credit = { ...existing, status: 'active' };
+          mode = 'promote';
+          origin = existing.importBatchId;
+        } else if (existing.status === 'active') {
+          credit = existing;
+          mode = 'recarry';
+        }
       }
     }
     if (credit === null) continue;
@@ -450,7 +481,15 @@ function planCarries(
           ? storedDebit
           : null;
 
-    planned.push({ id: creditId, row: creditRow, credit, debit, promotesFrom });
+    planned.push({
+      id: creditId,
+      row: creditRow,
+      credit,
+      debit,
+      fallback: mode === 'recarry' ? credit.unitPrice : null,
+      mode,
+      origin,
+    });
   }
   return planned;
 }
@@ -474,8 +513,11 @@ function settle(
       debit: leg.debit !== null && excludedTransactions.has(leg.debit.id) ? null : leg.debit,
     }));
 
+  // A promoted or re-carried credit is stored too; its stored self leaves the
+  // source history while it is a leg, so it is never counted twice.
+  const legCredits = new Set<string>(legs.map((leg) => leg.credit.id));
   const costs = resolveCarriedCosts(legs, (assetId, institutionId) => [
-    ...stored({ assetId, institutionId }),
+    ...stored({ assetId, institutionId }).filter((t) => !legCredits.has(t.id)),
     ...live
       .filter((c) => c.row.assetId === assetId && c.row.institutionId === institutionId)
       .map((c) => c.transaction),
@@ -501,14 +543,17 @@ function settle(
   for (const leg of legs) {
     const cost = costs.get(leg.id);
     if (cost === undefined) continue;
+    // #112: a re-carry that lands on the figure already stored writes nothing.
+    if (leg.mode === 'recarry' && cost.equals(leg.credit.unitPrice)) continue;
     groupOf(leg.credit).carried.push({ leg, transaction: withCarriedCost(leg.credit, cost) });
   }
+  const replaced = new Set<string>(
+    [...groups.values()].flatMap((group) => group.carried.map((c) => c.transaction.id)),
+  );
 
   return [...groups.values()].map((group) => {
-    // A promoted credit is in `stored` as its unclassified self too; replay
-    // selects `active` rows only, so the carried copy is the one that counts.
     const replayed = replayPosition([
-      ...stored(group.key),
+      ...stored(group.key).filter((t) => !replaced.has(t.id)),
       ...group.candidates.map((c) => c.transaction),
       ...group.carried.map((c) => c.transaction),
     ]);
@@ -517,46 +562,83 @@ function settle(
 }
 
 /**
- * BR-005-20a (#110) — an existing unclassified transfer takes its carried cost
- * in place: the same B3 row gaining information, not a new row, so its key is
- * kept (BR-005-17) and it is not badged as a user's edit (BR-006-16). Through
- * `editTransaction`, so BR-006-15's guard and the recalculation still run.
+ * BR-005-20a (#110, #112) — existing transfers take their carried cost in
+ * place: the same B3 row gaining information, not a new row, so the key is kept
+ * (BR-005-17) and the row is not badged as a user's edit (BR-006-16).
  *
- * The settling round already replayed this exact ledger, so a refusal here is
- * a defect, not a user error — thrown, so the whole commit rolls back
- * (BR-005-13) rather than leaving positions written for a promotion that
- * never happened.
+ * **All of them in one `editTransactions` call**, so BR-006-15's guard replays
+ * each position once with every update in it. Two transfers promoted into one
+ * position that a later transfer out needs both of are valid only together;
+ * edited one at a time, the first was refused and the batch could never commit.
+ *
+ * The settling round already replayed these ledgers, so a refusal here is a
+ * defect, not a user error — thrown, so the whole commit rolls back
+ * (BR-005-13) rather than leaving positions written for updates that never
+ * happened.
  */
-async function promoteTransfers(
+async function updateCarriedInPlace(
   deps: IngestionDependencies,
-  promotions: readonly CarriedCredit[],
-): Promise<Transaction[]> {
-  const promoted: Transaction[] = [];
-  const originRows = new Map<string, readonly ImportRow[]>();
-  for (const { leg, transaction } of promotions) {
-    const edited = await editTransaction(deps, transaction.id, {
-      unitPrice: transaction.unitPrice,
-      status: 'active',
-      preserveNaturalKey: true,
-      flagUserModified: false,
-    });
-    if (!edited.ok) {
-      throw new Error(`BR-005-20a: promoting a carried transfer failed: ${edited.error.code}`);
-    }
-    promoted.push(edited.value.transaction);
+  updates: readonly CarriedCredit[],
+): Promise<{ promoted: Transaction[]; recarried: Transaction[] }> {
+  if (updates.length === 0) return { promoted: [], recarried: [] };
 
-    // The row that first staged it leaves Needs attention, as classifying it would.
-    const origin = leg.promotesFrom as ImportBatchId;
-    const cached = originRows.get(origin);
-    const originBatch = cached ?? (await deps.rows.listByBatch(origin));
-    originRows.set(origin, originBatch);
-    for (const row of originBatch) {
-      if (row.transactionId === transaction.id && row.classification === 'unclassified') {
+  const edited = await editTransactions(
+    deps,
+    updates.map(({ transaction }) => ({
+      id: transaction.id,
+      input: {
+        unitPrice: transaction.unitPrice,
+        status: 'active',
+        preserveNaturalKey: true,
+        flagUserModified: false,
+      },
+    })),
+  );
+  if (!edited.ok) {
+    throw new Error(`BR-005-20a: updating carried transfers failed: ${edited.error.code}`);
+  }
+
+  const promoted: Transaction[] = [];
+  const recarried: Transaction[] = [];
+  const promotedByOrigin = new Map<ImportBatchId, Set<string>>();
+  edited.value.transactions.forEach((transaction, index) => {
+    const { leg } = updates[index] as CarriedCredit;
+    if (leg.mode === 'recarry') {
+      recarried.push(transaction);
+      return;
+    }
+    promoted.push(transaction);
+    const origin = leg.origin as ImportBatchId;
+    promotedByOrigin.set(origin, (promotedByOrigin.get(origin) ?? new Set()).add(transaction.id));
+  });
+
+  // The row that first staged a promoted transfer leaves Needs attention, as
+  // classifying it would — and its batch's stored counts say so (BR-005-10).
+  for (const [origin, transactionIds] of promotedByOrigin) {
+    let reclassified = 0;
+    for (const row of await deps.rows.listByBatch(origin)) {
+      if (
+        row.transactionId !== null &&
+        transactionIds.has(row.transactionId) &&
+        row.classification === 'unclassified'
+      ) {
         await deps.rows.updateClassification(row.id, 'new');
+        reclassified += 1;
       }
     }
+    const originBatch = await deps.batches.findById(origin);
+    if (originBatch === null || originBatch.rowCounts === null || reclassified === 0) continue;
+    await deps.batches.update({
+      ...originBatch,
+      rowCounts: {
+        ...originBatch.rowCounts,
+        new: originBatch.rowCounts.new + reclassified,
+        needsAttention: originBatch.rowCounts.needsAttention - reclassified,
+      },
+    });
   }
-  return promoted;
+
+  return { promoted, recarried };
 }
 
 /** `null` when the row's own fields fail `validateTransactionDraft` — a corrupt or contradictory extract row. */

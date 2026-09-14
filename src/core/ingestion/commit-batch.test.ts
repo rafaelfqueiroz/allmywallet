@@ -739,4 +739,124 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       totalCost: '1001',
     });
   });
+
+  it('review 1: several promotions into one position are applied together, and their origin batch counts move', async () => {
+    const deps = buildFakeIngestionDeps();
+    const B = 'Corretora B';
+    const D = 'Corretora D';
+    const file = [
+      // 10/03: 100 ORIGEM→B and 50 TERCEIRA→B.
+      credit({ institutionName: B }),
+      debit(),
+      credit({ institutionName: B, quantity: Quantity.fromString('50') }),
+      debit({ institutionName: TERCEIRA, quantity: Quantity.fromString('50') }),
+      // 12/03: all 150 B→D, which needs both credits into B.
+      credit({
+        institutionName: D,
+        tradeDate: BusinessDate.of('2026-03-12'),
+        quantity: Quantity.fromString('150'),
+      }),
+      debit({
+        institutionName: B,
+        tradeDate: BusinessDate.of('2026-03-12'),
+        quantity: Quantity.fromString('150'),
+      }),
+    ];
+
+    // No history: every debit is invalid, every credit waits.
+    const first = await importFile(deps, file);
+    expect(first.outcome).toMatchObject({ applied: 3, invalid: 3 });
+    expect(first.outcome.batch.rowCounts).toMatchObject({ new: 3, needsAttention: 3 });
+
+    // ORIGEM: 100 @ 10,00 = 1.000,00. TERCEIRA: 50 @ 16,00 = 800,00.
+    await importFile(deps, [
+      history(),
+      history({
+        institutionName: TERCEIRA,
+        quantity: Quantity.fromString('50'),
+        unitPrice: Money.fromString('16'),
+      }),
+    ]);
+
+    const again = await importFile(deps, file);
+
+    expect(again.outcome).toMatchObject({ applied: 3, promoted: 3, invalid: 0 });
+    expect(transfersIn(deps).every((t) => t.status === 'active')).toBe(true);
+    // B holds 100 @ 10,00 + 50 @ 16,00 = 1.800,00 over 150 before 12/03, so D
+    // carries 1.800,00 ÷ 150 = 12,00 and B closes to zero.
+    expect(await positionAt(deps, D)).toEqual({
+      quantity: '150',
+      averageCost: '12',
+      totalCost: '1800',
+    });
+    expect(await positionAt(deps, B)).toMatchObject({ quantity: '0' });
+    // BR-005-10: the first batch's stored counts follow its rows — 3 + 3 new, 3 − 3 attention.
+    expect((await deps.batches.findById(first.batchId))?.rowCounts).toMatchObject({
+      new: 6,
+      needsAttention: 0,
+    });
+    await expectRebuildEqualsIncremental(deps);
+  });
+
+  describe('review 2 / #112 — a carried cost follows the source history on re-import', () => {
+    const laterBuy = () =>
+      history({ tradeDate: BusinessDate.of('2026-02-01'), unitPrice: Money.fromString('20') });
+
+    it('the transfer before the buy: carried 10,00, corrected to 15,00 when the transfer file is re-imported', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [credit(), debit()]);
+      const [before] = transfersIn(deps);
+      expect(before?.unitPrice.toString()).toBe('10');
+
+      // A buy of 100 @ 20,00 at ORIGEM on 01/02, imported afterwards.
+      await importFile(deps, [laterBuy()]);
+      const again = await importFile(deps, [credit(), debit()]);
+
+      // ORIGEM before the 10/03 debit: 1.000,00 + 2.000,00 over 200 = 15,00.
+      expect(again.outcome).toMatchObject({ applied: 0, promoted: 0, recarried: 1 });
+      const [after] = transfersIn(deps);
+      expect(after).toMatchObject({
+        id: before?.id,
+        naturalKey: before?.naturalKey,
+        status: 'active',
+        isUserModified: false,
+      });
+      expect(after?.unitPrice.toString()).toBe('15');
+      expect(again.outcome.committed.map((t) => t.id)).toEqual([before?.id]);
+      expect(await positionAt(deps, DESTINO)).toEqual({
+        quantity: '100',
+        averageCost: '15',
+        totalCost: '1500',
+      });
+
+      // Unchanged the next time: nothing recomputes to a new figure.
+      const third = await importFile(deps, [credit(), debit()]);
+      expect(third.outcome).toMatchObject({ applied: 0, recarried: 0, committed: [] });
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    it('the buy before the transfer reaches the same 15,00', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [laterBuy()]);
+      await importFile(deps, [credit(), debit()]);
+
+      expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('15');
+    });
+
+    it('never recomputes a carried transfer the user has edited (BR-006-16)', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [credit(), debit()]);
+      const [carried] = transfersIn(deps);
+      await editTransaction(deps, (carried as Transaction).id, { fees: Money.fromString('1') });
+
+      await importFile(deps, [laterBuy()]);
+      const again = await importFile(deps, [credit(), debit()]);
+
+      expect(again.outcome.recarried).toBe(0);
+      expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
+    });
+  });
 });

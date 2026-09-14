@@ -3,7 +3,7 @@ import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import { TransactionId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
-import { editTransaction } from '@/core/ledger/edit-transaction';
+import { editTransaction, editTransactions } from '@/core/ledger/edit-transaction';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import { TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
 import {
@@ -418,5 +418,113 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
     expect(positions[0]?.state.quantity.toString()).toBe('100');
     expect(positions[0]?.state.totalCost.toString()).toBe('0');
     expect(positions[0]?.state.averageCost.toString()).toBe('0');
+  });
+});
+
+describe('editTransactions — several edits, one guard per position', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  /** Two transfers into B still unclassified, and 120 already leaving B on 12/03. */
+  function pendingLedger() {
+    const first = aTransaction()
+      .transferIn()
+      .at('B')
+      .on('2026-03-10')
+      .quantity('100')
+      .price('10')
+      .status('unclassified')
+      .build();
+    const second = aTransaction()
+      .transferIn()
+      .at('B')
+      .on('2026-03-10')
+      .quantity('50')
+      .price('16')
+      .status('unclassified')
+      .build();
+    const out = aTransaction().transferOut().at('B').on('2026-03-12').quantity('120').build();
+    return { first, second, out };
+  }
+
+  it('applies edits that are only valid together, recalculating the position once', async () => {
+    const { first, second, out } = pendingLedger();
+    const state = deps([first, second, out]);
+
+    // One at a time, 100 arriving cannot cover 120 leaving.
+    const alone = await editTransaction(state, first.id, { status: 'active' });
+    expect(alone.ok).toBe(false);
+    expect(state.transactions.updateCount).toBe(0);
+
+    const together = await editTransactions(state, [
+      { id: first.id, input: { status: 'active' } },
+      { id: second.id, input: { status: 'active' } },
+    ]);
+
+    expect(together.ok).toBe(true);
+    if (!together.ok) return;
+    expect(together.value.transactions.map((t) => t.id)).toEqual([first.id, second.id]);
+    expect(together.value.recalculations).toHaveLength(1);
+    expect(state.positions.upsertCount).toBe(1);
+    // 100 @ 10,00 + 50 @ 16,00 = 1.800,00 over 150 → 12,00; 120 leave at
+    // average → 30 @ 12,00 = 360,00.
+    const [position] = await state.positions.list();
+    expect(position?.state.quantity.toString()).toBe('30');
+    expect(position?.state.totalCost.toString()).toBe('360');
+  });
+
+  it('writes nothing when any edit names a missing transaction', async () => {
+    const { first, second, out } = pendingLedger();
+    const state = deps([first, second, out]);
+
+    const result = await editTransactions(state, [
+      { id: first.id, input: { status: 'active' } },
+      { id: TransactionId.generate(), input: { status: 'active' } },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('TRANSACTION_NOT_FOUND');
+    expect(state.transactions.updateCount).toBe(0);
+  });
+
+  it('writes nothing when any edit fails validation', async () => {
+    const { first, second, out } = pendingLedger();
+    const state = deps([first, second, out]);
+
+    const result = await editTransactions(state, [
+      { id: first.id, input: { status: 'active' } },
+      { id: second.id, input: { tradeDate: BusinessDate.of('2026-12-31') } },
+    ]);
+
+    expect(result.ok).toBe(false);
+    expect(state.transactions.updateCount).toBe(0);
+  });
+
+  it('recalculates each position an edit touches once, from its earliest date', async () => {
+    const opening = aTransaction().buy().at('A').on('2026-01-05').quantity('100').build();
+    const moving = aTransaction().buy().at('A').on('2026-03-01').quantity('10').build();
+    const staying = aTransaction().buy().at('B').on('2026-02-01').quantity('10').build();
+    const state = deps([opening, moving, staying]);
+
+    const result = await editTransactions(state, [
+      { id: moving.id, input: { institutionId: institutionIdFor('B') } },
+      { id: staying.id, input: { tradeDate: BusinessDate.of('2026-04-01') } },
+    ]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.value.recalculations.map((r) => [
+        r.position?.state.quantity.toString(),
+        r.scope.fromDate,
+      ]),
+    ).toEqual([
+      // B: `moving` arrives (earliest 01/03) and `staying` moves 01/02 → 01/04.
+      ['20', '2026-02-01'],
+      // A: `moving` left.
+      ['100', '2026-03-01'],
+    ]);
   });
 });
