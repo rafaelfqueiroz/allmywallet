@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   mkdirSync,
@@ -278,6 +278,52 @@ exit 0`,
     expect(index(log, 'docker pull')).toBe(-1);
     expect(index(log, 'dist/migrate.js')).toBe(-1);
     expect(upWith(log, 'local-current')).toBe(true);
+  });
+
+  describe('the start lock', () => {
+    function lockHeldBy(pid: number): void {
+      const lock = join(sandbox, 'state', 'start.lock');
+      mkdirSync(lock, { recursive: true });
+      writeFileSync(join(lock, 'pid'), `${pid}\n`);
+    }
+
+    it('clears a lock left by a start that died (power-off, SIGKILL) and starts normally', () => {
+      // A PID that has certainly exited: the child below ran to completion.
+      const dead = spawnSync('true');
+      lockHeldBy(dead.pid ?? 999_999);
+
+      const { result, calls: log } = startWith({ offline: true });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain('removing a stale start lock');
+      expect(upWith(log, 'local-current')).toBe(true);
+      expect(() => readFileSync(join(sandbox, 'state', 'start.lock', 'pid'))).toThrow();
+    });
+
+    it('clears a lock whose PID was reused by an unrelated process after a reboot', () => {
+      // This test runner is alive, and it is not start.sh.
+      lockHeldBy(process.pid);
+
+      const { result, calls: log } = startWith({ offline: true });
+
+      expect(result.status).toBe(0);
+      expect(upWith(log, 'local-current')).toBe(true);
+    });
+
+    it('refuses while another start.sh really is running, touching nothing', () => {
+      const holder = spawn('bash', ['-c', 'exec -a start.sh sleep 30'], { stdio: 'ignore' });
+      try {
+        lockHeldBy(holder.pid ?? 0);
+
+        const { result, calls: log } = startWith({ offline: true });
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('another start is running');
+        expect(log).toEqual([]);
+      } finally {
+        holder.kill('SIGKILL');
+      }
+    });
   });
 });
 

@@ -35,9 +35,45 @@ mkdir -p "$ALLMYWALLET_STATE_DIR"
 
 # launchd runs this at login and daily; a manual run may overlap it. Two
 # concurrent upgrades would back up, pull and migrate twice over one database.
+#
+# The lock records its holder's PID, because the EXIT trap that removes it
+# never runs on SIGKILL, power-off or a panic — and a lock that outlives its
+# holder would refuse every later start, leaving web and worker down
+# (`restart: on-failure`) and skipping the daily backup. A lock is only
+# honoured while its PID is alive AND is still a start.sh: after a reboot the
+# PID may belong to something else entirely.
 lock="$ALLMYWALLET_STATE_DIR/start.lock"
-mkdir "$lock" 2>/dev/null || die "another start is running (remove $lock if it is stale)"
-trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+
+lock_holder_running() {
+  local holder=$1
+  [ -n "$holder" ] || return 1
+  kill -0 "$holder" 2>/dev/null || return 1
+  ps -p "$holder" -o command= 2>/dev/null | grep -q 'start\.sh'
+}
+
+acquire_lock() {
+  if mkdir "$lock" 2>/dev/null; then
+    printf '%s\n' "$$" >"$lock/pid"
+    return 0
+  fi
+  local holder
+  holder=$(cat "$lock/pid" 2>/dev/null || true)
+  if [ -z "$holder" ]; then
+    # The holder may have made the directory and not yet written its PID.
+    sleep 1
+    holder=$(cat "$lock/pid" 2>/dev/null || true)
+  fi
+  if lock_holder_running "$holder"; then
+    return 1
+  fi
+  log "removing a stale start lock (holder ${holder:-unknown} is not running)"
+  rm -rf "$lock"
+  mkdir "$lock" 2>/dev/null || return 1
+  printf '%s\n' "$$" >"$lock/pid"
+}
+
+acquire_lock || die "another start is running (pid $(cat "$lock/pid" 2>/dev/null || echo unknown))"
+trap 'rm -rf "$lock" 2>/dev/null || true' EXIT
 
 read_state() { cat "$ALLMYWALLET_STATE_DIR/$1" 2>/dev/null || true; }
 write_state() { printf '%s\n' "$2" >"$ALLMYWALLET_STATE_DIR/$1"; }
