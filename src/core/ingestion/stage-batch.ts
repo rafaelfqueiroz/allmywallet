@@ -117,6 +117,8 @@ async function stagePositionRows(
       code: parsed.record.assetCode,
       name: parsed.record.assetName,
       assetClass: parsed.record.assetClass,
+      // #108 (SPEC-005 BR-005-06a): Posição states the class, by its tab.
+      classStated: true,
     });
     const institutionId =
       parsed.record.institutionName === null
@@ -164,6 +166,8 @@ async function stageTransactionRows(
       code: record.assetCode,
       name: record.assetName,
       assetClass: record.assetClass,
+      // #108: Movimentação and Negociação only guess the class from the ticker.
+      classStated: false,
     });
     const institutionId =
       record.institutionName === null

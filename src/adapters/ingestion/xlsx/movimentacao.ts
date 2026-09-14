@@ -74,10 +74,18 @@ function parseDirection(text: string | null): 'credit' | 'debit' | null {
   return null;
 }
 
-/** `"PETR4 - Petrobras PN"` → `{ code: "PETR4", name: "Petrobras PN" }`. Falls back to the whole string when there is no separator. */
+/**
+ * `"PETR4 - Petrobras PN"` → `{ code: "PETR4", name: "Petrobras PN" }`. Falls back to the whole string when there is no separator.
+ *
+ * #108: bank paper (`"CDB - BANCO INTER S/A"`) keeps the whole string as its
+ * code. Split like a ticker, every CDB, LCI and LCA at every bank became one
+ * asset called `CDB`.
+ */
 function splitProduct(produto: string): { code: string; name: string } {
   const separatorIndex = produto.indexOf(' - ');
-  if (separatorIndex === -1) return { code: produto.trim(), name: produto.trim() };
+  if (separatorIndex === -1 || BANK_PAPER_PREFIX.test(produto)) {
+    return { code: produto.trim(), name: produto.trim() };
+  }
   return {
     code: produto.slice(0, separatorIndex).trim(),
     name: produto.slice(separatorIndex + 3).trim(),
@@ -88,14 +96,19 @@ function splitProduct(produto: string): { code: string; name: string } {
  * Neither Movimentação nor Negociação states an asset's class — B3 does not
  * carry it in either extract. This is a documented heuristic, not a lookup:
  * a ticker ending `11` is a FII/unit, an ending like `34`/`35` reads as a
- * BDR, everything else defaults to `stock`. Wrong for an ETF or Tesouro
- * Direto row (which this heuristic reads as `stock`) — acceptable because
- * `AssetResolverPort.resolve` is an upsert (BR-005-06), so a later, more
- * informed write (or a manual correction) can still fix the classification
- * without this parser needing to be a full B3 instrument reference.
+ * BDR, everything else defaults to `stock`. Tesouro titles and bank paper are
+ * recognised by their `Produto` shape (#108). Still wrong for an ETF or a unit
+ * (`KLBN11` reads as a FII) — acceptable because it is only ever a *guess*:
+ * `AssetResolverPort` never lets a guess overwrite a class already stated, and
+ * Posição, which states classes, always overwrites a guess (#108).
  */
+const BANK_PAPER_PREFIX = /^(CDB|LCI|LCA) - /i;
+
 function guessAssetClass(code: string): AssetClass {
   const trimmed = code.trim().toUpperCase();
+  if (trimmed.startsWith('TESOURO ')) return 'tesouro_direto';
+  const bankPaper = BANK_PAPER_PREFIX.exec(trimmed)?.[1];
+  if (bankPaper !== undefined) return bankPaper.toLowerCase() as AssetClass;
   if (/\d{2}$/.test(trimmed) && trimmed.endsWith('11')) return 'fii';
   if (/3[2-9]$/.test(trimmed)) return 'bdr';
   return 'stock';

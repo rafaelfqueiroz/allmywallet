@@ -293,7 +293,23 @@ export interface ImportRowRepository {
 
 /** BR-005-08/BR-005-06: resolves a free-text B3 product name to an asset, creating it if new. */
 export interface AssetResolverPort {
-  resolve(input: { code: string; name: string; assetClass: AssetClass }): Promise<AssetId>;
+  resolve(input: AssetResolveInput): Promise<AssetId>;
+}
+
+export interface AssetResolveInput {
+  readonly code: string;
+  readonly name: string;
+  readonly assetClass: AssetClass;
+  /**
+   * #108 — whether `assetClass` (and `name`) are *stated* by the source or
+   * *guessed*. Posição states the class (its tab) and a user states it on
+   * manual entry; Movimentação and Negociação only guess from the ticker. A
+   * stated value overwrites what the catalog holds; a guess only ever fills a
+   * new asset. Without that, each Movimentação import undid Posição's classes
+   * (every Tesouro title back to `stock`, every unit to `fii`), and Negociação
+   * replaced real names with the bare ticker.
+   */
+  readonly classStated: boolean;
 }
 
 /** The institution-catalog counterpart — B3 extracts name a broker/bank in free text. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { detectExtractType, normalizeHeader } from '@/adapters/ingestion/xlsx/detect';
 import {
+  NEGOCIACAO_HEADERS,
   POSICAO_TAB_HEADERS,
   type PosicaoTab,
 } from '@/adapters/ingestion/xlsx/test-support/builder';
@@ -15,15 +16,7 @@ const MOVIMENTACAO_HEADER = [
   'Preço unitário',
   'Valor da Operação',
 ];
-const NEGOCIACAO_HEADER = [
-  'Data do Negócio',
-  'Tipo',
-  'Mercado',
-  'Código de Negociação',
-  'Quantidade',
-  'Preço',
-  'Valor',
-];
+const NEGOCIACAO_HEADER = [...NEGOCIACAO_HEADERS];
 const POSICAO_HEADER = [...POSICAO_TAB_HEADERS.Acoes];
 
 describe('SPEC-005 BR-005-03/04 — detectExtractType', () => {

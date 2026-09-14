@@ -149,6 +149,7 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
       code: 'VALE3',
       name: 'Vale ON',
       assetClass: 'stock',
+      classStated: false,
     });
     const batchId = await stagedBatch(deps, {
       extractType: 'b3_movimentacao',

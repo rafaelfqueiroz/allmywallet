@@ -136,6 +136,7 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
       code: first.record.assetCode,
       name: first.record.assetName,
       assetClass: first.record.assetClass,
+      classStated: false,
     });
     const institutionId = await deps.institutions.resolve(first.record.institutionName as string);
     const key = naturalKeyFor({

@@ -323,6 +323,8 @@ async function resolveAsset(
       code: input.assetCode.toUpperCase(),
       name: input.assetName ?? input.assetCode.toUpperCase(),
       assetClass: input.assetClass ?? 'stock',
+      // #108: the user chose it, so it corrects whatever an import guessed.
+      classStated: true,
     });
   }
   return input.assetId === null ? null : AssetId.of(input.assetId);

@@ -2,8 +2,11 @@ import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { assets, institutions } from '@/db/schema/assets';
 import { AssetId, InstitutionId } from '@/core/shared/ids';
-import type { AssetClass } from '@/core/quotes/ports';
-import type { AssetResolverPort, InstitutionResolverPort } from '@/core/ingestion/ports';
+import type {
+  AssetResolveInput,
+  AssetResolverPort,
+  InstitutionResolverPort,
+} from '@/core/ingestion/ports';
 
 /**
  * SPEC-005 — resolves the free-text product/institution names a B3 extract
@@ -18,8 +21,14 @@ import type { AssetResolverPort, InstitutionResolverPort } from '@/core/ingestio
 export class DrizzleAssetResolver implements AssetResolverPort {
   constructor(private readonly db: Tx | Database) {}
 
-  /** AR-19: `ON CONFLICT (code)` — a retried commit for a ticker already onboarded never creates a duplicate. */
-  async resolve(input: { code: string; name: string; assetClass: AssetClass }): Promise<AssetId> {
+  /**
+   * AR-19: `ON CONFLICT (code)` — a retried commit for a ticker already onboarded never creates a duplicate.
+   *
+   * #108: only a *stated* class and name overwrite the catalog's; a guess
+   * (`classStated: false`) leaves an existing asset as it is. The conflict
+   * still updates, so `RETURNING` yields the id either way.
+   */
+  async resolve(input: AssetResolveInput): Promise<AssetId> {
     const [row] = await this.db
       .insert(assets)
       .values({
@@ -30,7 +39,9 @@ export class DrizzleAssetResolver implements AssetResolverPort {
       })
       .onConflictDoUpdate({
         target: assets.code,
-        set: { name: input.name, assetClass: input.assetClass, updatedAt: new Date() },
+        set: input.classStated
+          ? { name: input.name, assetClass: input.assetClass, updatedAt: new Date() }
+          : { updatedAt: new Date() },
       })
       .returning({ id: assets.id });
     if (!row) throw new Error('DrizzleAssetResolver.resolve: upsert returned no row');

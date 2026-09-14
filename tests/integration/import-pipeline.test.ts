@@ -900,6 +900,57 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(contract?.ratePercent).toBeNull();
   });
 
+  /**
+   * #108 — Movimentação and Negociação only *guess* an asset's class from its
+   * ticker; Posição *states* it. `DrizzleAssetResolver` used to overwrite the
+   * class on every resolve, so importing a Movimentação after a Posição turned
+   * a unit like KLBN11 back into a FII and a Negociação replaced its name with
+   * the bare ticker.
+   */
+  it('#108: a Movimentação or Negociação guess never overwrites the class and name Posição stated', async () => {
+    const posicao = await newPendingBatch('b3_posicao');
+    await saveUploadedFile(
+      uploadDir,
+      posicao,
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'KLBN11 - KLABIN S.A.', codigo: 'KLBN11', quantidade: '10' }],
+      }),
+    );
+    await handleImportStage({ batchId: posicao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: posicao, userId, asOf: '2026-01-20' }, handlerDeps());
+
+    const movimentacao = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      movimentacao,
+      await buildMovimentacaoXlsx([
+        {
+          data: '15/01/2026',
+          movimentacao: 'Rendimento',
+          produto: 'KLBN11 - KLABIN UNT',
+          quantidade: '10',
+          precoUnitario: '0,10',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: movimentacao, userId }, handlerDeps());
+
+    const negociacao = await newPendingBatch('b3_negociacao');
+    await saveUploadedFile(
+      uploadDir,
+      negociacao,
+      await buildNegociacaoXlsx([
+        { data: '10/01/2026', tipo: 'Compra', codigo: 'KLBN11F', quantidade: '10', preco: '20,00' },
+      ]),
+    );
+    await handleImportStage({ batchId: negociacao, userId }, handlerDeps());
+
+    const { rows } = await migratorPool.query(
+      "SELECT class AS asset_class, name FROM assets WHERE code = 'KLBN11'",
+    );
+    expect(rows).toEqual([{ asset_class: 'stock', name: 'KLABIN S.A.' }]);
+  });
+
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {
     const batchId = await newPendingBatch('b3_movimentacao');
     // Default metadata block embeds SYNTHETIC_CPF, a checksum-valid CPF.

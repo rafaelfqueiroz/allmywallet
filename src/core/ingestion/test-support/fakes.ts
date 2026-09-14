@@ -1,6 +1,6 @@
 import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
 import type { ImportRowId, TransactionId } from '@/core/shared/ids';
-import type { AssetClass } from '@/core/quotes/ports';
+import type { AssetResolveInput } from '@/core/ingestion/ports';
 import type {
   AssetResolverPort,
   FixedIncomeContractWriterPort,
@@ -117,7 +117,7 @@ export class FakeImportRowRepository implements ImportRowRepository {
 export class FakeAssetResolver implements AssetResolverPort {
   #byCode = new Map<string, AssetId>();
 
-  async resolve(input: { code: string; name: string; assetClass: AssetClass }): Promise<AssetId> {
+  async resolve(input: AssetResolveInput): Promise<AssetId> {
     const existing = this.#byCode.get(input.code);
     if (existing) return existing;
     const id = AssetId.generate();

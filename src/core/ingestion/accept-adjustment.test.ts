@@ -17,6 +17,7 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
       code: 'HGLG11',
       name: 'CSHG Logística',
       assetClass: 'fii',
+      classStated: true,
     });
 
     const positionRecord: NormalizedPositionRecord = {
@@ -93,7 +94,12 @@ describe('SPEC-005 BR-005-25 — acceptReconciliationAdjustment', () => {
 
     const result = await acceptReconciliationAdjustment(deps, userId, {
       batchId,
-      assetId: await deps.assets.resolve({ code: 'X', name: 'X', assetClass: 'stock' }),
+      assetId: await deps.assets.resolve({
+        code: 'X',
+        name: 'X',
+        assetClass: 'stock',
+        classStated: true,
+      }),
       institutionId: null,
     });
     expect(result.ok).toBe(false);

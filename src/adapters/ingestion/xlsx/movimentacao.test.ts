@@ -98,4 +98,65 @@ describe('SPEC-005 — parseMovimentacao', () => {
     const records = parseMovimentacao(rows, structureOf(rows));
     expect(records).toHaveLength(1);
   });
+
+  describe('#108 — the real export', () => {
+    function parseOne(input: Parameters<typeof movimentacaoRow>[0]) {
+      const rows = rowsFor([movimentacaoRow(input)]);
+      const record = parseMovimentacao(rows, structureOf(rows))[0]?.record;
+      if (record?.kind !== 'transaction') throw new Error('expected a transaction record');
+      return record;
+    }
+
+    it("an event with no price (B3's `-`) parses with a zero unit price rather than failing the file", () => {
+      const record = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'Desdobro',
+        produto: 'PETR4 - Petrobras PN',
+        quantidade: '100',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      });
+      expect(record.unitPrice.toString()).toBe('0');
+    });
+
+    it('a Tesouro title keeps Produto as its code and is guessed as Tesouro Direto', () => {
+      const record = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'Compra',
+        produto: 'Tesouro Selic 2029',
+        quantidade: '1',
+      });
+      expect(record.assetCode).toBe('Tesouro Selic 2029');
+      expect(record.assetClass).toBe('tesouro_direto');
+    });
+
+    it('bank paper keeps the whole Produto as its code instead of collapsing into "CDB"', () => {
+      const cdb = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'CDB - BANCO EXEMPLO S/A',
+        quantidade: '1',
+      });
+      const lca = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'LCA - BANCO EXEMPLO S/A',
+        quantidade: '1',
+      });
+      expect(cdb.assetCode).toBe('CDB - BANCO EXEMPLO S/A');
+      expect(cdb.assetClass).toBe('cdb');
+      expect(lca.assetClass).toBe('lca');
+    });
+
+    it('a ticker still splits from its name', () => {
+      const record = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'B3SA3 - B3 S.A.',
+        quantidade: '10',
+      });
+      expect(record.assetCode).toBe('B3SA3');
+      expect(record.assetName).toBe('B3 S.A.');
+    });
+  });
 });

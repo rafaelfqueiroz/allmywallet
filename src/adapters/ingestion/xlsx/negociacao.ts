@@ -10,10 +10,22 @@ import { guessAssetClass } from '@/adapters/ingestion/xlsx/movimentacao';
  * ticker already in tradeable form (`codigo de negociacao`) rather than
  * Movimentação's free-text `"CODE - Name"` product string.
  *
- * Negociação carries no institution column (trades are scoped to the
- * account the extract was exported for, not stated per row) and no separate
- * asset name — both are documented simplifications, not B3 fidelity gaps
- * this parser tries to paper over.
+ * #108 — read against B3's real export (header names only, never values):
+ * `Data do Negócio · Tipo de Movimentação · Mercado · Prazo/Vencimento ·
+ * Instituição · Código de Negociação · Quantidade · Preço · Valor`.
+ *
+ *  - **Institution is a column**, not implied by the account. Reading it is
+ *    what lets BR-005-14's natural key see Movimentação's copy of the same
+ *    trade as the same trade, and lets reconciliation line a Negociação
+ *    position up with Posição's `(asset, institution)`.
+ *  - **Fractional-market trades carry an `F` suffix** (`PETR4F`). It names the
+ *    market, not the instrument, so it is stripped: a lot bought on the
+ *    fractional market is the same share as one bought on the spot market.
+ *  - **Term and auction rows** (`Prazo/Vencimento` set, `Mercado` = `Leilão`)
+ *    import as ordinary buys and sells — owner's decision, #108 Decision log.
+ *
+ * No separate asset name, so the ticker doubles as one; `AssetResolverPort`
+ * never lets that overwrite a name an extract that states one already set.
  */
 export function parseNegociacao(
   rows: readonly (string | null)[][],
@@ -37,16 +49,17 @@ export function parseNegociacao(
       continue;
     }
 
-    const tipo = cellAt(row, structure.columns, 'tipo') ?? '';
+    const tipo = cellAt(row, structure.columns, 'tipo de movimentacao') ?? '';
+    const ticker = spotTicker(codigo);
 
     const record: NormalizedTransactionRecord = {
       kind: 'transaction',
       b3Type: tipo,
-      direction: null, // Negociação's `Tipo` (Compra/Venda) needs no disambiguation.
-      assetCode: codigo.trim(),
-      assetName: codigo.trim(),
-      assetClass: guessAssetClass(codigo),
-      institutionName: null,
+      direction: null, // Negociação's `Tipo de Movimentação` (Compra/Venda) needs no disambiguation.
+      assetCode: ticker,
+      assetName: ticker,
+      assetClass: guessAssetClass(ticker),
+      institutionName: cellAt(row, structure.columns, 'instituicao'),
       tradeDate: parseBrDate(dataText, 'data do negocio'),
       quantity: parseQuantity(quantidadeText, 'quantidade'),
       unitPrice: parseMoney(precoText, 'preco'),
@@ -58,6 +71,13 @@ export function parseNegociacao(
   }
 
   return records;
+}
+
+/** `"PETR4F"` → `"PETR4"`, `"B3SA3F"` → `"B3SA3"`; any other code unchanged. */
+function spotTicker(codigo: string): string {
+  const trimmed = codigo.trim();
+  const fractional = /^([A-Z0-9]{4}\d{1,2})F$/.exec(trimmed);
+  return fractional?.[1] ?? trimmed;
 }
 
 function rawRowOf(

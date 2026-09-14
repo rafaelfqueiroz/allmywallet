@@ -43,6 +43,16 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-09-14'),
     parserFingerprint: 'cd1fc474859c90ab5d5104143bd872bac740da36ea1ede2a1f7c9d1b91f40c76',
   },
+  {
+    // #108, the Movimentação/Negociação half: both parsers rewritten for B3's
+    // real exports. The owner exported both via Extratos → Movimentação →
+    // Baixar and Extratos → Negociação → Baixar and confirmed the paths, so
+    // all three guide steps are verified as of this entry. Dated a day after
+    // the previous entry only because the test requires strictly later dates;
+    // the check itself happened on 2026-09-14.
+    asOf: BusinessDate.of('2026-09-15'),
+    parserFingerprint: '13fbfae0dd4feacead19b70022337126d5839377dcfaa502bde4260c89847139',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

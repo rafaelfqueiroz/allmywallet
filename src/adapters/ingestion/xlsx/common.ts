@@ -119,5 +119,9 @@ export function cellAt(
 ): string | null {
   const index = columns.get(header);
   if (index === undefined) return null;
-  return row[index] ?? null;
+  const cell = row[index] ?? null;
+  // #108: B3 writes a lone `-` for "no value" (a Movimentação event with no
+  // price, a Negociação trade with no term). Read as a value, it made
+  // `parseMoney` fail the whole file with MALFORMED_CELL.
+  return cell?.trim() === '-' ? null : cell;
 }
