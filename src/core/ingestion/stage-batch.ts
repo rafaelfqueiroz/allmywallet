@@ -12,6 +12,7 @@ import {
   planOccurrences,
 } from '@/core/ingestion/occurrence';
 import { classifyMovement, isIgnoredMovement } from '@/core/ingestion/movement-map';
+import { carriedTransferCosts } from '@/core/ingestion/transfer-cost';
 import type {
   ExtractType,
   ImportBatch,
@@ -189,6 +190,9 @@ async function stageTransactionRows(
     readonly isUnclassified: boolean;
     readonly ledgerType: TransactionType;
     readonly naturalKey: string;
+    /** Every other key this same B3 row has had or could have — see `keyForms`. */
+    readonly otherKeys: readonly string[];
+    readonly keyForms: KeyForms | null;
   }
 
   const resolved: Resolved[] = [];
@@ -249,17 +253,18 @@ async function stageTransactionRows(
       resolvedType === null || (!record.priceStated && PRICE_BEARING_TYPES.has(resolvedType));
     const ledgerType = resolvedType ?? UNCLASSIFIED_PLACEHOLDER_TYPE;
 
+    const keyParts = {
+      assetId,
+      institutionId,
+      tradeDate: record.tradeDate,
+      quantity: record.quantity,
+      unitPrice: record.unitPrice,
+    };
     const naturalKey = importNaturalKeyFor(
-      {
-        assetId,
-        institutionId,
-        type: ledgerType,
-        tradeDate: record.tradeDate,
-        quantity: record.quantity,
-        unitPrice: record.unitPrice,
-      },
+      { ...keyParts, type: ledgerType },
       isUnclassified ? record.b3Type : null,
     );
+    const forms = resolvedType === null ? null : keyFormsFor(keyParts, resolvedType, record.b3Type);
 
     resolved.push({
       raw: parsed.raw,
@@ -269,15 +274,53 @@ async function stageTransactionRows(
       isUnclassified,
       ledgerType,
       naturalKey,
+      otherKeys: forms === null ? [] : otherKeysThan(forms, naturalKey),
+      keyForms: forms,
     });
   }
 
+  // #110: a price-less custody transfer takes the source broker's average cost.
+  const carried = await carriedTransferCosts(
+    deps.transactions,
+    resolved.map((row) => ({
+      assetId: row.assetId,
+      institutionId: row.institutionId,
+      tradeDate: row.record.tradeDate,
+      quantity: row.record.quantity,
+      ledgerType: row.ledgerType,
+      needsCarriedCost:
+        row.isUnclassified && row.ledgerType === 'transfer_in' && !row.record.priceStated,
+    })),
+  );
+  const withCosts = resolved.map((row, index): Resolved => {
+    const cost = carried.get(index);
+    if (cost === undefined || row.keyForms === null) return row;
+    // The key keeps what B3 stated (no price), so a re-import keys it the same.
+    return {
+      ...row,
+      record: { ...row.record, unitPrice: cost },
+      isUnclassified: false,
+      naturalKey: row.keyForms.mapped,
+      otherKeys: otherKeysThan(row.keyForms, row.keyForms.mapped),
+    };
+  });
+
   // BR-005-15/16/17: one grouped occurrence query for the whole batch.
+  //
+  // #110 — a row's key depends on how it was classified, and that changes
+  // between map versions (v2's unmapped `APLICAÇÃO` is v3's `buy`) and between
+  // imports (a transfer whose cost could not be carried last time can be now).
+  // An occurrence already in the ledger under any other form of the same B3
+  // row counts towards this one, so the row stages as a duplicate rather than
+  // a second copy of something the user may already have classified by hand.
   const uniqueKeys = [
-    ...new Set([...resolved, ...ignoredInFileOrder].map((row) => row.naturalKey)),
+    ...new Set([
+      ...withCosts.flatMap((row) => [row.naturalKey, ...row.otherKeys]),
+      ...ignoredInFileOrder.map((row) => row.naturalKey),
+    ]),
   ];
   const existingCounts = await deps.transactions.occurrenceCounts(uniqueKeys);
-  const planned = planOccurrences(resolved, existingCounts);
+  const planned = planOccurrences(withCosts, countsAcrossKeyForms(withCosts, existingCounts));
   const plannedIgnored = planOccurrences(ignoredInFileOrder, existingCounts);
 
   const staged: ImportRow[] = [];
@@ -321,6 +364,61 @@ async function stageTransactionRows(
   });
   pushIgnored(planned.length);
   return staged;
+}
+
+/**
+ * #110 — the three keys one mapped B3 row can have been written under:
+ * `mapped` (classified, BR-005-14 unmodified), `priceless` (mapped but staged
+ * `unclassified` for want of a price, #108) and `unmapped` (a map version that
+ * did not know the string, `UNCLASSIFIED_PLACEHOLDER_TYPE`). The last two
+ * carry the raw B3 type (`importNaturalKeyFor`), and a hand classification
+ * keeps whichever it had (`classify-row.ts`).
+ */
+interface KeyForms {
+  readonly mapped: string;
+  readonly priceless: string;
+  readonly unmapped: string;
+}
+
+function keyFormsFor(
+  parts: Omit<Parameters<typeof importNaturalKeyFor>[0], 'type'>,
+  type: TransactionType,
+  b3Type: string,
+): KeyForms {
+  return {
+    mapped: importNaturalKeyFor({ ...parts, type }, null),
+    priceless: importNaturalKeyFor({ ...parts, type }, b3Type),
+    unmapped: importNaturalKeyFor({ ...parts, type: UNCLASSIFIED_PLACEHOLDER_TYPE }, b3Type),
+  };
+}
+
+function otherKeysThan(forms: KeyForms, key: string): readonly string[] {
+  return [...new Set([forms.mapped, forms.priceless, forms.unmapped])].filter((k) => k !== key);
+}
+
+/**
+ * Each planned key's existing count plus every distinct other form of it. Two
+ * rows can share a key yet differ in their other forms (`Resgate` and
+ * `RESGATE ANTECIPADO/` are both `sell`), so the forms are unioned per key.
+ */
+function countsAcrossKeyForms(
+  rows: readonly { readonly naturalKey: string; readonly otherKeys: readonly string[] }[],
+  existing: ReadonlyMap<string, number>,
+): ReadonlyMap<string, number> {
+  const forms = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const set = forms.get(row.naturalKey) ?? new Set<string>([row.naturalKey]);
+    for (const key of row.otherKeys) set.add(key);
+    forms.set(row.naturalKey, set);
+  }
+  const counts = new Map(existing);
+  for (const [key, set] of forms) {
+    counts.set(
+      key,
+      [...set].reduce((sum, form) => sum + (existing.get(form) ?? 0), 0),
+    );
+  }
+  return counts;
 }
 
 function summarize(read: number, rows: readonly ImportRow[]): ImportRowCounts {

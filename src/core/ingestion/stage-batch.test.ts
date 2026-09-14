@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
-import { ImportBatchId, TransactionId, UserId } from '@/core/shared/ids';
+import {
+  type AssetId,
+  ImportBatchId,
+  type InstitutionId,
+  TransactionId,
+  UserId,
+} from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
+import type { Transaction } from '@/core/ledger/transaction';
+import { aTransaction } from '@/core/ledger/test-support/transaction-builder';
+import { commitBatch } from '@/core/ingestion/commit-batch';
+import { UNCLASSIFIED_PLACEHOLDER_TYPE, importNaturalKeyFor } from '@/core/ingestion/occurrence';
 import type {
   NormalizedTransactionRecord,
   ParsedExtract,
@@ -31,6 +41,10 @@ function transactionRecord(overrides: Partial<NormalizedTransactionRecord> = {})
     ...overrides,
   };
   return { raw: { Movimentação: record.b3Type }, record };
+}
+
+function priceParts(record: NormalizedTransactionRecord) {
+  return { tradeDate: record.tradeDate, quantity: record.quantity, unitPrice: record.unitPrice };
 }
 
 async function seedPendingBatch(deps: ReturnType<typeof buildFakeIngestionDeps>) {
@@ -165,6 +179,144 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
 
       if (!result.ok) throw new Error('stage failed');
       expect(result.value.rows[1]).toMatchObject({ classification: 'new', occurrence: 1 });
+    });
+  });
+
+  describe('#110 — BR-005-17 across key forms', () => {
+    async function seedLedgerRow(
+      deps: ReturnType<typeof buildFakeIngestionDeps>,
+      record: NormalizedTransactionRecord,
+      naturalKey: (ids: { assetId: AssetId; institutionId: InstitutionId }) => string,
+      overrides: Partial<Transaction> = {},
+    ) {
+      const assetId = await deps.assets.resolve({
+        code: record.assetCode,
+        name: record.assetName,
+        assetClass: record.assetClass,
+        classStated: false,
+        nameStated: true,
+      });
+      const institutionId = await deps.institutions.resolve(record.institutionName as string);
+      await deps.transactions.insert({
+        ...aTransaction().rendimento().on(record.tradeDate).quantity('100').price('10').build(),
+        assetId,
+        institutionId,
+        status: 'unclassified',
+        naturalKey: naturalKey({ assetId, institutionId }),
+        occurrence: 1,
+        ...overrides,
+      });
+      return { assetId, institutionId };
+    }
+
+    it('a row committed unmapped under map v2 stages as a duplicate under v3, not a second buy', async () => {
+      const deps = buildFakeIngestionDeps();
+      const aplicacao = transactionRecord({ b3Type: 'APLICAÇÃO', direction: 'credit' })
+        .record as NormalizedTransactionRecord;
+      await seedLedgerRow(deps, aplicacao, (ids) =>
+        importNaturalKeyFor(
+          { ...ids, ...priceParts(aplicacao), type: UNCLASSIFIED_PLACEHOLDER_TYPE },
+          'APLICAÇÃO',
+        ),
+      );
+
+      const batchId = await seedPendingBatch(deps);
+      const result = await stageBatch(deps, userId, {
+        batchId,
+        extract: { extractType: 'b3_movimentacao', records: [{ raw: {}, record: aplicacao }] },
+      });
+
+      if (!result.ok) throw new Error('stage failed');
+      expect(result.value.rows[0]?.classification).toBe('duplicate');
+    });
+
+    it('a price-less transfer carries the source cost, and a re-import of the file is a duplicate', async () => {
+      const deps = buildFakeIngestionDeps();
+      const credit = transactionRecord({
+        b3Type: 'Transferência',
+        direction: 'credit',
+        institutionName: 'Corretora Destino',
+        priceStated: false,
+        unitPrice: Money.zero(),
+        fees: Money.zero(),
+      }).record as NormalizedTransactionRecord;
+      const debitRecord = {
+        ...credit,
+        direction: 'debit',
+        institutionName: 'Corretora Origem',
+      } as const;
+
+      // The source broker's history: 100 bought at 25,00 → preço médio 25,00.
+      const sourceIds = await seedLedgerRow(
+        deps,
+        { ...debitRecord, tradeDate: BusinessDate.of('2026-01-02') },
+        () => 'seeded-buy',
+        {
+          type: 'buy',
+          status: 'active',
+          unitPrice: Money.fromString('25'),
+          fees: Money.zero(),
+          tradeDate: BusinessDate.of('2026-01-02'),
+        },
+      );
+      const records = [
+        { raw: {}, record: credit },
+        { raw: {}, record: debitRecord },
+      ];
+
+      const batchId = await seedPendingBatch(deps);
+      const first = await stageBatch(deps, userId, {
+        batchId,
+        extract: { extractType: 'b3_movimentacao', records },
+      });
+      if (!first.ok) throw new Error('stage failed');
+      const [transferIn, transferOut] = first.value.rows;
+      expect(transferIn).toMatchObject({ classification: 'new', ledgerType: 'transfer_in' });
+      expect(
+        transferIn?.record.kind === 'transaction' &&
+          transferIn.record.unitPrice.equals(Money.fromString('25')),
+      ).toBe(true);
+      expect(transferOut).toMatchObject({ classification: 'new', ledgerType: 'transfer_out' });
+
+      await commitBatch(deps, userId, { batchId });
+      expect(
+        deps.transactions.rows.filter(
+          (t) => t.assetId === sourceIds.assetId && t.status === 'active',
+        ),
+      ).toHaveLength(3);
+
+      const again = await seedPendingBatch(deps);
+      const second = await stageBatch(deps, userId, {
+        batchId: again,
+        extract: { extractType: 'b3_movimentacao', records },
+      });
+      if (!second.ok) throw new Error('stage failed');
+      expect(second.value.rows.map((row) => row.classification)).toEqual([
+        'duplicate',
+        'duplicate',
+      ]);
+    });
+
+    it('a price-less transfer with no source debit stays unclassified', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await seedPendingBatch(deps);
+      const result = await stageBatch(deps, userId, {
+        batchId,
+        extract: {
+          extractType: 'b3_movimentacao',
+          records: [
+            transactionRecord({
+              b3Type: 'Transferência',
+              direction: 'credit',
+              priceStated: false,
+              unitPrice: Money.zero(),
+            }),
+          ],
+        },
+      });
+
+      if (!result.ok) throw new Error('stage failed');
+      expect(result.value.rows[0]?.classification).toBe('unclassified');
     });
   });
 
