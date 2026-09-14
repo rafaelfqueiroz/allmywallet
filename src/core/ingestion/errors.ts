@@ -19,6 +19,8 @@ export const IngestionUseCaseErrorCode = {
   ROW_NOT_FOUND: 'IMPORT_ROW_NOT_FOUND',
   /** BR-005-20: only an `unclassified` row can be manually classified. */
   ROW_NOT_UNCLASSIFIED: 'IMPORT_ROW_NOT_UNCLASSIFIED',
+  /** #108/#110: B3 gave no price, so a type whose effect depends on price would commit at zero. */
+  ROW_PRICE_NOT_STATED: 'IMPORT_ROW_PRICE_NOT_STATED',
   /** BR-005-22 (amended, #108): a Posição batch commits only with the reference date the user confirmed. */
   REFERENCE_DATE_REQUIRED: 'IMPORT_REFERENCE_DATE_REQUIRED',
   /** BR-005-22: B3 cannot have reported a position on a day that has not happened. */

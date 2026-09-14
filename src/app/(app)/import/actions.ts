@@ -201,13 +201,21 @@ export async function classifyRowAction(formData: FormData): Promise<void> {
   });
   if (!parsed.success) return;
 
-  const result = await withIngestionDeps(userId, (deps) =>
-    classifyImportRow(deps, {
+  const result = await withIngestionAndWalletDeps(userId, async (deps, wallets) => {
+    const classified = await classifyImportRow(deps, {
       rowId: ImportRowId.of(parsed.data.rowId),
       type: parsed.data.type as TransactionType,
       ratio: parsed.data.ratio ? Quantity.fromString(parsed.data.ratio) : null,
-    }),
-  );
+    });
+    if (!classified.ok) return classified;
+
+    // SPEC-010 BR-010-05/10 (#110): the row enters calculations only now, so
+    // it arrives in allocations now — in the same transaction, as at commit.
+    const effects = await applyLedgerEffects(wallets, userId, [classified.value.transaction]);
+    if (!effects.ok) return effects;
+
+    return classified;
+  });
   if (isErr(result)) return;
 
   revalidatePath('/import');

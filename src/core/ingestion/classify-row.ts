@@ -7,6 +7,7 @@ import { editTransaction, type EditTransactionResult } from '@/core/ledger/edit-
 import type { TransactionType } from '@/core/ledger/transaction';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
+import { PRICE_BEARING_TYPES } from '@/core/ingestion/stage-batch';
 
 /**
  * SPEC-005 BR-005-20 — manually classifying an `unclassified` row brings it
@@ -25,9 +26,10 @@ import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/erro
  *
  * An `ignored` row (BR-005-19 amended, #110) has no transaction to edit —
  * commit never wrote one — so classifying it *creates* one through SPEC-006's
- * `createTransaction`, which carries the same guard and recalculation. Its
- * key is the ledger's own natural key with the next free occurrence, so it
- * cannot collide with the Negociação trade it may mirror.
+ * `createTransaction`, which carries the same guard and recalculation. It keeps
+ * the key and occurrence staging gave the row, as an unclassified row's
+ * transaction does — that key carries the raw B3 type, so it cannot collide
+ * with the Negociação trade the row may mirror.
  */
 export interface ClassifyImportRowInput {
   readonly rowId: ImportRowId;
@@ -44,7 +46,27 @@ export async function classifyImportRow(
     return err(ingestionError(IngestionUseCaseErrorCode.ROW_NOT_FOUND, { rowId: input.rowId }));
   }
 
-  if (row.classification === 'ignored' && row.record.kind === 'transaction') {
+  // #108/#110: B3 gave no price, and a zero would open a lot at no cost or pay
+  // a provento of nothing, silently. Refused until a price can be supplied.
+  if (
+    row.record.kind === 'transaction' &&
+    !row.record.priceStated &&
+    PRICE_BEARING_TYPES.has(input.type)
+  ) {
+    return err(
+      ingestionError(IngestionUseCaseErrorCode.ROW_PRICE_NOT_STATED, {
+        rowId: row.id,
+        type: input.type,
+      }),
+    );
+  }
+
+  if (
+    row.classification === 'ignored' &&
+    row.record.kind === 'transaction' &&
+    row.naturalKey !== null &&
+    row.occurrence !== null
+  ) {
     const batch = await deps.batches.findById(row.batchId);
     // Committed only, as an `unclassified` row's transaction is: before commit
     // nothing from this batch is in the ledger (BR-005-09).
@@ -61,6 +83,9 @@ export async function classifyImportRow(
       fees: row.record.fees,
       ratio: input.ratio ?? null,
       importBatchId: row.batchId,
+      // BR-005-17: the staged key, so re-importing this file reports the row
+      // as a duplicate instead of offering to classify it a second time.
+      importKey: { naturalKey: row.naturalKey, occurrence: row.occurrence },
     });
     if (!created.ok) return created;
 

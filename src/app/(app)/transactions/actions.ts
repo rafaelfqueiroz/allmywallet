@@ -330,7 +330,8 @@ async function resolveAsset(
       // #108: a class the user chose corrects whatever an import guessed.
       // #110: none chosen is a guess, so an existing asset keeps its class.
       classStated: input.assetClass !== undefined,
-      nameStated: true,
+      // #110: a blank name must not rename an existing asset to its ticker.
+      nameStated: input.assetName !== null,
     });
   }
   return input.assetId === null ? null : AssetId.of(input.assetId);

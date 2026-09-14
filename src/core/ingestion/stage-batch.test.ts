@@ -144,7 +144,8 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
           (parsed) => parsed.record.kind === 'transaction' && parsed.record.b3Type,
         ),
       );
-      expect(result.value.rows[0]?.occurrence).toBeNull();
+      // Same asset, date, quantity and price in both directions: ordinals 1, 2.
+      expect(result.value.rows.map((row) => row.occurrence)).toEqual([1, 2, 1, 1]);
       expect(result.value.counts).toMatchObject({ read: 4, new: 1, needsAttention: 0, ignored: 3 });
       expect(result.value.unmappedTypes).toEqual([]);
     });

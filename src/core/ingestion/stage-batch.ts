@@ -52,7 +52,7 @@ import type {
  * BR-007-05 allows a zero attributed value; `transfer_out`, `split` and
  * `grupamento` never read the price.
  */
-const PRICE_BEARING_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
+export const PRICE_BEARING_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'buy',
   'sell',
   'subscription',
@@ -193,10 +193,9 @@ async function stageTransactionRows(
 
   const resolved: Resolved[] = [];
   // Keyed by how many planned rows precede it, so file order survives below.
-  const ignored = new Map<
-    number,
-    Pick<Resolved, 'raw' | 'record' | 'assetId' | 'institutionId' | 'naturalKey'>[]
-  >();
+  type IgnoredRow = Pick<Resolved, 'raw' | 'record' | 'assetId' | 'institutionId' | 'naturalKey'>;
+  const ignored = new Map<number, IgnoredRow[]>();
+  const ignoredInFileOrder: IgnoredRow[] = [];
   for (const parsed of records) {
     if (parsed.record.kind !== 'transaction') continue;
     const record = parsed.record;
@@ -214,12 +213,12 @@ async function stageTransactionRows(
         ? null
         : await deps.institutions.resolve(record.institutionName);
 
-    // BR-005-19 (amended, #110): a mirror of another extract's record takes no
-    // occurrence slot, so it can never turn a real row into a duplicate.
+    // BR-005-19 (amended, #110): a mirror of another extract's record. Its key
+    // carries the raw B3 type, as an unclassified row's does, so it can never
+    // share an occurrence count with a real row — only with its own earlier
+    // import, once the user has classified that one by hand (BR-005-17).
     if (isIgnoredMovement(record.b3Type)) {
-      const before = ignored.get(resolved.length) ?? [];
-      ignored.set(resolved.length, before);
-      before.push({
+      const row: IgnoredRow = {
         raw: parsed.raw,
         record,
         assetId,
@@ -235,7 +234,9 @@ async function stageTransactionRows(
           },
           record.b3Type,
         ),
-      });
+      };
+      ignored.set(resolved.length, [...(ignored.get(resolved.length) ?? []), row]);
+      ignoredInFileOrder.push(row);
       continue;
     }
 
@@ -272,19 +273,31 @@ async function stageTransactionRows(
   }
 
   // BR-005-15/16/17: one grouped occurrence query for the whole batch.
-  const uniqueKeys = [...new Set(resolved.map((row) => row.naturalKey))];
+  const uniqueKeys = [
+    ...new Set([...resolved, ...ignoredInFileOrder].map((row) => row.naturalKey)),
+  ];
   const existingCounts = await deps.transactions.occurrenceCounts(uniqueKeys);
   const planned = planOccurrences(resolved, existingCounts);
+  const plannedIgnored = planOccurrences(ignoredInFileOrder, existingCounts);
 
   const staged: ImportRow[] = [];
+  let ignoredCursor = 0;
   const pushIgnored = (index: number) => {
-    for (const row of ignored.get(index) ?? []) {
+    for (let n = ignored.get(index)?.length ?? 0; n > 0; n -= 1) {
+      const row = plannedIgnored[ignoredCursor];
+      ignoredCursor += 1;
+      if (row === undefined) return;
       staged.push({
         id: ImportRowId.generate(),
         batchId,
-        ...row,
-        classification: 'ignored',
-        occurrence: null,
+        raw: row.raw,
+        record: row.record,
+        assetId: row.assetId,
+        institutionId: row.institutionId,
+        // A duplicate here is a mirror the user already classified by hand.
+        classification: row.isDuplicate ? 'duplicate' : 'ignored',
+        naturalKey: row.naturalKey,
+        occurrence: row.occurrence,
         ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE,
         transactionId: null,
       });

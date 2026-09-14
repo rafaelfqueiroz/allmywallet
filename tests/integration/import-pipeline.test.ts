@@ -664,6 +664,12 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       'SELECT count(*)::int AS n FROM transactions',
     );
     expect(Number(txCount[0]?.n)).toBe(1);
+    // Reported as already done, so there is nothing to classify a second time.
+    const { rows: reimported } = await migratorPool.query(
+      'SELECT classification FROM import_rows WHERE batch_id = $1',
+      [second],
+    );
+    expect(reimported).toEqual([{ classification: 'duplicate' }]);
   });
 
   it('BR-005-16/AC: two genuine identical same-day trades both import; re-importing the same file adds neither again', async () => {

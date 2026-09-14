@@ -41,6 +41,12 @@ export interface CreateTransactionInput {
   readonly ratio?: Quantity | null | undefined;
   /** BR-006-02: provenance. Null means manual entry. */
   readonly importBatchId?: ImportBatchId | null | undefined;
+  /**
+   * SPEC-005 BR-005-17 (#110) — the key and occurrence staging gave an import
+   * row, kept so that re-importing the same file finds this transaction and
+   * reports the row as a duplicate. Omitted for manual entry.
+   */
+  readonly importKey?: { readonly naturalKey: string; readonly occurrence: number } | undefined;
 }
 
 export interface CreateTransactionResult {
@@ -69,14 +75,16 @@ export async function createTransaction(
   );
   if (!validation.ok) return validation;
 
-  const naturalKey = naturalKeyFor({
-    assetId: input.assetId,
-    institutionId: input.institutionId,
-    type: input.type,
-    tradeDate: input.tradeDate,
-    quantity: input.quantity,
-    unitPrice: input.unitPrice,
-  });
+  const naturalKey =
+    input.importKey?.naturalKey ??
+    naturalKeyFor({
+      assetId: input.assetId,
+      institutionId: input.institutionId,
+      type: input.type,
+      tradeDate: input.tradeDate,
+      quantity: input.quantity,
+      unitPrice: input.unitPrice,
+    });
 
   const now = deps.clock.now();
   const candidate: Transaction = {
@@ -95,7 +103,7 @@ export async function createTransaction(
     naturalKey,
     // BR-006-04 / TS-21: two genuinely identical same-day trades are real, so
     // uniqueness is on `(natural_key, occurrence)` and the second one gets 2.
-    occurrence: await deps.transactions.nextOccurrence(naturalKey),
+    occurrence: input.importKey?.occurrence ?? (await deps.transactions.nextOccurrence(naturalKey)),
     importBatchId: input.importBatchId ?? null,
     isManual: (input.importBatchId ?? null) === null,
     isUserModified: false,
