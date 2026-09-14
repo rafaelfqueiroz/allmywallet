@@ -167,3 +167,76 @@ export function aggregateStatus(
   if (components.some((c) => c.status === 'degraded')) return 'degraded';
   return 'ok';
 }
+
+export interface BackupHealth extends ComponentHealth {
+  readonly lastSuccessfulBackupAt: string | null;
+}
+
+/**
+ * SPEC-021 BR-021-20: the newest `backup_runs` row decides. A failure reports
+ * `degraded` — never `down` — for a reason specific to the personal instance:
+ * `scripts/personal/start.sh` rolls back to the last-known-good image when
+ * health answers 503, and a failed *backup* says nothing about whether the new
+ * image serves. Only `down` pulls the endpoint to 503 (`aggregateStatus`).
+ *
+ * No rows is `unknown`: development and any hosted deployment never run the
+ * personal backup script, and "not applicable here" is not a fault.
+ */
+export async function checkBackup(pool: Pool): Promise<BackupHealth> {
+  try {
+    const { rows } = await withTimeout(
+      pool.query<{ status: string; detail: string | null; last_success: Date | null }>(
+        `SELECT latest.status, latest.detail,
+                (SELECT max(finished_at) FROM backup_runs WHERE status = 'succeeded') AS last_success
+           FROM (SELECT status, detail FROM backup_runs ORDER BY finished_at DESC LIMIT 1) AS latest`,
+      ),
+      PROBE_TIMEOUT_MS,
+    );
+    const row = rows[0];
+    if (!row) {
+      return { status: 'unknown', detail: 'no backup recorded', lastSuccessfulBackupAt: null };
+    }
+    const lastSuccessfulBackupAt = row.last_success ? row.last_success.toISOString() : null;
+    if (row.status === 'failed') {
+      return {
+        status: 'degraded',
+        detail: `last backup failed: ${row.detail ?? 'no reason recorded'}`,
+        lastSuccessfulBackupAt,
+      };
+    }
+    return { status: 'ok', lastSuccessfulBackupAt };
+  } catch (error) {
+    return {
+      status: 'unknown',
+      detail: error instanceof Error ? error.message : 'backup check failed',
+      lastSuccessfulBackupAt: null,
+    };
+  }
+}
+
+export interface FailedBackup {
+  readonly failedAt: Date;
+  readonly reason: string | null;
+  readonly lastSuccessAt: Date | null;
+}
+
+/**
+ * SPEC-021 BR-021-20 — the in-app notice's read: the newest run, when it
+ * failed. Beside `checkBackup` because both read the same state, and outside
+ * `src/app/` so it is testable without the session module.
+ */
+export async function readFailedBackup(pool: Pool): Promise<FailedBackup | null> {
+  const { rows } = await pool.query<{
+    status: string;
+    detail: string | null;
+    finished_at: Date;
+    last_success: Date | null;
+  }>(
+    `SELECT latest.status, latest.detail, latest.finished_at,
+            (SELECT max(finished_at) FROM backup_runs WHERE status = 'succeeded') AS last_success
+       FROM (SELECT status, detail, finished_at FROM backup_runs ORDER BY finished_at DESC LIMIT 1) AS latest`,
+  );
+  const row = rows[0];
+  if (!row || row.status !== 'failed') return null;
+  return { failedAt: row.finished_at, reason: row.detail, lastSuccessAt: row.last_success };
+}

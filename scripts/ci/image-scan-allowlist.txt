@@ -1,0 +1,27 @@
+# Reviewed false positives for scripts/ci/scan-image.sh — path regexes, matched
+# against "<kind>: ./<layer>/<path>". Each needs a reason; never allowlist a
+# directory wholesale.
+
+# Alpine's public CA certificate bundles (base image). Public certificates, no key.
+^name: \./[0-9]+/etc/ssl(1\.1)?/cert\.pem$
+# npm's own default config, shipped inside the node:22-alpine base image's global npm. No token.
+^name: \./[0-9]+/usr/local/lib/node_modules/npm/\.npmrc$
+# A dependency's third-party licence inventory (package, licence, origin). No data.
+^name: \./[0-9]+/app/node_modules/\.pnpm/import-in-the-middle@[^/]+/node_modules/import-in-the-middle/LICENSE-3rdparty\.csv$
+
+# --- key-shaped false positives. Each file below was read (2026-09-14): it holds
+# a PEM header as a parser check or a documentation example followed by a
+# placeholder ("..." or "XXXX"), never a key body. Allowlisted per file, with
+# the version left open, so a real key anywhere else in the same package still
+# fails the scan.
+
+# jose's PKCS#8 importer tests whether its input *starts with* the header. Code, no key.
+^key-shaped: \./[0-9]+/app/node_modules/\.pnpm/jose@[^/]+/node_modules/jose/dist/webapi/key/import\.js$
+# Next.js's bundled docs: a multi-line env var example, `-----BEGIN RSA PRIVATE KEY-----` then "...".
+^key-shaped: \./[0-9]+/app/node_modules/\.pnpm/next@[^/]+/node_modules/next/dist/docs/01-app/02-guides/environment-variables\.md$
+# dotenv's READMEs (English and Spanish): the same multi-line example, "..." body.
+^key-shaped: \./[0-9]+/app/node_modules/\.pnpm/dotenv@[^/]+/node_modules/dotenv/README(-es)?\.md$
+# npm's own config docs and definitions in the node:22-alpine base image: `key="-----BEGIN PRIVATE KEY-----XXXX..."`.
+^key-shaped: \./[0-9]+/usr/local/lib/node_modules/npm/man/man7/config\.7$
+^key-shaped: \./[0-9]+/usr/local/lib/node_modules/npm/node_modules/@npmcli/config/lib/definitions/definitions\.js$
+^key-shaped: \./[0-9]+/usr/local/lib/node_modules/npm/docs/(output/using-npm/config\.html|content/using-npm/config\.md)$

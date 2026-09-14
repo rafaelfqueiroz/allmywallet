@@ -122,6 +122,20 @@ export const REGISTRY = {
     description: 'Which trading calendar dataset the TradingCalendar port uses (FR-6.6).',
     range: "one of: 'B3'",
   },
+  'personal.catchup_max_days': {
+    key: 'personal.catchup_max_days',
+    // SPEC-021 BR-021-28: how many missed business days worker-start catch-up
+    // covers. `0` is refused rather than read as "catch-up off" — a disabled
+    // catch-up would silently leave every missed close unrecorded, neither
+    // recovered nor marked as a gap. 90 business days is roughly the longest
+    // history the free quote tier's `3mo`/`6mo` ranges return.
+    schema: z.number().int().min(1).max(90),
+    default: 30,
+    levels: ['deployment'],
+    description:
+      'SPEC-021 BR-021-28: maximum business days of missed closes backfilled when the worker starts.',
+    range: 'integer business days, 1–90',
+  },
   'import.staleness_days': {
     key: 'import.staleness_days',
     schema: z.number().int().min(1).max(365),
@@ -379,6 +393,24 @@ export const REGISTRY = {
     description:
       '/api/health reports the worker unhealthy once its heartbeat is older than this (AR-50).',
     range: 'integer seconds, 5–7200',
+  },
+  'backup.retain_count': {
+    key: 'backup.retain_count',
+    schema: z.number().int().min(1).max(365),
+    default: 14,
+    levels: ['deployment'],
+    description:
+      'Encrypted database dumps the personal instance keeps; older ones are pruned only after a new backup succeeds (SPEC-021 BR-021-19).',
+    range: 'integer, 1–365',
+  },
+  'notifications.email_provider': {
+    key: 'notifications.email_provider',
+    schema: z.enum(['log', 'resend']),
+    default: 'log',
+    levels: ['deployment'],
+    description:
+      'Transport for opportunity emails: log renders and logs without sending; resend delivers through the Resend API with RESEND_API_KEY (SPEC-021 BR-021-34).',
+    range: 'log | resend',
   },
 } as const satisfies Record<string, RegistryEntryDef>;
 

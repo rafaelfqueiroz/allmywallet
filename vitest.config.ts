@@ -47,7 +47,11 @@ export default defineConfig({
           // tests/structural: TS-32/BR-016-07a's snapshot-read check — a
           // source-code scan, not a database test, so it belongs in the fast,
           // always-blocking project rather than tests/performance/'s nightly one.
-          include: ['src/**/*.test.ts', 'tests/structural/**/*.test.ts'],
+          include: [
+            'src/**/*.test.ts',
+            'tests/structural/**/*.test.ts',
+            'tests/scripts/**/*.test.ts',
+          ],
           // Component tests are the `components` project below — they need a
           // DOM, and running them here as well would run them twice, once in
           // an environment that cannot render.

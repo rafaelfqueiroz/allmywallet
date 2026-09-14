@@ -12,6 +12,7 @@ import { buildNegociacaoXlsx } from '@/adapters/ingestion/xlsx/test-support/buil
 import { handleImportCommit, handleImportStage } from '@/worker/handlers/import';
 import { withTenant } from '@/db/tenant';
 import { REFERENCE_TRANSACTION_COUNT, generateReferenceWorkload } from '@/db/reference-workload';
+import { assertNotPersonalDatabase } from '@/db/personal-guard';
 
 /**
  * SPEC-005's performance criterion: "**An import of 10,000 rows previews in
@@ -53,6 +54,9 @@ describe('SPEC-005 — a 10.000-row import at the stated budgets (nightly, advis
         'DATABASE_URL / DATABASE_MIGRATION_URL are required — this suite measures a real database',
       );
     }
+    // SPEC-021 BR-021-08: this suite writes and truncates through these URLs directly.
+    await assertNotPersonalDatabase(migrationUrl);
+    if (appUrl !== migrationUrl) await assertNotPersonalDatabase(appUrl);
 
     pool = new Pool({ connectionString: appUrl, max: 4 });
     migratorPool = new Pool({ connectionString: migrationUrl, max: 1 });

@@ -16,6 +16,8 @@
   "scripts": {
     "build": "next build",
     "build:worker": "esbuild src/worker/index.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/worker.js",
+    "build:migrate": "esbuild src/db/migrate.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/migrate.js",
+    "build:ops": "esbuild src/ops/personal-cli.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/ops.js",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",

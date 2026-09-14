@@ -6,6 +6,8 @@ import { withTenant } from '@/db/tenant';
 import { AssetId, UserId } from '@/core/shared/ids';
 import { Money } from '@/core/shared/money';
 import { hashUserId, logger } from '@/lib/logger';
+import { env } from '@/lib/env';
+import { assertNotPersonalDatabase } from '@/db/personal-guard';
 import {
   REFERENCE_ASSET_CLASS_TO_SCHEMA,
   REFERENCE_AS_OF_DATE,
@@ -210,7 +212,15 @@ async function upsertQuotes(assetIds: ReadonlyMap<string, AssetId>): Promise<num
 // Only run when invoked directly (`pnpm db:seed:reference`), so tests can
 // import `seedReferenceWorkload` without a side-effecting script run.
 if (process.argv[1]?.includes('seed-reference')) {
-  seedReferenceWorkload()
+  // SPEC-021 BR-021-08 (AR-72): checked at the script's own entrypoint, never
+  // in `@/db/client`, which the personal web and worker connect through. The
+  // seed writes through `DATABASE_URL`; the migration URL is checked too when
+  // present, since a shell holding one usually holds the other.
+  const urls = [env().DATABASE_URL, env().DATABASE_MIGRATION_URL].filter(
+    (url): url is string => url !== undefined,
+  );
+  Promise.all(urls.map((url) => assertNotPersonalDatabase(url)))
+    .then(() => seedReferenceWorkload())
     .then(async () => {
       await closePool();
     })

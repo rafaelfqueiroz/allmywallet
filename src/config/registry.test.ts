@@ -31,8 +31,10 @@ describe('registry', () => {
     // sent email suppresses the next one for) and
     // `notifications.quiet_hours` (BR-018-27, the band inside market hours
     // that stays silent) — both are the tunables DL-018-05's accepted trade
-    // is adjusted through, which is precisely why they are not constants.
-    expect(CONFIG_KEYS).toHaveLength(27);
+    // is adjusted through, which is precisely why they are not constants;
+    // plus one SPEC-021 addition, `personal.catchup_max_days` (BR-021-28, the
+    // bound on how far worker-start catch-up reaches back).
+    expect(CONFIG_KEYS).toHaveLength(30);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {

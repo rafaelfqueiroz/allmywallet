@@ -62,6 +62,17 @@ export class UntrustedHostConfigurationError extends Error {
 
 type HostEnv = Pick<Env, 'NODE_ENV' | 'AUTH_URL' | 'AUTH_TRUST_HOST'>;
 
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function isLoopbackHttpOrigin(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' && LOOPBACK_HOSTNAMES.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
 export function assertTrustedHostConfigured(e: HostEnv): void {
   // Outside production Auth.js trusts the host on its own, so requiring
   // anything here would only make `pnpm dev` harder to start for no security
@@ -89,7 +100,13 @@ export function assertTrustedHostConfigured(e: HostEnv): void {
   // cookie are built from a clear-text origin. Caddy terminates TLS in front
   // of the app (AR-56), so this can only be a typo — but it is a typo that
   // downgrades the whole sign-in flow, and nothing else would notice it.
-  if (!e.AUTH_URL.startsWith('https://')) {
+  //
+  // SPEC-021 BR-021-10/BR-021-11: the one exception is the personal instance,
+  // which publishes only on 127.0.0.1 with no Caddy and nothing to terminate.
+  // A loopback origin never crosses a network, so there is no clear-text hop
+  // to downgrade — and a pinned loopback origin still pins, unlike trusting
+  // the header.
+  if (!e.AUTH_URL.startsWith('https://') && !isLoopbackHttpOrigin(e.AUTH_URL)) {
     throw new UntrustedHostConfigurationError(
       `AUTH_URL must be https in production (#42); got "${e.AUTH_URL}". Callback URLs and the ` +
         'session cookie are built from this origin, and Caddy terminates TLS in front of the ' +

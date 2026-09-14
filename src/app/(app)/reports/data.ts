@@ -31,6 +31,7 @@ import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repos
 import { DrizzleFixedIncomeContractRepository } from '@/adapters/db/fixed-income-contract-repository';
 import { DrizzleIndexSeriesRepository } from '@/adapters/db/index-series-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
+import { listCloseGapDatesForTenant } from '@/adapters/db/close-gap-repository';
 import type { AssetClass } from '@/core/quotes/ports';
 import { db } from '@/db/client';
 import { assets, institutions } from '@/db/schema/assets';
@@ -101,6 +102,18 @@ export class DrizzleReportDataPort implements ReportDataPort {
     private readonly userId: UserId,
     private readonly clock: Clock = new SystemClock(),
   ) {}
+
+  /**
+   * SPEC-021 BR-021-31 — the dates in `[from, to]` whose market close for one
+   * of this tenant's assets could not be recovered, for the Patrimônio chart
+   * to mark. Reads `price_quote_gaps` (shared) against `positions` (a derived
+   * cache) — never the ledger, per BR-011-13 above. Not part of
+   * `ReportDataPort`: only the chart needs it, and no report figure depends
+   * on it.
+   */
+  async listCloseGapDates(from: BusinessDate, to: BusinessDate): Promise<readonly BusinessDate[]> {
+    return listCloseGapDatesForTenant(this.tx, from, to);
+  }
 
   async listValuedPositions(asOf: BusinessDate): Promise<readonly ReportPosition[]> {
     const rows = await this.tx

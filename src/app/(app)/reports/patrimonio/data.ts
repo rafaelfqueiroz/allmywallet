@@ -26,6 +26,11 @@ export interface PatrimonioData {
   readonly query: Result<ReportQueryResult, DomainError<string>>;
   /** `null` whenever the query failed or the range holds nothing. */
   readonly report: PortfolioValueReport | null;
+  /**
+   * SPEC-021 BR-021-31 — dates in the range whose close for a held asset could
+   * not be recovered. Read in the same tenant transaction as everything else.
+   */
+  readonly closeGapDates: ReadonlySet<string>;
 }
 
 export async function loadPatrimonio(
@@ -42,19 +47,21 @@ export async function loadPatrimonio(
       await port.earliestSnapshotDate(),
     );
 
-    if (!query.ok) return { wallets, query, report: null };
+    if (!query.ok) return { wallets, query, report: null, closeGapDates: new Set<string>() };
 
-    // Both extra reads happen only once the range is known — `findSnapshotBefore`
-    // needs its start date, and neither is worth a round trip if the query
+    // The extra reads happen only once the range is known — `findSnapshotBefore`
+    // needs its start date, and none is worth a round trip if the query
     // already failed validation.
-    const [opening, lastImportAt] = await Promise.all([
+    const [opening, lastImportAt, gapDates] = await Promise.all([
       port.findSnapshotBefore(query.value.range.from),
       port.lastImportAt(),
+      port.listCloseGapDates(query.value.range.from, query.value.range.to),
     ]);
 
     return {
       wallets,
       query,
+      closeGapDates: new Set<string>(gapDates),
       report: buildPortfolioValueReport({
         query: query.value,
         opening,

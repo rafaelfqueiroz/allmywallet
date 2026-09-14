@@ -11,6 +11,7 @@ import { raiseAlert } from '@/lib/alerts';
 import { describeDeadLetterFailure, isQueueBacklogWarning } from '@/worker/alerting';
 import { DEAD_LETTER_QUEUE, deadLetterCreateOptions, queueCreateOptions } from '@/worker/queues';
 import { REGISTRATIONS, type JobHandler, type RegisteredWorker } from '@/worker/registrations';
+import { runCatchUp } from '@/worker/catch-up';
 import { WORKER_HEARTBEAT_ID } from '@/db/schema/observability';
 
 /**
@@ -123,6 +124,16 @@ export async function startWorker(): Promise<PgBoss> {
       raiseAlert('job_failed', describeDeadLetterFailure(job, original));
     }
   });
+
+  // SPEC-021 BR-021-28: catch-up runs before any cron below is scheduled, so
+  // the first scheduled job of this start already rests on recovered history.
+  // A failure is logged, never fatal: a worker that refuses to start because a
+  // backfill failed would miss *today's* closes too, which is strictly worse.
+  try {
+    await runCatchUp();
+  } catch (error) {
+    logger.error({ queue: 'catch-up', err: error }, 'catch-up failed; starting schedules anyway');
+  }
 
   for (const registration of REGISTRATIONS) {
     await boss.createQueue(

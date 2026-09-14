@@ -10,6 +10,7 @@ import {
   handleAuditRetentionSweep,
 } from '@/worker/handlers/account-deletion';
 import { handleOpportunityEvaluate } from '@/worker/handlers/opportunity';
+import { CLOSE_CAPTURE_CRON } from '@/core/quotes/catch-up-days';
 
 /**
  * Split out of `src/worker/index.ts` so this list — pure data plus handler
@@ -52,8 +53,10 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
   {
     queue: QUEUE.QUOTES_CLOSE_CAPTURE,
     handler: handleQuotesCloseCapture,
-    // 17:05 — shortly after the regular B3 session's 17:00 close.
-    cron: '5 17 * * 1-5',
+    // 17:05 — shortly after the regular B3 session's 17:00 close. Shared with
+    // SPEC-021 catch-up's window (BR-021-28), so the two cannot disagree about
+    // when today's close stops being "still to come" and becomes "missed".
+    cron: CLOSE_CAPTURE_CRON,
   },
   {
     queue: QUEUE.TESOURO_SYNC,

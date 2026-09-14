@@ -23,9 +23,17 @@ import {
 
 export interface ValueChartPoint {
   readonly date: string;
-  /** Plotting coordinate only — see the file header. */
-  readonly value: number;
+  /**
+   * Plotting coordinate only — see the file header.
+   *
+   * `null` on a gap day (SPEC-021 BR-021-31): a market close the worker could
+   * not recover. Recharts leaves a break in the line for a `null` rather than
+   * joining its neighbours (`connectNulls` stays off), so the day is *shown*
+   * missing instead of drawn as an interpolated or carried-forward value.
+   */
+  readonly value: number | null;
   readonly estimated: boolean;
+  readonly gap?: boolean;
 }
 
 export function ValueChart({
@@ -59,6 +67,8 @@ export function ValueChart({
           // A dot per point on a five-year daily series is noise; the shape is
           // what this chart is for, and the exact figures live in the table.
           dot={false}
+          // SPEC-021 BR-021-31: a gap is a break in the line, never a bridge.
+          connectNulls={false}
           isAnimationActive={false}
         />
       </AreaChart>

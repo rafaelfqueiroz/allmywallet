@@ -145,6 +145,9 @@ describe('SPEC-008 tesouro.sync / bcb.sync handlers (integration)', () => {
           quotedAt: new Date(),
           source: 'brapi_free',
         }),
+      // SPEC-021 BR-021-29 extended the port; `bcb.sync` never asks for history.
+      fetchHistoricalCloses: async () =>
+        err(domainError('QUOTE_PROVIDER_UNAVAILABLE', { reason: 'not used by bcb.sync' })),
     };
 
     await handleBcbSync({

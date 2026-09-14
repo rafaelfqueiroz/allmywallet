@@ -1,7 +1,13 @@
 {
   "app": {
     "name": "AllMyWallet",
-    "tagline": "Seus investimentos, em um só lugar"
+    "tagline": "Seus investimentos, em um só lugar",
+    "backupNotice": {
+      "title": "O último backup falhou",
+      "withLastSuccess": "O backup de {failedAt} não foi concluído: {reason}. O último backup bem-sucedido foi em {lastSuccessAt}.",
+      "withoutSuccess": "O backup de {failedAt} não foi concluído: {reason}. Ainda não existe nenhum backup bem-sucedido.",
+      "action": "Corrija a causa e rode scripts/personal/backup.sh — este aviso some quando um backup for concluído."
+    }
   },
   "marketing": {
     "meta": {
@@ -888,6 +894,9 @@
       "badge": "Parte do período usa valores estimados",
       "hint": "Inclui renda fixa acruada, não observada no mercado"
     },
+    "gap": {
+      "badge": "Dias sem cotação de fechamento aparecem como falhas no gráfico"
+    },
     "decomposition": {
       "title": "De onde veio o crescimento",
       "description": "Dinheiro que cresceu porque você aportou não é dinheiro que cresceu porque rendeu.",
@@ -917,7 +926,8 @@
       "value": "Patrimônio",
       "basis": "Origem do valor",
       "observed": "Preço observado",
-      "estimated": "Estimado"
+      "estimated": "Estimado",
+      "gap": "Sem cotação de fechamento — valor do último fechamento disponível"
     }
   },
   "composicao": {

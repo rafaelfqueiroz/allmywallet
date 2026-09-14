@@ -1,9 +1,14 @@
-import { and, asc, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, max } from 'drizzle-orm';
 import type { Database } from '@/db/client';
-import { latestQuotes, priceQuotes } from '@/db/schema/market';
+import { latestQuotes, priceQuoteGaps, priceQuotes } from '@/db/schema/market';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
-import type { LatestQuote, PriceQuote, QuoteRepositoryPort } from '@/core/quotes/ports';
+import type {
+  LatestCloseDatePort,
+  LatestQuote,
+  PriceQuote,
+  QuoteRepositoryPort,
+} from '@/core/quotes/ports';
 import type { PriceHistoryPort } from '@/core/valuation/ports';
 
 /**
@@ -18,8 +23,26 @@ import type { PriceHistoryPort } from '@/core/valuation/ports';
  * what "the close" means; the ports stay separate so `core/valuation` depends
  * on the two methods it uses rather than on the write surface it must not.
  */
-export class DrizzleQuoteRepository implements QuoteRepositoryPort, PriceHistoryPort {
+export class DrizzleQuoteRepository
+  implements QuoteRepositoryPort, PriceHistoryPort, LatestCloseDatePort
+{
   constructor(private readonly db: Database) {}
+
+  /**
+   * SPEC-021 BR-021-28 — "the last recorded close capture", measured over the
+   * assets the caller polls. Restricted to those assets rather than the whole
+   * table because `tesouro.sync` writes Tesouro prices here too, on its own
+   * schedule: a Tesouro row from this morning must not make yesterday's
+   * missed equity close look captured.
+   */
+  async latestCloseDateAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null> {
+    if (assetIds.length === 0) return null;
+    const [row] = await this.db
+      .select({ latest: max(priceQuotes.date) })
+      .from(priceQuotes)
+      .where(inArray(priceQuotes.assetId, [...assetIds]));
+    return row?.latest ? BusinessDate.of(row.latest) : null;
+  }
 
   async getLatestQuote(assetId: AssetId): Promise<LatestQuote | null> {
     const [row] = await this.db
@@ -100,20 +123,34 @@ export class DrizzleQuoteRepository implements QuoteRepositoryPort, PriceHistory
     return rows.map(toPriceQuote);
   }
 
-  /** BR-008-09: the official close supersedes the day's intraday quote in history — never a different day's row (the PK is `(asset_id, date)`). */
+  /**
+   * BR-008-09: the official close supersedes the day's intraday quote in
+   * history — never a different day's row (the PK is `(asset_id, date)`).
+   *
+   * SPEC-021 BR-021-31: a close that exists is not a gap. Any gap row for the
+   * same `(asset_id, date)` is deleted in the **same transaction**, whichever
+   * job wrote the close — `quotes.close-capture`, catch-up or `tesouro.sync` —
+   * so no path can leave a chart showing a break on a day that has a real
+   * close, and none has to remember to clear it.
+   */
   async upsertClosePrice(quote: PriceQuote): Promise<void> {
-    await this.db
-      .insert(priceQuotes)
-      .values({
-        assetId: quote.assetId,
-        date: quote.date,
-        close: quote.close,
-        source: quote.source,
-      })
-      .onConflictDoUpdate({
-        target: [priceQuotes.assetId, priceQuotes.date],
-        set: { close: quote.close, source: quote.source, updatedAt: new Date() },
-      });
+    await this.db.transaction(async (tx) => {
+      await tx
+        .insert(priceQuotes)
+        .values({
+          assetId: quote.assetId,
+          date: quote.date,
+          close: quote.close,
+          source: quote.source,
+        })
+        .onConflictDoUpdate({
+          target: [priceQuotes.assetId, priceQuotes.date],
+          set: { close: quote.close, source: quote.source, updatedAt: new Date() },
+        });
+      await tx
+        .delete(priceQuoteGaps)
+        .where(and(eq(priceQuoteGaps.assetId, quote.assetId), eq(priceQuoteGaps.date, quote.date)));
+    });
   }
 }
 
