@@ -11,6 +11,7 @@ import { db } from '@/db/client';
 import { resolveConfig } from '@/config/resolve';
 import { AssetId, ImportBatchId, ImportRowId, InstitutionId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
+import { BusinessDate, SystemClock } from '@/core/shared/clock';
 import { isErr } from '@/core/shared/result';
 import { TRANSACTION_TYPES, type TransactionType } from '@/core/ledger/transaction';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
@@ -134,13 +135,41 @@ function uploadFailure(
 
 const BatchIdSchema = z.object({ batchId: z.string() });
 
+/**
+ * SPEC-005 BR-005-22 (amended, #108) — `asOf` is the Posição reference date
+ * the user confirms on the preview; the real export carries none. Absent for
+ * Movimentação and Negociação. `commitBatch` is what requires it for a Posição
+ * batch; the future-date check here only spares a job that would fail.
+ */
+const CommitSchema = z.object({
+  batchId: z.string(),
+  asOf: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
 export async function commitBatchAction(formData: FormData): Promise<void> {
   const userId = await requireUserId();
-  const parsed = BatchIdSchema.safeParse({ batchId: formData.get('batchId') });
+  const parsed = CommitSchema.safeParse({
+    batchId: formData.get('batchId'),
+    asOf: formData.get('asOf') || undefined,
+  });
   if (!parsed.success) return;
 
+  const { asOf } = parsed.data;
+  if (asOf !== undefined) {
+    // `2026-02-31` matches the pattern; `BusinessDate.of` is what rejects it,
+    // here rather than as a TypeError the worker would retry to no end.
+    try {
+      if (BusinessDate.of(asOf) > new SystemClock().today()) return;
+    } catch {
+      return;
+    }
+  }
+
   const batchId = ImportBatchId.of(parsed.data.batchId);
-  await enqueue(QUEUE.IMPORT_COMMIT, { batchId, userId });
+  await enqueue(QUEUE.IMPORT_COMMIT, { batchId, userId, ...(asOf === undefined ? {} : { asOf }) });
   revalidatePath(`/import/${batchId}`);
 }
 

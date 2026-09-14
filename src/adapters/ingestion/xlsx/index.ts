@@ -58,7 +58,7 @@ export class XlsxIngestionPort implements IngestionPort {
      */
     const sheets = workbook.worksheets
       .filter((sheet) => sheet.rowCount > 0)
-      .map((sheet) => sheetToRows(sheet));
+      .map((sheet) => ({ name: sheet.name, rows: sheetToRows(sheet) }));
 
     if (sheets.length === 0) {
       return err(
@@ -68,9 +68,9 @@ export class XlsxIngestionPort implements IngestionPort {
       );
     }
 
-    const recognized = sheets.flatMap((rows) => {
+    const recognized = sheets.flatMap(({ name, rows }) => {
       const detected = detectExtractType(rows);
-      return detected.ok ? [{ rows, structure: detected.value }] : [];
+      return detected.ok ? [{ name, rows, structure: detected.value }] : [];
     });
 
     const first = recognized[0];
@@ -79,7 +79,7 @@ export class XlsxIngestionPort implements IngestionPort {
       // one: for the single-sheet case — still the common one — this is
       // exactly the error the caller used to get, naming the headers it wanted.
       const firstSheet = sheets[0];
-      const detected = firstSheet === undefined ? undefined : detectExtractType(firstSheet);
+      const detected = firstSheet === undefined ? undefined : detectExtractType(firstSheet.rows);
       if (detected !== undefined && !detected.ok) return detected;
       return err(domainError(IngestionErrorCode.UNRECOGNIZED_STRUCTURE, {}));
     }
@@ -115,7 +115,8 @@ export class XlsxIngestionPort implements IngestionPort {
           ? parseMovimentacao(sheet.rows, sheet.structure)
           : sheet.structure.extractType === 'b3_negociacao'
             ? parseNegociacao(sheet.rows, sheet.structure)
-            : parsePosicao(sheet.rows, sheet.structure),
+            : // #108: Posição's asset class is stated only by its tab name.
+              parsePosicao(sheet.rows, sheet.structure, sheet.name),
       );
 
       return ok({ extractType: structure.extractType, records });

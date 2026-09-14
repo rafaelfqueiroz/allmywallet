@@ -1,7 +1,8 @@
-import type { BusinessDate } from '@/core/shared/clock';
+import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
+import type { Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { validateTransactionDraft } from '@/core/ledger/validate';
@@ -36,6 +37,13 @@ import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/r
  */
 export interface CommitBatchInput {
   readonly batchId: ImportBatchId;
+  /**
+   * SPEC-005 BR-005-22 (amended, #108) — the date B3's snapshot describes,
+   * **confirmed by the user** on the preview. The real Posição export states it
+   * nowhere inside the file, and DL-005-03 rules out the filename. Required for
+   * a Posição batch, ignored for the other two.
+   */
+  readonly asOf?: BusinessDate;
 }
 
 export interface CommitBatchOutcome {
@@ -102,6 +110,23 @@ export async function commitBatch(
   const unclassifiedRows = rows.filter((row) => row.classification === 'unclassified');
   const newRows = rows.filter((row) => row.classification === 'new');
   const positionRows = rows.filter((row) => row.classification === 'position');
+
+  // BR-005-22 (amended, #108): checked before any write, so a Posição commit
+  // missing its reference date changes nothing rather than half-applying.
+  let asOf: BusinessDate | null = null;
+  if (batch.source === 'b3_posicao' && positionRows.length > 0) {
+    if (input.asOf === undefined) {
+      return err(
+        ingestionError(IngestionUseCaseErrorCode.REFERENCE_DATE_REQUIRED, { batchId: batch.id }),
+      );
+    }
+    if (BusinessDate.isBefore(today, input.asOf)) {
+      return err(
+        ingestionError(IngestionUseCaseErrorCode.REFERENCE_DATE_IN_FUTURE, { batchId: batch.id }),
+      );
+    }
+    asOf = input.asOf;
+  }
 
   const toInsert: Transaction[] = [];
   const positionUpserts: PositionSnapshot[] = [];
@@ -198,9 +223,7 @@ export async function commitBatch(
   // BR-005-22: a Posição batch triggers reconciliation against what was just
   // committed (and everything committed before it).
   const reconciliation =
-    batch.source === 'b3_posicao' && positionRows.length > 0
-      ? await buildReconciliation(deps, positionRows, unclassifiedRows)
-      : null;
+    asOf !== null ? await buildReconciliation(deps, asOf, positionRows, unclassifiedRows) : null;
 
   const committedBatch: ImportBatch = {
     ...batch,
@@ -279,6 +302,7 @@ function buildCandidate(
 
 async function buildReconciliation(
   deps: IngestionDependencies,
+  asOf: BusinessDate,
   positionRows: readonly ImportRow[],
   unclassifiedRows: readonly ImportRow[],
 ): Promise<ImportBatch['reconciliation']> {
@@ -286,13 +310,26 @@ async function buildReconciliation(
     unclassifiedRows.map((row) => `${row.assetId}|${row.institutionId ?? ''}`),
   );
 
-  const inputs: ReconciliationInput[] = [];
-  let asOf: BusinessDate | null = null;
-
+  // #108: the real Posição carries a `Conta` column, so one asset at one
+  // institution can arrive as several rows, one per account. B3's figure for
+  // the position is their sum. Compared row by row, every account would read
+  // as a discrepancy against the whole ledger.
+  const snapshots = new Map<string, { row: ImportRow; assetCode: string; b3Quantity: Quantity }>();
   for (const row of positionRows) {
     if (row.record.kind !== 'position') continue;
-    asOf = row.record.asOf;
+    const key = `${row.assetId}|${row.institutionId ?? ''}`;
+    const seen = snapshots.get(key);
+    snapshots.set(key, {
+      row: seen?.row ?? row,
+      assetCode: seen?.assetCode ?? row.record.assetCode,
+      b3Quantity:
+        seen === undefined ? row.record.quantity : seen.b3Quantity.plus(row.record.quantity),
+    });
+  }
 
+  const inputs: ReconciliationInput[] = [];
+
+  for (const { row, assetCode, b3Quantity } of snapshots.values()) {
     const existing = await deps.transactions.listForPosition(row.assetId, row.institutionId);
     const active = existing.filter((t) => t.status === 'active');
     const replayed = replayPosition(existing);
@@ -300,7 +337,7 @@ async function buildReconciliation(
     // (commit already refused to write anything unreplayable) — treated as
     // "nothing computed yet" rather than thrown, so one bad position never
     // blocks the reconciliation report for every other asset.
-    const computedQuantity = replayed.ok ? replayed.value.quantity : row.record.quantity;
+    const computedQuantity = replayed.ok ? replayed.value.quantity : b3Quantity;
     const firstComputedTradeDate = active.reduce<BusinessDate | null>(
       (min, t) => (min === null || t.tradeDate < min ? t.tradeDate : min),
       null,
@@ -308,10 +345,10 @@ async function buildReconciliation(
 
     inputs.push({
       assetId: row.assetId,
-      assetCode: row.record.assetCode,
+      assetCode,
       institutionId: row.institutionId,
       computedQuantity,
-      b3Quantity: row.record.quantity,
+      b3Quantity,
       firstComputedTradeDate,
       hasUnclassifiedRowsAffectingAsset: unclassifiedAssetKeys.has(
         `${row.assetId}|${row.institutionId ?? ''}`,
@@ -319,5 +356,5 @@ async function buildReconciliation(
     });
   }
 
-  return reconcilePositions(asOf ?? deps.clock.today(), inputs);
+  return reconcilePositions(asOf, inputs);
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { detectExtractType, normalizeHeader } from '@/adapters/ingestion/xlsx/detect';
+import {
+  POSICAO_TAB_HEADERS,
+  type PosicaoTab,
+} from '@/adapters/ingestion/xlsx/test-support/builder';
 
 const MOVIMENTACAO_HEADER = [
   'Entrada/Saída',
@@ -20,7 +24,7 @@ const NEGOCIACAO_HEADER = [
   'Preço',
   'Valor',
 ];
-const POSICAO_HEADER = ['Produto', 'Instituição', 'Categoria', 'Quantidade', 'Data de Referência'];
+const POSICAO_HEADER = [...POSICAO_TAB_HEADERS.Acoes];
 
 describe('SPEC-005 BR-005-03/04 — detectExtractType', () => {
   it('identifies Movimentação by structure alone (filename plays no part — DL-005-03)', () => {
@@ -44,6 +48,19 @@ describe('SPEC-005 BR-005-03/04 — detectExtractType', () => {
     if (!result.ok) return;
     expect(result.value.extractType).toBe('b3_posicao');
   });
+
+  // #108: the schema was written against an invented layout, and no real
+  // Posição tab matched it. Every real tab has its header on row 1.
+  it.each(Object.keys(POSICAO_TAB_HEADERS) as PosicaoTab[])(
+    'identifies the real Posição tab %s',
+    (tab) => {
+      const result = detectExtractType([[...POSICAO_TAB_HEADERS[tab]]]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.extractType).toBe('b3_posicao');
+      expect(result.value.headerRowIndex).toBe(0);
+    },
+  );
 
   it('BR-005-04: tolerates leading metadata rows before the real header', () => {
     const rows = [

@@ -415,6 +415,10 @@
     "uploadedAt": "Enviado em {date}",
     "commit": "Confirmar importação",
     "cancel": "Cancelar importação",
+    "asOf": {
+      "label": "Data da posição",
+      "hint": "A B3 não informa essa data no arquivo. Use o dia em que você exportou a posição — a reconciliação compara com ela."
+    },
     "countRead": "Linhas lidas",
     "countNew": "Novas",
     "countDuplicates": "Duplicadas",

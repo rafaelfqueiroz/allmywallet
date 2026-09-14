@@ -99,8 +99,8 @@ export interface NormalizedPositionRecord {
   readonly assetClass: AssetClass;
   readonly institutionName: string | null;
   readonly quantity: Quantity;
-  /** BR-005-22: the snapshot date every row of a Posição extract shares — the day reconciliation compares against. */
-  readonly asOf: BusinessDate;
+  // No `asOf`: B3's real Posição carries no reference date on any tab (#108).
+  // BR-005-22's date is confirmed by the user at commit (`CommitBatchInput`).
   /** BR-005-06: present only for the fixed-income tab's rows. */
   readonly fixedIncome: NormalizedFixedIncomeDetails | null;
 }

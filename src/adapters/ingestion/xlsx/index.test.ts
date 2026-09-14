@@ -3,7 +3,6 @@ import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
 import {
   MOVIMENTACAO_HEADERS,
   NEGOCIACAO_HEADERS,
-  POSICAO_HEADERS,
   SYNTHETIC_CPF,
   buildMovimentacaoXlsx,
   buildMultiSheetXlsx,
@@ -11,9 +10,8 @@ import {
   buildPosicaoXlsx,
   buildXlsx,
   negociacaoRow,
-  posicaoRow,
+  posicaoSheet,
   type BuildSheetOptions,
-  type PosicaoRowInput,
 } from '@/adapters/ingestion/xlsx/test-support/builder';
 import { IngestionErrorCode } from '@/core/ingestion/ports';
 import { isValidCpf } from '@/adapters/ingestion/xlsx/strip-cpf';
@@ -107,17 +105,17 @@ describe('SPEC-005 BR-005-01..08 — XlsxIngestionPort', () => {
   });
 
   it('BR-005-03/06: identifies Posição and carries fixed-income details through', async () => {
-    const bytes = await buildPosicaoXlsx([
-      {
-        produto: 'CDB Banco Teste',
-        categoria: 'CDB',
-        quantidade: '1',
-        dataReferencia: '01/03/2026',
-        indexador: 'CDI',
-        taxaContratada: '110',
-        dataEmissao: '01/01/2024',
-      },
-    ]);
+    const bytes = await buildPosicaoXlsx({
+      'Renda Fixa': [
+        {
+          produto: 'CDB - BANCO TESTE S/A',
+          codigo: 'CDB0000TESTE',
+          quantidade: '1',
+          indexador: 'CDI',
+          dataEmissao: '01/01/2024',
+        },
+      ],
+    });
     const result = await port.parse(bytes);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -209,36 +207,23 @@ describe('SPEC-005 BR-005-01..08 — XlsxIngestionPort', () => {
  * why.
  */
 describe('a multi-tab workbook (#63)', () => {
-  const posicaoSheet = (rows: readonly PosicaoRowInput[]): BuildSheetOptions => ({
-    headers: [...POSICAO_HEADERS],
-    rows: rows.map(posicaoRow),
-  });
-
-  const equities = posicaoSheet([
-    {
-      produto: 'PETR4 - PETROBRAS PN',
-      categoria: 'Ações',
-      quantidade: '100',
-      dataReferencia: '31/03/2026',
-    },
+  const equities = posicaoSheet('Acoes', [
+    { produto: 'PETR4 - PETROBRAS', codigo: 'PETR4', tipo: 'PN', quantidade: '100' },
   ]);
 
-  const fixedIncome = posicaoSheet([
+  const fixedIncome = posicaoSheet('Renda Fixa', [
     {
-      produto: 'CDB BANCO TESTE',
-      categoria: 'CDB',
+      produto: 'CDB - BANCO TESTE S/A',
+      codigo: 'CDB0000TESTE',
       quantidade: '1',
-      dataReferencia: '31/03/2026',
       indexador: 'CDI',
-      taxaContratada: '110',
       dataEmissao: '01/02/2026',
       vencimento: '01/02/2028',
-      valorAplicado: '10.000,00',
     },
   ]);
 
   it('reads every tab, not only the first', async () => {
-    const bytes = await buildMultiSheetXlsx([equities, fixedIncome], ['Ações', 'Renda Fixa']);
+    const bytes = await buildMultiSheetXlsx([equities, fixedIncome], ['Acoes', 'Renda Fixa']);
 
     const parsed = await new XlsxIngestionPort().parse(bytes);
 
@@ -252,22 +237,24 @@ describe('a multi-tab workbook (#63)', () => {
   it('carries the fixed-income contract off a later tab', async () => {
     // The reason the count above matters. BR-005-06's contracted rate lives on
     // the tab that used to be dropped.
-    const bytes = await buildMultiSheetXlsx([equities, fixedIncome]);
+    const bytes = await buildMultiSheetXlsx([equities, fixedIncome], ['Acoes', 'Renda Fixa']);
 
     const parsed = await new XlsxIngestionPort().parse(bytes);
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     // `raw` keys are the normalised header names, not the sheet's own casing.
-    const cdb = parsed.value.records.find((record) => record.raw['categoria'] === 'CDB');
+    const cdb = parsed.value.records.find((record) => record.raw['codigo'] === 'CDB0000TESTE');
     expect(cdb).toBeDefined();
-    // The contract itself, not just the row: BR-005-06's indexer and rate are
-    // what SPEC-009 accrues from, and they exist nowhere but this tab.
+    // The contract itself, not just the row: the indexer, issue and maturity
+    // exist nowhere but this tab. The rate is typed by the user (BR-005-06 as
+    // amended, #108) — the real tab has none.
     expect(cdb?.record.kind).toBe('position');
     if (cdb?.record.kind !== 'position') return;
+    expect(cdb.record.assetClass).toBe('cdb');
     expect(cdb.record.fixedIncome).not.toBeNull();
     expect(cdb.record.fixedIncome?.indexer).toBe('cdi_percent');
-    expect(cdb.record.fixedIncome?.ratePercent?.toString()).toBe('110');
+    expect(cdb.record.fixedIncome?.ratePercent).toBeNull();
     expect(cdb.record.fixedIncome?.maturityDate).toBe('2028-02-01');
   });
 
@@ -282,7 +269,7 @@ describe('a multi-tab workbook (#63)', () => {
     };
 
     const parsed = await new XlsxIngestionPort().parse(
-      await buildMultiSheetXlsx([cover, equities, fixedIncome]),
+      await buildMultiSheetXlsx([cover, equities, fixedIncome], ['Capa', 'Acoes', 'Renda Fixa']),
     );
 
     expect(parsed.ok).toBe(true);

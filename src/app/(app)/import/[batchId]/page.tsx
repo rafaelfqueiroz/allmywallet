@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ImportBatchId } from '@/core/shared/ids';
+import { SystemClock } from '@/core/shared/clock';
 import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { formatDateTime } from '@/i18n/format';
 import {
@@ -77,6 +78,7 @@ export default async function ImportBatchDetailPage({
       : await resolveAssetLabels(summary.assets.map((asset) => asset.assetId));
   const canCommit = batch.status === 'previewed';
   const canCancel = batch.status === 'pending' || batch.status === 'previewed';
+  const today = new SystemClock().today();
 
   return (
     <PageShell
@@ -117,7 +119,17 @@ export default async function ImportBatchDetailPage({
           {canCommit && (
             <form action={commitBatchAction}>
               <input type="hidden" name="batchId" value={batch.id} />
-              <Button type="submit">{t('commit')}</Button>
+              <Cluster gap="sm" align="end">
+                {/* SPEC-005 BR-005-22 (amended, #108): B3's Posição states no
+                    reference date, so the user confirms the one reconciliation
+                    compares against. */}
+                {batch.source === 'b3_posicao' && (
+                  <Field id="commit-as-of" label={t('asOf.label')} hint={t('asOf.hint')} width="md">
+                    <Input type="date" name="asOf" defaultValue={today} max={today} required />
+                  </Field>
+                )}
+                <Button type="submit">{t('commit')}</Button>
+              </Cluster>
             </form>
           )}
           {canCancel && (
