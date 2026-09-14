@@ -12,11 +12,17 @@ import type { TradingCalendar } from './ports';
  *
  *     lastCapturedClose < d <= throughInclusive
  *
- * where `throughInclusive` is today when today's session has already closed,
- * and yesterday otherwise. Today's close is not *missed* while the session is
- * still open — `quotes.close-capture` will take it at 17:05 like any other
- * day — and asking the provider for it early would record a gap for a close
- * that simply does not exist yet.
+ * where `throughInclusive` is today once today's **close-capture time** (17:05
+ * in São Paulo, `CLOSE_CAPTURE_LOCAL_TIME`) has passed on a trading day, and
+ * yesterday otherwise.
+ *
+ * Why the capture time and not the session close: between 17:00 and 17:05 the
+ * session is closed but `quotes.close-capture` has not fired yet, and it
+ * *will* fire. Catch-up taking today in that window would race it — a
+ * non-final candle would make the 17:05 capture report `already_captured`, or
+ * a `not_supplied` gap would be recorded for a day the capture then fills.
+ * Once 17:05 has passed, a worker that was down missed that cron (pg-boss
+ * never fires one retroactively), so today is genuinely missed.
  *
  * **The cap keeps the most recent days.** `personal.catchup_max_days` bounds
  * a long absence. Keeping the *oldest* days instead would be self-defeating:
@@ -63,14 +69,40 @@ function addCalendarDays(date: BusinessDate, days: number): BusinessDate {
   return BusinessDate.of(new Date(millis).toISOString().slice(0, 10));
 }
 
-/** Today when its session has closed by `now`; otherwise the day before (trading or not — the caller filters). */
+/**
+ * SPEC-008 BR-008-09 — when `quotes.close-capture` runs, in São Paulo local
+ * time. The single source for both the worker's cron expression
+ * (`CLOSE_CAPTURE_CRON`, used by `src/worker/registrations.ts`) and catch-up's
+ * window, so the two cannot drift apart.
+ */
+export const CLOSE_CAPTURE_LOCAL_TIME = { hour: 17, minute: 5 } as const;
+
+/** Weekdays at `CLOSE_CAPTURE_LOCAL_TIME`; registered with `tz: 'America/Sao_Paulo'` (AR-17). */
+export const CLOSE_CAPTURE_CRON = `${CLOSE_CAPTURE_LOCAL_TIME.minute} ${CLOSE_CAPTURE_LOCAL_TIME.hour} * * 1-5`;
+
+/**
+ * The instant `quotes.close-capture` fires on `date`. Brazil has observed no
+ * daylight-saving time since 2019 (Decree 9,772), so São Paulo is a fixed
+ * UTC−3 — the same literal offset `src/adapters/calendar/b3-calendar.ts` uses.
+ */
+export function closeCaptureInstant(date: BusinessDate): Date {
+  const hh = String(CLOSE_CAPTURE_LOCAL_TIME.hour).padStart(2, '0');
+  const mm = String(CLOSE_CAPTURE_LOCAL_TIME.minute).padStart(2, '0');
+  return new Date(`${date}T${hh}:${mm}:00-03:00`);
+}
+
+/**
+ * Today when it is a trading day and its close-capture time has passed by
+ * `now`; otherwise the day before (trading or not — the caller filters).
+ */
 export function lastDueCloseDate(
   calendar: TradingCalendar,
   now: Date,
   today: BusinessDate,
 ): BusinessDate {
-  const session = calendar.sessionFor(today);
-  if (session !== undefined && now.getTime() >= session.closeUtc.getTime()) return today;
+  if (calendar.isTradingDay(today) && now.getTime() >= closeCaptureInstant(today).getTime()) {
+    return today;
+  }
   return addCalendarDays(today, -1);
 }
 

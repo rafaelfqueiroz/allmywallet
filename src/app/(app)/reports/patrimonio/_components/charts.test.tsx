@@ -69,7 +69,10 @@ describe('ValueChart', () => {
     expect((await audit(container)).violations).toEqual([]);
   });
 
-  it('SPEC-021 BR-021-31: accepts a gap day as a break in the series, and stays accessible', async () => {
+  // SPEC-021 BR-021-31: this only proves a null point renders accessibly. That
+  // gap days *become* null is asserted in `value-series.test.ts`, and that a
+  // null is a break rather than a bridge in `ValueChart.test.ts`.
+  it('SPEC-021 BR-021-31: renders a series holding a null gap point, and stays accessible', async () => {
     const { container } = render(
       <ValueChart
         title="Patrimônio ao longo do tempo"

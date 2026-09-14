@@ -926,7 +926,8 @@
       "value": "Patrimônio",
       "basis": "Origem do valor",
       "observed": "Preço observado",
-      "estimated": "Estimado"
+      "estimated": "Estimado",
+      "gap": "Sem cotação de fechamento — valor do último fechamento disponível"
     }
   },
   "composicao": {

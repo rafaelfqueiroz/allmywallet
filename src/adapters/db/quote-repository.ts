@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lte, max } from 'drizzle-orm';
 import type { Database } from '@/db/client';
-import { latestQuotes, priceQuotes } from '@/db/schema/market';
+import { latestQuotes, priceQuoteGaps, priceQuotes } from '@/db/schema/market';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
 import type {
@@ -123,20 +123,34 @@ export class DrizzleQuoteRepository
     return rows.map(toPriceQuote);
   }
 
-  /** BR-008-09: the official close supersedes the day's intraday quote in history — never a different day's row (the PK is `(asset_id, date)`). */
+  /**
+   * BR-008-09: the official close supersedes the day's intraday quote in
+   * history — never a different day's row (the PK is `(asset_id, date)`).
+   *
+   * SPEC-021 BR-021-31: a close that exists is not a gap. Any gap row for the
+   * same `(asset_id, date)` is deleted in the **same transaction**, whichever
+   * job wrote the close — `quotes.close-capture`, catch-up or `tesouro.sync` —
+   * so no path can leave a chart showing a break on a day that has a real
+   * close, and none has to remember to clear it.
+   */
   async upsertClosePrice(quote: PriceQuote): Promise<void> {
-    await this.db
-      .insert(priceQuotes)
-      .values({
-        assetId: quote.assetId,
-        date: quote.date,
-        close: quote.close,
-        source: quote.source,
-      })
-      .onConflictDoUpdate({
-        target: [priceQuotes.assetId, priceQuotes.date],
-        set: { close: quote.close, source: quote.source, updatedAt: new Date() },
-      });
+    await this.db.transaction(async (tx) => {
+      await tx
+        .insert(priceQuotes)
+        .values({
+          assetId: quote.assetId,
+          date: quote.date,
+          close: quote.close,
+          source: quote.source,
+        })
+        .onConflictDoUpdate({
+          target: [priceQuotes.assetId, priceQuotes.date],
+          set: { close: quote.close, source: quote.source, updatedAt: new Date() },
+        });
+      await tx
+        .delete(priceQuoteGaps)
+        .where(and(eq(priceQuoteGaps.assetId, quote.assetId), eq(priceQuoteGaps.date, quote.date)));
+    });
   }
 }
 

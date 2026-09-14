@@ -15,6 +15,7 @@ import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptySta
 import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { tryUserId } from '@/lib/session';
 import { loadPatrimonio } from '@/app/(app)/reports/patrimonio/data';
+import { basisOf, plot, toValueChartPoints } from '@/app/(app)/reports/patrimonio/value-series';
 import { ValueChart } from '@/app/(app)/reports/patrimonio/_components/ValueChart';
 import { ContributionChart } from '@/app/(app)/reports/patrimonio/_components/ContributionChart';
 import { StackedChart } from '@/app/(app)/reports/patrimonio/_components/StackedChart';
@@ -55,13 +56,6 @@ export const dynamic = 'force-dynamic';
 interface PageProps {
   readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
-
-/**
- * The server/client boundary for chart geometry. `Money` never crosses it —
- * see `ValueChart.tsx`'s header. Every figure a user *reads* on this page is
- * rendered from `Money` on the server, in the summaries and the table.
- */
-const plot = (value: MoneyValue): number => Number(value.toString());
 
 export default async function PatrimonioPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
@@ -236,19 +230,9 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                   <ValueChart
                     title={tp('chart.title')}
                     summary={<SeriesSummary points={history.series} label={tp('chart.summary')} />}
-                    points={history.series.map((point) => {
-                      // SPEC-021 BR-021-31: a day whose close could not be
-                      // recovered is plotted as a break, not as the snapshot's
-                      // carried-forward figure. The table below still states
-                      // that figure, labelled by its basis.
-                      const gap = closeGapDates.has(point.date);
-                      return {
-                        date: point.date,
-                        value: gap ? null : plot(point.value),
-                        estimated: point.estimated,
-                        gap,
-                      };
-                    })}
+                    // SPEC-021 BR-021-31: a gap day is plotted as a break; the
+                    // table below states its figure under its own basis.
+                    points={toValueChartPoints(history.series, closeGapDates)}
                   />
                   {history.series.some((point) => point.estimated) && (
                     // BR-013-07 / DL-013-04: the marker sits with the chart, not in
@@ -340,6 +324,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
               <Section title={tp('table.title')}>
                 <SeriesTable
                   points={history.series}
+                  gapDates={closeGapDates}
                   labels={{
                     caption: tp('table.title'),
                     date: tp('table.date'),
@@ -347,6 +332,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     basis: tp('table.basis'),
                     observed: tp('table.observed'),
                     estimated: tp('table.estimated'),
+                    gap: tp('table.gap'),
                   }}
                 />
               </Section>
@@ -478,10 +464,12 @@ function DecompositionTable({
 
 function SeriesTable({
   points,
+  gapDates,
   labels,
 }: {
   points: readonly ValuePoint[];
-  labels: Record<'caption' | 'date' | 'value' | 'basis' | 'observed' | 'estimated', string>;
+  gapDates: ReadonlySet<string>;
+  labels: Record<'caption' | 'date' | 'value' | 'basis' | 'observed' | 'estimated' | 'gap', string>;
 }) {
   return (
     <Table>
@@ -504,7 +492,8 @@ function SeriesTable({
             <TableCell className="text-right">
               <Money value={point.value} />
             </TableCell>
-            <TableCell>{point.estimated ? labels.estimated : labels.observed}</TableCell>
+            {/* SPEC-021 BR-021-31: a carried-forward gap day is never "observed". */}
+            <TableCell>{labels[basisOf(point, gapDates)]}</TableCell>
           </TableRow>
         ))}
       </TableBody>

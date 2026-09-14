@@ -116,9 +116,18 @@ export interface BrapiConfig {
   readonly apiToken?: string;
   /** Persisted alongside every quote so BR-008-04 can name the source (`quotes.provider`'s resolved value). */
   readonly source: string;
+  /**
+   * SPEC-021 BR-021-28 — the bound on one history request, headers and body
+   * together. Catch-up runs before any queue is registered, so a request that
+   * hangs (a captive portal, a half-open connection) would hold up imports and
+   * alerts for as long as it hangs. Past the bound the request is abandoned as
+   * UNAVAILABLE and its days are recorded as gaps (BR-021-31).
+   */
+  readonly historyTimeoutMs?: number;
 }
 
 const DEFAULT_BASE_URL = 'https://brapi.dev/api';
+const DEFAULT_HISTORY_TIMEOUT_MS = 15_000;
 
 export class BrapiQuoteProvider implements QuoteProvider {
   private readonly baseUrl: string;
@@ -205,10 +214,16 @@ export class BrapiQuoteProvider implements QuoteProvider {
     let rawBody: string;
     let status: number;
     try {
-      const response = await fetch(url, { method: 'GET' });
+      // The signal covers the body read too: `text()` on an aborted response
+      // rejects, and lands in this same catch.
+      const signal = AbortSignal.timeout(
+        this.config.historyTimeoutMs ?? DEFAULT_HISTORY_TIMEOUT_MS,
+      );
+      const response = await fetch(url, { method: 'GET', signal });
       status = response.status;
       rawBody = await response.text();
     } catch {
+      // Network failure or timeout — a provider failure, never "no such close".
       return err(domainError(QuoteProviderErrorCode.UNAVAILABLE, { ticker }));
     }
 

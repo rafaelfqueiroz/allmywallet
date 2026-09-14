@@ -22,7 +22,7 @@ import { DrizzleConsentRepository } from '@/adapters/db/consent-repository';
 import { DrizzleOpportunityRuleRepository } from '@/adapters/db/opportunity-rule-repository';
 import { DrizzleValuationSnapshotRepository } from '@/adapters/db/valuation-snapshot-repository';
 import { runCatchUp, type CatchUpDeps } from '@/worker/catch-up';
-import { handleQuotesPoll } from '@/worker/handlers/quotes';
+import { handleQuotesCloseCapture, handleQuotesPoll } from '@/worker/handlers/quotes';
 import {
   handleOpportunityEvaluate,
   type OpportunityEvaluateJobPayload,
@@ -402,6 +402,73 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
       { date: '2026-03-13', reason: 'budget_exhausted' },
       { date: '2026-03-16', reason: 'budget_exhausted' },
     ]);
+  });
+
+  it('BR-021-28/31: started at 17:02 — after the close, before the 17:05 capture — catch-up leaves today to the capture, and a real close clears any gap row for its day', async () => {
+    const provider = scenarioProvider();
+    // Tuesday 17's history would include a (non-final) candle; catch-up must not ask for it.
+    provider.set('PETR4', () =>
+      ok({
+        ticker: 'PETR4',
+        price: Money.fromString('33.10'),
+        quotedAt: new Date(),
+        source: 'brapi_free',
+      }),
+    );
+    provider.set('VALE3', () =>
+      ok({
+        ticker: 'VALE3',
+        price: Money.fromString('63.00'),
+        quotedAt: new Date(),
+        source: 'brapi_free',
+      }),
+    );
+    // A gap row for today, as the pre-fix window could have left behind.
+    await migratorPool.query(
+      `INSERT INTO price_quote_gaps (asset_id, date, reason) VALUES ($1, '2026-03-17', 'not_supplied')`,
+      [petr],
+    );
+
+    // 17:02 São Paulo = 20:02Z: the session closed at 20:00Z, the capture fires at 20:05Z.
+    const summary = await withFreshDb((database) =>
+      runCatchUp({
+        database,
+        clock: new FakeClock('2026-03-17T20:02:00Z'),
+        calendar,
+        provider,
+        syncMarketSeries: async () => {},
+        rebuildSnapshotsFrom: async () => {},
+      }),
+    );
+    expect(summary.days).toEqual(['2026-03-12', '2026-03-13', '2026-03-16']);
+    expect(provider.historicalCalls.every((call) => call.to === '2026-03-16')).toBe(true);
+
+    // 17:05 — the capture runs as scheduled and is not blocked by catch-up.
+    await withFreshDb((database) =>
+      handleQuotesCloseCapture({
+        database,
+        clock: new FakeClock('2026-03-17T20:05:00Z'),
+        calendar,
+        provider,
+        heldAssets: new FakeHeldAssetsPort([petr, vale]),
+      }),
+    );
+
+    const { rows: closes } = await migratorPool.query<{ code: string; close: string }>(
+      `SELECT a.code, q.close::text AS close FROM price_quotes q JOIN assets a ON a.id = q.asset_id
+        WHERE q.date = '2026-03-17' ORDER BY a.code`,
+    );
+    expect(closes).toEqual([
+      { code: 'PETR4', close: '33.10000000' },
+      { code: 'VALE3', close: '63.00000000' },
+    ]);
+    // The close write deleted today's gap in the same transaction; Friday's
+    // VALE3 gap, which has no close, stands.
+    const { rows: gaps } = await migratorPool.query<{ code: string; date: string }>(
+      `SELECT a.code, g.date::text AS date FROM price_quote_gaps g JOIN assets a ON a.id = g.asset_id
+        ORDER BY a.code, g.date`,
+    );
+    expect(gaps).toEqual([{ code: 'VALE3', date: '2026-03-13' }]);
   });
 
   it('AR-19: a second start in a row finds nothing missed and spends nothing', async () => {
