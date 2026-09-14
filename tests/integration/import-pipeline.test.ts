@@ -907,7 +907,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
    * a unit like TAEE11 back into a FII and a Negociação replaced its name with
    * the bare ticker.
    */
-  it('#108: a Movimentação or Negociação guess never overwrites the class and name Posição stated', async () => {
+  it('#108: a Movimentação or Negociação guess never overwrites the class Posição stated, and a bare ticker never replaces a name', async () => {
     const posicao = await newPendingBatch('b3_posicao');
     await saveUploadedFile(
       uploadDir,
@@ -948,7 +948,10 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     const { rows } = await migratorPool.query(
       "SELECT class AS asset_class, name FROM assets WHERE code = 'TAEE11'",
     );
-    expect(rows).toEqual([{ asset_class: 'stock', name: 'TAESA S.A.' }]);
+    // Class: Posição's `stock` survives both guesses (`fii` from the `11`
+    // ending). Name: Movimentação states one, so it may replace Posição's; the
+    // later Negociação has only the ticker and must not replace either.
+    expect(rows).toEqual([{ asset_class: 'stock', name: 'TAESA UNT' }]);
   });
 
   it('#108: Movimentação names an asset Negociação created with only its ticker, and keeps the guessed class', async () => {
