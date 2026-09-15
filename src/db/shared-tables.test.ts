@@ -27,12 +27,20 @@ describe('shared table declaration', () => {
     // negative counterpart of `price_quotes`, keyed the same way, holding
     // nothing derived from anyone's holdings.
     //
+    // `corporate_event_factors` and `corporate_event_factor_fetches` were
+    // added by SPEC-008 BR-008-29 (#113): B3's published split/grupamento/
+    // bonificação factor, "persisted and shared across tenants like quotes"
+    // by the spec's own words, plus that fetch's bookkeeping — an issuer code,
+    // a factor, a date, nothing derived from anyone's holdings.
+    //
     // This assertion is deliberately exact. Its whole value is that the next
     // person to widen the tenant-boundary exemption has to come here and say
     // why, rather than appending a string and watching the suite stay green.
     expect([...SHARED_TABLES].sort()).toEqual([
       'assets',
       'backup_runs',
+      'corporate_event_factor_fetches',
+      'corporate_event_factors',
       'index_series',
       'institutions',
       'latest_quotes',

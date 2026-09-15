@@ -167,6 +167,14 @@ export class TransactionBuilder {
   amortization(): TransactionBuilder {
     return this.#with({ type: 'amortization' });
   }
+  leilaoFracoes(): TransactionBuilder {
+    return this.#with({ type: 'leilao_fracoes' });
+  }
+  fracaoBonificacao(): TransactionBuilder {
+    // SPEC-007 BR-007-05a: the removal never reads a price — B3's `Fração em
+    // Ativos` row states none — so it defaults away, as a split's does.
+    return this.#with({ type: 'fracao_bonificacao', unitPrice: Money.zero() });
+  }
 
   of(assetCode: string): TransactionBuilder {
     return this.#with({ assetCode });

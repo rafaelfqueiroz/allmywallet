@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import Decimal from 'decimal.js';
 import { Money, Quantity } from '@/core/shared/money';
 import type { AllocationEvent, EarningRecord } from '@/core/reporting/ports';
 import {
@@ -46,6 +47,26 @@ const earning = (
   amount: Money.fromString(amount),
   quantity: Quantity.fromString(quantity),
 });
+
+/** A leilão de frações: `fraction` sold, `held` the position on the pay date. */
+const auction = (
+  assetId: ReturnType<typeof assetIdOf>,
+  amount: string,
+  payDate: string,
+  fraction: string,
+  held: string,
+): EarningRecord => ({
+  assetId,
+  institutionId: institutionIdOf('1'),
+  type: 'leilao_fracoes',
+  payDate: day(payDate),
+  amount: Money.fromString(amount),
+  quantity: Quantity.fromString(fraction),
+  heldQuantity: Quantity.fromString(held),
+});
+
+/** Display rounding: `Intl.NumberFormat` currency, two places, half-expand. */
+const shown = (amount: Money): string => amount.toDecimal().toFixed(2, Decimal.ROUND_HALF_UP);
 
 describe('allocationAt — the log folds to a state', () => {
   it('takes the latest event at or before the date, per wallet and asset', () => {
@@ -166,6 +187,105 @@ describe('attributeEarning — one payment, split as the wallets stood', () => {
     const result = attributeEarning(earning(PETR, '100', '2025-03-10', '3'), state);
     const summed = result.reduce((acc, slice) => acc.plus(slice.amount), Money.zero());
     expect(summed.toString()).toBe('100');
+  });
+});
+
+describe('attributeEarning — a leilão de frações splits over the held position (#113 review)', () => {
+  /**
+   * The reviewer's scenario. ITSA4 held 105 on the pay date; Aposentadoria
+   * holds 10 and 95 are unassigned. B3 paid 0,2 × 14,00 = 2,80 for the
+   * fraction.
+   *
+   * Over the row's 0,2 the Unassigned remainder clamps (0,2 − 10 < 0) and the
+   * whole 2,80 lands in Aposentadoria. Over the held 105:
+   *
+   *   weights       10 : 95                         (Σ 105)
+   *   Aposentadoria 2,80 × 10 ÷ 105 = 28 ÷ 105 = 0,266666…
+   *                 → 0,26666667 at eight places (ROUND_HALF_UP), R$ 0,27 shown
+   *   Unassigned    2,80 − 0,26666667 = 2,53333333 (the residual), R$ 2,53 shown
+   *   Σ             2,80 exactly; 0,27 + 2,53 = 2,80 shown
+   */
+  it('gives Unassigned its 95/105 rather than nothing', () => {
+    const state = allocationAt([event(RETIREMENT, ITSA, '10', '2026-01-05')], day('2026-03-17'));
+    const result = attributeEarning(auction(ITSA, '2.80', '2026-03-17', '0.2', '105'), state);
+
+    expect(result.map((slice) => [slice.walletId, slice.amount.toString()])).toEqual([
+      [RETIREMENT, '0.26666667'],
+      [null, '2.53333333'],
+    ]);
+    expect(result.map((slice) => shown(slice.amount))).toEqual(['0.27', '2.53']);
+    const summed = result.reduce((acc, slice) => acc.plus(slice.amount), Money.zero());
+    expect(summed.toString()).toBe('2.8');
+  });
+
+  /**
+   * Two wallets. A = 10, B = 50, 45 unassigned, held 105:
+   *
+   *   A          2,80 × 10 ÷ 105 = 28 ÷ 105  = 0,266666… → 0,26666667, R$ 0,27
+   *   B          2,80 × 50 ÷ 105 = 140 ÷ 105 = 1,333333… → 1,33333333, R$ 1,33
+   *   Unassigned 2,80 − 0,26666667 − 1,33333333 = 1,20000000   (exactly 45/105 × 2,80
+   *              = 126 ÷ 105 = 1,20), R$ 1,20
+   *   Σ          2,80; shown 0,27 + 1,33 + 1,20 = 2,80
+   */
+  it('splits 10 : 50 : 45 across two wallets and Unassigned', () => {
+    const state = allocationAt(
+      [event(RETIREMENT, ITSA, '10', '2026-01-05'), event(RESERVE, ITSA, '50', '2026-01-05')],
+      day('2026-03-17'),
+    );
+    const result = attributeEarning(auction(ITSA, '2.80', '2026-03-17', '0.2', '105'), state);
+
+    expect(result.map((slice) => [slice.walletId, slice.amount.toString()])).toEqual([
+      [RETIREMENT, '0.26666667'],
+      [RESERVE, '1.33333333'],
+      [null, '1.2'],
+    ]);
+    expect(result.map((slice) => shown(slice.amount))).toEqual(['0.27', '1.33', '1.20']);
+    const summed = result.reduce((acc, slice) => acc.plus(slice.amount), Money.zero());
+    expect(summed.toString()).toBe('2.8');
+  });
+
+  /**
+   * Held below allocated: a stale allocation after the position shrank, which
+   * `reconcile-allocations` repairs later. ITSA4 held 5 on the pay date;
+   * Aposentadoria still claims 10 and Reserva 30.
+   *
+   *   Unassigned  held − Σ allocated = 5 − 40 = −35 → clamped to 0, no slice
+   *   weights     10 : 30 : 0                                   (Σ 40)
+   *   Aposentadoria 2,80 × 10 ÷ 40 = 0,70 exactly
+   *   Reserva       residual 2,80 − 0,70 − 0 = 2,10
+   *   Σ             2,80 exactly; no slice negative
+   */
+  it('clamps Unassigned to zero when the held position is below the allocations', () => {
+    const state = allocationAt(
+      [event(RETIREMENT, ITSA, '10', '2026-01-05'), event(RESERVE, ITSA, '30', '2026-01-05')],
+      day('2026-03-17'),
+    );
+    const result = attributeEarning(auction(ITSA, '2.80', '2026-03-17', '0.2', '5'), state);
+
+    expect(result.map((slice) => [slice.walletId, slice.amount.toString()])).toEqual([
+      [RETIREMENT, '0.7'],
+      [RESERVE, '2.1'],
+    ]);
+    expect(result.every((slice) => !slice.amount.isNegative())).toBe(true);
+    const summed = result.reduce((acc, slice) => acc.plus(slice.amount), Money.zero());
+    expect(summed.toString()).toBe('2.8');
+  });
+
+  /**
+   * A dividend keeps its row quantity as the basis — unchanged by the fix.
+   * 105 × 0,50 = 52,50 paid on 105; Aposentadoria 10:
+   *
+   *   Aposentadoria 52,50 × 10 ÷ 105 = 525 ÷ 105 = 5,00 exactly
+   *   Unassigned    52,50 − 5,00     = 47,50
+   */
+  it('leaves a dividend apportioned by the quantity on its row', () => {
+    const state = allocationAt([event(RETIREMENT, ITSA, '10', '2026-01-05')], day('2026-03-17'));
+    const result = attributeEarning(earning(ITSA, '52.50', '2026-03-17', '105'), state);
+
+    expect(result.map((slice) => [slice.walletId, slice.amount.toString()])).toEqual([
+      [RETIREMENT, '5'],
+      [null, '47.5'],
+    ]);
   });
 });
 

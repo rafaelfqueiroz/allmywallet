@@ -63,6 +63,27 @@ export class DrizzleTransactionRepository implements TransactionRepository {
     return rows.map(toDomain);
   }
 
+  /**
+   * SPEC-014 BR-014-12 (#113 review) — every row for a set of assets, across
+   * all institutions and whatever the status, traded on or before `upTo`.
+   *
+   * Not part of `TransactionRepository`: only the Earnings report's port needs
+   * it, to replay the position a `leilao_fracoes` was paid against on its pay
+   * date. Status is left to `selectForReplay`, exactly as `listForPosition`
+   * leaves it (BR-007-16).
+   */
+  async listForAssetsUpTo(
+    assetIds: readonly AssetId[],
+    upTo: BusinessDate,
+  ): Promise<readonly Transaction[]> {
+    if (assetIds.length === 0) return [];
+    const rows = await this.tx
+      .select()
+      .from(transactions)
+      .where(and(inArray(transactions.assetId, [...assetIds]), lte(transactions.tradeDate, upTo)));
+    return rows.map(toDomain);
+  }
+
   /** Chunked — see `chunk.ts` for why one statement per 10.000 rows is not an option. */
   async insertMany(rows: readonly Transaction[]): Promise<void> {
     for (const chunk of chunked(rows)) {

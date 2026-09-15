@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Money, Quantity } from '@/core/shared/money';
-import type { TransactionType } from '@/core/ledger/transaction';
+import { TRANSACTION_TYPES, type TransactionType } from '@/core/ledger/transaction';
 import {
   aTransaction,
   resetTransactionSequence,
@@ -85,6 +85,37 @@ describe('applyTransaction — the type → effect dispatch', () => {
       aTransaction().bonificacao().quantity('25').price('0').build(),
     );
     expect(result.ok && result.value.averageCost.toString()).toBe('8');
+  });
+
+  describe('BR-007-05a — fracao_bonificacao', () => {
+    it('removes the fraction at unchanged total cost, ignoring the row’s price', () => {
+      // 100 − 0,5 = 99,5 shares; total 1.000,00 unchanged.
+      // average = 1.000,00 ÷ 99,5 = 2.000 ÷ 199 = 10,05025125…
+      //   2.000 − 199 × 10 = 10 → 100 (0), 1.000 (5 r5), 50 (0), 500 (2 r102),
+      //   1.020 (5 r25), 250 (1 r51), 510 (2 r112), 1.120 (5 r125)
+      // The 99,00 "price" is ignored: the auction cash is a leilao_fracoes row.
+      const result = applyTransaction(
+        HOLDING,
+        aTransaction().fracaoBonificacao().quantity('0.5').price('99.00').build(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('99.5');
+      expect(result.value.totalCost.toString()).toBe('1000');
+      expect(result.value.averageCost.toDecimal().toFixed(8)).toBe('10.05025125');
+      expect(result.value.realizedGain.toString()).toBe('0');
+    });
+
+    it('refuses removing more than held', () => {
+      const result = applyTransaction(
+        HOLDING,
+        aTransaction().fracaoBonificacao().quantity('100.5').build(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('INSUFFICIENT_QUANTITY');
+      expect(result.error.context['requested']).toBe('100.5');
+    });
   });
 
   describe('BR-007-04 — split and grupamento', () => {
@@ -195,7 +226,7 @@ describe('applyTransaction — the type → effect dispatch', () => {
     // SPEC-014 recognises these at pay date, in cash, never reinvested. A
     // dividend row carries the share count it was paid on, which must NOT be
     // mistaken for shares acquired — that would double the position.
-    it.each(['dividend', 'jcp', 'rendimento', 'amortization'] as const)(
+    it.each(['dividend', 'jcp', 'rendimento', 'amortization', 'leilao_fracoes'] as const)(
       'a %s changes nothing',
       (type) => {
         const row = { ...aTransaction().quantity('100').price('0.75').build(), type };
@@ -207,10 +238,10 @@ describe('applyTransaction — the type → effect dispatch', () => {
     );
   });
 
-  it('covers all thirteen BR-006-05 types without a default case', () => {
-    // The dispatch has no `default`, so a fourteenth type would fail to
+  it('covers all fifteen BR-006-05 types without a default case', () => {
+    // The dispatch has no `default`, so a sixteenth type would fail to
     // compile rather than silently becoming a no-op. This asserts the other
-    // half: that all thirteen are actually reachable today.
+    // half: that all fifteen are actually reachable today.
     const handled: TransactionType[] = [
       'buy',
       'sell',
@@ -225,7 +256,10 @@ describe('applyTransaction — the type → effect dispatch', () => {
       'transfer_in',
       'transfer_out',
       'adjustment',
+      'leilao_fracoes',
+      'fracao_bonificacao',
     ];
+    expect([...handled].sort()).toEqual([...TRANSACTION_TYPES].sort());
     for (const type of handled) {
       const base =
         type === 'split' || type === 'grupamento'

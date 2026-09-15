@@ -186,8 +186,11 @@ function quantityEffect(transaction: Transaction): Quantity | null {
     case 'subscription':
     case 'bonificacao':
       return transaction.quantity;
+    // SPEC-007 BR-007-05a (#113): a bonificação fraction B3 removed leaves
+    // the holding like a sale does, whatever it does to cost.
     case 'sell':
     case 'transfer_out':
+    case 'fracao_bonificacao':
       return transaction.quantity.negated();
     /**
      * Deliberately absent: `split` and `grupamento` scale a holding rather

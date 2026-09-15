@@ -3,7 +3,6 @@ import { getTranslations } from 'next-intl/server';
 import { ImportBatchId } from '@/core/shared/ids';
 import { positionKeyString } from '@/core/positions/replay';
 import { SystemClock } from '@/core/shared/clock';
-import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { formatBusinessDate, formatDateTime, formatQuantity } from '@/i18n/format';
 import type { RowRefusal } from '@/core/ingestion/refusal';
 import {
@@ -13,6 +12,7 @@ import {
   commitBatchAction,
 } from '@/app/(app)/import/actions';
 import { loadImportBatchDetail } from '@/app/(app)/import/data';
+import { ClassifyForm } from '@/app/(app)/import/[batchId]/_components/ClassifyForm';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletOptions, walletName } from '@/app/(app)/import/wallet-options';
 import { allocateAction } from '@/app/(app)/wallets/actions';
@@ -89,23 +89,17 @@ export default async function ImportBatchDetailPage({
     }
   };
   const classifyForm = (rowId: string) => (
-    <form action={classifyRowAction}>
-      <input type="hidden" name="rowId" value={rowId} />
-      <Cluster gap="sm" align="end">
-        <Field id={`classify-${rowId}`} label={t('classifyLabel')} width="lg">
-          <NativeSelect name="type" required>
-            {TRANSACTION_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {t(`transactionType.${type}`)}
-              </option>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Button type="submit" size="sm">
-          {t('classifySubmit')}
-        </Button>
-      </Cluster>
-    </form>
+    <ClassifyForm
+      rowId={rowId}
+      action={classifyRowAction}
+      labels={{
+        type: t('classifyLabel'),
+        ratio: t('classifyRatioLabel'),
+        ratioHint: t('classifyRatioHint'),
+        submit: t('classifySubmit'),
+        typeName: (type) => t(`transactionType.${type}`),
+      }}
+    />
   );
   const walletOptions = summary === null ? [] : await loadWalletOptions(userId);
   const labels =

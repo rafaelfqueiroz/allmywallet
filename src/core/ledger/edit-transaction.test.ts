@@ -36,7 +36,7 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
   });
 
   /**
-   * AC: "All thirteen transaction types can be created, edited and deleted."
+   * AC: "All fifteen transaction types can be created, edited and deleted."
    * `create-transaction.test.ts` covers the create third; this is the edit
    * third, and it is not a formality — an edit re-runs the whole draft
    * validation *and* BR-006-15's replay on the way back out, so a type is only
@@ -49,7 +49,7 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
    * of what this claims. That is exactly the shape the first version of this
    * test had, and it failed on those two types.
    */
-  it('AC — every one of the thirteen types can be edited', async () => {
+  it('AC — every one of the fifteen types can be edited', async () => {
     for (const type of TRANSACTION_TYPES) {
       resetTransactionSequence();
       const opening = aTransaction().buy().on('2026-01-05').quantity('1000').price('10.00').build();

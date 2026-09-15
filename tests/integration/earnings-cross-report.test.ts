@@ -58,6 +58,10 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
   const BUY = '2026-01-12';
   const FIRST_PAYMENT = '2026-02-10';
   const SECOND_PAYMENT = '2026-03-11';
+  const BONUS = '2026-03-12';
+  const AUCTION = '2026-03-17';
+  /** After the leilão's pay date, inside the period: must not reach its basis. */
+  const SALE_AFTER_AUCTION = '2026-03-18';
   const AS_OF = '2026-03-20';
 
   beforeAll(async () => {
@@ -92,6 +96,21 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
     await seed('buy', BUY, '100', '30');
     await seed('dividend', FIRST_PAYMENT, '100', '1.20');
     await seed('jcp', SECOND_PAYMENT, '100', '0.55');
+    // #113 — a 5,2 % bonificação leaves 0,2 of a share, which B3 removes the
+    // same day and pays for at auction: held 100 + 5,2 − 0,2 = 105 from BONUS.
+    // The fraction is priced at the auction value on purpose — its stored
+    // total must still be zero (BR-007-05a), or both paths would count 2,80
+    // twice.
+    await seed('bonificacao', BONUS, '5.2', '0');
+    await seed('fracao_bonificacao', BONUS, '0.2', '14.00');
+    // BR-014-01 — the fifth provento type must cross both paths too.
+    await seed('leilao_fracoes', AUCTION, '0.2', '14.00');
+    // #113 review — a sale between the leilão and the period end. The basis is
+    // the position on the pay date (105), not at the period end (105 − 50 = 55).
+    // It sells unassigned shares: Aposentadoria's 10 stay valid for every date
+    // (allocated 10 ≤ held 55, BR-010-17's invariant), and a sale is no
+    // provento, so both income paths are unchanged — 177,80 below.
+    await seed('sell', SALE_AFTER_AUCTION, '50', '41.00');
 
     await withTenant(
       userId,
@@ -109,7 +128,9 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
           userId,
           walletId,
           assetId: petr,
-          quantity: Quantity.fromString('100'),
+          // A tenth of the buy is filed in Aposentadoria; 90 — and later the
+          // bonus shares — stay unassigned (BR-011-09).
+          quantity: Quantity.fromString('10'),
           effectiveOn: BUY,
           cause: 'buy',
         });
@@ -168,7 +189,10 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
     );
   }
 
-  async function reports(scope: 'portfolio' | 'wallet') {
+  async function reports(
+    scope: 'portfolio' | 'wallet',
+    grouping: 'asset_class' | 'wallet' = 'asset_class',
+  ) {
     return withTenant(
       userId,
       async (tx) => {
@@ -178,7 +202,7 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
           {
             period: { kind: 'ytd' },
             scope: scope === 'portfolio' ? { kind: 'portfolio' } : { kind: 'wallet', walletId },
-            grouping: 'asset_class',
+            grouping,
             today: d(AS_OF),
           },
           await port.earliestSnapshotDate(),
@@ -201,7 +225,7 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
           patrimonio: buildPortfolioValueReport({
             query: query.value,
             opening,
-            grouping: 'asset_class',
+            grouping,
             today: d(AS_OF),
             lastImportAt,
           }),
@@ -226,9 +250,12 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
       throw new Error('expected a portfolio decomposition');
     }
 
-    // 100 × 1,20 + 100 × 0,55 = 175, by both routes: one summing the ledger's
-    // earning rows, the other differencing a stored cumulative column.
-    expect(proventos.total.toString()).toBe('175');
+    // 100 × 1,20 + 100 × 0,55 + 0,2 × 14,00 = 120 + 55 + 2,80 = 177,80 — the
+    // fraction removal adds nothing (stored total zero, BR-007-05a) and the
+    // 03-18 sale of 50 @ 41,00 is an external flow, not earnings — by
+    // both routes: one summing the ledger's earning rows, the other
+    // differencing a stored cumulative column.
+    expect(proventos.total.toString()).toBe('177.8');
     expect(patrimonio.decomposition.value.earnings.equals(proventos.total)).toBe(true);
   });
 
@@ -243,6 +270,45 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
     const { patrimonio, proventos } = await reports('wallet');
 
     expect(patrimonio.decomposition.kind).toBe('unavailable');
-    expect(proventos.total.toString()).toBe('175');
+    // Aposentadoria holds 10 throughout (BR-014-12):
+    //   dividend 120,00 × 10 ÷ 100 = 12,00
+    //   JCP       55,00 × 10 ÷ 100 =  5,50
+    //   leilão     2,80 × 10 ÷ 105 =  0,26666667 (held 105 on AUCTION, not the 0,2 sold,
+    //              and not the 55 left after the 03-18 sale: 2,80 × 10 ÷ 55 = 0,50909091)
+    //   total                      = 17,76666667
+    expect(proventos.total.toString()).toBe('17.76666667');
+  });
+
+  /**
+   * #113 review — the leilão is split over the position held on its pay date,
+   * read through the real port: the replay in `listEarnings` must see the
+   * bonificação and the same-day fraction removal to arrive at 105.
+   *
+   * Before the fix the basis was the row's 0,2, Unassigned clamped to zero
+   * and Aposentadoria took the whole 2,80.
+   */
+  it('attributes a leilão de frações by the held position, at wallet scope and by wallet', async () => {
+    const scoped = await reports('wallet');
+    // 2,80 × 10 ÷ 105 = 28 ÷ 105 = 0,2666… → 0,26666667 (R$ 0,27 shown).
+    // Pay-date cutoff: replayed to the period end instead, the basis would be
+    // 105 − 50 = 55 and this 2,80 × 10 ÷ 55 = 28 ÷ 55 = 0,509090… → 0,50909091.
+    expect(
+      scoped.proventos.byType.find((total) => total.type === 'leilao_fracoes')?.amount.toString(),
+    ).toBe('0.26666667');
+
+    const { proventos } = await reports('portfolio', 'wallet');
+    const byWallet = new Map(
+      proventos.breakdown.map((slice) => [slice.key.id, slice.amount.toString()]),
+    );
+    // Aposentadoria 12,00 + 5,50 + 0,26666667                        = 17,76666667
+    // Unassigned  108,00 + 49,50 + (2,80 − 0,26666667 = 2,53333333)  = 160,03333333
+    // Σ 177,80 — the portfolio total, so no centavo is lost to the split.
+    expect(byWallet).toEqual(
+      new Map([
+        [walletId, '17.76666667'],
+        ['__unassigned__', '160.03333333'],
+      ]),
+    );
+    expect(proventos.total.toString()).toBe('177.8');
   });
 });

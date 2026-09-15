@@ -24,14 +24,19 @@ const earning = (
   amount: string,
   payDate: string,
   type: EarningType = 'dividend',
-): EarningRecord => ({
-  assetId: PETR,
-  institutionId: institutionIdOf('1'),
-  type,
-  payDate: day(payDate),
-  amount: Money.fromString(amount),
-  quantity: Quantity.fromString('100'),
-});
+): EarningRecord => {
+  const fields = {
+    assetId: PETR,
+    institutionId: institutionIdOf('1'),
+    payDate: day(payDate),
+    amount: Money.fromString(amount),
+    quantity: Quantity.fromString('100'),
+  };
+  // A leilão carries the held position (BR-014-12); the totals here never read it.
+  return type === 'leilao_fracoes'
+    ? { ...fields, type, heldQuantity: Quantity.fromString('100') }
+    : { ...fields, type };
+};
 
 describe('totalsByType (BR-014-01/02)', () => {
   it('separates JCP from dividends rather than folding them together', () => {
@@ -57,8 +62,27 @@ describe('totalsByType (BR-014-01/02)', () => {
       'jcp',
       'rendimento',
       'amortization',
+      'leilao_fracoes',
     ]);
     expect(totals.find((total) => total.type === 'amortization')?.amount.toString()).toBe('0');
+    expect(totals.find((total) => total.type === 'leilao_fracoes')?.amount.toString()).toBe('0');
+  });
+
+  /**
+   * DL-014-08: a bonificação fraction's auction cash is its own bucket — not
+   * rendimento, not dividend. 100,00 of rendimento and 2,80 of leilão
+   * (0,2 × 14,00) stay 100 and 2,8, five lines in all.
+   */
+  it('BR-014-01 — keeps leilão de frações apart from rendimento', () => {
+    const totals = totalsByType([
+      earning('100', '2026-03-10', 'rendimento'),
+      earning('2.80', '2026-03-12', 'leilao_fracoes'),
+    ]);
+
+    expect(totals).toHaveLength(5);
+    expect(totals.find((total) => total.type === 'rendimento')?.amount.toString()).toBe('100');
+    expect(totals.find((total) => total.type === 'leilao_fracoes')?.amount.toString()).toBe('2.8');
+    expect(totals.find((total) => total.type === 'dividend')?.amount.toString()).toBe('0');
   });
 
   it('sums the period, exactly', () => {

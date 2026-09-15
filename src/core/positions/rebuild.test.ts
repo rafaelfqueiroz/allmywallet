@@ -106,14 +106,22 @@ function generateHistory(seed: number, length: number): Transaction[] {
       rows.push((ratio === 2 ? base.split() : base.grupamento()).ratio(String(ratio)).build());
     } else if (quantity > 0 && roll < 0.45) {
       const bonus = 1 + Math.floor(random() * 5);
+      // #113: half the bonificações leave a 0,5 fraction that B3 removes the
+      // same day (`fracao_bonificacao`, BR-007-05a) and pays for at auction
+      // (`leilao_fracoes`, BR-014-01), so both new types cross this property.
+      const withFraction = random() < 0.5;
       held.set(key, quantity + bonus);
       rows.push(
         base
           .bonificacao()
-          .quantity(String(bonus))
+          .quantity(withFraction ? `${bonus}.5` : String(bonus))
           .price(random() < 0.5 ? '0' : '3.33')
           .build(),
       );
+      if (withFraction) {
+        rows.push(base.fracaoBonificacao().quantity('0.5').build());
+        rows.push(base.leilaoFracoes().quantity('0.5').price('14.07').build());
+      }
     } else if (roll < 0.55) {
       // Proventos: no position effect, but they must survive the round trip.
       rows.push(
@@ -315,6 +323,65 @@ describe('TS-08 — rebuild equals incremental', () => {
     expect(position?.state.averageCost.toString()).toBe('11');
     expect(position?.state.totalCost.toString()).toBe('2750');
     expect(position?.state.realizedGain.toString()).toBe('688');
+  });
+});
+
+describe('TS-08 / DL-007-06 — rebuild equals incremental across #113’s types', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  const clock = new FakeClock('2030-01-01T12:00:00Z');
+
+  it('agrees with a backdated buy, a bonificação fraction and its leilão, entered scrambled', async () => {
+    // Chronological, hand-computed:
+    //  2026-01-05  buy 100 @ 20,00             → 100,   total 2.000,00
+    //  2026-02-01  buy  20 @ 20,00 (backdated) → 120,   total 2.400,00, average 20,00
+    //  2026-03-10  bonificação 6,2, free       → 126,2, total 2.400,00
+    //  2026-03-10  fracao_bonificacao 0,2      → 126,   total 2.400,00
+    //                average = 2.400,00 ÷ 126 = 400 ÷ 21
+    //                        = 19,04761904761904761904761904761904761904 (40 sig., truncated)
+    //  2026-03-12  leilao_fracoes 0,2 @ 14,00  → no position effect
+    //  2026-04-15  sell 21 @ 25,00             → realized = (25,00 − 400/21) × 21
+    //                = 21 × 25,00 − 21 × 400/21
+    //                = 525,00 − 400,00 = 125,00, plus a truncation residue below
+    //                1e-36 (21 × a sub-1e-38 shortfall in the average) — so
+    //                asserted at the stored eight places.
+    //                qty 105, total 2.400,00 − 400,00 = 2.000,00 (same residue)
+    //                average carried: 19,04761904761904761904761904761904761904
+    const chronological = [
+      aTransaction().buy().on('2026-01-05').quantity('100').price('20.00').build(),
+      aTransaction().buy().on('2026-02-01').quantity('20').price('20.00').build(),
+      aTransaction().bonificacao().on('2026-03-10').quantity('6.2').price('0').build(),
+      aTransaction().fracaoBonificacao().on('2026-03-10').quantity('0.2').build(),
+      aTransaction().leilaoFracoes().on('2026-03-12').quantity('0.2').price('14.00').build(),
+      aTransaction().sell().on('2026-04-15').quantity('21').price('25.00').build(),
+    ];
+    const [buy, backdated, bonus, fraction, leilao, sell] = chronological;
+    if (!buy || !backdated || !bonus || !fraction || !leilao || !sell) throw new Error('fixture');
+    // The fraction and the sell arrive before what they draw on; the
+    // backdated buy arrives last.
+    const arrival = [fraction, sell, leilao, buy, bonus, backdated];
+
+    const incremental = deps(clock);
+    expect(await enterInArrivalOrder(incremental, arrival)).toBe(arrival.length);
+
+    const rebuilt = await rebuildPositions({
+      transactions: incremental.transactions,
+      positions: new FakePositionRepository(),
+    });
+    expect(rebuilt.ok).toBe(true);
+    if (!rebuilt.ok) return;
+
+    expect(fingerprint(await incremental.positions.list())).toEqual(fingerprint(rebuilt.value));
+
+    const [position] = rebuilt.value;
+    expect(position?.state.quantity.toString()).toBe('105');
+    expect(position?.state.averageCost.toString()).toBe(
+      '19.04761904761904761904761904761904761904',
+    );
+    expect(position?.state.totalCost.toDecimal().toFixed(8)).toBe('2000.00000000');
+    expect(position?.state.realizedGain.toDecimal().toFixed(8)).toBe('125.00000000');
   });
 });
 

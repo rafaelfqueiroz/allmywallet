@@ -6,7 +6,10 @@ import {
   type Clock,
 } from '@/core/shared/clock';
 import { AssetId, InstitutionId, WalletId, type UserId } from '@/core/shared/ids';
-import { Money, Quantity } from '@/core/shared/money';
+import { Money, Quantity, sumQuantity } from '@/core/shared/money';
+import type { Transaction } from '@/core/ledger/transaction';
+import { replayPositions } from '@/core/positions/replay';
+import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
 import { EARNING_TYPES } from '@/core/reporting/ports';
 import type {
   AllocationEvent,
@@ -327,14 +330,77 @@ export class DrizzleReportDataPort implements ReportDataPort {
       )
       .orderBy(asc(transactions.tradeDate));
 
-    return rows.map((row) => ({
-      assetId: AssetId.of(row.assetId),
-      institutionId: row.institutionId === null ? null : InstitutionId.of(row.institutionId),
-      type: row.type as EarningType,
-      payDate: row.tradeDate as BusinessDate,
-      amount: row.totalValue,
-      quantity: row.quantity,
-    }));
+    // No leilão in the window reads nothing more: the repository returns
+    // before querying for an empty asset list.
+    const heldOn = await this.heldOnPayDate(
+      rows.filter((row) => row.type === 'leilao_fracoes').map((row) => AssetId.of(row.assetId)),
+      to,
+    );
+
+    return rows.map((row): EarningRecord => {
+      const fields = {
+        assetId: AssetId.of(row.assetId),
+        institutionId: row.institutionId === null ? null : InstitutionId.of(row.institutionId),
+        payDate: row.tradeDate as BusinessDate,
+        amount: row.totalValue,
+        quantity: row.quantity,
+      };
+      const type = row.type as EarningType;
+      return type === 'leilao_fracoes'
+        ? { ...fields, type, heldQuantity: heldOn(fields.assetId, fields.payDate) }
+        : { ...fields, type };
+    });
+  }
+
+  /**
+   * SPEC-014 BR-014-12 (#113 review) — the quantity held of an asset, across
+   * every institution, on a leilão de frações' pay date.
+   *
+   * A leilão row's quantity is the fraction B3 sold, so it cannot be the
+   * basis the wallet split is taken over; the held position is. Nothing
+   * stored holds a quantity as at a past date — `positions` is today's cache,
+   * `daily_valuation_snapshots` has no asset dimension, and the allocation log
+   * records wallets only — so it is replayed, through SPEC-007's own fold
+   * (`replayPositions`, inclusive of the pay date so a same-day
+   * `fracao_bonificacao` is already out), for the assets that paid a leilão
+   * and no other. One ledger read per call; one fold per distinct
+   * `(asset, pay date)`.
+   *
+   * A ledger that cannot be replayed throws rather than guessing a basis: the
+   * position cache and every valuation would be wrong with it, and a wallet
+   * split over an invented quantity is a wrong figure nobody could detect.
+   */
+  private async heldOnPayDate(
+    assetIds: readonly AssetId[],
+    upTo: BusinessDate,
+  ): Promise<(assetId: AssetId, payDate: BusinessDate) => Quantity> {
+    const ledger = await new DrizzleTransactionRepository(this.tx, this.userId).listForAssetsUpTo(
+      [...new Set(assetIds)],
+      upTo,
+    );
+    const byAsset = new Map<AssetId, Transaction[]>();
+    for (const transaction of ledger) {
+      const rows = byAsset.get(transaction.assetId) ?? [];
+      rows.push(transaction);
+      byAsset.set(transaction.assetId, rows);
+    }
+
+    const memo = new Map<string, Quantity>();
+    return (assetId, payDate) => {
+      const key = `${assetId}|${payDate}`;
+      const cached = memo.get(key);
+      if (cached !== undefined) return cached;
+
+      const replayed = replayPositions(byAsset.get(assetId) ?? [], { asOf: payDate });
+      if (!replayed.ok) {
+        throw new Error(
+          `listEarnings: the ledger of asset ${assetId} does not replay to ${payDate} (${replayed.error.code})`,
+        );
+      }
+      const held = sumQuantity(replayed.value.map((position) => position.state.quantity));
+      memo.set(key, held);
+      return held;
+    };
   }
 
   /**

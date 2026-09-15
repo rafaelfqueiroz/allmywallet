@@ -157,15 +157,17 @@ interface Group {
 
 /**
  * #117 — the types that take shares out of a position (`adjustment` when
- * negative, `grupamento` when it groups). Removing one only raises the
- * quantity every later row sees, so when a replay stops at a stored row the
- * staged disposal nearest before it is the row to refuse.
+ * negative, `grupamento` when it groups, `fracao_bonificacao` always — SPEC-007
+ * BR-007-05a). Removing one only raises the quantity every later row sees, so
+ * when a replay stops at a stored row the staged disposal nearest before it is
+ * the row to refuse.
  */
 const DISPOSALS: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'sell',
   'transfer_out',
   'grupamento',
   'adjustment',
+  'fracao_bonificacao',
 ]);
 
 /**

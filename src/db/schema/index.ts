@@ -12,6 +12,7 @@ export * from './transactions';
 export * from './import-rows';
 export * from './positions';
 export * from './market';
+export * from './corporate-event-factors';
 export * from './valuation';
 export * from './observability';
 export * from './wallets';

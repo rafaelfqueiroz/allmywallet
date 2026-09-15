@@ -3,7 +3,7 @@ import type { DomainError } from '@/core/shared/domain-error';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { Quantity } from '@/core/shared/money';
 import { makePosition, type PositionState } from '@/core/positions/position-state';
-import { invalidEventRatio } from '@/core/positions/errors';
+import { insufficientQuantity, invalidEventRatio } from '@/core/positions/errors';
 import { applyAcquisition, type AcquisitionInput } from '@/core/positions/average-cost';
 
 /**
@@ -96,6 +96,54 @@ export function applyShareRatioEvent(
  */
 export function applyBonus(state: PositionState, input: AcquisitionInput): PositionState {
   return applyAcquisition(state, input);
+}
+
+/**
+ * SPEC-007 BR-007-05a — **Fraction left by a bonificação:** the fractional
+ * quantity B3 removes leaves the position with **total cost unchanged**
+ * (average recomputed on the remaining quantity) and **no realized gain**. The
+ * auction cash is a separate `leilao_fracoes` provento (SPEC-014 BR-014-01),
+ * which this handler never sees.
+ *
+ * Why not a sale (DL-007-09): IRPF guidance declares a bonificação fraction's
+ * auction proceeds as exempt income without changing *preço médio*. A split or
+ * grupamento fraction is the opposite case — an alienação — and is recorded as
+ * a plain `sell` (BR-007-04b), never as this type.
+ *
+ * Why total cost stays rather than leaving at average cost like a sale: the
+ * bonus shares arrived at the value B3 attributed (usually zero, BR-007-05), so
+ * the fraction carries no cost of its own to take with it. Holding total cost
+ * and recomputing the average is the bonificação's own arithmetic run in
+ * reverse on the quantity alone.
+ *
+ * Worked example (DV-17):
+ *
+ *   Before       100 shares, total cost 2.000,00, average 20,00
+ *   Bonificação  5,2 shares, nothing attributed (5,2 %)
+ *                105,2 shares, total cost 2.000,00
+ *   Fraction     0,2 removed
+ *   After        105 shares
+ *                total cost = 2.000,00            ← unchanged
+ *                average    = 2.000,00 ÷ 105      = 19,047619047619…  (repeating "047619")
+ *                realized gain                    ← unchanged
+ *
+ * Removing more than is held is refused with BR-006-15's insufficient-quantity
+ * error, the same one a sale gets. Removing exactly what is held closes the
+ * position: `makePosition` resets the lot (BR-007-07), the total cost of a
+ * fraction-only position goes with it, and still no gain is realised
+ * (#113 Decision log row 11).
+ */
+export function applyBonusFractionRemoval(
+  state: PositionState,
+  quantity: Quantity,
+  date: BusinessDate,
+): Result<PositionState, DomainError> {
+  const remaining = state.quantity.minus(quantity);
+  if (remaining.isNegative()) {
+    return err(insufficientQuantity(state.quantity, quantity, date));
+  }
+  // No explicit average: BR-007-05a recomputes it from the unchanged total.
+  return ok(makePosition(remaining, state.totalCost, state.realizedGain));
 }
 
 /**

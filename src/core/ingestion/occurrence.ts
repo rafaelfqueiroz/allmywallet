@@ -57,10 +57,11 @@ export function planOccurrences<T extends OccurrenceCandidate>(
 }
 
 /**
- * `transactions.type` is `NOT NULL` with a 13-member CHECK (SPEC-006
- * BR-006-05), and BR-006-05 forbids a 14th value — so an unmapped B3 row still
- * needs *some* concrete `TransactionType` to satisfy the column. `rendimento`
- * is picked as the placeholder because it is the widest of the thirteen: its
+ * `transactions.type` is `NOT NULL` with a CHECK naming exactly BR-006-05's
+ * supported types (SPEC-006), and BR-006-05 admits no "unknown" value — so an
+ * unmapped B3 row still needs *some* concrete `TransactionType` to satisfy the
+ * column. `rendimento` is picked as the placeholder because it is the widest
+ * of them: its
  * quantity validation only forbids negative (`core/ledger/validate.ts`), it
  * carries no ratio, and — the property that matters here — the row is
  * excluded from every calculation by its `status` (`unclassified`), never by

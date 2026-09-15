@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { requireUserId } from '@/lib/session';
-import type { ActionState } from '@/lib/action-state';
+import { IDLE, INVALID_INPUT, failure, type ActionState } from '@/lib/action-state';
 import { IngestionErrorCode } from '@/core/ingestion/ports';
 import { env } from '@/lib/env';
 import { db } from '@/db/client';
@@ -13,7 +13,7 @@ import { AssetId, ImportBatchId, ImportRowId, InstitutionId } from '@/core/share
 import { Quantity } from '@/core/shared/money';
 import { BusinessDate, SystemClock } from '@/core/shared/clock';
 import { isErr } from '@/core/shared/result';
-import { TRANSACTION_TYPES, type TransactionType } from '@/core/ledger/transaction';
+import type { TransactionType } from '@/core/ledger/transaction';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
 import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
@@ -21,6 +21,7 @@ import { withIngestionAndWalletDeps, withIngestionDeps } from '@/app/(app)/impor
 import { handleImportCancel, saveUploadedFile } from '@/worker/handlers/import';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
+import { ClassifySchema } from '@/app/(app)/import/classify-schema';
 
 /**
  * AR-32: each action validates input with Zod at the boundary (DV-07),
@@ -186,26 +187,23 @@ export async function cancelBatchAction(formData: FormData): Promise<void> {
   redirect('/import');
 }
 
-const ClassifySchema = z.object({
-  rowId: z.string(),
-  type: z.enum(TRANSACTION_TYPES),
-  ratio: z.string().optional(),
-});
-
-export async function classifyRowAction(formData: FormData): Promise<void> {
+export async function classifyRowAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const userId = await requireUserId();
   const parsed = ClassifySchema.safeParse({
     rowId: formData.get('rowId'),
     type: formData.get('type'),
     ratio: formData.get('ratio') || undefined,
   });
-  if (!parsed.success) return;
+  if (!parsed.success) return INVALID_INPUT;
 
   const result = await withIngestionAndWalletDeps(userId, async (deps, wallets) => {
     const classified = await classifyImportRow(deps, {
       rowId: ImportRowId.of(parsed.data.rowId),
       type: parsed.data.type as TransactionType,
-      ratio: parsed.data.ratio ? Quantity.fromString(parsed.data.ratio) : null,
+      ratio: parsed.data.ratio === null ? null : Quantity.fromString(parsed.data.ratio),
     });
     if (!classified.ok) return classified;
 
@@ -216,9 +214,13 @@ export async function classifyRowAction(formData: FormData): Promise<void> {
 
     return classified;
   });
-  if (isErr(result)) return;
+  // BR-006-15 / #113: a refusal — a missing ratio, an unstated price, a row
+  // that is no longer classifiable — is explained on screen, not swallowed.
+  // See `action-state.ts` and `components/patterns/action-form.tsx`.
+  if (isErr(result)) return failure(result.error);
 
   revalidatePath('/import');
+  return IDLE;
 }
 
 const AcceptAdjustmentSchema = z.object({

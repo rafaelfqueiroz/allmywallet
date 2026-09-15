@@ -6,7 +6,7 @@ import type {
   TransactionId,
   UserId,
 } from '@/core/shared/ids';
-import type { Money, Quantity } from '@/core/shared/money';
+import { Money, type Quantity } from '@/core/shared/money';
 
 /**
  * SPEC-006 — the transaction entity.
@@ -17,7 +17,19 @@ import type { Money, Quantity } from '@/core/shared/money';
  * cannot be reproduced by replaying these rows.
  */
 
-/** SPEC-006 BR-006-05: the thirteen supported types, and no others. */
+/**
+ * SPEC-006 BR-006-05: the fifteen supported types, and no others.
+ *
+ * The last two arrived with #113 and are appended rather than slotted in, so
+ * no existing index moves:
+ *
+ *   - `leilao_fracoes` — the cash B3 pays for a bonificação fraction it sold at
+ *     auction. A provento (SPEC-014 BR-014-01, DL-014-08), not a sale.
+ *   - `fracao_bonificacao` — the fractional quantity a bonificação left behind,
+ *     removed at unchanged total cost with no realised gain (SPEC-007
+ *     BR-007-05a). A split or grupamento fraction is **not** this type: it is a
+ *     plain `sell` at the auction value (BR-007-04b, DL-007-09).
+ */
 export const TRANSACTION_TYPES = [
   'buy',
   'sell',
@@ -32,6 +44,8 @@ export const TRANSACTION_TYPES = [
   'transfer_in',
   'transfer_out',
   'adjustment',
+  'leilao_fracoes',
+  'fracao_bonificacao',
 ] as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
@@ -105,9 +119,9 @@ export interface Transaction {
 
 /**
  * Types that move quantity or cost basis. Everything else is recognised
- * elsewhere: dividends, JCP, rendimentos and amortizações are proventos
- * (SPEC-014), recognised at pay date and never assumed reinvested, so they
- * leave the position untouched.
+ * elsewhere: dividends, JCP, rendimentos, amortizações and leilões de frações
+ * are proventos (SPEC-014), recognised at pay date and never assumed
+ * reinvested, so they leave the position untouched.
  */
 const POSITION_AFFECTING_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'buy',
@@ -119,6 +133,8 @@ const POSITION_AFFECTING_TYPES: ReadonlySet<TransactionType> = new Set<Transacti
   'transfer_in',
   'transfer_out',
   'adjustment',
+  // SPEC-007 BR-007-05a: quantity leaves; total cost stays.
+  'fracao_bonificacao',
 ]);
 
 export function affectsPosition(type: TransactionType): boolean {
@@ -131,6 +147,8 @@ const EARNINGS_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'jcp',
   'rendimento',
   'amortization',
+  // SPEC-014 BR-014-01 / DL-014-08: a bonificação fraction's auction cash.
+  'leilao_fracoes',
 ]);
 
 export function isEarnings(type: TransactionType): boolean {
@@ -157,6 +175,16 @@ export function isActive(transaction: Transaction): boolean {
  * Worked example (DV-17): 100 PETR4 at R$ 32,15 with R$ 4,90 of fees is
  * 100 × 32,15 = 3.215,00 plus 4,90 = **3.219,90** on a buy, and
  * 3.215,00 − 4,90 = **3.210,10** on a sell.
+ *
+ * SPEC-007 BR-007-05a: a `fracao_bonificacao` moves no cash, so its total is
+ * **zero** whatever price or fees the row carries. The cash for the fraction
+ * is the separate `leilao_fracoes` provento (SPEC-014 BR-014-01); a total here
+ * would show the same money twice in the history list and the export — once
+ * as the removal, once as the auction — and read as income twice. The
+ * position engine never reads either field for this type
+ * (`core/positions/apply-transaction.ts`), so the zero changes no figure.
+ * Worked example: removing 0,2 ITSA4 entered at 14,00 is 0, not 0,2 × 14,00 =
+ * 2,80; the 2,80 lives on the leilão row alone.
  */
 export function computeTotalValue(
   type: TransactionType,
@@ -164,6 +192,7 @@ export function computeTotalValue(
   unitPrice: Money,
   fees: Money,
 ): Money {
+  if (type === 'fracao_bonificacao') return Money.zero();
   const gross = unitPrice.times(quantity);
   if (type === 'sell' || type === 'transfer_out') return gross.minus(fees);
   return gross.plus(fees);

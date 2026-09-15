@@ -72,8 +72,12 @@ const RATIO_EVENTS = new Set(['split', 'grupamento']);
  * behaviour and lands them in the Needs attention queue rather than breaking
  * an invariant. Auto-following the existing split would be the same guess
  * BR-010-11 refuses on the buy side. Tracked separately on #13.
+ *
+ * SPEC-007 BR-007-05a (#113): `fracao_bonificacao` is here too. B3 removed the
+ * shares, so a wallet still holding them would leave allocated > held and fail
+ * `assertWithinHoldings`, rolling back the whole commit.
  */
-const REDUCING_TYPES = new Set(['sell', 'transfer_out']);
+const REDUCING_TYPES = new Set(['sell', 'transfer_out', 'fracao_bonificacao']);
 
 export interface AllocationMade {
   readonly assetId: AssetId;

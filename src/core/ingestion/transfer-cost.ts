@@ -107,8 +107,9 @@ export function withCarriedCost(credit: Transaction, cost: Money): Transaction {
  * `created_at`, id).
  *
  * That cut includes every same-day row ranked before a `transfer_out` — a
- * bonificação (rank 0), a buy or another transfer in (rank 1), an adjustment
- * (rank 2) — and it is identical on every re-import, because by then the
+ * bonificação (rank 0), a buy or another transfer in (rank 1), a bonificação
+ * fraction removal (rank 2), an adjustment (rank 3) — and it is identical on
+ * every re-import, because by then the
  * ledger holds the same rows with the same `created_at` and ids.
  *
  * `history(asset, institution)` is everything the ledger holds or this commit

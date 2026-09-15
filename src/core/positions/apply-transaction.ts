@@ -5,6 +5,7 @@ import type { PositionState } from '@/core/positions/position-state';
 import { applyAcquisition, applySale, applyWithdrawal } from '@/core/positions/average-cost';
 import {
   applyBonus,
+  applyBonusFractionRemoval,
   applyShareRatioEvent,
   applySubscription,
 } from '@/core/positions/corporate-events';
@@ -13,8 +14,8 @@ import { missingEventRatio } from '@/core/positions/errors';
 /**
  * The one place a transaction type is turned into an effect on a position.
  *
- * Exhaustive by construction: every one of BR-006-05's thirteen types has a
- * case, and the switch has **no `default`**, so adding a fourteenth type stops
+ * Exhaustive by construction: every one of BR-006-05's fifteen types has a
+ * case, and the switch has **no `default`**, so adding a sixteenth type stops
  * the build rather than silently falling through to "no effect". A default
  * branch here would be the cheapest possible way to lose a corporate event.
  */
@@ -50,6 +51,12 @@ export function applyTransaction(
     case 'bonificacao':
       return ok(applyBonus(state, { quantity, unitPrice, fees }));
 
+    // SPEC-007 BR-007-05a: a bonificação fraction leaves at unchanged total
+    // cost, realising nothing. `unitPrice` and `fees` are deliberately unread —
+    // the auction cash is the separate `leilao_fracoes` provento.
+    case 'fracao_bonificacao':
+      return applyBonusFractionRemoval(state, quantity, tradeDate);
+
     // SPEC-007 BR-007-04. Both types share the arithmetic; only the ratio
     // differs (>1 splits, <1 groups).
     case 'split':
@@ -79,12 +86,15 @@ export function applyTransaction(
      * change in quantity and never assumed reinvested — so the position is
      * returned untouched. `amortization` sits here too: it returns principal
      * in cash, which SPEC-014 reports and SPEC-009 values; it is not a share
-     * count and does not move cost basis in v1.
+     * count and does not move cost basis in v1. So does `leilao_fracoes`
+     * (SPEC-014 BR-014-01): the fraction it pays for already left the position
+     * through `fracao_bonificacao` (SPEC-007 BR-007-05a).
      */
     case 'dividend':
     case 'jcp':
     case 'rendimento':
     case 'amortization':
+    case 'leilao_fracoes':
       return ok(state);
   }
 }

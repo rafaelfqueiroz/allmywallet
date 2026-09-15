@@ -11,6 +11,7 @@ import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
 import { tryUserId } from '@/lib/session';
 import { loadEarnings } from '@/app/(app)/reports/earnings/data';
 import { IncomeChart } from '@/app/(app)/reports/earnings/_components/IncomeChart';
+import { ByTypeBreakdown } from '@/app/(app)/reports/earnings/_components/ByTypeBreakdown';
 import { PageShell } from '@/components/patterns/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -117,15 +118,13 @@ export default async function EarningsPage({ searchParams }: PageProps) {
           <Headline report={report} labels={headlineLabels(tp)} />
 
           <Section title={tp('byType.title')} description={tp('byType.description')}>
-            <Grid cols={4} gap="md">
-              {report.byType.map((total) => (
-                <StatCard
-                  key={total.type}
-                  label={tp(`byType.${total.type}`)}
-                  value={<Money value={total.amount} />}
-                />
-              ))}
-            </Grid>
+            <ByTypeBreakdown
+              items={report.byType.map((total) => ({
+                type: total.type,
+                label: tp(`byType.${total.type}`),
+                amount: total.amount,
+              }))}
+            />
           </Section>
 
           <Section title={tp('monthly.title')} description={tp('monthly.description')}>

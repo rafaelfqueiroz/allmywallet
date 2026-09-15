@@ -206,11 +206,11 @@
     "MISSING_EVENT_RATIO": "O evento de {date} não informa a proporção do desdobramento ou grupamento, então não é possível recalcular o preço médio.",
     "INVALID_EVENT_RATIO": "A proporção {ratio} informada para o evento de {date} não é válida — ela precisa ser maior que zero.",
     "TRANSACTION_NOT_FOUND": "Esta transação não existe mais. Atualize a página e tente de novo.",
-    "INVALID_QUANTITY": "A quantidade {quantity} não é válida para uma transação do tipo {type}.",
+    "INVALID_QUANTITY": "A quantidade {quantity} não é válida para este tipo de transação.",
     "NEGATIVE_UNIT_PRICE": "O preço unitário não pode ser negativo.",
     "NEGATIVE_FEES": "As taxas não podem ser negativas.",
-    "RATIO_REQUIRED": "Informe a proporção do {type} — por exemplo, 2 para um desdobramento de 1:2.",
-    "RATIO_NOT_APPLICABLE": "Uma transação do tipo {type} não tem proporção. Verifique se o tipo está correto.",
+    "RATIO_REQUIRED": "Informe a proporção do desdobramento ou grupamento — por exemplo, 2 para um desdobramento de 1:2 ou 0,1 para um grupamento de 10:1.",
+    "RATIO_NOT_APPLICABLE": "Este tipo de transação não tem proporção. Verifique se o tipo está correto.",
     "INVALID_RATIO": "A proporção {ratio} precisa ser maior que zero.",
     "FUTURE_TRADE_DATE": "A data {tradeDate} está no futuro. O extrato registra apenas operações já realizadas.",
     "EMPTY_SELECTION": "Selecione ao menos uma transação.",
@@ -222,6 +222,7 @@
     "IMPORT_EMPTY_EXTRACT": "O arquivo não contém nenhuma linha reconhecível.",
     "IMPORT_ROW_NOT_FOUND": "Este item não existe mais.",
     "IMPORT_ROW_NOT_UNCLASSIFIED": "Este item já foi classificado.",
+    "IMPORT_ROW_PRICE_NOT_STATED": "A B3 não informou o preço desta linha. Este tipo precisa de um preço para ser classificado.",
     "INGESTION_UNRECOGNIZED_STRUCTURE": "Não reconhecemos a estrutura deste arquivo. Confira se é um extrato de Movimentação, Negociação ou Posição exportado da B3.",
     "INGESTION_AMBIGUOUS_STRUCTURE": "Este arquivo corresponde a mais de um tipo de extrato — não foi possível decidir automaticamente.",
     "INGESTION_FILE_TOO_LARGE": "Cada arquivo precisa ter no máximo {maxUploadMb} MB. Nenhum dos arquivos foi enviado.",
@@ -441,6 +442,8 @@
       "applied": "Esta linha já está no histórico, por outra importação."
     },
     "classifyLabel": "Classificar como",
+    "classifyRatioLabel": "Proporção",
+    "classifyRatioHint": "Só para desdobramento e grupamento — 10 para desdobramento 1:10, 0,1 para grupamento 10:1.",
     "classifySubmit": "Classificar",
     "reconciliationTitle": "Reconciliação com a posição da B3",
     "reconciliationStatus": {
@@ -502,7 +505,9 @@
       "subscription": "Subscrição",
       "transfer_in": "Transferência de entrada",
       "transfer_out": "Transferência de saída",
-      "adjustment": "Ajuste"
+      "adjustment": "Ajuste",
+      "leilao_fracoes": "Leilão de frações",
+      "fracao_bonificacao": "Fração de bonificação"
     },
     "summary": {
       "title": "O que esta importação mudou nas suas carteiras",
@@ -1077,7 +1082,7 @@
     "description": "Quanto sua carteira paga — e se isso está crescendo.",
     "headline": {
       "total": "Recebido no período",
-      "totalHint": "Soma de dividendos, JCP, rendimentos e amortizações, na data em que o dinheiro entrou.",
+      "totalHint": "Soma de dividendos, JCP, rendimentos, amortizações e leilões de frações, na data em que o dinheiro entrou.",
       "yieldOnCost": "Yield on cost",
       "yieldOnCostHint": "O que os proventos do período representam sobre o custo da carteira — quanto o seu dinheiro rende, não quanto renderia para quem comprasse hoje.",
       "growth": "Variação sobre o período anterior",
@@ -1091,7 +1096,8 @@
       "dividend": "Dividendos",
       "jcp": "JCP",
       "rendimento": "Rendimentos",
-      "amortization": "Amortizações"
+      "amortization": "Amortizações",
+      "leilao_fracoes": "Leilão de frações"
     },
     "monthly": {
       "title": "Mês a mês",

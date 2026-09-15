@@ -107,6 +107,54 @@ describe('reports and the dashboard read snapshots, not the ledger (SPEC-016 BR-
     ).toEqual([]);
   });
 
+  /**
+   * SPEC-011 BR-011-13 / DL-011-07, amended (#113). The reports **route**
+   * wires the report ports by hand, so a replay could enter one directory
+   * above `core/reporting` and the scan above would never see it — which is
+   * exactly how the one sanctioned replay first arrived unnoticed.
+   *
+   * Exactly one exception: wallet-scoped attribution of a `leilao_fracoes`
+   * provento needs the quantity held on its payment date, which no stored
+   * figure carries, so `data.ts` replays only the assets that paid one, up to
+   * the period end. The allowance is by file **and** by purpose: `data.ts`
+   * must still narrow the replayed assets to the rows of that type, by the
+   * filter expression itself — a comment or a type mention is not enough,
+   * because widening the filter to every earning asset would replay every
+   * earning asset's whole history on every Earnings and Goals render and a
+   * word-match would still pass.
+   */
+  it('the reports route reads no ledger, except the named leilão-de-frações replay', () => {
+    const reportsRouteDir = join(process.cwd(), 'src/app/(app)/reports');
+    const allowed = join(reportsRouteDir, 'data.ts');
+    const files = tsSourceFiles(reportsRouteDir);
+    expect(files.length).toBeGreaterThan(0);
+
+    const violations: string[] = [];
+    for (const file of files) {
+      const contents = readFileSync(file, 'utf8');
+      if (!LEDGER_IMPORT.test(contents) && !TRANSACTIONS_TABLE.test(contents)) continue;
+      // The purpose is checked by the code that bounds the replay, not by a
+      // word: only the rows of that type pick the assets, and each replay
+      // stops at the payment date.
+      if (
+        file === allowed &&
+        /\.filter\(\s*\(\s*row\s*\)\s*=>\s*row\.type\s*===\s*'leilao_fracoes'\s*\)/.test(
+          contents,
+        ) &&
+        /replayPositions\([^;]*\{\s*asOf:\s*payDate\s*\}\s*\)/.test(contents)
+      ) {
+        continue;
+      }
+      violations.push(file);
+    }
+
+    expect(
+      violations,
+      'SPEC-011 BR-011-13: the reports route reads snapshots. The only ledger replay allowed is ' +
+        "data.ts's leilão-de-frações held-quantity basis (DL-011-07, #113).",
+    ).toEqual([]);
+  });
+
   it('no valuation module reads the ledger without dealing in snapshots', () => {
     // SPEC-009 legitimately replays the ledger to BUILD snapshots, so the
     // rule here is the weaker one: a file that touches the ledger must be in
