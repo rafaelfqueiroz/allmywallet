@@ -11,8 +11,8 @@ import {
 } from '@/core/ledger/transaction';
 import { aTransaction } from '@/core/ledger/test-support/transaction-builder';
 
-describe('SPEC-006 BR-006-05 — the thirteen supported types', () => {
-  it('names exactly the thirteen the spec lists, in the spec’s order', () => {
+describe('SPEC-006 BR-006-05 — the fifteen supported types', () => {
+  it('names exactly the fifteen the spec lists, #113’s two appended', () => {
     expect([...TRANSACTION_TYPES]).toEqual([
       'buy',
       'sell',
@@ -27,6 +27,8 @@ describe('SPEC-006 BR-006-05 — the thirteen supported types', () => {
       'transfer_in',
       'transfer_out',
       'adjustment',
+      'leilao_fracoes',
+      'fracao_bonificacao',
     ]);
   });
 
@@ -46,7 +48,12 @@ describe('SPEC-006 BR-006-05 — the thirteen supported types', () => {
       'jcp',
       'rendimento',
       'amortization',
+      'leilao_fracoes',
     ]);
+    // SPEC-007 BR-007-05a / SPEC-014 BR-014-01: the fraction moves the
+    // position; its auction cash is income.
+    expect(affectsPosition('fracao_bonificacao')).toBe(true);
+    expect(isEarnings('leilao_fracoes')).toBe(true);
   });
 
   it('requires a ratio for exactly the two share-base ratio events', () => {

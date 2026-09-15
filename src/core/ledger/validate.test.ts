@@ -61,6 +61,7 @@ describe('validateTransactionDraft', () => {
       'transfer_in',
       'transfer_out',
       'bonificacao',
+      'fracao_bonificacao',
     ];
 
     it.each(POSITIVE_ONLY)('refuses a zero quantity on a %s', (type) => {

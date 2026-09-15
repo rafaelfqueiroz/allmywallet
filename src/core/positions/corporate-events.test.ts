@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
 import { Money, Quantity } from '@/core/shared/money';
-import { applyAcquisition } from '@/core/positions/average-cost';
+import { applyAcquisition, applySale } from '@/core/positions/average-cost';
 import {
   applyBonus,
+  applyBonusFractionRemoval,
   applyShareRatioEvent,
   applySubscription,
 } from '@/core/positions/corporate-events';
@@ -139,6 +140,101 @@ describe('SPEC-007 BR-007-05 — bonificação', () => {
     expect(result.quantity.toString()).toBe('110');
     expect(result.totalCost.toString()).toBe('1080');
     expect(result.averageCost.toDecimal().toFixed(10)).toBe('9.8181818181');
+  });
+});
+
+describe('SPEC-007 BR-007-05a — fraction left by a bonificação', () => {
+  /** 100 shares at 20,00 — total cost 2.000,00 — with 42,50 already realised. */
+  const BEFORE: PositionState = {
+    ...applyAcquisition(EMPTY_POSITION, {
+      quantity: Quantity.fromString('100'),
+      unitPrice: Money.fromString('20.00'),
+      fees: Money.zero(),
+    }),
+    realizedGain: Money.fromString('42.50'),
+  };
+
+  /**
+   * Bonificação of 5,2 shares, nothing attributed (BR-007-05):
+   *   qty     = 100 + 5,2          = 105,2
+   *   total   = 2.000,00           ← unchanged
+   *   average = 2.000,00 ÷ 105,2   = 5.000 ÷ 263 = 19,01140684…
+   *     long division: 5.000 − 263 × 19 = 3 → 30 (0), 300 (1 r37), 370 (1 r107),
+   *     1.070 (4 r18), 180 (0), 1.800 (6 r222), 2.220 (8 r116), 1.160 (4 r108)
+   */
+  const BONUSED = applyBonus(BEFORE, {
+    quantity: Quantity.fromString('5.2'),
+    unitPrice: Money.zero(),
+    fees: Money.zero(),
+  });
+
+  it('the bonificação leaves 105,2 shares at an unchanged 2.000,00', () => {
+    expect(BONUSED.quantity.toString()).toBe('105.2');
+    expect(BONUSED.totalCost.toString()).toBe('2000');
+    expect(BONUSED.averageCost.toDecimal().toFixed(8)).toBe('19.01140684');
+  });
+
+  it('removing the 0,2 fraction keeps total cost and recomputes the average on 105', () => {
+    // qty     = 105,2 − 0,2       = 105
+    // total   = 2.000,00          ← unchanged (BR-007-05a)
+    // average = 2.000,00 ÷ 105    = 400 ÷ 21 = 19,047619047619…  (repeating "047619")
+    //   400 − 21 × 19 = 1 → 1 ÷ 21 = 0,047619 047619 …
+    //   At Money's 40 significant digits, truncated: 2 integer digits + 38
+    //   decimals = six "047619" groups (36) + "04".
+    // realized = 42,50            ← unchanged, a fraction removal is not a sale
+    const result = applyBonusFractionRemoval(BONUSED, Quantity.fromString('0.2'), DATE);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.quantity.toString()).toBe('105');
+    expect(result.value.totalCost.toString()).toBe('2000');
+    expect(result.value.averageCost.toString()).toBe('19.04761904761904761904761904761904761904');
+    expect(result.value.realizedGain.toString()).toBe('42.5');
+  });
+
+  it('refuses removing more than held, with the same error a sale gets (BR-006-15)', () => {
+    // 105,2 held, 105,3 requested — refused, never clamped to zero.
+    const removal = applyBonusFractionRemoval(BONUSED, Quantity.fromString('105.3'), DATE);
+    const sale = applySale(BONUSED, {
+      quantity: Quantity.fromString('105.3'),
+      unitPrice: Money.fromString('1.00'),
+      fees: Money.zero(),
+      date: DATE,
+    });
+
+    expect(removal.ok).toBe(false);
+    if (removal.ok || sale.ok) throw new Error('both must be refused');
+    expect(removal.error.code).toBe('INSUFFICIENT_QUANTITY');
+    expect(removal.error.context).toEqual({
+      held: '105.2',
+      requested: '105.3',
+      date: '2026-04-20',
+    });
+    expect(removal.error).toEqual(sale.error);
+  });
+
+  it('removing a fraction-only position closes it, resets the lot, realises nothing (BR-007-07)', () => {
+    // A position of 0,2 at 15,00 each: total 0,2 × 15,00 = 3,00.
+    // Removing 0,2 → qty 0. The 3,00 goes with the lot (reset), and realized
+    // gain stays at 42,50 — #113 Decision log row 11, owner-confirmed.
+    const fractionOnly: PositionState = {
+      ...applyAcquisition(EMPTY_POSITION, {
+        quantity: Quantity.fromString('0.2'),
+        unitPrice: Money.fromString('15.00'),
+        fees: Money.zero(),
+      }),
+      realizedGain: Money.fromString('42.50'),
+    };
+    expect(fractionOnly.totalCost.toString()).toBe('3');
+
+    const result = applyBonusFractionRemoval(fractionOnly, Quantity.fromString('0.2'), DATE);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.quantity.toString()).toBe('0');
+    expect(result.value.totalCost.toString()).toBe('0');
+    expect(result.value.averageCost.toString()).toBe('0');
+    expect(result.value.realizedGain.toString()).toBe('42.5');
   });
 });
 

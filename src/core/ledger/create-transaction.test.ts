@@ -143,7 +143,7 @@ describe('SPEC-006 BR-006-11 — createTransaction', () => {
     expect(positions[0]?.state.quantity.toString()).toBe('100');
   });
 
-  it('AC — all thirteen types can be created', async () => {
+  it('AC — all fifteen types can be created', async () => {
     const state = deps();
     // Opened first, so disposals have something to draw on.
     await createTransaction(
@@ -366,7 +366,7 @@ describe('SPEC-006 BR-006-11 — createTransaction', () => {
     // A cheap structural guard: the input type is what is stored, with no
     // silent remapping in between.
     const types: TransactionType[] = [...TRANSACTION_TYPES];
-    expect(new Set(types).size).toBe(13);
+    expect(new Set(types).size).toBe(15);
     expect(aTransaction().build().type).toBe('buy');
   });
 });

@@ -33,13 +33,13 @@ describe('SPEC-006 BR-006-13 — deleteTransaction', () => {
   });
 
   /**
-   * The last third of "all thirteen transaction types can be created, edited
+   * The last third of "all fifteen transaction types can be created, edited
    * and deleted". Each type is deleted from a ledger that also holds an
    * opening buy, so removing it leaves a *replayable* history — the guard
    * BR-006-15 applies to a deletion is about what survives, and deleting the
-   * only row of a position would test the empty case thirteen times instead.
+   * only row of a position would test the empty case fifteen times instead.
    */
-  it('AC — every one of the thirteen types can be deleted', async () => {
+  it('AC — every one of the fifteen types can be deleted', async () => {
     for (const type of TRANSACTION_TYPES) {
       resetTransactionSequence();
       const opening = aTransaction().buy().on('2026-01-05').quantity('1000').price('10.00').build();

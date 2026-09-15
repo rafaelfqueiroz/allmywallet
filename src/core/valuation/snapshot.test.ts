@@ -183,6 +183,8 @@ describe('externalFlow — what TWR will have to neutralise, and nothing else', 
       aTransaction().split().ratio('2').build(),
       aTransaction().grupamento().ratio('0.1').build(),
       aTransaction().bonificacao().quantity('10').build(),
+      aTransaction().fracaoBonificacao().quantity('0.2').build(),
+      aTransaction().leilaoFracoes().quantity('0.2').price('14.00').build(),
       aTransaction().adjustment().quantity('1').price('0').build(),
     ]) {
       expect(externalFlow(transaction).isZero(), transaction.type).toBe(true);
@@ -276,6 +278,32 @@ describe('BR-009-16 — the four figures on a snapshot', () => {
     // and never assumed reinvested.
     expect(to8(snapshot.earningsToDate)).toBe('103.00000000');
     // Proventos leave the position — and therefore the total — untouched.
+    expect(to8(snapshot.totalValue)).toBe('25811.92970588');
+  });
+
+  it('SPEC-014 BR-014-01: a leilão de frações counts in earnings, not contributions', async () => {
+    const h = harness();
+    seedPrices(h);
+    const ledger = [
+      ...threeMethodLedger(),
+      aTransaction().dividend().of('PETR4').on('2026-03-18').quantity('100').price('0.72').build(),
+      aTransaction()
+        .leilaoFracoes()
+        .of('PETR4')
+        .on('2026-03-19')
+        .quantity('0.2')
+        .price('14.00')
+        .build(),
+    ];
+    const context = await loadValuationContext(h.deps, ledger, d('2026-03-20'), d('2026-03-20'));
+    const valued = valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical');
+    if (!valued.ok) throw new Error('valuation failed');
+    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+
+    // 100 × 0,72 + 0,2 × 14,00 = 72,00 + 2,80 = 74,80
+    expect(to8(snapshot.earningsToDate)).toBe('74.80000000');
+    // Contributions unchanged from the three buys: 24.415,00.
+    expect(to8(snapshot.netContributions)).toBe('24415.00000000');
     expect(to8(snapshot.totalValue)).toBe('25811.92970588');
   });
 

@@ -30,6 +30,82 @@ function averageAt(transactions: readonly Transaction[], date: string) {
   return result.value;
 }
 
+describe('#113 — fractions left by corporate events, in sequence', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  it('BR-007-04b — a split-fraction sale is a plain sell: grupamento then sell 0,5', () => {
+    //  1. 2026-01-05  Buy 105 @ 10,00
+    //       total = 1.050,00, qty 105, average 10,00
+    //  2. 2026-02-10  Grupamento ratio 0,1
+    //       qty = 105 × 0,1 = 10,5; total 1.050,00; average 1.050,00 ÷ 10,5 = 100,00
+    //  3. 2026-02-12  Sell 0,5 @ 98,00 (the auction value), no fees
+    //       realized = (98,00 − 100,00) × 0,5 = −1,00
+    //       qty      = 10
+    //       total    = 1.050,00 − 100,00 × 0,5 = 1.000,00
+    //       average  = 100,00  ← unchanged by a sale (BR-007-03)
+    const history = [
+      aTransaction().buy().on('2026-01-05').quantity('105').price('10.00').build(),
+      aTransaction().grupamento().on('2026-02-10').ratio('0.1').build(),
+      aTransaction().sell().on('2026-02-12').quantity('0.5').price('98.00').build(),
+    ];
+
+    const grouped = averageAt(history, '2026-02-10');
+    expect(grouped.quantity.toString()).toBe('10.5');
+    expect(grouped.totalCost.toString()).toBe('1050');
+    expect(grouped.averageCost.toString()).toBe('100');
+
+    const sold = averageAt(history, '2026-02-12');
+    expect(sold.quantity.toString()).toBe('10');
+    expect(sold.totalCost.toString()).toBe('1000');
+    expect(sold.averageCost.toString()).toBe('100');
+    expect(sold.realizedGain.toString()).toBe('-1');
+  });
+
+  it('BR-007-05a / BR-007-15 — same day: bonificação, fraction, buy, sell, leilão', () => {
+    //  1. 2026-01-05  Buy 100 @ 20,00 → total 2.000,00
+    //  2. 2026-03-10, all on one date, built in reverse so only rank orders them:
+    //     a. bonificação 5,2, nothing attributed → qty 105,2, total 2.000,00
+    //     b. fracao_bonificacao 0,2              → qty 105,   total 2.000,00
+    //     c. buy 95 @ 20,00 = 1.900,00           → qty 200,   total 3.900,00
+    //                                               average 3.900,00 ÷ 200 = 19,50
+    //     d. sell 50 @ 21,50                     → realized (21,50 − 19,50) × 50 = 100,00
+    //                                               qty 150, total 3.900,00 − 19,50 × 50
+    //                                               = 3.900,00 − 975,00 = 2.925,00
+    //     e. leilao_fracoes 0,2 @ 14,00          → no position effect
+    const history = [
+      aTransaction().buy().on('2026-01-05').quantity('100').price('20.00').build(),
+      aTransaction().leilaoFracoes().on('2026-03-10').quantity('0.2').price('14.00').build(),
+      aTransaction().sell().on('2026-03-10').quantity('50').price('21.50').build(),
+      aTransaction().buy().on('2026-03-10').quantity('95').price('20.00').build(),
+      aTransaction().fracaoBonificacao().on('2026-03-10').quantity('0.2').build(),
+      aTransaction().bonificacao().on('2026-03-10').quantity('5.2').price('0').build(),
+    ];
+
+    const state = averageAt(history, '2026-03-10');
+    expect(state.quantity.toString()).toBe('150');
+    expect(state.totalCost.toString()).toBe('2925');
+    expect(state.averageCost.toString()).toBe('19.5');
+    expect(state.realizedGain.toString()).toBe('100');
+  });
+
+  it('BR-007-05a — the fraction applies after a same-day bonificação on a flat position', () => {
+    // Nothing held before 2026-03-10. Bonificação 5,2 → 5,2 shares; fraction
+    // 0,2 → 5. Ranked the other way round the removal would meet an empty
+    // position and be refused. The fraction is built first on purpose.
+    const history = [
+      aTransaction().fracaoBonificacao().on('2026-03-10').quantity('0.2').build(),
+      aTransaction().bonificacao().on('2026-03-10').quantity('5.2').price('0').build(),
+    ];
+
+    const state = averageAt(history, '2026-03-10');
+    expect(state.quantity.toString()).toBe('5');
+    expect(state.totalCost.toString()).toBe('0');
+    expect(state.realizedGain.toString()).toBe('0');
+  });
+});
+
 describe('TS-06 — buy → split → buy → bonificação → partial sell', () => {
   beforeEach(() => {
     resetTransactionSequence();

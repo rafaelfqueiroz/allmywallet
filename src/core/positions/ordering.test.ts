@@ -42,14 +42,67 @@ describe('replay ordering', () => {
       expect(typeRank('adjustment')).toBeLessThan(typeRank('sell'));
     });
 
-    it('assigns every one of BR-006-05’s thirteen types a rank', () => {
+    it('assigns every one of BR-006-05’s fifteen types a rank', () => {
       // A type with no rank would sort as NaN and make the comparator
       // non-transitive — which corrupts the fold in a way that depends on the
       // input array's length.
       for (const type of TRANSACTION_TYPES) {
         expect(Number.isInteger(typeRank(type))).toBe(true);
       }
-      expect(TRANSACTION_TYPES).toHaveLength(13);
+      expect(TRANSACTION_TYPES).toHaveLength(15);
+    });
+
+    it('BR-007-05a — ranks the bonificação fraction after share-base events and before every trade', () => {
+      for (const event of ['split', 'grupamento', 'bonificacao'] as const) {
+        expect(typeRank(event)).toBeLessThan(typeRank('fracao_bonificacao'));
+      }
+      for (const later of [
+        'buy',
+        'subscription',
+        'transfer_in',
+        'adjustment',
+        'sell',
+        'transfer_out',
+        'dividend',
+        'leilao_fracoes',
+      ] as const) {
+        expect(typeRank('fracao_bonificacao')).toBeLessThan(typeRank(later));
+      }
+    });
+
+    it('BR-014-01 — ranks leilão de frações with the other proventos', () => {
+      for (const provento of ['dividend', 'jcp', 'rendimento', 'amortization'] as const) {
+        expect(typeRank('leilao_fracoes')).toBe(typeRank(provento));
+      }
+    });
+
+    it('#113 — inserting rank 1 changed no pre-existing relative order', () => {
+      // The table as it stood before #113, written out literally so this test
+      // does not read the code it checks.
+      const BEFORE_113 = {
+        split: 0,
+        grupamento: 0,
+        bonificacao: 0,
+        buy: 1,
+        subscription: 1,
+        transfer_in: 1,
+        adjustment: 2,
+        sell: 3,
+        transfer_out: 3,
+        dividend: 4,
+        jcp: 4,
+        rendimento: 4,
+        amortization: 4,
+      } as const;
+      const types = Object.keys(BEFORE_113) as (keyof typeof BEFORE_113)[];
+      expect(types).toHaveLength(13);
+      for (const a of types) {
+        for (const b of types) {
+          expect(Math.sign(typeRank(a) - typeRank(b)), `${a} vs ${b}`).toBe(
+            Math.sign(BEFORE_113[a] - BEFORE_113[b]),
+          );
+        }
+      }
     });
   });
 
@@ -129,6 +182,24 @@ describe('replay ordering', () => {
       expect(sortForReplay([februaryBuy, january, march, februarySplit]).map((t) => t.id)).toEqual(
         expected,
       );
+    });
+
+    it('same day: bonificação, then its fraction, then buy, then sell, then provento', () => {
+      // Built in exactly the reverse order, so ids and created_at both point
+      // the wrong way and only the type rank can produce the expected order.
+      const provento = aTransaction().leilaoFracoes().on('2026-03-10').build();
+      const sell = aTransaction().sell().on('2026-03-10').build();
+      const buy = aTransaction().buy().on('2026-03-10').build();
+      const fraction = aTransaction().fracaoBonificacao().on('2026-03-10').build();
+      const bonus = aTransaction().bonificacao().on('2026-03-10').build();
+
+      expect(sortForReplay([provento, sell, buy, fraction, bonus]).map((t) => t.id)).toEqual([
+        bonus.id,
+        fraction.id,
+        buy.id,
+        sell.id,
+        provento.id,
+      ]);
     });
 
     it('handles an empty ledger', () => {

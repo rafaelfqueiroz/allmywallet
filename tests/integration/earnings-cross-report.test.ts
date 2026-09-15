@@ -92,6 +92,8 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
     await seed('buy', BUY, '100', '30');
     await seed('dividend', FIRST_PAYMENT, '100', '1.20');
     await seed('jcp', SECOND_PAYMENT, '100', '0.55');
+    // #113 / BR-014-01 — the fifth provento type must cross both paths too.
+    await seed('leilao_fracoes', SECOND_PAYMENT, '0.2', '14.00');
 
     await withTenant(
       userId,
@@ -226,9 +228,10 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
       throw new Error('expected a portfolio decomposition');
     }
 
-    // 100 × 1,20 + 100 × 0,55 = 175, by both routes: one summing the ledger's
-    // earning rows, the other differencing a stored cumulative column.
-    expect(proventos.total.toString()).toBe('175');
+    // 100 × 1,20 + 100 × 0,55 + 0,2 × 14,00 = 120 + 55 + 2,80 = 177,80, by
+    // both routes: one summing the ledger's earning rows, the other
+    // differencing a stored cumulative column.
+    expect(proventos.total.toString()).toBe('177.8');
     expect(patrimonio.decomposition.value.earnings.equals(proventos.total)).toBe(true);
   });
 
@@ -243,6 +246,6 @@ describe('SPEC-014 BR-014-13 — Proventos and Patrimônio agree on income', () 
     const { patrimonio, proventos } = await reports('wallet');
 
     expect(patrimonio.decomposition.kind).toBe('unavailable');
-    expect(proventos.total.toString()).toBe('175');
+    expect(proventos.total.toString()).toBe('177.8');
   });
 });
