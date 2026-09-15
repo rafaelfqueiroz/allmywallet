@@ -59,6 +59,13 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-09-14'),
     parserFingerprint: '3895ecf3dede3f2f604ff6ce64193882e377fbafe8347873ec76824c2a14d1e1',
   },
+  {
+    // #115: Movimentação reads a bank-paper `Produto` (`CDB - <Código>[ - <issuer>]`)
+    // as Posição's `Código`. Read from the same real export verified above; no
+    // B3 screen moved, so the guide's steps stand.
+    asOf: BusinessDate.of('2026-09-15'),
+    parserFingerprint: '171a38e1cfe9c71067f9a0ce8ed8f4a87706c0e585ab5ecd2aea9b537f776af7',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

@@ -34,6 +34,9 @@ import { UNCLASSIFIED_PLACEHOLDER_TYPE, importNaturalKeyFor } from '@/core/inges
 import { DrizzleImportRowRepository } from '@/adapters/db/import-row-repository';
 import { DrizzleFixedIncomeContractReader } from '@/adapters/db/fixed-income-contract-repository';
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
+import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
+import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
+import { verifyPositions } from '@/core/positions/rebuild';
 import {
   buildMovimentacaoXlsx,
   buildNegociacaoXlsx,
@@ -1037,6 +1040,220 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     // BR-005-06 (amended, #108): no rate on the real tab — the contract waits
     // for the user to type it (BR-009-13, valued at cost until then).
     expect(contract?.ratePercent).toBeNull();
+  });
+
+  describe('#115 — bank paper coded the same in Movimentação and Posição', () => {
+    const application = {
+      data: '10/01/2026',
+      movimentacao: 'APLICAÇÃO',
+      produto: 'CDB - CDB0000TESTE - BANCO TESTE S/A',
+      quantidade: '1',
+      precoUnitario: '50.000,00',
+    };
+    const snapshotOf = (quantidade: string) => ({
+      'Renda Fixa': [
+        {
+          produto: 'CDB - BANCO TESTE S/A',
+          codigo: 'CDB0000TESTE',
+          quantidade,
+          indexador: 'CDI',
+          dataEmissao: '10/01/2026',
+        },
+      ],
+    });
+    const snapshot = snapshotOf('1');
+
+    async function importFile(
+      source: ImportBatch['source'],
+      file: Uint8Array,
+      asOf?: string,
+    ): Promise<ImportBatchId> {
+      const batchId = await newPendingBatch(source);
+      await saveUploadedFile(uploadDir, batchId, file);
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit(
+        asOf === undefined ? { batchId, userId } : { batchId, userId, asOf },
+        handlerDeps(),
+      );
+      return batchId;
+    }
+
+    const reconciliationOf = async (batchId: ImportBatchId) =>
+      (await batchRow(batchId))?.reconciliation as {
+        status: string;
+        discrepancies: { computedQuantity: string }[];
+      } | null;
+
+    const countTransactions = async () =>
+      Number((await migratorPool.query('SELECT count(*)::int AS n FROM transactions')).rows[0]?.n);
+
+    const runMerge = async () =>
+      migratorPool.query(
+        await readFile(
+          join(process.cwd(), 'src/db/migrations/0020_merge_bank_paper_assets.sql'),
+          'utf8',
+        ),
+      );
+
+    /**
+     * What the pre-#115 parser left: the asset and its staged rows under the
+     * whole `Produto`. Keys name the asset by id, so they are already exact.
+     */
+    const makeLegacy = async (legacyCode: string): Promise<string> => {
+      const { rows } = await migratorPool.query(
+        "UPDATE assets SET code = $1 WHERE code = 'CDB0000TESTE' RETURNING id",
+        [legacyCode],
+      );
+      const id = rows[0]?.id as string;
+      await migratorPool.query(
+        "UPDATE import_rows SET parsed_payload = jsonb_set(parsed_payload, '{assetCode}', to_jsonb($1::text)) WHERE asset_id = $2",
+        [legacyCode, id],
+      );
+      return id;
+    };
+
+    it('BR-005-22..24: a CDB applied in Movimentação reconciles against Posição', async () => {
+      await importFile('b3_movimentacao', await buildMovimentacaoXlsx([application]));
+      const posicao = await importFile(
+        'b3_posicao',
+        await buildPosicaoXlsx(snapshot),
+        '2026-01-20',
+      );
+
+      expect((await reconciliationOf(posicao))?.status).toBe('reconciled');
+      const { rows } = await migratorPool.query("SELECT code FROM assets WHERE class = 'cdb'");
+      expect(rows.map((row) => row.code)).toEqual(['CDB0000TESTE']);
+    });
+
+    /**
+     * The owner's ledger: applications imported before the parser read the
+     * code, a Posição on the code, and a wallet holding the paper. The legacy
+     * state is reproduced by renaming the asset — every key names it by id, so
+     * that is exactly what the old parser left.
+     */
+    it('BR-005-17: 0020 merges a mis-coded asset, and re-importing both extracts adds nothing', async () => {
+      // Two genuine applications on one day — occurrences 1 and 2.
+      await importFile('b3_movimentacao', await buildMovimentacaoXlsx([application, application]));
+      const legacyId = await makeLegacy('CDB - CDB0000TESTE - BANCO TESTE S/A');
+
+      const wallet = await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildWalletDeps(tx, userId, clock);
+          const created = await createWallet(deps, userId, { name: 'Reserva' });
+          if (!created.ok) throw new Error('wallet setup failed');
+          await allocateToWallet(deps, userId, {
+            walletId: created.value.id,
+            assetId: AssetId.of(legacyId),
+          });
+          return created.value;
+        },
+        appDb,
+      );
+
+      const before = await importFile('b3_posicao', await buildPosicaoXlsx(snapshot), '2026-01-20');
+      expect((await reconciliationOf(before))?.discrepancies[0]?.computedQuantity).toBe('0');
+
+      await runMerge();
+
+      const { rows: canonical } = await migratorPool.query(
+        "SELECT id FROM assets WHERE code = 'CDB0000TESTE'",
+      );
+      const canonicalId = canonical[0]?.id as string;
+      const { rows: legacyLeft } = await migratorPool.query('SELECT 1 FROM assets WHERE id = $1', [
+        legacyId,
+      ]);
+      expect(legacyLeft).toHaveLength(0);
+
+      const { rows: ledger } = await migratorPool.query(
+        'SELECT asset_id, natural_key, occurrence FROM transactions ORDER BY occurrence',
+      );
+      expect(ledger.map((row) => [row.asset_id, row.occurrence])).toEqual([
+        [canonicalId, 1],
+        [canonicalId, 2],
+      ]);
+      for (const row of ledger) expect(row.natural_key).toContain(canonicalId);
+
+      const { rows: held } = await migratorPool.query(
+        'SELECT asset_id, quantity::text AS q FROM positions',
+      );
+      expect(held).toEqual([{ asset_id: canonicalId, q: '2.00000000' }]);
+      const { rows: allocated } = await migratorPool.query(
+        'SELECT asset_id FROM wallet_allocations WHERE wallet_id = $1',
+        [wallet.id],
+      );
+      expect(allocated).toEqual([{ asset_id: canonicalId }]);
+      const { rows: events } = await migratorPool.query(
+        'SELECT DISTINCT asset_id FROM wallet_allocation_events',
+      );
+      expect(events).toEqual([{ asset_id: canonicalId }]);
+      // The stored report no longer names the deleted asset.
+      expect(JSON.stringify(await reconciliationOf(before))).not.toContain(legacyId);
+      const { rows: contracts } = await migratorPool.query(
+        'SELECT asset_id FROM fixed_income_contracts',
+      );
+      expect(contracts).toEqual([{ asset_id: canonicalId }]);
+      const { rows: staged } = await migratorPool.query(
+        "SELECT DISTINCT asset_id, parsed_payload->>'assetCode' AS code FROM import_rows",
+      );
+      expect(staged).toEqual([{ asset_id: canonicalId, code: 'CDB0000TESTE' }]);
+
+      // The migration is a no-op once merged.
+      await runMerge();
+
+      await importFile('b3_movimentacao', await buildMovimentacaoXlsx([application, application]));
+      expect(await countTransactions()).toBe(2);
+
+      const after = await importFile(
+        'b3_posicao',
+        await buildPosicaoXlsx(snapshotOf('2')),
+        '2026-01-21',
+      );
+      expect((await reconciliationOf(after))?.status).toBe('reconciled');
+
+      // The ledger still rebuilds to the position it caches.
+      const verified = await withTenant(
+        userId,
+        async (tx) =>
+          verifyPositions({
+            transactions: new DrizzleTransactionRepository(tx, userId),
+            positions: new DrizzlePositionRepository(tx, userId),
+          }),
+        appDb,
+      );
+      expect(verified.ok && verified.value.drift).toEqual([]);
+    });
+
+    it('0020 renames a mis-coded asset when no Posição has coded it yet', async () => {
+      await importFile('b3_movimentacao', await buildMovimentacaoXlsx([application]));
+      const legacyId = await makeLegacy('CDB - CDB0000TESTE');
+
+      await runMerge();
+
+      const { rows } = await migratorPool.query("SELECT id, code FROM assets WHERE class = 'cdb'");
+      expect(rows).toEqual([{ id: legacyId, code: 'CDB0000TESTE' }]);
+      await importFile('b3_movimentacao', await buildMovimentacaoXlsx([application]));
+      expect(await countTransactions()).toBe(1);
+    });
+
+    it('0020 writes nothing when a key clashes with its canonical asset', async () => {
+      await importFile('b3_movimentacao', await buildMovimentacaoXlsx([application]));
+      const legacyId = await makeLegacy('CDB - CDB0000TESTE');
+      // The same application imported again on a fresh canonical asset.
+      await importFile('b3_movimentacao', await buildMovimentacaoXlsx([application]));
+      const ledgerBefore = (
+        await migratorPool.query('SELECT id, asset_id, natural_key FROM transactions ORDER BY id')
+      ).rows;
+      expect(ledgerBefore).toHaveLength(2);
+
+      await expect(runMerge()).rejects.toThrow(/#115/);
+      const { rows } = await migratorPool.query('SELECT 1 FROM assets WHERE id = $1', [legacyId]);
+      expect(rows).toHaveLength(1);
+      const ledgerAfter = (
+        await migratorPool.query('SELECT id, asset_id, natural_key FROM transactions ORDER BY id')
+      ).rows;
+      expect(ledgerAfter).toEqual(ledgerBefore);
+    });
   });
 
   /**

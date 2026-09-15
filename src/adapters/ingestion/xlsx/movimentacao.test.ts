@@ -174,6 +174,64 @@ describe('SPEC-005 — parseMovimentacao', () => {
       expect(lca.assetClass).toBe('lca');
     });
 
+    it("#115: bank paper that states its code is coded as Posição's `Código`", () => {
+      const bare = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'CDB - CDB0000TESTE',
+        quantidade: '1',
+      });
+      const withIssuer = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'CDB - CDBA000TESTE - BANCO TESTE S/A',
+        quantidade: '1',
+      });
+      const lci = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'LCI - LCI00TESTE1 - BANCO TESTE S/A',
+        quantidade: '1',
+      });
+      const lca = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'LCA - LCA00TESTE1',
+        quantidade: '1',
+      });
+
+      expect(bare.assetCode).toBe('CDB0000TESTE');
+      expect(bare.assetName).toBe('CDB - CDB0000TESTE');
+      expect(bare.assetClass).toBe('cdb');
+      expect(withIssuer.assetCode).toBe('CDBA000TESTE');
+      expect(withIssuer.assetName).toBe('CDB - BANCO TESTE S/A');
+      expect(withIssuer.assetClass).toBe('cdb');
+      expect(lci.assetCode).toBe('LCI00TESTE1');
+      expect(lci.assetClass).toBe('lci');
+      expect(lca.assetCode).toBe('LCA00TESTE1');
+      expect(lca.assetClass).toBe('lca');
+    });
+
+    it('#115: a ticker that starts like bank paper is still a stock', () => {
+      const record = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'LCAM3 - LOCAMERICA',
+        quantidade: '10',
+      });
+      expect(record.assetCode).toBe('LCAM3');
+      expect(record.assetClass).toBe('stock');
+
+      const option = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'Compra',
+        produto: 'LCAMA120 - LOCAMERICA',
+        quantidade: '100',
+      });
+      expect(option.assetCode).toBe('LCAMA120');
+      expect(option.assetClass).toBe('stock');
+    });
+
     it('a ticker still splits from its name', () => {
       const record = parseOne({
         data: '10/01/2026',
