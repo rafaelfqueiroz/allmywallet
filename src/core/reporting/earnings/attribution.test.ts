@@ -245,6 +245,33 @@ describe('attributeEarning — a leilão de frações splits over the held posit
   });
 
   /**
+   * Held below allocated: a stale allocation after the position shrank, which
+   * `reconcile-allocations` repairs later. ITSA4 held 5 on the pay date;
+   * Aposentadoria still claims 10 and Reserva 30.
+   *
+   *   Unassigned  held − Σ allocated = 5 − 40 = −35 → clamped to 0, no slice
+   *   weights     10 : 30 : 0                                   (Σ 40)
+   *   Aposentadoria 2,80 × 10 ÷ 40 = 0,70 exactly
+   *   Reserva       residual 2,80 − 0,70 − 0 = 2,10
+   *   Σ             2,80 exactly; no slice negative
+   */
+  it('clamps Unassigned to zero when the held position is below the allocations', () => {
+    const state = allocationAt(
+      [event(RETIREMENT, ITSA, '10', '2026-01-05'), event(RESERVE, ITSA, '30', '2026-01-05')],
+      day('2026-03-17'),
+    );
+    const result = attributeEarning(auction(ITSA, '2.80', '2026-03-17', '0.2', '5'), state);
+
+    expect(result.map((slice) => [slice.walletId, slice.amount.toString()])).toEqual([
+      [RETIREMENT, '0.7'],
+      [RESERVE, '2.1'],
+    ]);
+    expect(result.every((slice) => !slice.amount.isNegative())).toBe(true);
+    const summed = result.reduce((acc, slice) => acc.plus(slice.amount), Money.zero());
+    expect(summed.toString()).toBe('2.8');
+  });
+
+  /**
    * A dividend keeps its row quantity as the basis — unchanged by the fix.
    * 105 × 0,50 = 52,50 paid on 105; Aposentadoria 10:
    *
