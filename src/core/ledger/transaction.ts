@@ -6,7 +6,7 @@ import type {
   TransactionId,
   UserId,
 } from '@/core/shared/ids';
-import type { Money, Quantity } from '@/core/shared/money';
+import { Money, type Quantity } from '@/core/shared/money';
 
 /**
  * SPEC-006 — the transaction entity.
@@ -175,6 +175,16 @@ export function isActive(transaction: Transaction): boolean {
  * Worked example (DV-17): 100 PETR4 at R$ 32,15 with R$ 4,90 of fees is
  * 100 × 32,15 = 3.215,00 plus 4,90 = **3.219,90** on a buy, and
  * 3.215,00 − 4,90 = **3.210,10** on a sell.
+ *
+ * SPEC-007 BR-007-05a: a `fracao_bonificacao` moves no cash, so its total is
+ * **zero** whatever price or fees the row carries. The cash for the fraction
+ * is the separate `leilao_fracoes` provento (SPEC-014 BR-014-01); a total here
+ * would show the same money twice in the history list and the export — once
+ * as the removal, once as the auction — and read as income twice. The
+ * position engine never reads either field for this type
+ * (`core/positions/apply-transaction.ts`), so the zero changes no figure.
+ * Worked example: removing 0,2 ITSA4 entered at 14,00 is 0, not 0,2 × 14,00 =
+ * 2,80; the 2,80 lives on the leilão row alone.
  */
 export function computeTotalValue(
   type: TransactionType,
@@ -182,6 +192,7 @@ export function computeTotalValue(
   unitPrice: Money,
   fees: Money,
 ): Money {
+  if (type === 'fracao_bonificacao') return Money.zero();
   const gross = unitPrice.times(quantity);
   if (type === 'sell' || type === 'transfer_out') return gross.minus(fees);
   return gross.plus(fees);
