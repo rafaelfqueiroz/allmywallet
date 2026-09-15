@@ -116,9 +116,12 @@ describe('reports and the dashboard read snapshots, not the ledger (SPEC-016 BR-
    * Exactly one exception: wallet-scoped attribution of a `leilao_fracoes`
    * provento needs the quantity held on its payment date, which no stored
    * figure carries, so `data.ts` replays only the assets that paid one, up to
-   * the period end. The allowance is by file **and** by purpose: if `data.ts`
-   * stops dealing in `leilao_fracoes`, the replay has no reason to be there
-   * and the allowance lapses.
+   * the period end. The allowance is by file **and** by purpose: `data.ts`
+   * must still narrow the replayed assets to the rows of that type, by the
+   * filter expression itself — a comment or a type mention is not enough,
+   * because widening the filter to every earning asset would replay every
+   * earning asset's whole history on every Earnings and Goals render and a
+   * word-match would still pass.
    */
   it('the reports route reads no ledger, except the named leilão-de-frações replay', () => {
     const reportsRouteDir = join(process.cwd(), 'src/app/(app)/reports');
@@ -130,7 +133,18 @@ describe('reports and the dashboard read snapshots, not the ledger (SPEC-016 BR-
     for (const file of files) {
       const contents = readFileSync(file, 'utf8');
       if (!LEDGER_IMPORT.test(contents) && !TRANSACTIONS_TABLE.test(contents)) continue;
-      if (file === allowed && /leilao_fracoes/.test(contents)) continue;
+      // The purpose is checked by the code that bounds the replay, not by a
+      // word: only the rows of that type pick the assets, and each replay
+      // stops at the payment date.
+      if (
+        file === allowed &&
+        /\.filter\(\s*\(\s*row\s*\)\s*=>\s*row\.type\s*===\s*'leilao_fracoes'\s*\)/.test(
+          contents,
+        ) &&
+        /replayPositions\([^;]*\{\s*asOf:\s*payDate\s*\}\s*\)/.test(contents)
+      ) {
+        continue;
+      }
       violations.push(file);
     }
 
