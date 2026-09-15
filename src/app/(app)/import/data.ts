@@ -9,6 +9,8 @@ import {
   buildPostImportSummary,
   type PostImportSummary,
 } from '@/core/ingestion/post-import-summary';
+import { adjustmentBlocker, type AdjustmentBlocker } from '@/core/ingestion/accept-adjustment';
+import { positionKeyString } from '@/core/positions/replay';
 import { listPendingAllocations } from '@/core/wallets/pending';
 import { withIngestionDeps } from '@/app/(app)/import/composition';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
@@ -86,6 +88,13 @@ export interface ImportBatchDetail {
   /** SPEC-005 BR-005-19 (amended, #110) — stored and visible, outside Needs attention. */
   readonly ignored: readonly ImportRow[];
   /**
+   * SPEC-005 BR-005-25 (#110) — for each unresolved discrepancy B3's figure
+   * cannot be accepted for right now, why, keyed by `positionKeyString`. Asked
+   * of the current ledger with the same `adjustmentBlocker` the use case refuses
+   * with, so the page offers the button exactly where accepting would work.
+   */
+  readonly acceptBlockers: ReadonlyMap<string, AdjustmentBlocker>;
+  /**
    * SPEC-010 BR-010-15 — `null` until the batch is committed. Before that
    * nothing has been allocated and a summary would be describing a future.
    */
@@ -100,9 +109,23 @@ export async function loadImportBatchDetail(
     const batch = await deps.batches.findById(batchId);
     if (batch === null) return null;
     const rows = await deps.rows.listByBatch(batchId);
+
+    const acceptBlockers = new Map<string, AdjustmentBlocker>();
+    const reconciliation = batch.reconciliation;
+    for (const discrepancy of reconciliation?.discrepancies ?? []) {
+      if (reconciliation === null || discrepancy.resolved) continue;
+      const ledger = await deps.transactions.listForPosition(
+        discrepancy.assetId,
+        discrepancy.institutionId,
+      );
+      const blocker = adjustmentBlocker(discrepancy, ledger, reconciliation.asOf);
+      if (blocker !== null) acceptBlockers.set(positionKeyString(discrepancy), blocker);
+    }
+
     return {
       batch,
       rows,
+      acceptBlockers,
       needsAttention: rows.filter(
         (row) => row.classification === 'unclassified' || row.classification === 'invalid',
       ),

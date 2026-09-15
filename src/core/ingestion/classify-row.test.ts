@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
-import { ImportBatchId, UserId } from '@/core/shared/ids';
+import { ImportBatchId, TransactionId, UserId } from '@/core/shared/ids';
+import { aTransaction } from '@/core/ledger/test-support/transaction-builder';
 import { Money, Quantity } from '@/core/shared/money';
 import type { NormalizedTransactionRecord, ParsedExtract } from '@/core/ingestion/ports';
 import { stageBatch } from '@/core/ingestion/stage-batch';
@@ -122,6 +123,44 @@ describe('SPEC-005 BR-005-20 — classifyImportRow', () => {
 
       expect(again.classification).toBe('duplicate');
       expect(deps.transactions.rows).toHaveLength(1);
+    });
+
+    it('review 5: restores a superseded transaction as the chosen type rather than creating a second with its key', async () => {
+      const deps = buildFakeIngestionDeps();
+      const row = await committedUnclassifiedRow(deps, 'Transferência - Liquidação');
+      // The state a re-import leaves a pre-#112 mirror in: its unclassified
+      // transaction superseded, still holding the row's key and occurrence.
+      const supersededId = TransactionId.generate();
+      await deps.transactions.insert({
+        ...aTransaction().rendimento().on('2026-01-10').quantity('100').price('32.15').build(),
+        id: supersededId,
+        assetId: row.assetId,
+        institutionId: row.institutionId,
+        status: 'superseded',
+        naturalKey: row.naturalKey as string,
+        occurrence: row.occurrence as number,
+        importBatchId: row.batchId,
+      });
+      await deps.rows.attachTransactions(new Map([[row.id, supersededId]]));
+
+      const result = await classifyImportRow(deps, { rowId: row.id, type: 'buy' });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.transaction).toMatchObject({
+        id: supersededId,
+        type: 'buy',
+        status: 'active',
+        naturalKey: row.naturalKey,
+        occurrence: row.occurrence,
+      });
+      // One transaction for that key and occurrence — the constraint Postgres enforces.
+      expect(
+        deps.transactions.rows.filter(
+          (t) => t.naturalKey === row.naturalKey && t.occurrence === row.occurrence,
+        ),
+      ).toHaveLength(1);
+      expect((await deps.rows.findById(row.id))?.classification).toBe('new');
     });
 
     it('refuses while the batch is still a preview, since nothing is in the ledger yet', async () => {

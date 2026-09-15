@@ -27,6 +27,11 @@ import {
   saveUploadedFile,
 } from '@/worker/handlers/import';
 import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
+import { InstitutionId, TransactionId } from '@/core/shared/ids';
+import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
+import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
+import { UNCLASSIFIED_PLACEHOLDER_TYPE, importNaturalKeyFor } from '@/core/ingestion/occurrence';
+import { DrizzleImportRowRepository } from '@/adapters/db/import-row-repository';
 import { DrizzleFixedIncomeContractReader } from '@/adapters/db/fixed-income-contract-repository';
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
 import {
@@ -917,6 +922,76 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(reconciliation?.discrepancies[0]?.difference).toBe('-10');
   });
 
+  /**
+   * SPEC-005 BR-005-25 (#110) — the owner's morning: a Posição committed into
+   * an empty ledger, its figures accepted, and every position doubled when the
+   * history arrived. Accepting is refused with no history, and refused again
+   * once history has made the stored difference stale.
+   */
+  it('BR-005-25 (#110): accepting B3’s figure is refused with no history, and when history made the report stale', async () => {
+    const posicao = await newPendingBatch('b3_posicao');
+    await saveUploadedFile(
+      uploadDir,
+      posicao,
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'PETR4 - PETROBRAS', codigo: 'PETR4', quantidade: '100' }],
+      }),
+    );
+    await handleImportStage({ batchId: posicao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: posicao, userId, asOf: '2026-01-20' }, handlerDeps());
+    const report = (await batchRow(posicao))?.reconciliation as {
+      discrepancies: { assetId: string; institutionId: string | null; computedQuantity: string }[];
+    };
+    const [discrepancy] = report.discrepancies;
+    expect(discrepancy?.computedQuantity).toBe('0');
+
+    const institutionId = discrepancy?.institutionId ?? null;
+    const accept = () =>
+      withTenant(
+        userId,
+        async (tx) =>
+          acceptReconciliationAdjustment(buildIngestionDeps(tx, userId, clock), userId, {
+            batchId: posicao,
+            assetId: AssetId.of(discrepancy?.assetId as string),
+            institutionId: institutionId === null ? null : InstitutionId.of(institutionId),
+          }),
+        appDb,
+      );
+    const countTransactions = async () =>
+      Number((await migratorPool.query('SELECT count(*)::int AS n FROM transactions')).rows[0]?.n);
+
+    const noHistory = await accept();
+    expect(noHistory.ok || noHistory.error.code).toBe('IMPORT_ADJUSTMENT_NO_HISTORY');
+    expect(await countTransactions()).toBe(0);
+
+    // The history arrives: the 100 were bought on 10/01, before the report's date.
+    const history = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      history,
+      await buildMovimentacaoXlsx([
+        {
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '32,15',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: history, userId }, handlerDeps());
+    await handleImportCommit({ batchId: history, userId }, handlerDeps());
+
+    // The stored +100 would now make 200.
+    const stale = await accept();
+    expect(stale.ok || stale.error.code).toBe('IMPORT_ADJUSTMENT_STALE');
+    expect(await countTransactions()).toBe(1);
+    const after = (await batchRow(posicao))?.reconciliation as {
+      discrepancies: { resolved: boolean }[];
+    };
+    expect(after.discrepancies[0]?.resolved).toBe(false);
+  });
+
   it('BR-005-06/AC: a CDB Posição row creates a fixed_income_contracts row the valuation reader can find', async () => {
     const batchId = await newPendingBatch('b3_posicao');
     await saveUploadedFile(
@@ -1291,6 +1366,175 @@ describe('SPEC-005 — import pipeline (integration)', () => {
         total_cost: '1500.00000000',
       });
     });
+  });
+
+  /**
+   * SPEC-005 BR-005-17..19 (#110) — the owner's path. A Movimentação committed
+   * before map v3 stored a settlement mirror and an `APLICAÇÃO` as
+   * `unclassified` transactions under the placeholder type and the raw B3 type.
+   * Re-importing the same file supersedes the mirror, activates the
+   * `APLICAÇÃO` as a buy, and empties Needs attention.
+   */
+  it('#110: a re-import supersedes mirrors and activates newly mapped rows an older map stored unclassified', async () => {
+    const file = [
+      {
+        entradaSaida: 'Credito',
+        data: '10/03/2026',
+        movimentacao: 'Transferência - Liquidação',
+        produto: 'PETR4 - Petrobras PN',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '100',
+        precoUnitario: '32,15',
+      },
+      {
+        entradaSaida: 'Credito',
+        data: '10/03/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'VALE3 - Vale ON',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '100',
+        precoUnitario: '10,00',
+      },
+    ];
+
+    // This morning: staged by the real handler, then written as map v2 wrote it.
+    const origin = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, origin, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: origin, userId }, handlerDeps());
+    const seeded = await withTenant(
+      userId,
+      async (tx) => {
+        const deps = buildIngestionDeps(tx, userId, clock);
+        const staged = await deps.rows.listByBatch(origin);
+        const byType = new Map<string, { rowId: string; transaction: Transaction }>();
+        for (const row of staged) {
+          if (row.record.kind !== 'transaction') continue;
+          const record = row.record;
+          const transaction: Transaction = {
+            id: TransactionId.generate(),
+            userId,
+            assetId: row.assetId,
+            institutionId: row.institutionId,
+            type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+            status: 'unclassified',
+            tradeDate: record.tradeDate,
+            quantity: record.quantity,
+            unitPrice: record.unitPrice,
+            fees: record.fees,
+            totalValue: computeTotalValue(
+              UNCLASSIFIED_PLACEHOLDER_TYPE,
+              record.quantity,
+              record.unitPrice,
+              record.fees,
+            ),
+            ratio: null,
+            naturalKey: importNaturalKeyFor(
+              {
+                assetId: row.assetId,
+                institutionId: row.institutionId,
+                type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+                tradeDate: record.tradeDate,
+                quantity: record.quantity,
+                unitPrice: record.unitPrice,
+              },
+              record.b3Type,
+            ),
+            occurrence: 1,
+            importBatchId: origin,
+            isManual: false,
+            isUserModified: false,
+            createdAt: clock.now(),
+            updatedAt: clock.now(),
+          };
+          await deps.transactions.insert(transaction);
+          byType.set(record.b3Type, { rowId: row.id, transaction });
+        }
+        return byType;
+      },
+      appDb,
+    );
+    for (const { rowId, transaction } of seeded.values()) {
+      await migratorPool.query(
+        `UPDATE import_rows SET classification = 'unclassified', natural_key = $1,
+           occurrence = 1, ledger_type = $2, transaction_id = $3 WHERE id = $4`,
+        [transaction.naturalKey, UNCLASSIFIED_PLACEHOLDER_TYPE, transaction.id, rowId],
+      );
+    }
+    await migratorPool.query(
+      `UPDATE import_batches SET status = 'committed',
+         row_counts = row_counts || '{"new":0,"needsAttention":2,"ignored":0}'::jsonb
+       WHERE id = $1`,
+      [origin],
+    );
+    const mirror = seeded.get('Transferência - Liquidação')?.transaction as Transaction;
+    const aplicacao = seeded.get('APLICAÇÃO')?.transaction as Transaction;
+
+    // Today: the same file, through the real handlers.
+    const again = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, again, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: again, userId }, handlerDeps());
+    await handleImportCommit({ batchId: again, userId }, handlerDeps());
+
+    expect((await batchRow(again))?.status).toBe('committed');
+    const { rows: current } = await migratorPool.query(
+      'SELECT classification FROM import_rows WHERE batch_id = $1',
+      [again],
+    );
+    expect(current.map((r) => r.classification)).toEqual(['duplicate', 'duplicate']);
+
+    const { rows: stored } = await migratorPool.query(
+      'SELECT id, type, status, natural_key, is_user_modified FROM transactions ORDER BY status',
+    );
+    expect(stored).toEqual([
+      {
+        id: aplicacao.id,
+        type: 'buy',
+        status: 'active',
+        natural_key: aplicacao.naturalKey,
+        is_user_modified: false,
+      },
+      {
+        id: mirror.id,
+        type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+        status: 'superseded',
+        natural_key: mirror.naturalKey,
+        is_user_modified: false,
+      },
+    ]);
+
+    // VALE3: 100 × 10,00 = 1.000,00 with no fees. PETR4: no position — a mirror moves nothing.
+    const { rows: positions } = await migratorPool.query(
+      'SELECT asset_id, quantity, average_cost, total_cost FROM positions',
+    );
+    expect(positions).toEqual([
+      {
+        asset_id: aplicacao.assetId,
+        quantity: '100.00000000',
+        average_cost: '10.00000000',
+        total_cost: '1000.00000000',
+      },
+    ]);
+
+    const { rows: originRows } = await migratorPool.query(
+      'SELECT transaction_id, classification FROM import_rows WHERE batch_id = $1 ORDER BY classification',
+      [origin],
+    );
+    expect(originRows).toEqual([
+      { transaction_id: mirror.id, classification: 'ignored' },
+      { transaction_id: aplicacao.id, classification: 'new' },
+    ]);
+    expect((await batchRow(origin))?.row_counts).toMatchObject({
+      new: 1,
+      needsAttention: 0,
+      ignored: 1,
+    });
+    // The dashboard's Needs attention queue reads `import_rows.classification`.
+    const attention = await withTenant(
+      userId,
+      async (tx) => new DrizzleImportRowRepository(tx, userId).countNeedsAttentionByBatch(),
+      appDb,
+    );
+    expect(attention).toEqual([]);
   });
 
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {

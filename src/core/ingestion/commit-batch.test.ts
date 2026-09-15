@@ -9,8 +9,11 @@ import {
   type TransactionType,
 } from '@/core/ledger/transaction';
 import { replayPosition } from '@/core/positions/replay';
+import { classifyImportRow } from '@/core/ingestion/classify-row';
+import { UNCLASSIFIED_PLACEHOLDER_TYPE, importNaturalKeyFor } from '@/core/ingestion/occurrence';
 import type {
   ImportBatch,
+  ImportRow,
   NormalizedTransactionRecord,
   ParsedExtract,
   ParsedRecord,
@@ -885,5 +888,266 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       expect(again.outcome.recarried).toBe(0);
       expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
     });
+  });
+});
+
+describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassified are fixed on re-import', () => {
+  /** APLICAÇÃO of 100 PETR4 @ 32,15 with 4,90 of fees — map v3's `buy`, v2's unmapped. */
+  const aplicacao = (overrides: Partial<NormalizedTransactionRecord> = {}) =>
+    buy({ b3Type: 'APLICAÇÃO', direction: 'credit', ...overrides });
+  const liquidacao = () => buy({ b3Type: 'Transferência - Liquidação', direction: 'credit' });
+  /** Resgate of a CDB never bought — v3's `sell`, which cannot replay. */
+  const resgate = () =>
+    buy({ b3Type: 'Resgate', direction: 'credit', assetCode: 'CDB-X', assetName: 'CDB X' });
+
+  async function importFile(deps: FakeIngestionDeps, records: readonly ParsedRecord[]) {
+    const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+    const result = await commitBatch(deps, userId, { batchId });
+    if (!result.ok) throw new Error(`commit failed: ${result.error.code}`);
+    return { batchId, outcome: result.value };
+  }
+
+  /**
+   * This morning's state: the file committed by a map that knew none of these
+   * strings — every row an `unclassified` transaction under the placeholder
+   * type and the raw B3 type (`importNaturalKeyFor`), every origin row
+   * `unclassified` and counted as needing attention.
+   */
+  async function commitUnderMapV2(deps: FakeIngestionDeps, records: readonly ParsedRecord[]) {
+    const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+    const now = deps.clock.now();
+    const staged = await deps.rows.listByBatch(batchId);
+    const transactions: Transaction[] = [];
+    const rows: ImportRow[] = [];
+    for (const row of staged) {
+      const record = row.record as NormalizedTransactionRecord;
+      const naturalKey = importNaturalKeyFor(
+        {
+          assetId: row.assetId,
+          institutionId: row.institutionId,
+          type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+          tradeDate: record.tradeDate,
+          quantity: record.quantity,
+          unitPrice: record.unitPrice,
+        },
+        record.b3Type,
+      );
+      const transaction: Transaction = {
+        id: TransactionId.generate(),
+        userId,
+        assetId: row.assetId,
+        institutionId: row.institutionId,
+        type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+        status: 'unclassified',
+        tradeDate: record.tradeDate,
+        quantity: record.quantity,
+        unitPrice: record.unitPrice,
+        fees: record.fees,
+        totalValue: computeTotalValue(
+          UNCLASSIFIED_PLACEHOLDER_TYPE,
+          record.quantity,
+          record.unitPrice,
+          record.fees,
+        ),
+        ratio: null,
+        naturalKey,
+        occurrence: 1,
+        importBatchId: batchId,
+        isManual: false,
+        isUserModified: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+      transactions.push(transaction);
+      rows.push({
+        ...row,
+        classification: 'unclassified',
+        naturalKey,
+        occurrence: 1,
+        ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE,
+        transactionId: transaction.id,
+      });
+    }
+    await deps.transactions.insertMany(transactions);
+    await deps.rows.insertMany(rows); // replaces the staged rows by id
+    const batch = (await deps.batches.findById(batchId)) as ImportBatch;
+    await deps.batches.update({
+      ...batch,
+      status: 'committed',
+      rowCounts: {
+        read: staged.length,
+        new: 0,
+        duplicates: 0,
+        needsAttention: staged.length,
+        ignored: 0,
+        fromDate: null,
+        toDate: null,
+      },
+    });
+    return { batchId, transactions };
+  }
+
+  const rowFor = async (deps: FakeIngestionDeps, batchId: ImportBatchId, id: TransactionId) =>
+    (await deps.rows.listByBatch(batchId)).find((row) => row.transactionId === id);
+
+  it('a row that now mirrors another extract is superseded, and its origin row and counts become ignored', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [liquidacao()]);
+    const [stored] = transactions as [Transaction];
+
+    const again = await importFile(deps, [liquidacao()]);
+
+    expect(again.outcome).toMatchObject({
+      applied: 0,
+      superseded: 1,
+      reclassified: 0,
+      skippedDuplicates: 1,
+      committed: [],
+    });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      status: 'superseded',
+      naturalKey: stored.naturalKey,
+      isUserModified: false,
+    });
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('ignored');
+    // 1 needing attention − 1 = 0; 0 ignored + 1 = 1.
+    expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+      new: 0,
+      needsAttention: 0,
+      ignored: 1,
+    });
+    // The re-import's own row stays a duplicate, and no position was written.
+    const current = await deps.rows.listByBatch(again.batchId);
+    expect(current.map((row) => row.classification)).toEqual(['duplicate']);
+    expect(await deps.positions.list()).toHaveLength(0);
+  });
+
+  it('an APLICAÇÃO is activated in place as a buy and the position recalculated', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [aplicacao()]);
+    const [stored] = transactions as [Transaction];
+
+    const again = await importFile(deps, [aplicacao()]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 1, superseded: 0 });
+    expect(again.outcome.committed.map((t) => t.id)).toEqual([stored.id]);
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      type: 'buy',
+      status: 'active',
+      naturalKey: stored.naturalKey,
+      isUserModified: false,
+    });
+    // 100 × 32,15 + 4,90 = 3.219,90 over 100 → 32,199.
+    const [position] = await deps.positions.list();
+    expect(position?.state.quantity.toString()).toBe('100');
+    expect(position?.state.totalCost.toString()).toBe('3219.9');
+    expect(position?.state.averageCost.toString()).toBe('32.199');
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('new');
+    expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+      new: 1,
+      needsAttention: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
+
+  it('a Resgate that cannot replay as a sell stays unclassified, and the rest of the commit applies', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [resgate(), aplicacao()]);
+    const [storedResgate, storedAplicacao] = transactions as [Transaction, Transaction];
+
+    const again = await importFile(deps, [resgate(), aplicacao()]);
+
+    expect(again.outcome).toMatchObject({ reclassified: 1, superseded: 0 });
+    expect(await deps.transactions.findById(storedResgate.id)).toMatchObject({
+      type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+      status: 'unclassified',
+    });
+    expect(await deps.transactions.findById(storedAplicacao.id)).toMatchObject({
+      type: 'buy',
+      status: 'active',
+    });
+    expect((await rowFor(deps, batchId, storedResgate.id))?.classification).toBe('unclassified');
+    // 2 needing attention − 1 activated = 1.
+    expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+      new: 1,
+      needsAttention: 1,
+    });
+  });
+
+  it('never touches a copy the user edited (BR-006-16)', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [aplicacao()]);
+    const [stored] = transactions as [Transaction];
+    await deps.transactions.update({ ...stored, isUserModified: true });
+
+    const again = await importFile(deps, [aplicacao()]);
+
+    expect(again.outcome.reclassified).toBe(0);
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({ status: 'unclassified' });
+  });
+
+  it('never touches a copy the user classified by hand (BR-005-20)', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [aplicacao()]);
+    const [stored] = transactions as [Transaction];
+    const origin = await rowFor(deps, batchId, stored.id);
+    const classified = await classifyImportRow(deps, {
+      rowId: (origin as ImportRow).id,
+      type: 'subscription',
+    });
+    expect(classified.ok).toBe(true);
+
+    const again = await importFile(deps, [aplicacao()]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, superseded: 0 });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({ type: 'subscription' });
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
+
+  it('never touches a manual transaction', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [aplicacao()]);
+    const [stored] = transactions as [Transaction];
+    await deps.transactions.update({ ...stored, importBatchId: null, isManual: true });
+
+    const again = await importFile(deps, [aplicacao()]);
+
+    expect(again.outcome.reclassified).toBe(0);
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({ status: 'unclassified' });
+  });
+
+  it('a second re-import of the same file changes nothing', async () => {
+    const deps = buildFakeIngestionDeps();
+    await commitUnderMapV2(deps, [liquidacao(), aplicacao()]);
+    await importFile(deps, [liquidacao(), aplicacao()]);
+    const updates = deps.transactions.updateCount;
+    const upserts = deps.positions.upsertCount;
+
+    const third = await importFile(deps, [liquidacao(), aplicacao()]);
+
+    expect(third.outcome).toMatchObject({
+      applied: 0,
+      reclassified: 0,
+      superseded: 0,
+      committed: [],
+    });
+    expect(deps.transactions.updateCount).toBe(updates);
+    expect(deps.positions.upsertCount).toBe(upserts);
+  });
+
+  it('AR-19: committing the re-import batch twice applies it once', async () => {
+    const deps = buildFakeIngestionDeps();
+    await commitUnderMapV2(deps, [liquidacao(), aplicacao()]);
+    const { batchId } = await importFile(deps, [liquidacao(), aplicacao()]);
+    const updates = deps.transactions.updateCount;
+
+    const retried = await commitBatch(deps, userId, { batchId });
+
+    expect(retried.ok && retried.value).toMatchObject({
+      reclassified: 0,
+      superseded: 0,
+      committed: [],
+    });
+    expect(deps.transactions.updateCount).toBe(updates);
   });
 });

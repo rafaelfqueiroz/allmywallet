@@ -25,6 +25,18 @@ export const IngestionUseCaseErrorCode = {
   REFERENCE_DATE_REQUIRED: 'IMPORT_REFERENCE_DATE_REQUIRED',
   /** BR-005-22: B3 cannot have reported a position on a day that has not happened. */
   REFERENCE_DATE_IN_FUTURE: 'IMPORT_REFERENCE_DATE_IN_FUTURE',
+  /**
+   * BR-005-25 (#110): the ledger holds no active transaction for the position
+   * at or before the reconciliation date — the history was never imported, so
+   * B3's figure would become an opening balance that doubles once it is.
+   */
+  ADJUSTMENT_NO_HISTORY: 'IMPORT_ADJUSTMENT_NO_HISTORY',
+  /**
+   * BR-005-25 (#110): the ledger's quantity at the reconciliation date is no
+   * longer the one the report computed — history arrived since — so the
+   * stored difference is no longer the correction.
+   */
+  ADJUSTMENT_STALE: 'IMPORT_ADJUSTMENT_STALE',
 } as const;
 export type IngestionUseCaseErrorCode =
   (typeof IngestionUseCaseErrorCode)[keyof typeof IngestionUseCaseErrorCode];

@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ImportBatchId } from '@/core/shared/ids';
+import { positionKeyString } from '@/core/positions/replay';
 import { SystemClock } from '@/core/shared/clock';
 import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { formatDateTime } from '@/i18n/format';
@@ -70,7 +71,7 @@ export default async function ImportBatchDetailPage({
   const detail = await loadImportBatchDetail(userId, batchId);
   if (detail === null) notFound();
 
-  const { batch, rows, needsAttention, ignored, summary } = detail;
+  const { batch, rows, needsAttention, ignored, summary, acceptBlockers } = detail;
   const classifyForm = (rowId: string) => (
     <form action={classifyRowAction}>
       <input type="hidden" name="rowId" value={rowId} />
@@ -324,37 +325,45 @@ export default async function ImportBatchDetailPage({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {batch.reconciliation.discrepancies.map((d) => (
-                  <TableRow key={d.assetId}>
-                    <TableCell className="py-row font-medium">{d.assetCode}</TableCell>
-                    <TableCell className="py-row tabular-nums">{d.computedQuantity}</TableCell>
-                    <TableCell className="py-row tabular-nums">{d.b3Quantity}</TableCell>
-                    <TableCell className="py-row tabular-nums">{d.difference}</TableCell>
-                    <TableCell className="py-row">
-                      <Text as="span" size="xs" tone="muted">
-                        {t(`discrepancyCause.${d.cause}`)}
-                      </Text>
-                    </TableCell>
-                    <TableCell className="py-row">
-                      {d.resolved ? (
+                {batch.reconciliation.discrepancies.map((d) => {
+                  // BR-005-25 (#110): no button where accepting would be refused.
+                  const blocker = acceptBlockers.get(positionKeyString(d));
+                  return (
+                    <TableRow key={d.assetId}>
+                      <TableCell className="py-row font-medium">{d.assetCode}</TableCell>
+                      <TableCell className="py-row tabular-nums">{d.computedQuantity}</TableCell>
+                      <TableCell className="py-row tabular-nums">{d.b3Quantity}</TableCell>
+                      <TableCell className="py-row tabular-nums">{d.difference}</TableCell>
+                      <TableCell className="py-row">
                         <Text as="span" size="xs" tone="muted">
-                          {t('resolved')}
+                          {t(`discrepancyCause.${d.cause}`)}
                         </Text>
-                      ) : (
-                        <form action={acceptAdjustmentAction}>
-                          <input type="hidden" name="batchId" value={batch.id} />
-                          <input type="hidden" name="assetId" value={d.assetId} />
-                          {d.institutionId && (
-                            <input type="hidden" name="institutionId" value={d.institutionId} />
-                          )}
-                          <Button type="submit" size="xs" variant="outline">
-                            {t('acceptAdjustment')}
-                          </Button>
-                        </form>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell className="py-row">
+                        {d.resolved ? (
+                          <Text as="span" size="xs" tone="muted">
+                            {t('resolved')}
+                          </Text>
+                        ) : blocker !== undefined ? (
+                          <Text as="span" size="xs" tone="muted">
+                            {t(`acceptAdjustmentBlocked.${blocker}`)}
+                          </Text>
+                        ) : (
+                          <form action={acceptAdjustmentAction}>
+                            <input type="hidden" name="batchId" value={batch.id} />
+                            <input type="hidden" name="assetId" value={d.assetId} />
+                            {d.institutionId && (
+                              <input type="hidden" name="institutionId" value={d.institutionId} />
+                            )}
+                            <Button type="submit" size="xs" variant="outline">
+                              {t('acceptAdjustment')}
+                            </Button>
+                          </form>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
