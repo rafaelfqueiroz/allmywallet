@@ -1547,7 +1547,9 @@ describe('SPEC-005 — import pipeline (integration)', () => {
         total_cost: '1800.00000000',
       });
       const counts = (await batchRow(first))?.row_counts as Record<string, number>;
-      expect(counts).toMatchObject({ new: 6, needsAttention: 0 });
+      // #117: the three promoted credits are new; the three debits the first
+      // commit refused, applied by the re-import, are duplicates.
+      expect(counts).toMatchObject({ new: 3, duplicates: 3, needsAttention: 0 });
     });
 
     it('re-imports a transfer after a backdated source buy and corrects the carried 10,00 to 15,00', async () => {
@@ -1752,6 +1754,83 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       appDb,
     );
     expect(attention).toEqual([]);
+  });
+
+  it('#117: one transfer debit with no holding no longer discards the asset’s proventos, and a re-import applies it once', async () => {
+    const produto = 'HGLG11 - CSHG Logística';
+    const file = [
+      {
+        entradaSaida: 'Credito',
+        data: '13/02/2026',
+        movimentacao: 'Rendimento',
+        produto,
+        instituicao: 'CORRETORA ORIGEM',
+        quantidade: '10',
+        precoUnitario: '1,10',
+        valorOperacao: '11,00',
+      },
+      {
+        entradaSaida: 'Debito',
+        data: '20/02/2026',
+        movimentacao: 'Transferência',
+        produto,
+        instituicao: 'CORRETORA ORIGEM',
+        quantidade: '10',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      },
+    ];
+    async function importFile(rows: Parameters<typeof buildMovimentacaoXlsx>[0]) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+    const ledgerTypes = async () =>
+      (await migratorPool.query('SELECT type FROM transactions ORDER BY type')).rows.map(
+        (row) => row.type as string,
+      );
+    const classifications = async (batchId: ImportBatchId) =>
+      (
+        await migratorPool.query(
+          'SELECT classification FROM import_rows WHERE batch_id = $1 ORDER BY classification',
+          [batchId],
+        )
+      ).rows.map((row) => row.classification as string);
+
+    // No holding at ORIGEM: only the debit is refused; the provento applies.
+    const first = await importFile(file);
+    expect(await ledgerTypes()).toEqual(['rendimento']);
+    expect(await classifications(first)).toEqual(['invalid', 'new']);
+    expect((await batchRow(first))?.row_counts).toMatchObject({ new: 1, needsAttention: 1 });
+
+    // ORIGEM's history: 10 bought at 160,00.
+    await importFile([
+      {
+        entradaSaida: 'Credito',
+        data: '05/01/2026',
+        movimentacao: 'Compra',
+        produto,
+        instituicao: 'CORRETORA ORIGEM',
+        quantidade: '10',
+        precoUnitario: '160,00',
+      },
+    ]);
+
+    // BR-005-17: the re-import applies the refused debit once, and the first
+    // batch's copy leaves Needs attention.
+    await importFile(file);
+    expect(await ledgerTypes()).toEqual(['buy', 'rendimento', 'transfer_out']);
+    expect(await classifications(first)).toEqual(['duplicate', 'new']);
+    expect((await batchRow(first))?.row_counts).toMatchObject({
+      new: 1,
+      duplicates: 1,
+      needsAttention: 0,
+    });
+
+    await importFile(file);
+    expect(await ledgerTypes()).toEqual(['buy', 'rendimento', 'transfer_out']);
   });
 
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {

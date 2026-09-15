@@ -595,13 +595,13 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     },
   );
 
-  it('carries nothing from a debit whose own source group fails, and writes neither', async () => {
+  it('#117: a sale the transfer starves is refused alone, and the transfer still carries', async () => {
     const deps = buildFakeIngestionDeps();
     await importFile(deps, [history()]);
 
-    // ORIGEM holds 100: the transfer of 100 and a sale of 100 two days later
-    // cannot both happen, so the group is invalid — and so no cost leaves it.
-    const { outcome } = await importFile(deps, [
+    // ORIGEM holds 100: the transfer of 100 on 10/03 and a sale of 100 on 12/03
+    // cannot both happen. The replay stops at the sale, so only it is refused.
+    const { batchId, outcome } = await importFile(deps, [
       credit(),
       debit(),
       buy({
@@ -611,16 +611,20 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       }),
     ]);
 
-    expect(outcome.invalid).toBe(2);
-    expect(transfersIn(deps)[0]).toMatchObject({ status: 'unclassified' });
-    expect(deps.transactions.rows.filter((t) => t.type === 'transfer_out')).toHaveLength(0);
+    expect(outcome.invalid).toBe(1);
+    expect(transfersIn(deps)[0]).toMatchObject({ status: 'active' });
+    expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
+    expect(deps.transactions.rows.filter((t) => t.type === 'transfer_out')).toHaveLength(1);
+    const rows = await deps.rows.listByBatch(batchId);
+    expect(rows.map((row) => row.classification)).toEqual(['new', 'new', 'invalid']);
+    await expectRebuildEqualsIncremental(deps);
   });
 
-  it('falls back to unclassified when the destination group fails for another row', async () => {
+  it('#117: a sale the destination cannot cover is refused alone, and the credit still carries', async () => {
     const deps = buildFakeIngestionDeps();
     await importFile(deps, [history()]);
 
-    // DESTINO would hold 100 carried; a sale of 150 there fails the group.
+    // DESTINO holds 100 carried; a sale of 150 there is the only row refused.
     const { batchId, outcome } = await importFile(deps, [
       credit(),
       debit(),
@@ -633,9 +637,38 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     ]);
 
     expect(outcome.invalid).toBe(1);
-    expect(transfersIn(deps)[0]).toMatchObject({ status: 'unclassified' });
+    expect(transfersIn(deps)[0]).toMatchObject({ status: 'active' });
     const rows = await deps.rows.listByBatch(batchId);
-    expect(rows.map((row) => row.classification)).toEqual(['unclassified', 'new', 'invalid']);
+    expect(rows.map((row) => row.classification)).toEqual(['new', 'new', 'invalid']);
+    expect(outcome.batch.rowCounts).toMatchObject({ new: 2, needsAttention: 1 });
+    await expectRebuildEqualsIncremental(deps);
+  });
+
+  it('#117 review: a destination sale waits for its carry while the source refuses its own bad row', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [history()]);
+
+    // ORIGEM's sale of 5 on 02/01 precedes its buy, so the source cannot
+    // replay and the carry is unresolved in the first round. DESTINO's sale of
+    // the 100 carried shares must not be refused for want of it.
+    const { batchId, outcome } = await importFile(deps, [
+      credit(),
+      debit(),
+      buy({
+        b3Type: 'Venda',
+        institutionName: ORIGEM,
+        tradeDate: BusinessDate.of('2026-01-02'),
+        quantity: Quantity.fromString('5'),
+      }),
+      buy({ b3Type: 'Venda', institutionName: DESTINO, tradeDate: BusinessDate.of('2026-03-12') }),
+    ]);
+
+    expect(outcome.invalid).toBe(1);
+    const rows = await deps.rows.listByBatch(batchId);
+    expect(rows.map((row) => row.classification)).toEqual(['new', 'new', 'invalid', 'new']);
+    expect(transfersIn(deps)[0]).toMatchObject({ status: 'active' });
+    expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
+    expect(await positionAt(deps, DESTINO)).toMatchObject({ quantity: '0' });
     await expectRebuildEqualsIncremental(deps);
   });
 
@@ -769,7 +802,8 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     // No history: every debit is invalid, every credit waits.
     const first = await importFile(deps, file);
     expect(first.outcome).toMatchObject({ applied: 3, invalid: 3 });
-    expect(first.outcome.batch.rowCounts).toMatchObject({ new: 3, needsAttention: 3 });
+    // #117: the refused debits are counted as needing attention, not as new.
+    expect(first.outcome.batch.rowCounts).toMatchObject({ new: 0, needsAttention: 6 });
 
     // ORIGEM: 100 @ 10,00 = 1.000,00. TERCEIRA: 50 @ 16,00 = 800,00.
     await importFile(deps, [
@@ -793,9 +827,12 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       totalCost: '1800',
     });
     expect(await positionAt(deps, B)).toMatchObject({ quantity: '0' });
-    // BR-005-10: the first batch's stored counts follow its rows — 3 + 3 new, 3 − 3 attention.
+    // BR-005-10: the first batch's stored counts follow its rows — the 3 promoted
+    // credits are new, and the 3 debits it refused, now applied by the
+    // re-import, are duplicates (#117).
     expect((await deps.batches.findById(first.batchId))?.rowCounts).toMatchObject({
-      new: 6,
+      new: 3,
+      duplicates: 3,
       needsAttention: 0,
     });
     await expectRebuildEqualsIncremental(deps);
@@ -1149,5 +1186,208 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
       committed: [],
     });
     expect(deps.transactions.updateCount).toBe(updates);
+  });
+});
+
+describe('SPEC-005 #117 — a failing position refuses only the rows it cannot replay', () => {
+  const HGLG = { assetCode: 'HGLG11', assetName: 'CSHG Logística', assetClass: 'fii' as const };
+  const rendimento = (date: string) =>
+    buy({
+      ...HGLG,
+      b3Type: 'Rendimento',
+      direction: 'credit',
+      tradeDate: BusinessDate.of(date),
+      quantity: Quantity.fromString('10'),
+      unitPrice: Money.fromString('1.10'),
+      fees: Money.zero(),
+    });
+  const transferOut = (date: string, quantity = '10') =>
+    buy({
+      ...HGLG,
+      b3Type: 'Transferência',
+      direction: 'debit',
+      tradeDate: BusinessDate.of(date),
+      quantity: Quantity.fromString(quantity),
+      priceStated: false,
+      unitPrice: Money.zero(),
+      fees: Money.zero(),
+    });
+  /** 10 HGLG11 at 160,00 → cost 1.600,00. */
+  const holding = () =>
+    buy({
+      ...HGLG,
+      tradeDate: BusinessDate.of('2026-01-05'),
+      quantity: Quantity.fromString('10'),
+      unitPrice: Money.fromString('160'),
+      fees: Money.zero(),
+    });
+
+  async function importFile(deps: FakeIngestionDeps, records: readonly ParsedRecord[]) {
+    const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+    const result = await commitBatch(deps, userId, { batchId });
+    if (!result.ok) throw new Error(`commit failed: ${result.error.code}`);
+    return { batchId, outcome: result.value };
+  }
+
+  const ledgerTypes = (deps: FakeIngestionDeps) => deps.transactions.rows.map((t) => t.type).sort();
+
+  it('one transfer debit with no holding behind it no longer discards the asset’s proventos', async () => {
+    const deps = buildFakeIngestionDeps();
+
+    const { batchId, outcome } = await importFile(deps, [
+      rendimento('2026-01-15'),
+      rendimento('2026-02-13'),
+      transferOut('2026-02-20'),
+    ]);
+
+    expect(outcome).toMatchObject({ applied: 2, invalid: 1 });
+    expect(ledgerTypes(deps)).toEqual(['rendimento', 'rendimento']);
+    const rows = await deps.rows.listByBatch(batchId);
+    expect(rows.map((row) => row.classification)).toEqual(['new', 'new', 'invalid']);
+    // BR-005-10: the committed counts say what the preview could not know.
+    expect(outcome.batch.rowCounts).toMatchObject({ new: 2, needsAttention: 1 });
+  });
+
+  it('refuses every unreplayable row of one position in a single commit, and keeps the rest', async () => {
+    const deps = buildFakeIngestionDeps();
+
+    const { outcome } = await importFile(deps, [
+      transferOut('2026-02-01', '5'),
+      transferOut('2026-02-10', '5'),
+      rendimento('2026-02-13'),
+    ]);
+
+    expect(outcome).toMatchObject({ applied: 1, invalid: 2 });
+    expect(ledgerTypes(deps)).toEqual(['rendimento']);
+  });
+
+  it('a stored sale a staged transfer would starve refuses the transfer, and keeps the provento', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [
+      holding(),
+      buy({
+        ...HGLG,
+        b3Type: 'Venda',
+        tradeDate: BusinessDate.of('2026-03-12'),
+        quantity: Quantity.fromString('10'),
+        unitPrice: Money.fromString('170'),
+      }),
+    ]);
+
+    // 10 held; 5 leave on 10/03, so the stored sale of 10 on 12/03 fails — at
+    // a row this batch did not stage.
+    const { batchId, outcome } = await importFile(deps, [
+      transferOut('2026-03-10', '5'),
+      rendimento('2026-03-11'),
+    ]);
+
+    expect(outcome).toMatchObject({ applied: 1, invalid: 1 });
+    const rows = await deps.rows.listByBatch(batchId);
+    expect(rows.map((row) => row.classification)).toEqual(['invalid', 'new']);
+    expect(ledgerTypes(deps)).toEqual(['buy', 'rendimento', 'sell']);
+  });
+
+  it('BR-005-17: once the history is in, re-importing applies the refused row once and the earlier copy leaves Needs attention', async () => {
+    const deps = buildFakeIngestionDeps();
+    const file = [rendimento('2026-02-13'), transferOut('2026-02-20')];
+    const first = await importFile(deps, file);
+    expect(first.outcome).toMatchObject({ applied: 1, invalid: 1 });
+
+    await importFile(deps, [holding()]);
+    const again = await importFile(deps, file);
+
+    expect(again.outcome).toMatchObject({ applied: 1, skippedDuplicates: 1, invalid: 0 });
+    expect(ledgerTypes(deps)).toEqual(['buy', 'rendimento', 'transfer_out']);
+    const earlier = await deps.rows.listByBatch(first.batchId);
+    expect(earlier.map((row) => row.classification)).toEqual(['new', 'duplicate']);
+    expect((await deps.batches.findById(first.batchId))?.rowCounts).toMatchObject({
+      new: 1,
+      duplicates: 1,
+      needsAttention: 0,
+    });
+    const [position] = await deps.positions.list();
+    expect(position?.state.quantity.toString()).toBe('0');
+
+    const third = await importFile(deps, file);
+    expect(third.outcome).toMatchObject({ applied: 0, skippedDuplicates: 2, invalid: 0 });
+    expect(deps.transactions.rows).toHaveLength(3);
+  });
+
+  it('BR-005-17: proventos a pre-#117 commit refused with their whole position apply on re-import, once', async () => {
+    const deps = buildFakeIngestionDeps();
+    const file = [rendimento('2026-01-15'), rendimento('2026-02-13'), transferOut('2026-02-20')];
+    // The owner's state: every row of the position stored `invalid`, counted new.
+    const legacy = await stagedBatch(deps, { extractType: 'b3_movimentacao', records: file });
+    for (const row of await deps.rows.listByBatch(legacy)) {
+      await deps.rows.updateClassification(row.id, 'invalid');
+    }
+    const staged = (await deps.batches.findById(legacy)) as ImportBatch;
+    await deps.batches.update({ ...staged, status: 'committed' });
+
+    const again = await importFile(deps, file);
+
+    expect(again.outcome).toMatchObject({ applied: 2, invalid: 1 });
+    expect(ledgerTypes(deps)).toEqual(['rendimento', 'rendimento']);
+    const earlier = await deps.rows.listByBatch(legacy);
+    expect(earlier.map((row) => row.classification)).toEqual(['duplicate', 'duplicate', 'invalid']);
+    expect((await deps.batches.findById(legacy))?.rowCounts).toMatchObject({
+      new: 0,
+      duplicates: 2,
+      needsAttention: 1,
+    });
+
+    const third = await importFile(deps, file);
+    expect(third.outcome).toMatchObject({ applied: 0, skippedDuplicates: 2, invalid: 1 });
+    expect(deps.transactions.rows).toHaveLength(2);
+  });
+
+  const sale = (date: string, quantity: string) =>
+    buy({
+      ...HGLG,
+      b3Type: 'Venda',
+      tradeDate: BusinessDate.of(date),
+      quantity: Quantity.fromString(quantity),
+      unitPrice: Money.fromString('170'),
+      fees: Money.zero(),
+    });
+
+  it('#117 review: a stored sale a staged transfer starves refuses only that transfer, and a later valid sale still applies — on every import', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [holding(), sale('2026-02-20', '10')]);
+
+    // 10 held; 5 leave on 10/02, so the stored sale of 10 on 20/02 fails. The
+    // buy of 5 and sale of 5 in March replay on their own: 0 + 5 − 5.
+    const file = [
+      transferOut('2026-02-10', '5'),
+      buy({
+        ...HGLG,
+        tradeDate: BusinessDate.of('2026-03-01'),
+        quantity: Quantity.fromString('5'),
+        unitPrice: Money.fromString('150'),
+        fees: Money.zero(),
+      }),
+      sale('2026-03-05', '5'),
+      rendimento('2026-03-10'),
+    ];
+    const { batchId, outcome } = await importFile(deps, file);
+
+    expect(outcome).toMatchObject({ applied: 3, invalid: 1 });
+    const rows = await deps.rows.listByBatch(batchId);
+    expect(rows.map((row) => row.classification)).toEqual(['invalid', 'new', 'new', 'new']);
+
+    const again = await importFile(deps, file);
+    expect(again.outcome).toMatchObject({ applied: 0, skippedDuplicates: 3, invalid: 1 });
+  });
+
+  it('a stored ledger that fails on its own refuses the whole position, as before', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [holding(), sale('2026-02-20', '10')]);
+    // Only reachable by editing around the write path: the buy leaves the replay.
+    const storedBuy = deps.transactions.rows.find((t) => t.type === 'buy') as Transaction;
+    await deps.transactions.update({ ...storedBuy, status: 'superseded' });
+
+    const { outcome } = await importFile(deps, [rendimento('2026-03-10')]);
+
+    expect(outcome).toMatchObject({ applied: 0, invalid: 1 });
   });
 });

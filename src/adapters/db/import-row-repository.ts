@@ -119,6 +119,21 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
       .set({ classification, updatedAt: new Date() })
       .where(eq(importRows.id, id));
   }
+
+  /** Chunked like `insertMany`: a 10.000-row commit asks for up to 10.000 keys. */
+  async listInvalidByNaturalKeys(keys: readonly string[]): Promise<readonly ImportRow[]> {
+    const found: ImportRow[] = [];
+    for (const chunk of chunked([...new Set(keys)])) {
+      const rows = await this.tx
+        .select()
+        .from(importRows)
+        .where(
+          and(eq(importRows.classification, 'invalid'), inArray(importRows.naturalKey, chunk)),
+        );
+      found.push(...rows.map(toDomain));
+    }
+    return found;
+  }
 }
 
 type Row = typeof importRows.$inferSelect;

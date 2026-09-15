@@ -111,6 +111,14 @@ export class FakeImportRowRepository implements ImportRowRepository {
     const row = this.#rows.get(id);
     if (row) this.#rows.set(id, { ...row, classification });
   }
+
+  async listInvalidByNaturalKeys(keys: readonly string[]): Promise<readonly ImportRow[]> {
+    const wanted = new Set(keys);
+    return [...this.#rows.values()].filter(
+      (row) =>
+        row.classification === 'invalid' && row.naturalKey !== null && wanted.has(row.naturalKey),
+    );
+  }
 }
 
 /** Upserts by `code`, mirroring `DrizzleAssetCatalogRepository.upsertByCode`'s behaviour. */

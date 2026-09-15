@@ -4,7 +4,8 @@ import { ImportBatchId } from '@/core/shared/ids';
 import { positionKeyString } from '@/core/positions/replay';
 import { SystemClock } from '@/core/shared/clock';
 import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
-import { formatDateTime } from '@/i18n/format';
+import { formatBusinessDate, formatDateTime, formatQuantity } from '@/i18n/format';
+import type { RowRefusal } from '@/core/ingestion/refusal';
 import {
   acceptAdjustmentAction,
   cancelBatchAction,
@@ -71,7 +72,22 @@ export default async function ImportBatchDetailPage({
   const detail = await loadImportBatchDetail(userId, batchId);
   if (detail === null) notFound();
 
-  const { batch, rows, needsAttention, ignored, summary, acceptBlockers } = detail;
+  const { batch, rows, needsAttention, ignored, summary, acceptBlockers, refusals } = detail;
+  // SPEC-005 #117 BR-005-24: a refused row says why, with the figures behind it.
+  const refusalText = (refusal: RowRefusal) => {
+    switch (refusal.kind) {
+      case 'insufficient_quantity':
+        return t('refusal.insufficient_quantity', {
+          date: formatBusinessDate(refusal.date),
+          held: formatQuantity(refusal.held),
+          requested: formatQuantity(refusal.requested),
+        });
+      case 'conflicts_with_ledger':
+        return t('refusal.conflicts_with_ledger', { date: formatBusinessDate(refusal.date) });
+      default:
+        return t(`refusal.${refusal.kind}`);
+    }
+  };
   const classifyForm = (rowId: string) => (
     <form action={classifyRowAction}>
       <input type="hidden" name="rowId" value={rowId} />
@@ -135,6 +151,13 @@ export default async function ImportBatchDetailPage({
             <StatCard label={t('countIgnored')} value={batch.rowCounts.ignored} />
           )}
         </Grid>
+      )}
+      {/* SPEC-005 BR-005-10 (#117): staging classifies without replaying, so
+          the preview says what its counts cannot know yet. */}
+      {batch.rowCounts && canCommit && batch.source !== 'b3_posicao' && (
+        <Text size="xs" tone="muted">
+          {t('preReplayHint')}
+        </Text>
       )}
 
       {(canCommit || canCancel) && (
@@ -255,8 +278,15 @@ export default async function ImportBatchDetailPage({
                 <Stack gap="sm" align="start">
                   <span className="font-medium">{row.record.assetCode}</span>
                   <Text as="span" size="xs" tone="muted">
-                    {row.record.kind === 'transaction' ? row.record.b3Type : ''}
+                    {row.record.kind === 'transaction'
+                      ? `${row.record.b3Type} · ${formatBusinessDate(row.record.tradeDate)}`
+                      : ''}
                   </Text>
+                  {refusals.has(row.id) && (
+                    <Text as="span" size="xs">
+                      {refusalText(refusals.get(row.id) as RowRefusal)}
+                    </Text>
+                  )}
                   {row.classification === 'unclassified' && classifyForm(row.id)}
                 </Stack>
               </ListItem>
@@ -287,7 +317,7 @@ export default async function ImportBatchDetailPage({
                       <span className="font-medium">{row.record.assetCode}</span>
                       <Text as="span" size="xs" tone="muted">
                         {row.record.kind === 'transaction'
-                          ? `${row.record.b3Type} · ${row.record.tradeDate}`
+                          ? `${row.record.b3Type} · ${formatBusinessDate(row.record.tradeDate)}`
                           : ''}
                       </Text>
                       {batch.status === 'committed' && classifyForm(row.id)}

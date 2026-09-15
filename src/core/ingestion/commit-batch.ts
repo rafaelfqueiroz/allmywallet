@@ -5,21 +5,27 @@ import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
 import { type Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
-import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
+import {
+  computeTotalValue,
+  type Transaction,
+  type TransactionType,
+} from '@/core/ledger/transaction';
 import { validateTransactionDraft } from '@/core/ledger/validate';
 import {
+  firstUnreplayable,
   type PositionKey,
   type PositionSnapshot,
   positionKeyString,
   replayPosition,
 } from '@/core/positions/replay';
+import { sortForReplay } from '@/core/positions/ordering';
 import type { PositionState } from '@/core/positions/position-state';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/reconcile';
 import { isIgnoredMovement } from '@/core/ingestion/movement-map';
-import { keyFormsFor } from '@/core/ingestion/stage-batch';
+import { keyFormsFor, summarizeRows } from '@/core/ingestion/stage-batch';
 import {
   type CarryLeg,
   isCarryCandidate,
@@ -40,10 +46,18 @@ import {
  * not a guarantee that every staged row is individually applicable: a row
  * whose position cannot be replayed (BR-006-15 — selling more than was ever
  * bought, typically from missing history before the import range) is
- * excluded from *its own* insert and surfaced as `invalid`, rather than
- * failing the other 9.999 rows in the same commit. "Forgiving of user error"
- * (the issue's own framing) is why this reads BR-005-13 as per-position-group
- * atomicity for that one failure mode, not whole-batch.
+ * excluded from its insert and surfaced as `invalid`, rather than failing the
+ * other 9.999 rows in the same commit. "Forgiving of user error" (the issue's
+ * own framing) is why this reads BR-005-13 as per-row atomicity for that one
+ * failure mode, not whole-batch.
+ *
+ * **#117 — only the rows at fault.** Until #117 the whole `(asset,
+ * institution)` group was excluded, so one transfer debit with no holding
+ * behind it discarded every provento of that asset. Now a failing group gives
+ * up the row its replay stops at, one at a time (`refusedCandidates`), and the
+ * rest of it applies. `invalid` rather than a stored `unclassified`
+ * transaction: nothing is written, so no occurrence is taken, and importing
+ * the file again once the earlier history is in applies the row (BR-005-17).
  *
  * **Why this does not call `core/ledger/create-transaction.ts` per row.**
  * That use case replays the affected position after *every* insert — exactly
@@ -131,8 +145,28 @@ interface Group {
   readonly candidates: Candidate[];
   readonly carried: CarriedCredit[];
   readonly reclassified: Reclassification[];
+  /** What the group's replay folded: stored ledger plus this commit's rows. */
+  readonly ledger: readonly Transaction[];
+  /**
+   * #117 review — a credit into this position has a live debit whose cost did
+   * not resolve this round, so the position may replay once its source does.
+   */
+  readonly waitsForCarry: boolean;
   readonly state: PositionState | null;
 }
+
+/**
+ * #117 — the types that take shares out of a position (`adjustment` when
+ * negative, `grupamento` when it groups). Removing one only raises the
+ * quantity every later row sees, so when a replay stops at a stored row the
+ * staged disposal nearest before it is the row to refuse.
+ */
+const DISPOSALS: ReadonlySet<TransactionType> = new Set<TransactionType>([
+  'sell',
+  'transfer_out',
+  'grupamento',
+  'adjustment',
+]);
 
 /**
  * SPEC-005 BR-005-17..19 (#110) — an existing `unclassified` transaction an
@@ -237,12 +271,11 @@ export async function commitBatch(
    * excludes what failed. Exclusions only grow, so the rounds end; in practice
    * the first round is the last.
    *
-   * A known limit, kept for that termination guarantee: an exclusion is never
-   * reconsidered. Excluding a row at a source can let a stored debit's carry
-   * resolve in a later round, and a destination group excluded earlier for
-   * want of that carry stays excluded (its rows `invalid`). Re-admitting rows
-   * would make the rounds non-monotonic. It needs a backdated unreplayable row
-   * at the source and a dependent row at the destination in the same batch.
+   * An exclusion is never reconsidered, which is what keeps the rounds
+   * monotonic. So a destination whose carry is still unresolved (`waitsForCarry`)
+   * is not judged while another failed group can be: excluding a row at the
+   * source may resolve the carry next round and let the destination replay
+   * (#117 review). Only when every failed group waits are they judged anyway.
    */
   const excluded = new Set<string>();
   const vetoed = new Set<string>();
@@ -256,7 +289,8 @@ export async function commitBatch(
     failed.length > 0;
     failed = settlement.filter((group) => group.state === null)
   ) {
-    for (const group of failed) {
+    const ready = failed.filter((group) => !group.waitsForCarry);
+    for (const group of ready.length > 0 ? ready : failed) {
       // #110: an older import's row that no longer replays as its mapped type
       // (a `Resgate` sell of shares the ledger never held) is given up first.
       // It stays `unclassified`, exactly as it was, and the batch keeps its own
@@ -265,9 +299,17 @@ export async function commitBatch(
         for (const r of group.reclassified) declined.add(r.row.id);
         continue;
       }
-      // BR-006-15 could not be satisfied for this group — every `new` row in
-      // it is excluded (never written) and surfaced as `invalid`, not the
-      // rest of the batch. A carried credit in it falls back to `unclassified`.
+      // #117 BR-006-15: only the rows the replay cannot accept are excluded
+      // (never written, surfaced as `invalid`); the group's proventos and every
+      // other row still apply.
+      const refused = refusedCandidates(group);
+      if (refused.length > 0) {
+        for (const c of refused) excluded.add(c.row.id);
+        continue;
+      }
+      // Nothing of this batch explains it — the stored ledger fails on its own,
+      // which the write path never lets happen: every `new` row in the group is
+      // excluded, and a carried credit in it falls back to `unclassified`.
       for (const c of group.candidates) excluded.add(c.row.id);
       for (const c of group.carried) vetoed.add(c.leg.id);
     }
@@ -349,6 +391,8 @@ export async function commitBatch(
     ...reclassifications.filter((r) => r.kind === 'supersede'),
   ]);
 
+  await settleEarlierRefusals(deps, batch.id, toInsert);
+
   // BR-005-06: create/update fixed-income contracts from the Posição
   // fixed-income tab before reconciliation reads the ledger.
   for (const row of positionRows) {
@@ -380,16 +424,12 @@ export async function commitBatch(
     status: 'committed',
     committedAt: now,
     reconciliation,
-    // BR-005-10: the preview counted a carried credit as needing attention;
-    // the committed batch reports what it became.
+    // BR-005-10: the preview counted a carried credit as needing attention and
+    // a refused row (#117) as new; the committed batch reports what each became.
     rowCounts:
-      batch.rowCounts === null || carriedRowIds.size === 0
-        ? batch.rowCounts
-        : {
-            ...batch.rowCounts,
-            new: batch.rowCounts.new + carriedRowIds.size,
-            needsAttention: batch.rowCounts.needsAttention - carriedRowIds.size,
-          },
+      batch.rowCounts === null
+        ? null
+        : summarizeRows(batch.rowCounts.read, await deps.rows.listByBatch(batch.id)),
   };
   await deps.batches.update(committedBatch);
 
@@ -697,6 +737,11 @@ function settle(
       )
       .map((r) => r.updated),
   ]);
+  const waiting = new Set<string>(
+    legs
+      .filter((leg) => leg.debit !== null && !costs.has(leg.id))
+      .map((leg) => positionKeyString(leg.credit)),
+  );
 
   const groups = new Map<
     string,
@@ -743,14 +788,97 @@ function settle(
   );
 
   return [...groups.values()].map((group) => {
-    const replayed = replayPosition([
+    const ledger = [
       ...stored(group.key).filter((t) => !replaced.has(t.id)),
       ...group.candidates.map((c) => c.transaction),
       ...group.carried.map((c) => c.transaction),
       ...group.reclassified.map((r) => r.updated),
-    ]);
-    return { ...group, state: replayed.ok ? replayed.value : null };
+    ];
+    const replayed = replayPosition(ledger);
+    return {
+      ...group,
+      ledger,
+      waitsForCarry: waiting.has(positionKeyString(group.key)),
+      state: replayed.ok ? replayed.value : null,
+    };
   });
+}
+
+/**
+ * #117 — the candidates of a failed group its replay cannot accept, in replay
+ * order. The fold's failing row is set aside when this batch staged it; when
+ * it is stored, the staged disposal nearest before it is (`disposalBefore`).
+ * The fold runs again until it completes, or until nothing staged explains the
+ * failure.
+ *
+ * Replayed here against the group alone, so a group with many refusals costs
+ * one settling round rather than one per refusal.
+ */
+function refusedCandidates(group: Group): readonly Candidate[] {
+  const byTransaction = new Map(group.candidates.map((c) => [c.transaction.id, c]));
+  const refused: Candidate[] = [];
+  let ledger = group.ledger;
+  for (
+    let failure = firstUnreplayable(ledger);
+    failure !== null;
+    failure = firstUnreplayable(ledger)
+  ) {
+    const culprit =
+      byTransaction.get(failure.transaction.id) ??
+      disposalBefore(ledger, failure.transaction, byTransaction);
+    if (culprit === undefined) break;
+    refused.push(culprit);
+    const id = culprit.transaction.id;
+    ledger = ledger.filter((t) => t.id !== id);
+  }
+  return refused;
+}
+
+function disposalBefore(
+  ledger: readonly Transaction[],
+  failing: Transaction,
+  byTransaction: ReadonlyMap<string, Candidate>,
+): Candidate | undefined {
+  const ordered = sortForReplay(ledger);
+  for (let i = ordered.findIndex((t) => t.id === failing.id) - 1; i >= 0; i -= 1) {
+    const candidate = byTransaction.get((ordered[i] as Transaction).id);
+    if (candidate !== undefined && DISPOSALS.has(candidate.transaction.type)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * #117 / BR-005-17 — rows an earlier commit refused (`invalid`) that this
+ * commit applied under the same key and occurrence are now in the ledger: each
+ * becomes a `duplicate`, leaves Needs attention, and its batch is recounted.
+ * Before #117 that was also every provento of a refused group, stored `invalid`
+ * on each import of the same file.
+ */
+async function settleEarlierRefusals(
+  deps: IngestionDependencies,
+  batchId: ImportBatchId,
+  applied: readonly Transaction[],
+): Promise<void> {
+  if (applied.length === 0) return;
+  const appliedKeys = new Set(applied.map((t) => `${t.naturalKey}#${t.occurrence}`));
+  const earlier = (
+    await deps.rows.listInvalidByNaturalKeys(applied.map((t) => t.naturalKey))
+  ).filter(
+    (row) => row.batchId !== batchId && appliedKeys.has(`${row.naturalKey}#${row.occurrence}`),
+  );
+  const batches = new Set<ImportBatchId>();
+  for (const row of earlier) {
+    await deps.rows.updateClassification(row.id, 'duplicate');
+    batches.add(row.batchId);
+  }
+  for (const id of batches) {
+    const origin = await deps.batches.findById(id);
+    if (origin === null || origin.rowCounts === null) continue;
+    await deps.batches.update({
+      ...origin,
+      rowCounts: summarizeRows(origin.rowCounts.read, await deps.rows.listByBatch(id)),
+    });
+  }
 }
 
 /**
@@ -882,7 +1010,7 @@ async function updateInPlace(
 }
 
 /** `null` when the row's own fields fail `validateTransactionDraft` — a corrupt or contradictory extract row. */
-function buildCandidate(
+export function buildCandidate(
   row: ImportRow,
   batchId: ImportBatchId,
   userId: UserId,

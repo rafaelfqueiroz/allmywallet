@@ -7,7 +7,12 @@ import {
   institutionIdFor,
   resetTransactionSequence,
 } from '@/core/ledger/test-support/transaction-builder';
-import { positionKeyString, replayPosition, replayPositions } from '@/core/positions/replay';
+import {
+  firstUnreplayable,
+  positionKeyString,
+  replayPosition,
+  replayPositions,
+} from '@/core/positions/replay';
 
 /**
  * TS-06 — corporate events tested **in combination**, not just individually.
@@ -267,6 +272,43 @@ describe('SPEC-007 BR-007-16 — only active rows participate', () => {
     if (result.ok) return;
     expect(result.error.code).toBe('INSUFFICIENT_QUANTITY');
     expect(result.error.context).toEqual({ held: '10', requested: '50', date: '2026-02-05' });
+  });
+});
+
+describe('firstUnreplayable — SPEC-005 #117, the row a replay stops at', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  it('is null for a ledger that replays', () => {
+    expect(
+      firstUnreplayable([aTransaction().buy().on('2026-01-05').quantity('10').build()]),
+    ).toBeNull();
+  });
+
+  it('names the first failing row in replay order, not in input order, with its error', () => {
+    // Held 10 from 05/01. The 01/03 transfer of 30 fails first; the 01/02 sale
+    // of 50 fails earlier in replay order although it arrives later.
+    const transfer = aTransaction().transferOut().on('2026-03-01').quantity('30').build();
+    const sale = aTransaction().sell().on('2026-02-01').quantity('50').price('12.00').build();
+    const failure = firstUnreplayable([
+      aTransaction().buy().on('2026-01-05').quantity('10').price('10.00').build(),
+      transfer,
+      sale,
+    ]);
+    expect(failure?.transaction.id).toBe(sale.id);
+    expect(failure?.error).toEqual({
+      code: 'INSUFFICIENT_QUANTITY',
+      context: { held: '10', requested: '50', date: '2026-02-01' },
+    });
+  });
+
+  it('honours asOf', () => {
+    const ledger = [
+      aTransaction().buy().on('2026-01-05').quantity('10').build(),
+      aTransaction().sell().on('2026-02-01').quantity('50').build(),
+    ];
+    expect(firstUnreplayable(ledger, { asOf: BusinessDate.of('2026-01-31') })).toBeNull();
   });
 });
 
