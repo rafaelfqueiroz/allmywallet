@@ -49,11 +49,16 @@ export interface AcceptAdjustmentOutcome {
  *   has history but holds less than B3 (`reconcile.ts`), and that can still be
  *   a legitimate correction — a gap before the export range.
  *
- * - `stale`: the ledger's quantity at the reconciliation date is no longer the
- *   report's `computedQuantity`, so its stored difference is not the
- *   correction any more. This is how history imported after the report shows
- *   up once it exists: accepting 50 for a position that now holds 50 would
- *   double it just the same.
+ * - `stale`: the ledger's quantity is no longer the report's
+ *   `computedQuantity`, so its stored difference is not the correction any
+ *   more. This is how history imported after the report shows up once it
+ *   exists: accepting 50 for a position that now holds 50 would double it just
+ *   the same.
+ *
+ *   Measured the way `commit-batch.ts`'s `buildReconciliation` measured it —
+ *   the whole ledger, not the ledger at the reconciliation date. Comparing at
+ *   the date made every position traded after it permanently "stale", and
+ *   re-importing Posição, which the hint asks for, computed the same figure.
  */
 export type AdjustmentBlocker = 'no_history' | 'stale';
 
@@ -62,9 +67,8 @@ export function adjustmentBlocker(
   ledger: readonly Transaction[],
   asOf: BusinessDate,
 ): AdjustmentBlocker | null {
-  const held = selectForReplay(ledger, { asOf });
-  if (held.length === 0) return 'no_history';
-  const replayed = replayPosition(held);
+  if (selectForReplay(ledger, { asOf }).length === 0) return 'no_history';
+  const replayed = replayPosition(ledger);
   // A ledger that no longer replays has no quantity to compare: not the one reported.
   if (!replayed.ok) return 'stale';
   return replayed.value.quantity.equals(Quantity.fromString(discrepancy.computedQuantity))

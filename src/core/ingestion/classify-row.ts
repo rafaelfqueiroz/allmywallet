@@ -73,6 +73,25 @@ export async function classifyImportRow(
     if (batch === null || batch.status !== 'committed') {
       return notClassifiable(row.id, row.classification);
     }
+
+    // BR-005-19 (#110): a mirror an earlier map stored `unclassified` and a
+    // re-import then superseded still holds this row's key and occurrence, which
+    // are unique per user. Classifying it brings that same transaction back as
+    // the chosen type; creating a second one would violate the constraint.
+    const stored =
+      row.transactionId === null ? null : await deps.transactions.findById(row.transactionId);
+    if (stored !== null && stored.status === 'superseded') {
+      const restored = await editTransaction(deps, stored.id, {
+        type: input.type,
+        status: 'active',
+        ratio: input.ratio ?? null,
+        preserveNaturalKey: true,
+      });
+      if (!restored.ok) return restored;
+      await deps.rows.updateClassification(row.id, 'new');
+      return restored;
+    }
+
     const created = await createTransaction(deps, batch.userId, {
       assetId: row.assetId,
       institutionId: row.institutionId,

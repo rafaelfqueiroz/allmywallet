@@ -232,6 +232,13 @@ describe('#110 BR-005-25 — adjustmentBlocker', () => {
     expect(adjustmentBlocker(discrepancy('30'), [buy], AS_OF)).toBeNull();
   });
 
+  it('review 5: is null for a position traded after the date — the report counted the whole ledger', () => {
+    // 30 before the date and 10 after: the report computed 40, as the ledger still holds.
+    const before = aTransaction().buy().on('2026-02-01').quantity('30').build();
+    const after = aTransaction().buy().on('2026-03-05').quantity('10').build();
+    expect(adjustmentBlocker(discrepancy('40'), [before, after], AS_OF)).toBeNull();
+  });
+
   it('is stale when the ledger now holds another quantity', () => {
     const buy = aTransaction().buy().on('2026-02-01').quantity('30').build();
     expect(adjustmentBlocker(discrepancy('0'), [buy], AS_OF)).toBe('stale');
