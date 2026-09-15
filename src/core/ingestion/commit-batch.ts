@@ -18,6 +18,7 @@ import {
   positionKeyString,
   replayPosition,
 } from '@/core/positions/replay';
+import { sortForReplay } from '@/core/positions/ordering';
 import type { PositionState } from '@/core/positions/position-state';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
@@ -146,25 +147,25 @@ interface Group {
   readonly reclassified: Reclassification[];
   /** What the group's replay folded: stored ledger plus this commit's rows. */
   readonly ledger: readonly Transaction[];
+  /**
+   * #117 review — a credit into this position has a live debit whose cost did
+   * not resolve this round, so the position may replay once its source does.
+   */
+  readonly waitsForCarry: boolean;
   readonly state: PositionState | null;
 }
 
 /**
- * #117 — types whose removal from a replay can never make it fail: they add
- * shares, rescale them upwards, or leave the quantity untouched (proventos).
- * A group whose failing row is stored rather than staged gives up its other
- * candidates — the disposals — before giving up everything.
+ * #117 — the types that take shares out of a position (`adjustment` when
+ * negative, `grupamento` when it groups). Removing one only raises the
+ * quantity every later row sees, so when a replay stops at a stored row the
+ * staged disposal nearest before it is the row to refuse.
  */
-const NEVER_REFUSED: ReadonlySet<TransactionType> = new Set<TransactionType>([
-  'buy',
-  'subscription',
-  'transfer_in',
-  'bonificacao',
-  'split',
-  'dividend',
-  'jcp',
-  'rendimento',
-  'amortization',
+const DISPOSALS: ReadonlySet<TransactionType> = new Set<TransactionType>([
+  'sell',
+  'transfer_out',
+  'grupamento',
+  'adjustment',
 ]);
 
 /**
@@ -270,12 +271,11 @@ export async function commitBatch(
    * excludes what failed. Exclusions only grow, so the rounds end; in practice
    * the first round is the last.
    *
-   * A known limit, kept for that termination guarantee: an exclusion is never
-   * reconsidered. Excluding a row at a source can let a stored debit's carry
-   * resolve in a later round, and a destination group excluded earlier for
-   * want of that carry stays excluded (its rows `invalid`). Re-admitting rows
-   * would make the rounds non-monotonic. It needs a backdated unreplayable row
-   * at the source and a dependent row at the destination in the same batch.
+   * An exclusion is never reconsidered, which is what keeps the rounds
+   * monotonic. So a destination whose carry is still unresolved (`waitsForCarry`)
+   * is not judged while another failed group can be: excluding a row at the
+   * source may resolve the carry next round and let the destination replay
+   * (#117 review). Only when every failed group waits are they judged anyway.
    */
   const excluded = new Set<string>();
   const vetoed = new Set<string>();
@@ -289,7 +289,8 @@ export async function commitBatch(
     failed.length > 0;
     failed = settlement.filter((group) => group.state === null)
   ) {
-    for (const group of failed) {
+    const ready = failed.filter((group) => !group.waitsForCarry);
+    for (const group of ready.length > 0 ? ready : failed) {
       // #110: an older import's row that no longer replays as its mapped type
       // (a `Resgate` sell of shares the ledger never held) is given up first.
       // It stays `unclassified`, exactly as it was, and the batch keeps its own
@@ -306,14 +307,8 @@ export async function commitBatch(
         for (const c of refused) excluded.add(c.row.id);
         continue;
       }
-      // The replay stops at a stored row, which a disposal of this batch
-      // starved: the disposals go, the rest stays.
-      const disposals = group.candidates.filter((c) => !NEVER_REFUSED.has(c.transaction.type));
-      if (disposals.length > 0) {
-        for (const c of disposals) excluded.add(c.row.id);
-        continue;
-      }
-      // Nothing of this batch explains it: every `new` row in the group is
+      // Nothing of this batch explains it — the stored ledger fails on its own,
+      // which the write path never lets happen: every `new` row in the group is
       // excluded, and a carried credit in it falls back to `unclassified`.
       for (const c of group.candidates) excluded.add(c.row.id);
       for (const c of group.carried) vetoed.add(c.leg.id);
@@ -742,6 +737,11 @@ function settle(
       )
       .map((r) => r.updated),
   ]);
+  const waiting = new Set<string>(
+    legs
+      .filter((leg) => leg.debit !== null && !costs.has(leg.id))
+      .map((leg) => positionKeyString(leg.credit)),
+  );
 
   const groups = new Map<
     string,
@@ -795,14 +795,21 @@ function settle(
       ...group.reclassified.map((r) => r.updated),
     ];
     const replayed = replayPosition(ledger);
-    return { ...group, ledger, state: replayed.ok ? replayed.value : null };
+    return {
+      ...group,
+      ledger,
+      waitsForCarry: waiting.has(positionKeyString(group.key)),
+      state: replayed.ok ? replayed.value : null,
+    };
   });
 }
 
 /**
  * #117 — the candidates of a failed group its replay cannot accept, in replay
- * order: the row the fold stops at is set aside and the fold runs again, until
- * it completes or stops at a row this batch did not stage.
+ * order. The fold's failing row is set aside when this batch staged it; when
+ * it is stored, the staged disposal nearest before it is (`disposalBefore`).
+ * The fold runs again until it completes, or until nothing staged explains the
+ * failure.
  *
  * Replayed here against the group alone, so a group with many refusals costs
  * one settling round rather than one per refusal.
@@ -811,14 +818,33 @@ function refusedCandidates(group: Group): readonly Candidate[] {
   const byTransaction = new Map(group.candidates.map((c) => [c.transaction.id, c]));
   const refused: Candidate[] = [];
   let ledger = group.ledger;
-  for (let failure = firstUnreplayable(ledger); failure !== null;) {
-    const culprit = byTransaction.get(failure.transaction.id);
+  for (
+    let failure = firstUnreplayable(ledger);
+    failure !== null;
+    failure = firstUnreplayable(ledger)
+  ) {
+    const culprit =
+      byTransaction.get(failure.transaction.id) ??
+      disposalBefore(ledger, failure.transaction, byTransaction);
     if (culprit === undefined) break;
     refused.push(culprit);
-    ledger = ledger.filter((t) => t.id !== culprit.transaction.id);
-    failure = firstUnreplayable(ledger);
+    const id = culprit.transaction.id;
+    ledger = ledger.filter((t) => t.id !== id);
   }
   return refused;
+}
+
+function disposalBefore(
+  ledger: readonly Transaction[],
+  failing: Transaction,
+  byTransaction: ReadonlyMap<string, Candidate>,
+): Candidate | undefined {
+  const ordered = sortForReplay(ledger);
+  for (let i = ordered.findIndex((t) => t.id === failing.id) - 1; i >= 0; i -= 1) {
+    const candidate = byTransaction.get((ordered[i] as Transaction).id);
+    if (candidate !== undefined && DISPOSALS.has(candidate.transaction.type)) return candidate;
+  }
+  return undefined;
 }
 
 /**

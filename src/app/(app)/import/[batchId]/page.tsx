@@ -279,7 +279,7 @@ export default async function ImportBatchDetailPage({
                   <span className="font-medium">{row.record.assetCode}</span>
                   <Text as="span" size="xs" tone="muted">
                     {row.record.kind === 'transaction'
-                      ? `${row.record.b3Type} · ${row.record.tradeDate}`
+                      ? `${row.record.b3Type} · ${formatBusinessDate(row.record.tradeDate)}`
                       : ''}
                   </Text>
                   {refusals.has(row.id) && (
@@ -317,7 +317,7 @@ export default async function ImportBatchDetailPage({
                       <span className="font-medium">{row.record.assetCode}</span>
                       <Text as="span" size="xs" tone="muted">
                         {row.record.kind === 'transaction'
-                          ? `${row.record.b3Type} · ${row.record.tradeDate}`
+                          ? `${row.record.b3Type} · ${formatBusinessDate(row.record.tradeDate)}`
                           : ''}
                       </Text>
                       {batch.status === 'committed' && classifyForm(row.id)}

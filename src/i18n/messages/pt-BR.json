@@ -432,7 +432,7 @@
     },
     "needsAttentionTitle": "Precisa de atenção",
     "needsAttentionEmpty": "Nada esperando classificação nesta importação.",
-    "preReplayHint": "Estas contagens vêm antes de refazer o histórico de cada posição. Ao confirmar, uma linha que retiraria mais do que havia naquela data — uma venda ou transferência sem histórico anterior — é recusada sozinha e aparece em Precisa de atenção com o motivo. As demais linhas do mesmo ativo, proventos inclusive, entram normalmente.",
+    "preReplayHint": "Estas contagens vêm antes de refazer o histórico de cada posição. Ao confirmar, uma linha que retiraria mais do que havia naquela data — uma venda ou transferência sem histórico anterior — é recusada e aparece em Precisa de atenção com o motivo, e os proventos do mesmo ativo entram mesmo assim. Por isso as contagens podem mudar depois de confirmar.",
     "refusal": {
       "insufficient_quantity": "Recusada: em {date} havia {held} deste ativo nesta instituição, e a linha retira {requested}. Importe o histórico anterior e depois este arquivo de novo.",
       "conflicts_with_ledger": "Recusada: com esta linha, uma operação de {date} já registrada ficaria sem saldo. Confira o histórico deste ativo.",

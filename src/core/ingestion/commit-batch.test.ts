@@ -644,6 +644,34 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     await expectRebuildEqualsIncremental(deps);
   });
 
+  it('#117 review: a destination sale waits for its carry while the source refuses its own bad row', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [history()]);
+
+    // ORIGEM's sale of 5 on 02/01 precedes its buy, so the source cannot
+    // replay and the carry is unresolved in the first round. DESTINO's sale of
+    // the 100 carried shares must not be refused for want of it.
+    const { batchId, outcome } = await importFile(deps, [
+      credit(),
+      debit(),
+      buy({
+        b3Type: 'Venda',
+        institutionName: ORIGEM,
+        tradeDate: BusinessDate.of('2026-01-02'),
+        quantity: Quantity.fromString('5'),
+      }),
+      buy({ b3Type: 'Venda', institutionName: DESTINO, tradeDate: BusinessDate.of('2026-03-12') }),
+    ]);
+
+    expect(outcome.invalid).toBe(1);
+    const rows = await deps.rows.listByBatch(batchId);
+    expect(rows.map((row) => row.classification)).toEqual(['new', 'new', 'invalid', 'new']);
+    expect(transfersIn(deps)[0]).toMatchObject({ status: 'active' });
+    expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
+    expect(await positionAt(deps, DESTINO)).toMatchObject({ quantity: '0' });
+    await expectRebuildEqualsIncremental(deps);
+  });
+
   describe('defect 3 — an unclassified copy already committed is promoted, whatever the import order', () => {
     it('the transfer first, the history later: promoted in place at 10,00, zero new transfers', async () => {
       const deps = buildFakeIngestionDeps();
@@ -1311,5 +1339,55 @@ describe('SPEC-005 #117 — a failing position refuses only the rows it cannot r
     const third = await importFile(deps, file);
     expect(third.outcome).toMatchObject({ applied: 0, skippedDuplicates: 2, invalid: 1 });
     expect(deps.transactions.rows).toHaveLength(2);
+  });
+
+  const sale = (date: string, quantity: string) =>
+    buy({
+      ...HGLG,
+      b3Type: 'Venda',
+      tradeDate: BusinessDate.of(date),
+      quantity: Quantity.fromString(quantity),
+      unitPrice: Money.fromString('170'),
+      fees: Money.zero(),
+    });
+
+  it('#117 review: a stored sale a staged transfer starves refuses only that transfer, and a later valid sale still applies — on every import', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [holding(), sale('2026-02-20', '10')]);
+
+    // 10 held; 5 leave on 10/02, so the stored sale of 10 on 20/02 fails. The
+    // buy of 5 and sale of 5 in March replay on their own: 0 + 5 − 5.
+    const file = [
+      transferOut('2026-02-10', '5'),
+      buy({
+        ...HGLG,
+        tradeDate: BusinessDate.of('2026-03-01'),
+        quantity: Quantity.fromString('5'),
+        unitPrice: Money.fromString('150'),
+        fees: Money.zero(),
+      }),
+      sale('2026-03-05', '5'),
+      rendimento('2026-03-10'),
+    ];
+    const { batchId, outcome } = await importFile(deps, file);
+
+    expect(outcome).toMatchObject({ applied: 3, invalid: 1 });
+    const rows = await deps.rows.listByBatch(batchId);
+    expect(rows.map((row) => row.classification)).toEqual(['invalid', 'new', 'new', 'new']);
+
+    const again = await importFile(deps, file);
+    expect(again.outcome).toMatchObject({ applied: 0, skippedDuplicates: 3, invalid: 1 });
+  });
+
+  it('a stored ledger that fails on its own refuses the whole position, as before', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [holding(), sale('2026-02-20', '10')]);
+    // Only reachable by editing around the write path: the buy leaves the replay.
+    const storedBuy = deps.transactions.rows.find((t) => t.type === 'buy') as Transaction;
+    await deps.transactions.update({ ...storedBuy, status: 'superseded' });
+
+    const { outcome } = await importFile(deps, [rendimento('2026-03-10')]);
+
+    expect(outcome).toMatchObject({ applied: 0, invalid: 1 });
   });
 });

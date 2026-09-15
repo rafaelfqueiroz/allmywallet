@@ -117,7 +117,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
     ).toBe('malformed');
   });
 
-  it('a row the fold refuses for another reason than quantity is malformed', () => {
+  it('a grupamento with a zero ratio is malformed', () => {
     expect(
       explainRefusal(row('grupamento', '2026-02-01', '0', '0'), [held10()], userId, now, today)
         .kind,
