@@ -451,6 +451,10 @@
       "undetermined": "Não foi possível determinar a causa"
     },
     "acceptAdjustment": "Aceitar valor da B3",
+    "acceptAdjustmentBlocked": {
+      "no_history": "Importe a Negociação e a Movimentação antes de aceitar o valor da B3",
+      "stale": "O histórico mudou desde esta conciliação. Importe a Posição de novo para conferir"
+    },
     "resolved": "Ajustado",
     "rowsCount": "{count} linha(s) nesta importação",
     "extractType": {

@@ -27,7 +27,8 @@ import {
   saveUploadedFile,
 } from '@/worker/handlers/import';
 import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
-import { TransactionId } from '@/core/shared/ids';
+import { InstitutionId, TransactionId } from '@/core/shared/ids';
+import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { UNCLASSIFIED_PLACEHOLDER_TYPE, importNaturalKeyFor } from '@/core/ingestion/occurrence';
 import { DrizzleImportRowRepository } from '@/adapters/db/import-row-repository';
@@ -919,6 +920,76 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(reconciliation?.discrepancies).toHaveLength(1);
     expect(reconciliation?.discrepancies[0]?.cause).toBe('uncaptured_corporate_event');
     expect(reconciliation?.discrepancies[0]?.difference).toBe('-10');
+  });
+
+  /**
+   * SPEC-005 BR-005-25 (#110) — the owner's morning: a Posição committed into
+   * an empty ledger, its figures accepted, and every position doubled when the
+   * history arrived. Accepting is refused with no history, and refused again
+   * once history has made the stored difference stale.
+   */
+  it('BR-005-25 (#110): accepting B3’s figure is refused with no history, and when history made the report stale', async () => {
+    const posicao = await newPendingBatch('b3_posicao');
+    await saveUploadedFile(
+      uploadDir,
+      posicao,
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'PETR4 - PETROBRAS', codigo: 'PETR4', quantidade: '100' }],
+      }),
+    );
+    await handleImportStage({ batchId: posicao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: posicao, userId, asOf: '2026-01-20' }, handlerDeps());
+    const report = (await batchRow(posicao))?.reconciliation as {
+      discrepancies: { assetId: string; institutionId: string | null; computedQuantity: string }[];
+    };
+    const [discrepancy] = report.discrepancies;
+    expect(discrepancy?.computedQuantity).toBe('0');
+
+    const institutionId = discrepancy?.institutionId ?? null;
+    const accept = () =>
+      withTenant(
+        userId,
+        async (tx) =>
+          acceptReconciliationAdjustment(buildIngestionDeps(tx, userId, clock), userId, {
+            batchId: posicao,
+            assetId: AssetId.of(discrepancy?.assetId as string),
+            institutionId: institutionId === null ? null : InstitutionId.of(institutionId),
+          }),
+        appDb,
+      );
+    const countTransactions = async () =>
+      Number((await migratorPool.query('SELECT count(*)::int AS n FROM transactions')).rows[0]?.n);
+
+    const noHistory = await accept();
+    expect(noHistory.ok || noHistory.error.code).toBe('IMPORT_ADJUSTMENT_NO_HISTORY');
+    expect(await countTransactions()).toBe(0);
+
+    // The history arrives: the 100 were bought on 10/01, before the report's date.
+    const history = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      history,
+      await buildMovimentacaoXlsx([
+        {
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '32,15',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: history, userId }, handlerDeps());
+    await handleImportCommit({ batchId: history, userId }, handlerDeps());
+
+    // The stored +100 would now make 200.
+    const stale = await accept();
+    expect(stale.ok || stale.error.code).toBe('IMPORT_ADJUSTMENT_STALE');
+    expect(await countTransactions()).toBe(1);
+    const after = (await batchRow(posicao))?.reconciliation as {
+      discrepancies: { resolved: boolean }[];
+    };
+    expect(after.discrepancies[0]?.resolved).toBe(false);
   });
 
   it('BR-005-06/AC: a CDB Posição row creates a fixed_income_contracts row the valuation reader can find', async () => {
