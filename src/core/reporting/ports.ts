@@ -337,6 +337,13 @@ export interface ReportDataPort {
    * There is no snapshot to read instead — `earnings_to_date` is a cumulative
    * total with no type, no asset and no month in it, and SPEC-014 needs all
    * three.
+   *
+   * **The one bounded replay** (#113 review, BR-014-12): a `leilao_fracoes`
+   * record must carry `heldQuantity`, the position on its pay date, because
+   * its row quantity is the fraction sold and no stored table holds a
+   * quantity as at a past date. The adapter derives it for those rows alone,
+   * from the ledger of the assets they name, up to `to` — a handful of rows
+   * per bonificação, not the per-request five-year replay DL-011-07 forbids.
    */
   listEarnings(from: BusinessDate, to: BusinessDate): Promise<readonly EarningRecord[]>;
   /**
@@ -385,11 +392,10 @@ export type EarningType = (typeof EARNING_TYPES)[number];
  * row type cannot silently change what a report means, and so the structural
  * check that reporting never imports the ledger stays true.
  */
-export interface EarningRecord {
+interface EarningRecordFields {
   readonly assetId: AssetId;
   /** BR-011-03: institution is a grouping dimension, and income groups by it too. */
   readonly institutionId: InstitutionId | null;
-  readonly type: EarningType;
   /**
    * BR-014-08 / DL-014-04 — the **pay date**: when the money arrived, which is
    * what the B3 Movimentação extract records and what matches the user's bank
@@ -399,16 +405,46 @@ export interface EarningRecord {
   /** The amount received, gross (SPEC-009 BR-009-12 — no tax is modelled). */
   readonly amount: Money;
   /**
-   * The quantity that generated the payment, as B3 states it on the row.
+   * The quantity B3 states on the row.
    *
-   * This is what makes wallet attribution possible without a position replay:
-   * it *is* the held quantity on the pay date, so the share not covered by any
-   * wallet allocation is the Unassigned remainder (BR-011-09). Zero on a
-   * hand-entered provento that named no quantity, which the attribution treats
-   * as "allocations are all there is to go on".
+   * For a dividend, JCP, rendimento or amortization this is the number of
+   * shares the payment was made on — it *is* the held quantity on the pay
+   * date, which is what makes wallet attribution possible without a position
+   * replay (the share no wallet claims is the Unassigned remainder,
+   * BR-011-09). Zero on a hand-entered provento that named no quantity, which
+   * the attribution treats as "allocations are all there is to go on".
+   *
+   * For a `leilao_fracoes` it is the **fraction sold** (0,2 of a share), not a
+   * paid-on count — see `heldQuantity` below.
    */
   readonly quantity: Quantity;
 }
+
+/**
+ * The cash-per-share proventos, whose row quantity is the paid-on quantity.
+ */
+export interface SharePaymentRecord extends EarningRecordFields {
+  readonly type: Exclude<EarningType, 'leilao_fracoes'>;
+}
+
+/**
+ * SPEC-014 BR-014-01 / DL-014-08 — a bonificação fraction's auction cash.
+ *
+ * Its row quantity is the fraction, so it cannot serve as BR-014-12's basis:
+ * once wallets held more than 0,2 shares of the asset, `quantity − Σ allocated`
+ * would clamp Unassigned to nothing and every centavo would land in the
+ * wallets (#113 review). `heldQuantity` is the basis instead — the position
+ * held across every institution **on the pay date**, the same date the
+ * allocations are folded at. It is required by the type, so a leilão cannot
+ * reach the attribution without it.
+ */
+export interface FractionAuctionRecord extends EarningRecordFields {
+  readonly type: 'leilao_fracoes';
+  readonly heldQuantity: Quantity;
+}
+
+/** One provento, as the report reads it. */
+export type EarningRecord = SharePaymentRecord | FractionAuctionRecord;
 
 /**
  * SPEC-014 BR-014-12 — one recorded allocation state.

@@ -14,12 +14,18 @@ import type { AllocationEvent, EarningRecord } from '@/core/reporting/ports';
  * nothing about the past having changed. That is the defect this whole module
  * exists to prevent, and it is why `wallet_allocation_events` exists at all.
  *
- * **The denominator is the quantity B3 states on the payment row.** A provento
- * is paid on a number of shares, and the extract records it — so the share of
- * the payment that no wallet had claimed is `paid_on − Σ allocated`, and it
- * lands in Unassigned exactly as BR-011-09 requires. Recovering the held
- * quantity any other way would mean replaying the position, which is the five
- * year replay DL-011-07 forbids a report from doing.
+ * **The denominator is the quantity held on the pay date.** For a dividend,
+ * JCP, rendimento or amortization that is the quantity B3 states on the
+ * payment row — a provento is paid on a number of shares, and the extract
+ * records it — so the share no wallet had claimed is `held − Σ allocated`, and
+ * it lands in Unassigned exactly as BR-011-09 requires.
+ *
+ * A `leilao_fracoes` row is the exception (#113 review): its quantity is the
+ * fraction B3 sold (0,2 of a share), not a count the cash was paid on, so it
+ * arrives with `heldQuantity` — the position on the pay date, which the port
+ * derives for these rows alone — and that is the denominator instead. The
+ * auction cash is income on the whole position the fraction came from, so it
+ * splits in the same proportions a dividend paid that day would.
  */
 
 /** What each wallet held of each asset, as at one date. */
@@ -79,7 +85,7 @@ export interface EarningSlice {
  *    (SPEC-006 allows it). There is then no held quantity to compare against,
  *    so the allocations are all there is to go on and the split is over them
  *    alone — stated rather than silently treated as fully unassigned.
- *  - **Allocations exceed the paid-on quantity.** A stale allocation for a
+ *  - **Allocations exceed the held quantity.** A stale allocation for a
  *    position since reduced, which `reconcile-allocations.ts` repairs when it
  *    next runs. Clamping the Unassigned remainder at zero keeps the slices
  *    summing to the payment; letting it go negative would make a wallet's
@@ -99,7 +105,7 @@ export function attributeEarning(
   if (wallets.length === 0) return unattributed;
 
   const allocated = sumQuantity(wallets.map(([, quantity]) => quantity));
-  const paidOn = earning.quantity;
+  const paidOn = heldOnPayDate(earning);
   const unassigned =
     paidOn.isZero() || !paidOn.minus(allocated).isPositive()
       ? Quantity.zero()
@@ -133,6 +139,22 @@ export function attributeEarning(
   // downstream — the share, the ranking and the breakdown would all carry a
   // group that received nothing.
   return slices.filter((slice) => !slice.amount.isZero());
+}
+
+/**
+ * BR-014-12 — the quantity the payment is apportioned by.
+ *
+ * Worked example (DV-17), a leilão de frações: ITSA4 held 105 on the pay date,
+ * Aposentadoria holding 10 of them, and B3 paid 0,2 × 14,00 = 2,80 for the
+ * fraction. The row's quantity is 0,2, and `0,2 − 10` clamps Unassigned to
+ * zero — 2,80 to Aposentadoria, which held a tenth of the position. Over the
+ * held 105 instead: Unassigned is 105 − 10 = 95, and the weights 10 : 95 give
+ * Aposentadoria 2,80 × 10 ÷ 105 = 0,2666… (0,26666667 at the stored eight
+ * places, R$ 0,27 displayed) and Unassigned the residual 2,53333333
+ * (R$ 2,53).
+ */
+function heldOnPayDate(earning: EarningRecord): Quantity {
+  return earning.type === 'leilao_fracoes' ? earning.heldQuantity : earning.quantity;
 }
 
 /**

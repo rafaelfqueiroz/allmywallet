@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import Decimal from 'decimal.js';
 import { Money } from '@/core/shared/money';
 import type { AssetId, WalletId } from '@/core/shared/ids';
 import { runReportQuery, type ReportQueryResult } from '@/core/reporting/base-query';
@@ -41,15 +42,21 @@ const earning = (
   assetId: AssetId,
   amount: string,
   payDate: string,
-  options: { type?: EarningType; quantity?: string } = {},
-): EarningRecord => ({
-  assetId,
-  institutionId: institutionIdOf('1'),
-  type: options.type ?? 'dividend',
-  payDate: day(payDate),
-  amount: money(amount),
-  quantity: qty(options.quantity ?? '100'),
-});
+  options: { type?: EarningType; quantity?: string; held?: string } = {},
+): EarningRecord => {
+  const fields = {
+    assetId,
+    institutionId: institutionIdOf('1'),
+    payDate: day(payDate),
+    amount: money(amount),
+    quantity: qty(options.quantity ?? '100'),
+  };
+  const type = options.type ?? 'dividend';
+  // BR-014-12: a leilão is apportioned by the position held on its pay date.
+  return type === 'leilao_fracoes'
+    ? { ...fields, type, heldQuantity: qty(options.held ?? '100') }
+    : { ...fields, type };
+};
 
 const allocated = (
   walletId: WalletId,
@@ -189,6 +196,68 @@ describe('buildEarningsReport — portfolio scope', () => {
     expect(report.total.toString()).toBe('100');
   });
 
+  /**
+   * #113 review — a leilão de frações grouped by wallet. PETR held 105 on
+   * 2026-03-17; Aposentadoria 10, Reserva 50, 45 unassigned; B3 paid
+   * 0,2 × 14,00 = 2,80.
+   *
+   *   Aposentadoria 2,80 × 10 ÷ 105 → 0,26666667
+   *   Reserva       2,80 × 50 ÷ 105 → 1,33333333
+   *   Unassigned    residual         = 1,2
+   *
+   * Shares are amount ÷ 2,80, a truncating division:
+   *   0,26666667 ÷ 2,80 = 0,0952380964285714…  → 9,52 % shown
+   *   1,33333333 ÷ 2,80 = 0,476190475          → 47,62 % shown
+   *   1,2        ÷ 2,80 = 0,4285714285714…     → 42,86 % shown
+   *   Σ = 1 less a truncation residue below 1e-38 — 1,00000000 at eight places,
+   *   and 9,52 + 47,62 + 42,86 = 100,00 % shown.
+   */
+  it('splits a leilão de frações by wallet over the held position, shares summing to 100 %', async () => {
+    const report = build(
+      await query({ kind: 'portfolio' }, 'wallet'),
+      [
+        earning(PETR, '2.80', '2026-03-17', {
+          type: 'leilao_fracoes',
+          quantity: '0.2',
+          held: '105',
+        }),
+      ],
+      [
+        allocated(RETIREMENT, PETR, '10', '2025-01-01'),
+        allocated(RESERVE, PETR, '50', '2025-01-01'),
+      ],
+    );
+
+    const byWallet = new Map(
+      report.breakdown.map((slice) => [slice.key.id, slice.amount.toString()]),
+    );
+    expect(byWallet).toEqual(
+      new Map([
+        [RETIREMENT, '0.26666667'],
+        [RESERVE, '1.33333333'],
+        ['__unassigned__', '1.2'],
+      ]),
+    );
+    expect(report.total.toString()).toBe('2.8');
+
+    const shares = report.breakdown.map((slice) => slice.share ?? Money.zero());
+    const percent = new Map(
+      report.breakdown.map((slice, index) => [
+        slice.key.id,
+        (shares[index] as Money).toDecimal().times(100).toFixed(2, Decimal.ROUND_HALF_UP),
+      ]),
+    );
+    expect(percent).toEqual(
+      new Map([
+        [RETIREMENT, '9.52'],
+        [RESERVE, '47.62'],
+        ['__unassigned__', '42.86'],
+      ]),
+    );
+    const summed = shares.reduce((acc, share) => acc.plus(share), Money.zero());
+    expect(summed.toDecimal().toFixed(8, Decimal.ROUND_HALF_UP)).toBe('1.00000000');
+  });
+
   it('reports the scope’s yield on cost over every holding', async () => {
     const report = build(await query({ kind: 'portfolio' }, 'asset_class'), [
       earning(PETR, '145', '2026-03-10'),
@@ -313,6 +382,31 @@ describe('buildEarningsReport — wallet scope (BR-014-12, Marina’s question)'
 
     expect(report.growth.previous.toString()).toBe('100');
     expect(report.growth.change?.toString()).toBe('0.2');
+  });
+
+  /**
+   * #113 review — Marina's question for a leilão. The same 2,80 as above
+   * with Aposentadoria 10 of the 105 held: its income is 2,80 × 10 ÷ 105 =
+   * 0,26666667, under the leilão type, not the whole 2,80 the fraction's 0,2
+   * would have handed it.
+   */
+  it('counts only the wallet’s held share of a leilão de frações', async () => {
+    const report = build(
+      await query({ kind: 'wallet', walletId: RETIREMENT }, 'asset'),
+      [
+        earning(PETR, '2.80', '2026-03-17', {
+          type: 'leilao_fracoes',
+          quantity: '0.2',
+          held: '105',
+        }),
+      ],
+      [allocated(RETIREMENT, PETR, '10', '2025-01-01')],
+    );
+
+    expect(report.total.toString()).toBe('0.26666667');
+    expect(report.byType.find((total) => total.type === 'leilao_fracoes')?.amount.toString()).toBe(
+      '0.26666667',
+    );
   });
 
   it('reports a wallet that held nothing when the payments landed as empty', async () => {

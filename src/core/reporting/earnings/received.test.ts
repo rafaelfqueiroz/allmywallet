@@ -24,14 +24,19 @@ const earning = (
   amount: string,
   payDate: string,
   type: EarningType = 'dividend',
-): EarningRecord => ({
-  assetId: PETR,
-  institutionId: institutionIdOf('1'),
-  type,
-  payDate: day(payDate),
-  amount: Money.fromString(amount),
-  quantity: Quantity.fromString('100'),
-});
+): EarningRecord => {
+  const fields = {
+    assetId: PETR,
+    institutionId: institutionIdOf('1'),
+    payDate: day(payDate),
+    amount: Money.fromString(amount),
+    quantity: Quantity.fromString('100'),
+  };
+  // A leilão carries the held position (BR-014-12); the totals here never read it.
+  return type === 'leilao_fracoes'
+    ? { ...fields, type, heldQuantity: Quantity.fromString('100') }
+    : { ...fields, type };
+};
 
 describe('totalsByType (BR-014-01/02)', () => {
   it('separates JCP from dividends rather than folding them together', () => {

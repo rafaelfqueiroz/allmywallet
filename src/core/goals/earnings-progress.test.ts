@@ -31,14 +31,17 @@ const PETR4 = AssetId.generate();
 const AS_OF_MARCH_2026 = BusinessDate.of('2026-03-15');
 
 function earning(payDate: string, amount: string, type: EarningType = 'rendimento'): EarningRecord {
-  return {
+  const fields = {
     assetId: HGLG11,
     institutionId: null,
-    type,
     payDate: BusinessDate.of(payDate),
     amount: Money.fromString(amount),
     quantity: Quantity.fromString('100'),
   };
+  // A leilão carries the held position (SPEC-014 BR-014-12); goals never read it.
+  return type === 'leilao_fracoes'
+    ? { ...fields, type, heldQuantity: Quantity.fromString('100') }
+    : { ...fields, type };
 }
 
 function goalOf(overrides: Partial<WalletGoal> = {}): WalletGoal {
