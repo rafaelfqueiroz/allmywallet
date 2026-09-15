@@ -51,6 +51,21 @@ export const SHARED_TABLES: readonly string[] = [
   // scripts/personal/backup.sh. The dump's *contents* never touch this table.
   // Same "holds no personal data" test as `worker_heartbeats`.
   'backup_runs',
+  // Added by SPEC-008 BR-008-29 (#113), same reviewed-addition path as
+  // `price_quote_gaps` above. `corporate_event_factors` holds B3's published
+  // split/grupamento/bonificação factor by issuer and event date — public
+  // market data, "persisted and shared across tenants like quotes"
+  // (BR-008-25 by explicit cross-reference in BR-008-29). No user column,
+  // nothing derived from anyone's holdings: it confirms a ratio a tenant's
+  // own custody rows already imply, it never itself creates or classifies a
+  // transaction (SPEC-003 BR-003-06's review: reviewed and declared here).
+  'corporate_event_factors',
+  // Added alongside `corporate_event_factors` by the same #113 change.
+  // `corporate_event_factor_fetches` is this table's fetch bookkeeping — one
+  // row per issuer, when B3's endpoint was last called and what happened.
+  // Same "holds no personal data" test: an issuer's fetch outcome is not
+  // tenant data any more than `worker_heartbeats`' process identity is.
+  'corporate_event_factor_fetches',
 ];
 
 /**

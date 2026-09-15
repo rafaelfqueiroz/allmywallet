@@ -148,6 +148,13 @@
       "when": 1789489376944,
       "tag": "0020_merge_bank_paper_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789489376945,
+      "tag": "0021_corporate_event_types_and_factors",
+      "breakpoints": true
     }
   ]
 }
