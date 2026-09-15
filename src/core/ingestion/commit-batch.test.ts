@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
 import { ImportBatchId, TransactionId, UserId } from '@/core/shared/ids';
-import { Money, Quantity } from '@/core/shared/money';
+import { Money, Quantity, asStored } from '@/core/shared/money';
 import { editTransaction } from '@/core/ledger/edit-transaction';
 import {
   computeTotalValue,
@@ -843,6 +843,33 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       await importFile(deps, [credit(), debit()]);
 
       expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('15');
+    });
+
+    it('review 4: a repeating average read back at the column scale is not rewritten on re-import', async () => {
+      const deps = buildFakeIngestionDeps();
+      // ORIGEM: 3 @ 10,00 + 1,00 fees = 31,00 → preço médio 10,333… (repeating).
+      const three = { quantity: Quantity.fromString('3') };
+      await importFile(deps, [history({ ...three, fees: Money.fromString('1') })]);
+      await importFile(deps, [credit(three), debit(three)]);
+
+      // NUMERIC(20,8) keeps 8 places; the fake does not, so store what Postgres would.
+      const [carried] = transfersIn(deps) as Transaction[];
+      expect(asStored((carried as Transaction).unitPrice)).toBe('10.33333333');
+      const readBack = Money.fromString(asStored((carried as Transaction).unitPrice));
+      await deps.transactions.update({
+        ...(carried as Transaction),
+        unitPrice: readBack,
+        totalValue: computeTotalValue(
+          'transfer_in',
+          Quantity.fromString('3'),
+          readBack,
+          Money.zero(),
+        ),
+      });
+
+      const again = await importFile(deps, [credit(three), debit(three)]);
+
+      expect(again.outcome).toMatchObject({ recarried: 0, committed: [] });
     });
 
     it('never recomputes a carried transfer the user has edited (BR-006-16)', async () => {

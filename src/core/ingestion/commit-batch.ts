@@ -2,7 +2,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
-import type { Quantity } from '@/core/shared/money';
+import { type Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
@@ -544,7 +544,10 @@ function settle(
     const cost = costs.get(leg.id);
     if (cost === undefined) continue;
     // #112: a re-carry that lands on the figure already stored writes nothing.
-    if (leg.mode === 'recarry' && cost.equals(leg.credit.unitPrice)) continue;
+    // Compared at the column's scale (`asStored`): a repeating average is kept
+    // to 8 places, so the full-precision figure would never equal it and every
+    // re-import of the same file would rewrite the transfer and rebuild history.
+    if (leg.mode === 'recarry' && asStored(cost) === asStored(leg.credit.unitPrice)) continue;
     groupOf(leg.credit).carried.push({ leg, transaction: withCarriedCost(leg.credit, cost) });
   }
   const replaced = new Set<string>(
