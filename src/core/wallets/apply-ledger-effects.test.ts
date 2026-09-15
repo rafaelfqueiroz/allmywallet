@@ -332,6 +332,40 @@ describe('SPEC-010 BR-010-05/17 — every type that reduces the position reduces
     expect((await deps.allocations.listForWallet(wallet.id))[0]?.quantity.toString()).toBe('60');
   });
 
+  /**
+   * SPEC-007 BR-007-05a (#113): B3 removed a bonificação fraction. Left
+   * allocated, the wallet claims 0.2 shares the position no longer holds and
+   * `assertWithinHoldings` rolls the whole commit back.
+   */
+  it('a fracao_bonificacao of a fully-allocated asset reduces the allocation', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('105.2'), Money.fromString('10'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
+
+    deps.positionQuery.set(ITSA4, Quantity.fromString('105'), Money.fromString('10'));
+    const result = await applyLedgerEffects(deps, USER, [
+      tx('fracao_bonificacao', '0.2', '2026-03-10'),
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect((await deps.allocations.listForWallet(wallet.id))[0]?.quantity.toString()).toBe('105');
+  });
+
+  it('a leilao_fracoes provento moves no allocation', async () => {
+    const deps = buildFakeDeps();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('105'), Money.fromString('10'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+    await allocateToWallet(deps, USER, { walletId: wallet.id, assetId: ITSA4 });
+
+    const result = await applyLedgerEffects(deps, USER, [
+      tx('leilao_fracoes', '0.2', '2026-04-20'),
+    ]);
+
+    expect(result.ok).toBe(true);
+    expect((await deps.allocations.listForWallet(wallet.id))[0]?.quantity.toString()).toBe('105');
+  });
+
   it('a positive adjustment adds no allocation — the shares land in Unassigned', async () => {
     const deps = buildFakeDeps();
     deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'));

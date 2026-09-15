@@ -93,6 +93,29 @@ describe('the selection is read as the quantity it brought in', () => {
     expect(result.value.assigned[0]?.quantity.toString()).toBe('70');
   });
 
+  // SPEC-007 BR-007-05a (#113): a removed bonificação fraction left the holding.
+  it('nets a removed bonificação fraction against the buy', async () => {
+    const buy = aTransaction().buy().of('PETR4').quantity('100').on('2026-01-05').build();
+    const fraction = aTransaction()
+      .fracaoBonificacao()
+      .of('PETR4')
+      .quantity('0.2')
+      .on('2026-02-10')
+      .build();
+    const { deps } = build([buy, fraction]);
+    deps.positionQuery.set(PETR4, Quantity.fromString('200'), Money.fromString('30'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+
+    const result = await assignTransactionsToWallet(deps, TEST_USER_ID, {
+      walletId: wallet.id,
+      transactionIds: [buy.id, fraction.id],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.assigned[0]?.quantity.toString()).toBe('99.8');
+  });
+
   it('adds to the wallet rather than replacing what it already holds', async () => {
     const first = aTransaction().buy().of('PETR4').quantity('60').on('2026-01-05').build();
     const second = aTransaction().buy().of('PETR4').quantity('40').on('2026-02-05').build();
