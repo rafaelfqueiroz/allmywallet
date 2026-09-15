@@ -360,7 +360,7 @@ interface KeyForms {
   readonly unmapped: string;
 }
 
-function keyFormsFor(
+export function keyFormsFor(
   parts: Omit<Parameters<typeof importNaturalKeyFor>[0], 'type'>,
   type: TransactionType,
   b3Type: string,

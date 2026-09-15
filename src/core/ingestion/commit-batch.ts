@@ -18,6 +18,8 @@ import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/reconcile';
+import { isIgnoredMovement } from '@/core/ingestion/movement-map';
+import { keyFormsFor } from '@/core/ingestion/stage-batch';
 import {
   type CarryLeg,
   isCarryCandidate,
@@ -67,6 +69,16 @@ export interface CommitBatchOutcome {
   readonly promoted: number;
   /** BR-005-20a (#112): existing carried transfers whose cost this commit recomputed to a new figure. */
   readonly recarried: number;
+  /**
+   * BR-005-17/18 (#110): rows an older map stored `unclassified` that this
+   * map classifies, activated in place as that type.
+   */
+  readonly reclassified: number;
+  /**
+   * BR-005-19 (amended, #110): rows an older map stored `unclassified` that
+   * mirror another extract's record, now `superseded`.
+   */
+  readonly superseded: number;
   readonly skippedDuplicates: number;
   readonly invalid: number;
   /**
@@ -118,7 +130,21 @@ interface Group {
   readonly key: PositionKey;
   readonly candidates: Candidate[];
   readonly carried: CarriedCredit[];
+  readonly reclassified: Reclassification[];
   readonly state: PositionState | null;
+}
+
+/**
+ * SPEC-005 BR-005-17..19 (#110) — an existing `unclassified` transaction an
+ * older map version stored, which the staged duplicate of the same B3 row now
+ * classifies: `activate` as its mapped type, or `supersede` as a mirror.
+ * `origin` is the batch whose row staged it.
+ */
+interface Reclassification {
+  readonly row: ImportRow;
+  readonly kind: 'activate' | 'supersede';
+  readonly updated: Transaction;
+  readonly origin: ImportBatchId;
 }
 
 type StoredLedger = (key: PositionKey) => readonly Transaction[];
@@ -146,6 +172,8 @@ export async function commitBatch(
       applied: 0,
       promoted: 0,
       recarried: 0,
+      reclassified: 0,
+      superseded: 0,
       skippedDuplicates: 0,
       invalid: 0,
       committed: [],
@@ -218,20 +246,32 @@ export async function commitBatch(
    */
   const excluded = new Set<string>();
   const vetoed = new Set<string>();
-  let settlement = settle(newCandidates, carryLegs, stored, excluded, vetoed);
+  const declined = new Set<string>();
+  const reclassifications = planReclassifications(rows, stored, carryLegs, today);
+  const settleRound = () =>
+    settle(newCandidates, carryLegs, reclassifications, stored, excluded, vetoed, declined);
+  let settlement = settleRound();
   for (
     let failed = settlement.filter((group) => group.state === null);
     failed.length > 0;
     failed = settlement.filter((group) => group.state === null)
   ) {
     for (const group of failed) {
+      // #110: an older import's row that no longer replays as its mapped type
+      // (a `Resgate` sell of shares the ledger never held) is given up first.
+      // It stays `unclassified`, exactly as it was, and the batch keeps its own
+      // rows — the owner's file must import (BR-005-19).
+      if (group.reclassified.length > 0) {
+        for (const r of group.reclassified) declined.add(r.row.id);
+        continue;
+      }
       // BR-006-15 could not be satisfied for this group — every `new` row in
       // it is excluded (never written) and surfaced as `invalid`, not the
       // rest of the batch. A carried credit in it falls back to `unclassified`.
       for (const c of group.candidates) excluded.add(c.row.id);
       for (const c of group.carried) vetoed.add(c.leg.id);
     }
-    settlement = settle(newCandidates, carryLegs, stored, excluded, vetoed);
+    settlement = settleRound();
   }
   for (const c of newCandidates) if (excluded.has(c.row.id)) invalidRowIds.push(c.row.id);
 
@@ -240,6 +280,7 @@ export async function commitBatch(
   const rowToTransaction = new Map<ImportRowId, TransactionId>();
   const carriedRowIds = new Set<ImportRowId>();
   const inPlace: CarriedCredit[] = [];
+  const reclassified: Reclassification[] = [];
 
   for (const group of settlement) {
     // Every group left in the final round replayed.
@@ -257,7 +298,13 @@ export async function commitBatch(
       rowToTransaction.set(c.leg.row.id, c.transaction.id);
       carriedRowIds.add(c.leg.row.id);
     }
-    positionUpserts.push({ ...group.key, state: group.state });
+    reclassified.push(...group.reclassified);
+    // A group holding only superseded rows changed no figure: nothing to write.
+    const changesPosition =
+      group.candidates.length > 0 ||
+      group.carried.length > 0 ||
+      group.reclassified.some((r) => r.kind === 'activate');
+    if (changesPosition) positionUpserts.push({ ...group.key, state: group.state });
   }
 
   // `unclassified` rows are excluded from replay by `status`
@@ -297,7 +344,10 @@ export async function commitBatch(
     await deps.rows.updateClassification(rowId, 'new');
   }
 
-  const { promoted, recarried } = await updateCarriedInPlace(deps, inPlace);
+  const { promoted, recarried, activated, superseded } = await updateInPlace(deps, inPlace, [
+    ...reclassified,
+    ...reclassifications.filter((r) => r.kind === 'supersede'),
+  ]);
 
   // BR-005-06: create/update fixed-income contracts from the Posição
   // fixed-income tab before reconciliation reads the ledger.
@@ -348,9 +398,12 @@ export async function commitBatch(
     applied: toInsert.length,
     promoted: promoted.length,
     recarried: recarried.length,
+    reclassified: activated.length,
+    superseded: superseded.length,
     skippedDuplicates: duplicates.length,
     invalid: invalidRowIds.length,
-    committed: [...toInsert, ...promoted, ...recarried],
+    // Superseded rows are left out: they enter no calculation (BR-006-03).
+    committed: [...toInsert, ...promoted, ...recarried, ...activated],
   });
 }
 
@@ -367,6 +420,7 @@ async function loadLedgers(
   for (const row of rows) {
     const touches =
       row.classification === 'new' ||
+      row.classification === 'duplicate' ||
       row.ledgerType === 'transfer_in' ||
       row.ledgerType === 'transfer_out';
     if (!touches || row.record.kind !== 'transaction') continue;
@@ -382,6 +436,114 @@ function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undef
   return stored(row).find(
     (t) => t.naturalKey === row.naturalKey && t.occurrence === row.occurrence,
   );
+}
+
+/**
+ * SPEC-005 BR-005-17..19 (#110) — duplicates whose stored copy an older map
+ * version left `unclassified`, and what this map makes of them.
+ *
+ * The owner's first real Movimentação was committed before map v3: 684 mirror
+ * rows and 13 rows v3 now maps were stored as `unclassified` transactions.
+ * Re-importing the file counted them as duplicates (BR-005-17's key forms) and
+ * did nothing else, so they stayed in Needs attention for good.
+ *
+ * **Finding the stored copy.** `ImportRow` persists one key, the one staging
+ * chose. A mirror row is staged under the same key an older map stored it
+ * with (placeholder type plus raw B3 type), so it is looked up by that key. A
+ * row this map classifies is staged under the `mapped` form, and its stored
+ * copy sits under the `unmapped` form — rebuilt here from the row's own fields
+ * with `keyFormsFor`, the function staging counts forms with. Same occurrence
+ * on both sides; a copy under another ordinal is not guessed at.
+ *
+ * Only a copy no human decided is touched: `unclassified`, not user-modified,
+ * imported (BR-006-16). A row staged price-less or as a carry candidate is
+ * not activated here — the carry owns it (BR-005-20a).
+ */
+function planReclassifications(
+  rows: readonly ImportRow[],
+  stored: StoredLedger,
+  carryLegs: readonly PlannedCarry[],
+  today: BusinessDate,
+): readonly Reclassification[] {
+  const taken = new Set<string>(carryLegs.map((leg) => leg.credit.id));
+  const planned: Reclassification[] = [];
+  for (const row of rows) {
+    if (
+      row.classification !== 'duplicate' ||
+      row.record.kind !== 'transaction' ||
+      row.naturalKey === null ||
+      row.ledgerType === null
+    ) {
+      continue;
+    }
+    const record = row.record;
+    const mirror = isIgnoredMovement(record.b3Type);
+    let storedKey = row.naturalKey;
+    if (!mirror) {
+      if (isCarryCandidate(row)) continue;
+      const forms = keyFormsFor(
+        {
+          assetId: row.assetId,
+          institutionId: row.institutionId,
+          tradeDate: record.tradeDate,
+          quantity: record.quantity,
+          unitPrice: record.unitPrice,
+        },
+        row.ledgerType,
+        record.b3Type,
+      );
+      // Still unmapped, or mapped but staged for want of a price: nothing to activate.
+      if (row.naturalKey !== forms.mapped) continue;
+      storedKey = forms.unmapped;
+    }
+
+    const copy = stored(row).find(
+      (t) =>
+        t.naturalKey === storedKey &&
+        t.occurrence === row.occurrence &&
+        t.status === 'unclassified' &&
+        !t.isUserModified &&
+        !t.isManual &&
+        t.importBatchId !== null &&
+        !taken.has(t.id),
+    );
+    if (copy === undefined) continue;
+
+    const updated: Transaction = mirror
+      ? { ...copy, status: 'superseded' }
+      : {
+          ...copy,
+          type: row.ledgerType,
+          status: 'active',
+          ratio: record.ratio,
+          totalValue: computeTotalValue(row.ledgerType, copy.quantity, copy.unitPrice, copy.fees),
+        };
+    if (
+      !mirror &&
+      !validateTransactionDraft(
+        {
+          type: updated.type,
+          tradeDate: updated.tradeDate,
+          quantity: updated.quantity,
+          unitPrice: updated.unitPrice,
+          fees: updated.fees,
+          ratio: updated.ratio,
+        },
+        today,
+      ).ok
+    ) {
+      continue;
+    }
+
+    taken.add(copy.id);
+    planned.push({
+      row,
+      kind: mirror ? 'supersede' : 'activate',
+      updated,
+      origin: copy.importBatchId as ImportBatchId,
+    });
+  }
+  return planned;
 }
 
 /**
@@ -498,11 +660,14 @@ function planCarries(
 function settle(
   newCandidates: readonly Candidate[],
   carryLegs: readonly PlannedCarry[],
+  reclassifications: readonly Reclassification[],
   stored: StoredLedger,
   excluded: ReadonlySet<string>,
   vetoed: ReadonlySet<string>,
+  declined: ReadonlySet<string>,
 ): Group[] {
   const live = newCandidates.filter((c) => !excluded.has(c.row.id));
+  const liveReclassified = reclassifications.filter((r) => !declined.has(r.row.id));
   const excludedTransactions = new Set<string>(
     newCandidates.filter((c) => excluded.has(c.row.id)).map((c) => c.transaction.id),
   );
@@ -521,11 +686,26 @@ function settle(
     ...live
       .filter((c) => c.row.assetId === assetId && c.row.institutionId === institutionId)
       .map((c) => c.transaction),
+    // An activated row is part of the source's history, as it would have been
+    // had the older map known its type.
+    ...liveReclassified
+      .filter(
+        (r) =>
+          r.kind === 'activate' &&
+          r.updated.assetId === assetId &&
+          r.updated.institutionId === institutionId,
+      )
+      .map((r) => r.updated),
   ]);
 
   const groups = new Map<
     string,
-    { key: PositionKey; candidates: Candidate[]; carried: CarriedCredit[] }
+    {
+      key: PositionKey;
+      candidates: Candidate[];
+      carried: CarriedCredit[];
+      reclassified: Reclassification[];
+    }
   >();
   const groupOf = (key: PositionKey) => {
     const id = positionKeyString(key);
@@ -535,6 +715,7 @@ function settle(
       key: { assetId: key.assetId, institutionId: key.institutionId },
       candidates: [],
       carried: [],
+      reclassified: [],
     };
     groups.set(id, created);
     return created;
@@ -550,8 +731,15 @@ function settle(
     if (leg.mode === 'recarry' && asStored(cost) === asStored(leg.credit.unitPrice)) continue;
     groupOf(leg.credit).carried.push({ leg, transaction: withCarriedCost(leg.credit, cost) });
   }
+  // Only an activation enters a replay; a superseded row was never in one.
+  for (const r of liveReclassified) {
+    if (r.kind === 'activate') groupOf(r.updated).reclassified.push(r);
+  }
   const replaced = new Set<string>(
-    [...groups.values()].flatMap((group) => group.carried.map((c) => c.transaction.id)),
+    [...groups.values()].flatMap((group) => [
+      ...group.carried.map((c) => c.transaction.id),
+      ...group.reclassified.map((r) => r.updated.id),
+    ]),
   );
 
   return [...groups.values()].map((group) => {
@@ -559,6 +747,7 @@ function settle(
       ...stored(group.key).filter((t) => !replaced.has(t.id)),
       ...group.candidates.map((c) => c.transaction),
       ...group.carried.map((c) => c.transaction),
+      ...group.reclassified.map((r) => r.updated),
     ]);
     return { ...group, state: replayed.ok ? replayed.value : null };
   });
@@ -579,69 +768,117 @@ function settle(
  * (BR-005-13) rather than leaving positions written for updates that never
  * happened.
  */
-async function updateCarriedInPlace(
-  deps: IngestionDependencies,
-  updates: readonly CarriedCredit[],
-): Promise<{ promoted: Transaction[]; recarried: Transaction[] }> {
-  if (updates.length === 0) return { promoted: [], recarried: [] };
+interface InPlaceOutcome {
+  readonly promoted: Transaction[];
+  readonly recarried: Transaction[];
+  readonly activated: Transaction[];
+  readonly superseded: Transaction[];
+}
 
-  const edited = await editTransactions(
-    deps,
-    updates.map(({ transaction }) => ({
+/**
+ * #110 — every in-place update of this commit that enters a calculation —
+ * promoted and re-carried transfers, activated rows — in the one
+ * `editTransactions` call, so BR-006-15's guard and the recalculation run once
+ * per position with all of them in place.
+ *
+ * A superseded row is written directly instead. `unclassified` → `superseded`
+ * changes no replay input (both are excluded by `selectForReplay`), so there is
+ * nothing for the guard to refuse, and recalculating would cache an empty
+ * position for an asset the ledger holds nothing active of — one a rebuild
+ * never produces (DM-4).
+ */
+async function updateInPlace(
+  deps: IngestionDependencies,
+  carried: readonly CarriedCredit[],
+  reclassifications: readonly Reclassification[],
+): Promise<InPlaceOutcome> {
+  const outcome: InPlaceOutcome = { promoted: [], recarried: [], activated: [], superseded: [] };
+  const reclassified = reclassifications.filter((r) => r.kind === 'activate');
+  const supersedes = reclassifications.filter((r) => r.kind === 'supersede');
+  if (carried.length === 0 && reclassifications.length === 0) return outcome;
+
+  const edited = await editTransactions(deps, [
+    ...carried.map(({ transaction }) => ({
       id: transaction.id,
       input: {
         unitPrice: transaction.unitPrice,
-        status: 'active',
+        status: 'active' as const,
         preserveNaturalKey: true,
         flagUserModified: false,
       },
     })),
-  );
+    ...reclassified.map(({ updated }) => ({
+      id: updated.id,
+      input: {
+        type: updated.type,
+        status: updated.status,
+        ratio: updated.ratio,
+        preserveNaturalKey: true,
+        flagUserModified: false,
+      },
+    })),
+  ]);
   if (!edited.ok) {
-    throw new Error(`BR-005-20a: updating carried transfers failed: ${edited.error.code}`);
+    throw new Error(`SPEC-005 #110: in-place import updates failed: ${edited.error.code}`);
   }
 
-  const promoted: Transaction[] = [];
-  const recarried: Transaction[] = [];
-  const promotedByOrigin = new Map<ImportBatchId, Set<string>>();
+  // What each origin row becomes: `new` once it enters calculations, `ignored`
+  // once it is known to mirror another extract (BR-005-19).
+  const originRows = new Map<ImportBatchId, Map<string, 'new' | 'ignored'>>();
+  const mark = (origin: ImportBatchId, id: string, next: 'new' | 'ignored') => {
+    originRows.set(origin, (originRows.get(origin) ?? new Map()).set(id, next));
+  };
   edited.value.transactions.forEach((transaction, index) => {
-    const { leg } = updates[index] as CarriedCredit;
-    if (leg.mode === 'recarry') {
-      recarried.push(transaction);
+    if (index < carried.length) {
+      const { leg } = carried[index] as CarriedCredit;
+      if (leg.mode === 'recarry') {
+        outcome.recarried.push(transaction);
+        return;
+      }
+      outcome.promoted.push(transaction);
+      mark(leg.origin as ImportBatchId, transaction.id, 'new');
       return;
     }
-    promoted.push(transaction);
-    const origin = leg.origin as ImportBatchId;
-    promotedByOrigin.set(origin, (promotedByOrigin.get(origin) ?? new Set()).add(transaction.id));
+    const r = reclassified[index - carried.length] as Reclassification;
+    outcome.activated.push(transaction);
+    mark(r.origin, transaction.id, 'new');
   });
+  for (const r of supersedes) {
+    const superseded: Transaction = { ...r.updated, updatedAt: deps.clock.now() };
+    await deps.transactions.update(superseded);
+    outcome.superseded.push(superseded);
+    mark(r.origin, superseded.id, 'ignored');
+  }
 
-  // The row that first staged a promoted transfer leaves Needs attention, as
-  // classifying it would — and its batch's stored counts say so (BR-005-10).
-  for (const [origin, transactionIds] of promotedByOrigin) {
-    let reclassified = 0;
+  // The row that first staged each one leaves Needs attention, and its batch's
+  // stored counts say so (BR-005-10).
+  for (const [origin, marks] of originRows) {
+    let toNew = 0;
+    let toIgnored = 0;
     for (const row of await deps.rows.listByBatch(origin)) {
-      if (
-        row.transactionId !== null &&
-        transactionIds.has(row.transactionId) &&
-        row.classification === 'unclassified'
-      ) {
-        await deps.rows.updateClassification(row.id, 'new');
-        reclassified += 1;
-      }
+      const next = row.transactionId === null ? undefined : marks.get(row.transactionId);
+      if (next === undefined || row.classification !== 'unclassified') continue;
+      await deps.rows.updateClassification(row.id, next);
+      if (next === 'new') toNew += 1;
+      else toIgnored += 1;
     }
     const originBatch = await deps.batches.findById(origin);
-    if (originBatch === null || originBatch.rowCounts === null || reclassified === 0) continue;
+    if (originBatch === null || originBatch.rowCounts === null || toNew + toIgnored === 0) {
+      continue;
+    }
+    const counts = originBatch.rowCounts;
     await deps.batches.update({
       ...originBatch,
       rowCounts: {
-        ...originBatch.rowCounts,
-        new: originBatch.rowCounts.new + reclassified,
-        needsAttention: originBatch.rowCounts.needsAttention - reclassified,
+        ...counts,
+        new: counts.new + toNew,
+        ignored: counts.ignored + toIgnored,
+        needsAttention: counts.needsAttention - toNew - toIgnored,
       },
     });
   }
 
-  return { promoted, recarried };
+  return outcome;
 }
 
 /** `null` when the row's own fields fail `validateTransactionDraft` — a corrupt or contradictory extract row. */
