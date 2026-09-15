@@ -13,7 +13,10 @@
 -- Data only, no DDL, so the previous image runs on it unchanged (AR-69).
 --
 -- Per tenant under `app.user_id`: every tenant table is FORCE ROW LEVEL
--- SECURITY, so the migrator sees a tenant's rows only with the context set.
+-- SECURITY, so a non-superuser migrator sees a tenant's rows only with the
+-- context set. The personal and CI migrator is a superuser and sees every
+-- tenant at once, so every check and write also matches on `user_id` and a
+-- repeated pass changes nothing.
 --
 --   - No canonical asset yet (no Posição imported): the asset is renamed, and
 --     nothing else moves — every key names it by id.
@@ -53,12 +56,14 @@ BEGIN
           JOIN transactions o
             ON o.natural_key = replace(t.natural_key, legacy.id::text, canonical_id::text)
            AND o.occurrence = t.occurrence
+           AND o.user_id = t.user_id
          WHERE t.asset_id = legacy.id
       ) OR EXISTS (
         SELECT 1 FROM positions p
           JOIN positions o
             ON o.asset_id = canonical_id
            AND o.institution_id IS NOT DISTINCT FROM p.institution_id
+           AND o.user_id = p.user_id
          WHERE p.asset_id = legacy.id
       ) OR EXISTS (
         SELECT 1 FROM wallet_allocations a
@@ -68,12 +73,14 @@ BEGIN
         SELECT 1 FROM wallet_targets w
           JOIN wallet_targets o ON o.wallet_id = w.wallet_id AND o.asset_id = canonical_id
          WHERE w.asset_id = legacy.id
-      ) OR (
-        EXISTS (SELECT 1 FROM wallet_asset_rules WHERE asset_id = legacy.id)
-        AND EXISTS (SELECT 1 FROM wallet_asset_rules WHERE asset_id = canonical_id)
-      ) OR (
-        EXISTS (SELECT 1 FROM opportunity_rules WHERE asset_id = legacy.id)
-        AND EXISTS (SELECT 1 FROM opportunity_rules WHERE asset_id = canonical_id)
+      ) OR EXISTS (
+        SELECT 1 FROM wallet_asset_rules r
+          JOIN wallet_asset_rules o ON o.user_id = r.user_id AND o.asset_id = canonical_id
+         WHERE r.asset_id = legacy.id
+      ) OR EXISTS (
+        SELECT 1 FROM opportunity_rules r
+          JOIN opportunity_rules o ON o.user_id = r.user_id AND o.asset_id = canonical_id
+         WHERE r.asset_id = legacy.id
       ) THEN
         RAISE EXCEPTION '#115: asset % holds rows that clash with its canonical asset %; nothing was merged',
           legacy.id, canonical_id;
@@ -103,9 +110,12 @@ BEGIN
 
       UPDATE positions SET asset_id = canonical_id WHERE asset_id = legacy.id;
 
-      DELETE FROM fixed_income_contracts
-       WHERE asset_id = legacy.id
-         AND EXISTS (SELECT 1 FROM fixed_income_contracts WHERE asset_id = canonical_id);
+      DELETE FROM fixed_income_contracts c
+       WHERE c.asset_id = legacy.id
+         AND EXISTS (
+           SELECT 1 FROM fixed_income_contracts o
+            WHERE o.asset_id = canonical_id AND o.user_id = c.user_id
+         );
       UPDATE fixed_income_contracts SET asset_id = canonical_id WHERE asset_id = legacy.id;
 
       UPDATE wallet_allocations SET asset_id = canonical_id WHERE asset_id = legacy.id;

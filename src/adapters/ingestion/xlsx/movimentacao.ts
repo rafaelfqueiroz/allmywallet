@@ -48,7 +48,9 @@ export function parseMovimentacao(
       direction,
       assetCode: code,
       assetName: name,
-      assetClass: guessAssetClass(code),
+      // #115: bank paper's class is its `Produto` prefix, not a guess from the
+      // code, so a listed code that starts `LCA…` never reads as an LCA.
+      assetClass: guessAssetClass(BANK_PAPER_CODE.test(produto.trim()) ? produto : code),
       institutionName: cellAt(row, structure.columns, 'instituicao'),
       tradeDate: parseBrDate(dataText, 'data'),
       quantity: parseQuantity(quantidadeText, 'quantidade'),
@@ -128,17 +130,10 @@ const BANK_PAPER_PREFIX = /^(CDB|LCI|LCA) - /i;
  */
 const BANK_PAPER_CODE = /^(CDB|LCI|LCA) - ((?:CDB|LCI|LCA)[A-Z0-9]{5,})(?: - (.+))?$/i;
 
-/**
- * A bank-paper code standing alone. Eight characters or more, so a ticker that
- * happens to start the same way (`LCAM3`) still reads as a stock.
- */
-const BANK_PAPER_CODE_ALONE = /^(CDB|LCI|LCA)[A-Z0-9]{5,}$/;
-
 function guessAssetClass(code: string): AssetClass {
   const trimmed = code.trim().toUpperCase();
   if (trimmed.startsWith('TESOURO ')) return 'tesouro_direto';
-  const bankPaper =
-    BANK_PAPER_PREFIX.exec(trimmed)?.[1] ?? BANK_PAPER_CODE_ALONE.exec(trimmed)?.[1];
+  const bankPaper = BANK_PAPER_PREFIX.exec(trimmed)?.[1];
   if (bankPaper !== undefined) return bankPaper.toLowerCase() as AssetClass;
   if (/\d{2}$/.test(trimmed) && trimmed.endsWith('11')) return 'fii';
   if (/3[2-9]$/.test(trimmed)) return 'bdr';

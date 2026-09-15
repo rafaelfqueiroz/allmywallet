@@ -221,6 +221,15 @@ describe('SPEC-005 — parseMovimentacao', () => {
       });
       expect(record.assetCode).toBe('LCAM3');
       expect(record.assetClass).toBe('stock');
+
+      const option = parseOne({
+        data: '10/01/2026',
+        movimentacao: 'Compra',
+        produto: 'LCAMA120 - LOCAMERICA',
+        quantidade: '100',
+      });
+      expect(option.assetCode).toBe('LCAMA120');
+      expect(option.assetClass).toBe('stock');
     });
 
     it('a ticker still splits from its name', () => {

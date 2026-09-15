@@ -64,7 +64,7 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     // as Posição's `Código`. Read from the same real export verified above; no
     // B3 screen moved, so the guide's steps stand.
     asOf: BusinessDate.of('2026-09-15'),
-    parserFingerprint: '4eb5ce02b8db20ed66c61b8f599376aa41a9da5dff6ee1ae6b59f207ead8c047',
+    parserFingerprint: '171a38e1cfe9c71067f9a0ce8ed8f4a87706c0e585ab5ecd2aea9b537f776af7',
   },
 ];
 
