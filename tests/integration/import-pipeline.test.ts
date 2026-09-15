@@ -601,11 +601,75 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(positions).toHaveLength(1);
     expect(positions[0]?.q).toBe('100.00000000');
 
-    // BR-005-19: the settlement row is stored and surfaced, never discarded.
-    const { rows: unclassified } = await migratorPool.query(
-      "SELECT count(*)::int AS n FROM import_rows WHERE classification = 'unclassified'",
+    // BR-005-19 (amended, #110): the settlement row is stored, never discarded,
+    // and ignored — no ledger row, nothing in Needs attention.
+    const { rows: settlement } = await migratorPool.query(
+      'SELECT classification, transaction_id FROM import_rows WHERE batch_id = $1',
+      [movimentacao],
     );
-    expect(Number(unclassified[0]?.n)).toBe(1);
+    expect(settlement).toEqual([{ classification: 'ignored', transaction_id: null }]);
+  });
+
+  /**
+   * BR-005-17 + BR-005-19 (amended, #110) + BR-005-20. A Movimentação-only user
+   * classifies an ignored settlement by hand. Re-importing the identical file
+   * stages it `ignored` again — it never enters the occurrence plan — so the
+   * user's classification is not doubled.
+   */
+  it('BR-005-17/20 (#110): classifying an ignored row then re-importing the same file adds nothing', async () => {
+    const file = [
+      {
+        data: '12/01/2026',
+        movimentacao: 'Transferência - Liquidação',
+        produto: 'PETR4 - Petrobras PN',
+        quantidade: '100',
+        precoUnitario: '38,50',
+      },
+    ];
+
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: first, userId }, handlerDeps());
+    await handleImportCommit({ batchId: first, userId }, handlerDeps());
+
+    const { rows: ignored } = await migratorPool.query(
+      "SELECT id FROM import_rows WHERE classification = 'ignored'",
+    );
+    expect(ignored).toHaveLength(1);
+
+    await withTenant(
+      userId,
+      async (tx) => {
+        const deps = buildIngestionDeps(tx, userId, clock);
+        const classified = await classifyImportRow(deps, {
+          rowId: ImportRowId.of(ignored[0]?.id as string),
+          type: 'buy',
+        });
+        if (!classified.ok) throw new Error(`classify failed: ${classified.error.code}`);
+      },
+      appDb,
+    );
+
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, await buildMovimentacaoXlsx(file));
+    await handleImportStage({ batchId: second, userId }, handlerDeps());
+    await handleImportCommit({ batchId: second, userId }, handlerDeps());
+
+    const { rows: positions } = await migratorPool.query(
+      'SELECT quantity::text AS q FROM positions WHERE user_id = $1',
+      [userId],
+    );
+    expect(positions).toEqual([{ q: '100.00000000' }]);
+    const { rows: txCount } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM transactions',
+    );
+    expect(Number(txCount[0]?.n)).toBe(1);
+    // Reported as already done, so there is nothing to classify a second time.
+    const { rows: reimported } = await migratorPool.query(
+      'SELECT classification FROM import_rows WHERE batch_id = $1',
+      [second],
+    );
+    expect(reimported).toEqual([{ classification: 'duplicate' }]);
   });
 
   it('BR-005-16/AC: two genuine identical same-day trades both import; re-importing the same file adds neither again', async () => {
@@ -1017,6 +1081,216 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       [batchId],
     );
     expect(staged).toEqual([{ classification: 'unclassified' }]);
+  });
+
+  /**
+   * SPEC-005 BR-005-20a (#110) — import order must not decide the outcome.
+   * A transfer imported before its source broker's history commits
+   * `unclassified`; once the history is in, re-importing the same file gives
+   * that transaction its carried cost in place rather than adding a copy.
+   */
+  it('BR-005-20a (#110): a transfer imported before its source history is promoted in place on re-import', async () => {
+    const transferFile = [
+      {
+        entradaSaida: 'Credito',
+        data: '10/03/2026',
+        movimentacao: 'Transferência',
+        produto: 'PETR4 - Petrobras PN',
+        instituicao: 'CORRETORA DESTINO',
+        quantidade: '100',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      },
+      {
+        entradaSaida: 'Debito',
+        data: '10/03/2026',
+        movimentacao: 'Transferência',
+        produto: 'PETR4 - Petrobras PN',
+        instituicao: 'CORRETORA ORIGEM',
+        quantidade: '100',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      },
+    ];
+    async function importFile(rows: Parameters<typeof buildMovimentacaoXlsx>[0]) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+
+    // No source history yet: the debit cannot leave ORIGEM, the credit waits.
+    const first = await importFile(transferFile);
+    const { rows: waiting } = await migratorPool.query(
+      "SELECT id, natural_key, status FROM transactions WHERE type = 'transfer_in'",
+    );
+    expect(waiting).toEqual([expect.objectContaining({ status: 'unclassified' })]);
+
+    // ORIGEM's history: 100 bought at 10,00, no fees → cost 1.000,00, preço médio 10,00.
+    await importFile([
+      {
+        entradaSaida: 'Credito',
+        data: '05/01/2026',
+        movimentacao: 'Compra',
+        produto: 'PETR4 - Petrobras PN',
+        instituicao: 'CORRETORA ORIGEM',
+        quantidade: '100',
+        precoUnitario: '10,00',
+      },
+    ]);
+
+    await importFile(transferFile);
+
+    const { rows: promoted } = await migratorPool.query(
+      "SELECT id, natural_key, occurrence, status, unit_price, is_user_modified FROM transactions WHERE type = 'transfer_in'",
+    );
+    expect(promoted).toHaveLength(1);
+    expect(promoted[0]).toMatchObject({
+      id: waiting[0]?.id,
+      natural_key: waiting[0]?.natural_key,
+      status: 'active',
+      is_user_modified: false,
+      unit_price: '10.00000000',
+    });
+    const { rows: total } = await migratorPool.query('SELECT count(*)::int AS n FROM transactions');
+    // The buy, the debit written on re-import, and the one promoted credit.
+    expect(Number(total[0]?.n)).toBe(3);
+
+    // DESTINO: 100 × 10,00 = 1.000,00.
+    const { rows: destination } = await migratorPool.query(
+      'SELECT quantity, average_cost, total_cost FROM positions WHERE institution_id = $1',
+      [promoted[0]?.institution_id ?? (await transferInInstitution())],
+    );
+    expect(destination).toEqual([
+      { quantity: '100.00000000', average_cost: '10.00000000', total_cost: '1000.00000000' },
+    ]);
+
+    // The row that first staged it has left Needs attention.
+    const { rows: origin } = await migratorPool.query(
+      'SELECT classification FROM import_rows WHERE batch_id = $1 AND transaction_id = $2',
+      [first, waiting[0]?.id],
+    );
+    expect(origin).toEqual([{ classification: 'new' }]);
+
+    async function transferInInstitution() {
+      const { rows } = await migratorPool.query(
+        "SELECT institution_id FROM transactions WHERE type = 'transfer_in'",
+      );
+      return rows[0]?.institution_id as string;
+    }
+  });
+
+  describe('BR-005-20a — several carries into one position, and re-carry (#110 review, #112)', () => {
+    const row = (
+      direction: 'Credito' | 'Debito',
+      data: string,
+      instituicao: string,
+      quantidade: string,
+    ) => ({
+      entradaSaida: direction,
+      data,
+      movimentacao: 'Transferência',
+      produto: 'PETR4 - Petrobras PN',
+      instituicao,
+      quantidade,
+      precoUnitario: '-',
+      valorOperacao: '-',
+    });
+    const buyAt = (instituicao: string, data: string, quantidade: string, preco: string) => ({
+      entradaSaida: 'Credito',
+      data,
+      movimentacao: 'Compra',
+      produto: 'PETR4 - Petrobras PN',
+      instituicao,
+      quantidade,
+      precoUnitario: preco,
+    });
+
+    async function importFile(rows: Parameters<typeof buildMovimentacaoXlsx>[0]) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+
+    async function positionOfCreditInto(quantity: string) {
+      const { rows } = await migratorPool.query(
+        `SELECT p.quantity, p.average_cost, p.total_cost FROM positions p
+           JOIN transactions t ON t.institution_id = p.institution_id AND t.asset_id = p.asset_id
+          WHERE t.type = 'transfer_in' AND t.quantity = $1`,
+        [quantity],
+      );
+      return rows[0];
+    }
+
+    it('promotes two credits into one position that a later transfer needs both of, and fixes the first batch’s counts', async () => {
+      const file = [
+        row('Credito', '10/03/2026', 'CORRETORA B', '100'),
+        row('Debito', '10/03/2026', 'CORRETORA A', '100'),
+        row('Credito', '10/03/2026', 'CORRETORA B', '50'),
+        row('Debito', '10/03/2026', 'CORRETORA C', '50'),
+        row('Credito', '12/03/2026', 'CORRETORA D', '150'),
+        row('Debito', '12/03/2026', 'CORRETORA B', '150'),
+      ];
+      const first = await importFile(file);
+
+      // A: 100 @ 10,00 = 1.000,00. C: 50 @ 16,00 = 800,00.
+      await importFile([
+        buyAt('CORRETORA A', '05/01/2026', '100', '10,00'),
+        buyAt('CORRETORA C', '05/01/2026', '50', '16,00'),
+      ]);
+      const again = await importFile(file);
+
+      expect((await batchRow(again))?.status).toBe('committed');
+      const { rows: credits } = await migratorPool.query(
+        "SELECT status FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(credits.map((c) => c.status)).toEqual(['active', 'active', 'active']);
+      // D carries (1.000,00 + 800,00) ÷ 150 = 12,00.
+      expect(await positionOfCreditInto('150')).toEqual({
+        quantity: '150.00000000',
+        average_cost: '12.00000000',
+        total_cost: '1800.00000000',
+      });
+      const counts = (await batchRow(first))?.row_counts as Record<string, number>;
+      expect(counts).toMatchObject({ new: 6, needsAttention: 0 });
+    });
+
+    it('re-imports a transfer after a backdated source buy and corrects the carried 10,00 to 15,00', async () => {
+      const file = [
+        row('Credito', '10/03/2026', 'CORRETORA DESTINO', '100'),
+        row('Debito', '10/03/2026', 'CORRETORA ORIGEM', '100'),
+      ];
+      await importFile([buyAt('CORRETORA ORIGEM', '05/01/2026', '100', '10,00')]);
+      await importFile(file);
+      const { rows: carried } = await migratorPool.query(
+        "SELECT id, natural_key, unit_price FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(carried[0]?.unit_price).toBe('10.00000000');
+
+      await importFile([buyAt('CORRETORA ORIGEM', '01/02/2026', '100', '20,00')]);
+      await importFile(file);
+
+      // ORIGEM before 10/03: (1.000,00 + 2.000,00) ÷ 200 = 15,00.
+      const { rows: recarried } = await migratorPool.query(
+        "SELECT id, natural_key, unit_price, is_user_modified FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(recarried).toEqual([
+        {
+          id: carried[0]?.id,
+          natural_key: carried[0]?.natural_key,
+          unit_price: '15.00000000',
+          is_user_modified: false,
+        },
+      ]);
+      expect(await positionOfCreditInto('100')).toEqual({
+        quantity: '100.00000000',
+        average_cost: '15.00000000',
+        total_cost: '1500.00000000',
+      });
+    });
   });
 
   it('BR-005-07/AC: no CPF exists anywhere after import — a raw SQL scan of import_rows.raw_payload', async () => {

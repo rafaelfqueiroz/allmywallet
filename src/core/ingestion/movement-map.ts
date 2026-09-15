@@ -23,7 +23,7 @@ import type { TransactionType } from '@/core/ledger/transaction';
  * own casing and accenting of these strings is not perfectly consistent
  * across extracts.
  */
-export const MOVEMENT_MAP_VERSION = 2;
+export const MOVEMENT_MAP_VERSION = 3;
 
 function normalize(value: string): string {
   return value
@@ -61,6 +61,19 @@ const MOVEMENT_MAP: ReadonlyMap<string, readonly MappedEntry[]> = new Map(
       ['juros sobre capital proprio', [{ type: 'jcp', direction: null }]],
       ['rendimento', [{ type: 'rendimento', direction: null }]],
       ['amortizacao', [{ type: 'amortization', direction: null }]],
+      // #110 (v3): Tesouro Direto and bank paper, which Negociação never
+      // carries, so no second source can double them. An application opens or
+      // grows the position at its price (BR-007-02); a redemption, early or at
+      // maturity, reduces it at average cost and realises the difference
+      // (BR-007-03). B3 marks `Resgate` as a credit (the cash) and
+      // `RESGATE ANTECIPADO/` as a debit (the paper), so direction is ignored.
+      ['aplicacao', [{ type: 'buy', direction: null }]],
+      ['resgate', [{ type: 'sell', direction: null }]],
+      ['resgate antecipado/', [{ type: 'sell', direction: null }]],
+      // Principal returned in cash, as `Amortização` is — no share count moves
+      // and v1 leaves cost basis alone (`core/positions/apply-transaction.ts`).
+      // `Restituição de Capital em Ações` is a different event and stays unmapped.
+      ['restituicao de capital', [{ type: 'amortization', direction: null }]],
       // BR-007-04: split/grupamento are deliberately absent. Their ratio is
       // not something a single Movimentação row states — B3 shows only the
       // quantity delta the event produced, and turning that into a ratio
@@ -126,6 +139,31 @@ export function classifyMovement(
     entries.find((entry) => entry.direction === null) ??
     entries[0];
   return match?.type ?? null;
+}
+
+/**
+ * SPEC-005 BR-005-19 (amended, #110) — rows that **mirror a record another
+ * extract owns**. They are staged `ignored`: stored and visible on the batch,
+ * never written to the ledger and never in Needs attention, and still
+ * classifiable by hand (BR-005-20) by a user who exported only Movimentação.
+ *
+ * - `Transferência - Liquidação` is a trade settling; Negociação is the
+ *   authoritative trade record (BR-005-01), so classifying it would double
+ *   every trade — see the `transferencia` entry above.
+ * - `… - Transferido` is a provento moved between brokers, both legs of it:
+ *   the provento itself arrives as its own `Dividendo` / `Juros Sobre Capital
+ *   Próprio` row.
+ *
+ * Checked before `classifyMovement`, whatever the direction.
+ */
+const IGNORED_MOVEMENTS: ReadonlySet<string> = new Set([
+  'transferencia - liquidacao',
+  'juros sobre capital proprio - transferido',
+  'dividendo - transferido',
+]);
+
+export function isIgnoredMovement(b3Type: string): boolean {
+  return IGNORED_MOVEMENTS.has(normalize(b3Type));
 }
 
 /** Exposed for `stage-batch.ts`'s Needs Attention log line and for tests. */

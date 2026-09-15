@@ -116,6 +116,8 @@ function deserializeRowCounts(raw: Record<string, unknown>): ImportRowCounts {
     new: Number(raw['new']),
     duplicates: Number(raw['duplicates']),
     needsAttention: Number(raw['needsAttention']),
+    // #110: batches staged before `ignored` existed carry no such key.
+    ignored: Number(raw['ignored'] ?? 0),
     fromDate:
       raw['fromDate'] === null || raw['fromDate'] === undefined
         ? null

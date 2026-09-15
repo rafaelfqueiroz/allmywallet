@@ -5,7 +5,7 @@ import type { Money, Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
-import { guardReplayable, without } from '@/core/ledger/guard-replayable';
+import { guardReplayable, type PositionLookupKey, without } from '@/core/ledger/guard-replayable';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import {
   computeTotalValue,
@@ -14,7 +14,11 @@ import {
   type TransactionType,
 } from '@/core/ledger/transaction';
 import { validateTransactionDraft } from '@/core/ledger/validate';
-import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
+import {
+  recalculatePositionFrom,
+  type RecalculationOutcome,
+  type RecalculationScope,
+} from '@/core/ledger/recalculate-from';
 
 /**
  * SPEC-006 BR-006-12: **any** transaction can be edited, whether manual or
@@ -56,6 +60,14 @@ export interface EditTransactionInput {
    * the unclassified key, matches nothing, and inserts the row a second time.
    */
   readonly preserveNaturalKey?: boolean | undefined;
+  /**
+   * BR-006-16 — `false` for the one edit no human made: import promoting its
+   * own unclassified transfer once the carried cost resolves (SPEC-005
+   * BR-005-20a, #110). The row gains information from its B3 source rather
+   * than a correction, so it is not badged as user-modified. Defaults to
+   * flagging.
+   */
+  readonly flagUserModified?: boolean | undefined;
 }
 
 export interface EditTransactionResult {
@@ -75,79 +87,123 @@ export async function editTransaction(
   id: TransactionId,
   input: EditTransactionInput,
 ): Promise<Result<EditTransactionResult, DomainError>> {
-  const original = await deps.transactions.findById(id);
-  if (original === null) {
-    return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { transactionId: id }));
-  }
+  const result = await editTransactions(deps, [{ id, input }]);
+  if (!result.ok) return result;
+  const [transaction] = result.value.transactions;
+  // One edit in, one transaction out — `editTransactions` returns them in order.
+  return ok({
+    transaction: transaction as Transaction,
+    recalculations: result.value.recalculations,
+  });
+}
 
-  const updated = applyEdit(original, input, deps.clock.now());
+export interface TransactionEdit {
+  readonly id: TransactionId;
+  readonly input: EditTransactionInput;
+}
 
-  const validation = validateTransactionDraft(
-    {
-      type: updated.type,
-      tradeDate: updated.tradeDate,
-      quantity: updated.quantity,
-      unitPrice: updated.unitPrice,
-      fees: updated.fees,
-      ratio: updated.ratio,
-    },
-    deps.clock.today(),
-  );
-  if (!validation.ok) return validation;
+export interface EditTransactionsResult {
+  /** The edited transactions, in the order the edits were given. */
+  readonly transactions: readonly Transaction[];
+  /** One per position any edit touched — each recalculated once. */
+  readonly recalculations: readonly RecalculationOutcome[];
+}
 
-  const movedPosition =
-    original.assetId !== updated.assetId || original.institutionId !== updated.institutionId;
-  const removed = new Set<string>([original.id]);
+/**
+ * Several edits applied as one write, and the one implementation of an edit —
+ * `editTransaction` is this with a single entry.
+ *
+ * **Why the guard runs over all of them at once.** Two edits can be legal only
+ * together: SPEC-005 BR-005-20a (#110) promotes two unclassified transfers into
+ * one position that a later transfer out needs both of. Applied one at a time,
+ * the first edit's BR-006-15 replay still sees the second transfer unclassified
+ * and refuses a ledger the batch as a whole makes valid. So every position an
+ * edit touches is replayed once, with **every** edit in place, and nothing is
+ * written unless all of them hold.
+ */
+export async function editTransactions(
+  deps: LedgerDependencies,
+  edits: readonly TransactionEdit[],
+): Promise<Result<EditTransactionsResult, DomainError>> {
+  const now = deps.clock.now();
+  const today = deps.clock.today();
 
-  // BR-006-15: the destination ledger must hold together *with* the edited row
-  // in it. `without` first, because an edit that only changes the quantity is
-  // a replace, not an addition.
-  const destinationGuard = await guardReplayable(deps, updated, (existing) => [
-    ...without(existing, removed),
-    updated,
-  ]);
-  if (!destinationGuard.ok) return destinationGuard;
-
-  if (movedPosition) {
-    // ...and so must the ledger the row left behind. Moving a buy away can
-    // strand a sale that depended on it, which is refused rather than left to
-    // surface as an unreplayable position later.
-    const sourceGuard = await guardReplayable(deps, original, (existing) =>
-      without(existing, removed),
+  const pairs: { original: Transaction; updated: Transaction }[] = [];
+  for (const edit of edits) {
+    const original = await deps.transactions.findById(edit.id);
+    if (original === null) {
+      return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { transactionId: edit.id }));
+    }
+    const updated = applyEdit(original, edit.input, now);
+    const validation = validateTransactionDraft(
+      {
+        type: updated.type,
+        tradeDate: updated.tradeDate,
+        quantity: updated.quantity,
+        unitPrice: updated.unitPrice,
+        fees: updated.fees,
+        ratio: updated.ratio,
+      },
+      today,
     );
-    if (!sourceGuard.ok) return sourceGuard;
+    if (!validation.ok) return validation;
+    pairs.push({ original, updated });
   }
-
-  await deps.transactions.update(updated);
 
   /**
-   * DL-006-03: recalculation runs forward from the **earlier** of the two
-   * dates. Moving a trade from March to June makes March's figures stale too —
-   * taking the new date alone would leave every chart between the two dates
-   * showing a position that no transaction supports.
+   * Every position touched: each edit's destination, then — when the row moved
+   * asset or institution — the one it left, which must be recalculated too.
+   * Recalculating only the destination leaves the source permanently
+   * overstated, invisible until a rebuild disagrees with it (DM-4).
+   *
+   * DL-006-03: each recalculates forward from the **earliest** date any edit
+   * gave it, the original or the new one. Moving a trade from March to June
+   * makes March's figures stale too.
    */
-  const fromDate = earlier(original.tradeDate, updated.tradeDate);
-
-  const recalculations: RecalculationOutcome[] = [];
-  const destination = await recalculatePositionFrom(deps, {
-    assetId: updated.assetId,
-    institutionId: updated.institutionId,
-    fromDate,
-  });
-  if (!destination.ok) return destination;
-  recalculations.push(destination.value);
-
-  if (movedPosition) {
-    const source = await recalculatePositionFrom(deps, {
-      assetId: original.assetId,
-      institutionId: original.institutionId,
-      fromDate,
+  const scopes = new Map<string, RecalculationScope>();
+  const touch = (key: PositionLookupKey, date: BusinessDate) => {
+    const id = `${key.assetId}|${key.institutionId ?? ''}`;
+    const seen = scopes.get(id);
+    scopes.set(id, {
+      assetId: key.assetId,
+      institutionId: key.institutionId,
+      fromDate: seen === undefined ? date : earlier(seen.fromDate, date),
     });
-    if (!source.ok) return source;
-    recalculations.push(source.value);
+  };
+  for (const { original, updated } of pairs) {
+    touch(updated, earlier(original.tradeDate, updated.tradeDate));
+  }
+  for (const { original, updated } of pairs) {
+    if (original.assetId !== updated.assetId || original.institutionId !== updated.institutionId) {
+      touch(original, earlier(original.tradeDate, updated.tradeDate));
+    }
   }
 
-  return ok({ transaction: updated, recalculations });
+  // BR-006-15: each ledger must hold together with every edit in place.
+  // `without` first, because an edit that only changes the quantity is a
+  // replace, not an addition; a row moved away is simply absent from the
+  // position it left, which is what can strand a sale there.
+  const removed = new Set<string>(pairs.map((pair) => pair.original.id));
+  for (const scope of scopes.values()) {
+    const guard = await guardReplayable(deps, scope, (existing) => [
+      ...without(existing, removed),
+      ...pairs
+        .map((pair) => pair.updated)
+        .filter((t) => t.assetId === scope.assetId && t.institutionId === scope.institutionId),
+    ]);
+    if (!guard.ok) return guard;
+  }
+
+  for (const { updated } of pairs) await deps.transactions.update(updated);
+
+  const recalculations: RecalculationOutcome[] = [];
+  for (const scope of scopes.values()) {
+    const recalculated = await recalculatePositionFrom(deps, scope);
+    if (!recalculated.ok) return recalculated;
+    recalculations.push(recalculated.value);
+  }
+
+  return ok({ transactions: pairs.map((pair) => pair.updated), recalculations });
 }
 
 function applyEdit(original: Transaction, input: EditTransactionInput, now: Date): Transaction {
@@ -178,7 +234,7 @@ function applyEdit(original: Transaction, input: EditTransactionInput, now: Date
     // key in place would make a re-import match this row against a trade it is
     // no longer a record of.
     naturalKey:
-      input.preserveNaturalKey === true
+      input.preserveNaturalKey === true || keepsImportKey(original, input)
         ? original.naturalKey
         : naturalKeyFor({ assetId, institutionId, type, tradeDate, quantity, unitPrice }),
     /**
@@ -189,9 +245,38 @@ function applyEdit(original: Transaction, input: EditTransactionInput, now: Date
      * decided this value" is worth more than one that means "a human decided
      * this value, but only on rows we happened to import".
      */
-    isUserModified: true,
+    isUserModified: input.flagUserModified === false ? original.isUserModified : true,
     updatedAt: now,
   };
+}
+
+/**
+ * SPEC-005 BR-005-17 (#110) — an imported row whose key is **not** derived
+ * from its own fields keeps that key while the B3 row it records is still the
+ * same row: same asset, institution, type, date and quantity.
+ *
+ * Two kinds of imported row are keyed that way. A row staged `unclassified`
+ * carries the raw B3 type in its key (`importNaturalKeyFor`), and a carried
+ * transfer is keyed at the price B3 stated — none — while it stores the
+ * carried cost (BR-005-20a). Rederiving either key on a fees-only or
+ * price-only edit produced a key no re-import computes, and the next import of
+ * the file wrote the row a second time.
+ *
+ * A manual row, and an imported row keyed by `naturalKeyFor` itself, are
+ * untouched: for them this is never true, and BR-006-04 applies as before.
+ */
+function keepsImportKey(original: Transaction, input: EditTransactionInput): boolean {
+  if (original.importBatchId === null) return false;
+  const derived = naturalKeyFor(original);
+  if (original.naturalKey === derived) return false;
+  return (
+    (input.assetId ?? original.assetId) === original.assetId &&
+    (input.institutionId === undefined ? original.institutionId : input.institutionId) ===
+      original.institutionId &&
+    (input.type ?? original.type) === original.type &&
+    (input.tradeDate ?? original.tradeDate) === original.tradeDate &&
+    (input.quantity ?? original.quantity).equals(original.quantity)
+  );
 }
 
 function earlier(a: BusinessDate, b: BusinessDate): BusinessDate {

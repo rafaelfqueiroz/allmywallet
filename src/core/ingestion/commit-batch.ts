@@ -2,15 +2,30 @@ import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
-import type { Quantity } from '@/core/shared/money';
+import { type Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
+import { editTransactions } from '@/core/ledger/edit-transaction';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { validateTransactionDraft } from '@/core/ledger/validate';
-import { type PositionKey, type PositionSnapshot, replayPosition } from '@/core/positions/replay';
+import {
+  type PositionKey,
+  type PositionSnapshot,
+  positionKeyString,
+  replayPosition,
+} from '@/core/positions/replay';
+import type { PositionState } from '@/core/positions/position-state';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/reconcile';
+import {
+  type CarryLeg,
+  isCarryCandidate,
+  pairTransfers,
+  resolveCarriedCosts,
+  type TransferLeg,
+  withCarriedCost,
+} from '@/core/ingestion/transfer-cost';
 
 /**
  * SPEC-005 BR-005-13 — atomic apply to the ledger.
@@ -32,8 +47,7 @@ import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/r
  * That use case replays the affected position after *every* insert — exactly
  * right for a single manual entry, and O(n²) for a 10.000-row commit
  * (BR-005-13's 60s budget). This groups candidates by `(asset, institution)`
- * and replays each group exactly once, whether it holds one row or a
- * thousand.
+ * and replays each group once per settling round (see `settle`).
  */
 export interface CommitBatchInput {
   readonly batchId: ImportBatchId;
@@ -49,6 +63,10 @@ export interface CommitBatchInput {
 export interface CommitBatchOutcome {
   readonly batch: ImportBatch;
   readonly applied: number;
+  /** BR-005-20a (#110): existing unclassified transfers this commit gave their carried cost. */
+  readonly promoted: number;
+  /** BR-005-20a (#112): existing carried transfers whose cost this commit recomputed to a new figure. */
+  readonly recarried: number;
   readonly skippedDuplicates: number;
   readonly invalid: number;
   /**
@@ -57,10 +75,13 @@ export interface CommitBatchOutcome {
    *
    * Carried rather than re-queried because a second read could not tell this
    * batch's rows from any other's, and applying a buy twice would allocate it
-   * twice. It is deliberately the domain objects that were just inserted, not
+   * twice. It is deliberately the domain objects that were just written, not
    * a bespoke summary type: the wallet side needs type, quantity, ratio and
    * trade date, which is most of a `Transaction` anyway, and a parallel shape
    * would be one more thing to keep in step.
+   *
+   * Promoted transfers are included: they enter calculations in this commit,
+   * so the snapshot rebuild must start no later than their trade date.
    *
    * `core/ingestion` still knows nothing about wallets — it reports what it
    * did, and `core/wallets/apply-ledger-effects.ts` decides what that means.
@@ -72,6 +93,35 @@ interface Candidate {
   readonly row: ImportRow;
   readonly transaction: Transaction;
 }
+
+/**
+ * A carry leg with the row it came from, and what carrying it writes:
+ *
+ * - `insert` — a price-less row staged `unclassified` in this batch;
+ * - `promote` (#110) — a duplicate of an existing unclassified transfer, which
+ *   becomes active at the carried cost; `origin` is the batch that staged it;
+ * - `recarry` (#112) — a duplicate of an existing carried transfer no one has
+ *   edited, whose cost is recomputed and updated when the figure changed.
+ */
+interface PlannedCarry extends CarryLeg {
+  readonly row: ImportRow;
+  readonly mode: 'insert' | 'promote' | 'recarry';
+  readonly origin: ImportBatchId | null;
+}
+
+interface CarriedCredit {
+  readonly leg: PlannedCarry;
+  readonly transaction: Transaction;
+}
+
+interface Group {
+  readonly key: PositionKey;
+  readonly candidates: Candidate[];
+  readonly carried: CarriedCredit[];
+  readonly state: PositionState | null;
+}
+
+type StoredLedger = (key: PositionKey) => readonly Transaction[];
 
 export async function commitBatch(
   deps: IngestionDependencies,
@@ -91,7 +141,15 @@ export async function commitBatch(
   if (batch.status === 'committed') {
     // AR-19: a no-op success carries no effects either — a retry must not
     // re-apply wallet allocations for a batch that already applied them.
-    return ok({ batch, applied: 0, skippedDuplicates: 0, invalid: 0, committed: [] });
+    return ok({
+      batch,
+      applied: 0,
+      promoted: 0,
+      recarried: 0,
+      skippedDuplicates: 0,
+      invalid: 0,
+      committed: [],
+    });
   }
   if (batch.status !== 'previewed') {
     return err(
@@ -128,15 +186,85 @@ export async function commitBatch(
     asOf = input.asOf;
   }
 
+  const invalidRowIds: ImportRowId[] = [];
+  const newCandidates: Candidate[] = [];
+  for (const row of newRows) {
+    const transaction = buildCandidate(row, batch.id, userId, 'active', now, today);
+    if (transaction === null) invalidRowIds.push(row.id);
+    else newCandidates.push({ row, transaction });
+  }
+
+  const stored = await loadLedgers(deps, rows);
+  const carryLegs = planCarries(rows, newCandidates, stored, batch.id, userId, now, today);
+
+  /**
+   * SPEC-005 BR-005-20a (#110) — carries are resolved here, at commit, where
+   * the source's history is this batch's rows plus the ledger, rather than at
+   * staging, where it was the ledger alone.
+   *
+   * A carry and a group's replay depend on each other: a debit whose source
+   * group fails is never written, so nothing may be carried from it, and a
+   * credit into a group that fails is not written either. So the two are
+   * settled together: each round resolves carries, replays every group, and
+   * excludes what failed. Exclusions only grow, so the rounds end; in practice
+   * the first round is the last.
+   *
+   * A known limit, kept for that termination guarantee: an exclusion is never
+   * reconsidered. Excluding a row at a source can let a stored debit's carry
+   * resolve in a later round, and a destination group excluded earlier for
+   * want of that carry stays excluded (its rows `invalid`). Re-admitting rows
+   * would make the rounds non-monotonic. It needs a backdated unreplayable row
+   * at the source and a dependent row at the destination in the same batch.
+   */
+  const excluded = new Set<string>();
+  const vetoed = new Set<string>();
+  let settlement = settle(newCandidates, carryLegs, stored, excluded, vetoed);
+  for (
+    let failed = settlement.filter((group) => group.state === null);
+    failed.length > 0;
+    failed = settlement.filter((group) => group.state === null)
+  ) {
+    for (const group of failed) {
+      // BR-006-15 could not be satisfied for this group — every `new` row in
+      // it is excluded (never written) and surfaced as `invalid`, not the
+      // rest of the batch. A carried credit in it falls back to `unclassified`.
+      for (const c of group.candidates) excluded.add(c.row.id);
+      for (const c of group.carried) vetoed.add(c.leg.id);
+    }
+    settlement = settle(newCandidates, carryLegs, stored, excluded, vetoed);
+  }
+  for (const c of newCandidates) if (excluded.has(c.row.id)) invalidRowIds.push(c.row.id);
+
   const toInsert: Transaction[] = [];
   const positionUpserts: PositionSnapshot[] = [];
   const rowToTransaction = new Map<ImportRowId, TransactionId>();
-  const invalidRowIds: ImportRowId[] = [];
+  const carriedRowIds = new Set<ImportRowId>();
+  const inPlace: CarriedCredit[] = [];
+
+  for (const group of settlement) {
+    // Every group left in the final round replayed.
+    if (group.state === null) continue;
+    for (const c of group.candidates) {
+      toInsert.push(c.transaction);
+      rowToTransaction.set(c.row.id, c.transaction.id);
+    }
+    for (const c of group.carried) {
+      if (c.leg.mode !== 'insert') {
+        inPlace.push(c);
+        continue;
+      }
+      toInsert.push(c.transaction);
+      rowToTransaction.set(c.leg.row.id, c.transaction.id);
+      carriedRowIds.add(c.leg.row.id);
+    }
+    positionUpserts.push({ ...group.key, state: group.state });
+  }
 
   // `unclassified` rows are excluded from replay by `status`
   // (`selectForReplay`, SPEC-007), so they can never make a position
-  // unreplayable and never need the group check below.
+  // unreplayable and never need the group check above.
   for (const row of unclassifiedRows) {
+    if (carriedRowIds.has(row.id)) continue;
     const transaction = buildCandidate(row, batch.id, userId, 'unclassified', now, today);
     if (transaction === null) {
       invalidRowIds.push(row.id);
@@ -144,41 +272,6 @@ export async function commitBatch(
     }
     toInsert.push(transaction);
     rowToTransaction.set(row.id, transaction.id);
-  }
-
-  for (const group of groupByPosition(newRows)) {
-    const candidates: Candidate[] = [];
-    for (const row of group) {
-      const transaction = buildCandidate(row, batch.id, userId, 'active', now, today);
-      if (transaction === null) {
-        invalidRowIds.push(row.id);
-        continue;
-      }
-      candidates.push({ row, transaction });
-    }
-    const first = candidates[0];
-    if (first === undefined) continue;
-
-    const key: PositionKey = {
-      assetId: first.transaction.assetId,
-      institutionId: first.transaction.institutionId,
-    };
-    const existing = await deps.transactions.listForPosition(key.assetId, key.institutionId);
-    const replayed = replayPosition([...existing, ...candidates.map((c) => c.transaction)]);
-
-    if (!replayed.ok) {
-      // BR-006-15 could not be satisfied for this group — every `new` row in
-      // it is excluded (never written) and surfaced as `invalid`, not the
-      // rest of the batch.
-      for (const c of candidates) invalidRowIds.push(c.row.id);
-      continue;
-    }
-
-    for (const c of candidates) {
-      toInsert.push(c.transaction);
-      rowToTransaction.set(c.row.id, c.transaction.id);
-    }
-    positionUpserts.push({ ...key, state: replayed.value });
   }
 
   // BR-005-13: one write for the whole batch. Written row by row this was
@@ -199,6 +292,12 @@ export async function commitBatch(
   for (const rowId of invalidRowIds) {
     await deps.rows.updateClassification(rowId, 'invalid');
   }
+  // BR-005-19/20a: a carried credit no longer needs attention.
+  for (const rowId of carriedRowIds) {
+    await deps.rows.updateClassification(rowId, 'new');
+  }
+
+  const { promoted, recarried } = await updateCarriedInPlace(deps, inPlace);
 
   // BR-005-06: create/update fixed-income contracts from the Posição
   // fixed-income tab before reconciliation reads the ledger.
@@ -222,35 +321,327 @@ export async function commitBatch(
 
   // BR-005-22: a Posição batch triggers reconciliation against what was just
   // committed (and everything committed before it).
+  const stillUnclassified = unclassifiedRows.filter((row) => !carriedRowIds.has(row.id));
   const reconciliation =
-    asOf !== null ? await buildReconciliation(deps, asOf, positionRows, unclassifiedRows) : null;
+    asOf !== null ? await buildReconciliation(deps, asOf, positionRows, stillUnclassified) : null;
 
   const committedBatch: ImportBatch = {
     ...batch,
     status: 'committed',
     committedAt: now,
     reconciliation,
+    // BR-005-10: the preview counted a carried credit as needing attention;
+    // the committed batch reports what it became.
+    rowCounts:
+      batch.rowCounts === null || carriedRowIds.size === 0
+        ? batch.rowCounts
+        : {
+            ...batch.rowCounts,
+            new: batch.rowCounts.new + carriedRowIds.size,
+            needsAttention: batch.rowCounts.needsAttention - carriedRowIds.size,
+          },
   };
   await deps.batches.update(committedBatch);
 
   return ok({
     batch: committedBatch,
     applied: toInsert.length,
+    promoted: promoted.length,
+    recarried: recarried.length,
     skippedDuplicates: duplicates.length,
     invalid: invalidRowIds.length,
-    committed: toInsert,
+    committed: [...toInsert, ...promoted, ...recarried],
   });
 }
 
-function groupByPosition(rows: readonly ImportRow[]): readonly ImportRow[][] {
-  const groups = new Map<string, ImportRow[]>();
+/**
+ * The stored ledger of every position this commit can touch: those its `new`
+ * rows land in, and those either side of a transfer. Loaded once, so settling
+ * rounds and carries never query again.
+ */
+async function loadLedgers(
+  deps: IngestionDependencies,
+  rows: readonly ImportRow[],
+): Promise<StoredLedger> {
+  const ledgers = new Map<string, readonly Transaction[]>();
   for (const row of rows) {
-    const key = `${row.assetId}|${row.institutionId ?? ''}`;
-    const group = groups.get(key);
-    if (group === undefined) groups.set(key, [row]);
-    else group.push(row);
+    const touches =
+      row.classification === 'new' ||
+      row.ledgerType === 'transfer_in' ||
+      row.ledgerType === 'transfer_out';
+    if (!touches || row.record.kind !== 'transaction') continue;
+    const key = positionKeyString(row);
+    if (ledgers.has(key)) continue;
+    ledgers.set(key, await deps.transactions.listForPosition(row.assetId, row.institutionId));
   }
-  return [...groups.values()];
+  return (key) => ledgers.get(positionKeyString(key)) ?? [];
+}
+
+/** The stored transaction a staged `duplicate` row stands for — same key, same occurrence. */
+function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undefined {
+  return stored(row).find(
+    (t) => t.naturalKey === row.naturalKey && t.occurrence === row.occurrence,
+  );
+}
+
+/**
+ * BR-005-20a — the credits that can take a carried cost in this commit, each
+ * with the debit it is paired with (`pairTransfers`).
+ *
+ * A credit is a price-less row staged `unclassified`, or — import order must
+ * not decide the outcome — a `duplicate` of an **existing** `transfer_in` no
+ * one has edited (BR-006-16):
+ *
+ * - unclassified (#110): the same B3 row, imported before its source's history
+ *   was, now able to take its cost;
+ * - active (#112): a cost carried by an earlier import, recomputed because the
+ *   source's history may have grown since — a buy imported after the transfer
+ *   changes the average the shares left with.
+ */
+function planCarries(
+  rows: readonly ImportRow[],
+  newCandidates: readonly Candidate[],
+  stored: StoredLedger,
+  batchId: ImportBatchId,
+  userId: UserId,
+  now: Date,
+  today: BusinessDate,
+): readonly PlannedCarry[] {
+  const legOf = (row: ImportRow): TransferLeg[] =>
+    row.record.kind === 'transaction'
+      ? [
+          {
+            id: row.id,
+            assetId: row.assetId,
+            institutionId: row.institutionId,
+            tradeDate: row.record.tradeDate,
+            quantity: row.record.quantity,
+          },
+        ]
+      : [];
+  const inLedger = (row: ImportRow) =>
+    row.classification === 'new' || row.classification === 'duplicate';
+
+  const pairs = pairTransfers(
+    rows
+      .filter(
+        (row) =>
+          row.ledgerType === 'transfer_in' &&
+          (inLedger(row) || row.classification === 'unclassified'),
+      )
+      .flatMap(legOf),
+    rows.filter((row) => row.ledgerType === 'transfer_out' && inLedger(row)).flatMap(legOf),
+  );
+
+  const byId = new Map<string, ImportRow>(rows.map((row) => [row.id, row]));
+  const candidateById = new Map<string, Transaction>(
+    newCandidates.map((c) => [c.row.id, c.transaction]),
+  );
+
+  const planned: PlannedCarry[] = [];
+  for (const [creditId, debitId] of pairs) {
+    const creditRow = byId.get(creditId);
+    const debitRow = byId.get(debitId);
+    if (creditRow === undefined || debitRow === undefined || !isCarryCandidate(creditRow)) {
+      continue;
+    }
+
+    let credit: Transaction | null = null;
+    let mode: PlannedCarry['mode'] = 'insert';
+    let origin: ImportBatchId | null = null;
+    if (creditRow.classification === 'unclassified') {
+      credit = buildCandidate(creditRow, batchId, userId, 'active', now, today);
+    } else if (creditRow.classification === 'duplicate') {
+      const existing = storedCopyOf(stored, creditRow);
+      if (
+        existing !== undefined &&
+        existing.type === 'transfer_in' &&
+        !existing.isUserModified &&
+        existing.importBatchId !== null
+      ) {
+        if (existing.status === 'unclassified') {
+          credit = { ...existing, status: 'active' };
+          mode = 'promote';
+          origin = existing.importBatchId;
+        } else if (existing.status === 'active') {
+          credit = existing;
+          mode = 'recarry';
+        }
+      }
+    }
+    if (credit === null) continue;
+
+    const storedDebit = storedCopyOf(stored, debitRow);
+    const debit =
+      debitRow.classification === 'new'
+        ? (candidateById.get(debitId) ?? null)
+        : storedDebit !== undefined &&
+            storedDebit.type === 'transfer_out' &&
+            storedDebit.status === 'active'
+          ? storedDebit
+          : null;
+
+    planned.push({
+      id: creditId,
+      row: creditRow,
+      credit,
+      debit,
+      fallback: mode === 'recarry' ? credit.unitPrice : null,
+      mode,
+      origin,
+    });
+  }
+  return planned;
+}
+
+/** One settling round: resolve carries against what is not excluded, then replay every group. */
+function settle(
+  newCandidates: readonly Candidate[],
+  carryLegs: readonly PlannedCarry[],
+  stored: StoredLedger,
+  excluded: ReadonlySet<string>,
+  vetoed: ReadonlySet<string>,
+): Group[] {
+  const live = newCandidates.filter((c) => !excluded.has(c.row.id));
+  const excludedTransactions = new Set<string>(
+    newCandidates.filter((c) => excluded.has(c.row.id)).map((c) => c.transaction.id),
+  );
+  const legs = carryLegs
+    .filter((leg) => !vetoed.has(leg.id))
+    .map((leg) => ({
+      ...leg,
+      debit: leg.debit !== null && excludedTransactions.has(leg.debit.id) ? null : leg.debit,
+    }));
+
+  // A promoted or re-carried credit is stored too; its stored self leaves the
+  // source history while it is a leg, so it is never counted twice.
+  const legCredits = new Set<string>(legs.map((leg) => leg.credit.id));
+  const costs = resolveCarriedCosts(legs, (assetId, institutionId) => [
+    ...stored({ assetId, institutionId }).filter((t) => !legCredits.has(t.id)),
+    ...live
+      .filter((c) => c.row.assetId === assetId && c.row.institutionId === institutionId)
+      .map((c) => c.transaction),
+  ]);
+
+  const groups = new Map<
+    string,
+    { key: PositionKey; candidates: Candidate[]; carried: CarriedCredit[] }
+  >();
+  const groupOf = (key: PositionKey) => {
+    const id = positionKeyString(key);
+    const existing = groups.get(id);
+    if (existing !== undefined) return existing;
+    const created = {
+      key: { assetId: key.assetId, institutionId: key.institutionId },
+      candidates: [],
+      carried: [],
+    };
+    groups.set(id, created);
+    return created;
+  };
+  for (const c of live) groupOf(c.transaction).candidates.push(c);
+  for (const leg of legs) {
+    const cost = costs.get(leg.id);
+    if (cost === undefined) continue;
+    // #112: a re-carry that lands on the figure already stored writes nothing.
+    // Compared at the column's scale (`asStored`): a repeating average is kept
+    // to 8 places, so the full-precision figure would never equal it and every
+    // re-import of the same file would rewrite the transfer and rebuild history.
+    if (leg.mode === 'recarry' && asStored(cost) === asStored(leg.credit.unitPrice)) continue;
+    groupOf(leg.credit).carried.push({ leg, transaction: withCarriedCost(leg.credit, cost) });
+  }
+  const replaced = new Set<string>(
+    [...groups.values()].flatMap((group) => group.carried.map((c) => c.transaction.id)),
+  );
+
+  return [...groups.values()].map((group) => {
+    const replayed = replayPosition([
+      ...stored(group.key).filter((t) => !replaced.has(t.id)),
+      ...group.candidates.map((c) => c.transaction),
+      ...group.carried.map((c) => c.transaction),
+    ]);
+    return { ...group, state: replayed.ok ? replayed.value : null };
+  });
+}
+
+/**
+ * BR-005-20a (#110, #112) — existing transfers take their carried cost in
+ * place: the same B3 row gaining information, not a new row, so the key is kept
+ * (BR-005-17) and the row is not badged as a user's edit (BR-006-16).
+ *
+ * **All of them in one `editTransactions` call**, so BR-006-15's guard replays
+ * each position once with every update in it. Two transfers promoted into one
+ * position that a later transfer out needs both of are valid only together;
+ * edited one at a time, the first was refused and the batch could never commit.
+ *
+ * The settling round already replayed these ledgers, so a refusal here is a
+ * defect, not a user error — thrown, so the whole commit rolls back
+ * (BR-005-13) rather than leaving positions written for updates that never
+ * happened.
+ */
+async function updateCarriedInPlace(
+  deps: IngestionDependencies,
+  updates: readonly CarriedCredit[],
+): Promise<{ promoted: Transaction[]; recarried: Transaction[] }> {
+  if (updates.length === 0) return { promoted: [], recarried: [] };
+
+  const edited = await editTransactions(
+    deps,
+    updates.map(({ transaction }) => ({
+      id: transaction.id,
+      input: {
+        unitPrice: transaction.unitPrice,
+        status: 'active',
+        preserveNaturalKey: true,
+        flagUserModified: false,
+      },
+    })),
+  );
+  if (!edited.ok) {
+    throw new Error(`BR-005-20a: updating carried transfers failed: ${edited.error.code}`);
+  }
+
+  const promoted: Transaction[] = [];
+  const recarried: Transaction[] = [];
+  const promotedByOrigin = new Map<ImportBatchId, Set<string>>();
+  edited.value.transactions.forEach((transaction, index) => {
+    const { leg } = updates[index] as CarriedCredit;
+    if (leg.mode === 'recarry') {
+      recarried.push(transaction);
+      return;
+    }
+    promoted.push(transaction);
+    const origin = leg.origin as ImportBatchId;
+    promotedByOrigin.set(origin, (promotedByOrigin.get(origin) ?? new Set()).add(transaction.id));
+  });
+
+  // The row that first staged a promoted transfer leaves Needs attention, as
+  // classifying it would — and its batch's stored counts say so (BR-005-10).
+  for (const [origin, transactionIds] of promotedByOrigin) {
+    let reclassified = 0;
+    for (const row of await deps.rows.listByBatch(origin)) {
+      if (
+        row.transactionId !== null &&
+        transactionIds.has(row.transactionId) &&
+        row.classification === 'unclassified'
+      ) {
+        await deps.rows.updateClassification(row.id, 'new');
+        reclassified += 1;
+      }
+    }
+    const originBatch = await deps.batches.findById(origin);
+    if (originBatch === null || originBatch.rowCounts === null || reclassified === 0) continue;
+    await deps.batches.update({
+      ...originBatch,
+      rowCounts: {
+        ...originBatch.rowCounts,
+        new: originBatch.rowCounts.new + reclassified,
+        needsAttention: originBatch.rowCounts.needsAttention - reclassified,
+      },
+    });
+  }
+
+  return { promoted, recarried };
 }
 
 /** `null` when the row's own fields fail `validateTransactionDraft` — a corrupt or contradictory extract row. */

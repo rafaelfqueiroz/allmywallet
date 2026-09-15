@@ -79,7 +79,11 @@ const AssetChoiceSchema = z.object({
   assetId: optionalId,
   assetCode: optionalText,
   assetName: optionalText,
-  assetClass: z.enum(ASSET_CLASSES).optional(),
+  // #110: the form's blank option states no class.
+  assetClass: z.preprocess(
+    (value) => (value === '' ? undefined : value),
+    z.enum(ASSET_CLASSES).optional(),
+  ),
 });
 
 const InstitutionChoiceSchema = z.object({
@@ -323,9 +327,11 @@ async function resolveAsset(
       code: input.assetCode.toUpperCase(),
       name: input.assetName ?? input.assetCode.toUpperCase(),
       assetClass: input.assetClass ?? 'stock',
-      // #108: the user chose it, so it corrects whatever an import guessed.
-      classStated: true,
-      nameStated: true,
+      // #108: a class the user chose corrects whatever an import guessed.
+      // #110: none chosen is a guess, so an existing asset keeps its class.
+      classStated: input.assetClass !== undefined,
+      // #110: a blank name must not rename an existing asset to its ticker.
+      nameStated: input.assetName !== null,
     });
   }
   return input.assetId === null ? null : AssetId.of(input.assetId);

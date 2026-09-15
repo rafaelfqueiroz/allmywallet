@@ -423,6 +423,13 @@
     "countNew": "Novas",
     "countDuplicates": "Duplicadas",
     "countNeedsAttention": "Precisam de atenção",
+    "countIgnored": "Ignoradas",
+    "ignored": {
+      "title": "Ignoradas",
+      "description": "Linhas que repetem um registro de outro extrato — liquidações de negócios que a Negociação já traz e proventos transferidos entre corretoras. Ficam guardadas, mas não entram nos cálculos.",
+      "show": "Ver {count} linha(s) ignorada(s)",
+      "classifyHint": "Só classifique se você não importa a Negociação; senão, o negócio conta duas vezes."
+    },
     "needsAttentionTitle": "Precisa de atenção",
     "needsAttentionEmpty": "Nada esperando classificação nesta importação.",
     "classifyLabel": "Classificar como",
@@ -681,6 +688,7 @@
       "assetNewCodeHint": "Preenchido, este código vale no lugar da escolha acima.",
       "assetNewName": "Nome do ativo",
       "assetNewClass": "Classe",
+      "assetNewClassUnstated": "Manter a do catálogo (ação, se for novo)",
       "institutionSection": "Instituição",
       "institutionExisting": "Escolha uma instituição",
       "institutionExistingNone": "— nenhuma —",

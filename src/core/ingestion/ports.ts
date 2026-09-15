@@ -169,6 +169,8 @@ export interface ImportRowCounts {
   readonly new: number;
   readonly duplicates: number;
   readonly needsAttention: number;
+  /** BR-005-19 (amended, #110). Absent from batches staged before it — read as 0. */
+  readonly ignored: number;
   readonly fromDate: BusinessDate | null;
   readonly toDate: BusinessDate | null;
 }
@@ -213,6 +215,9 @@ export const IMPORT_ROW_CLASSIFICATIONS = [
   'unclassified',
   'invalid',
   'position',
+  // BR-005-19 (amended, #110): mirrors a record another extract owns —
+  // `core/ingestion/movement-map.ts`'s `isIgnoredMovement`. No transaction.
+  'ignored',
 ] as const;
 export type ImportRowClassification = (typeof IMPORT_ROW_CLASSIFICATIONS)[number];
 

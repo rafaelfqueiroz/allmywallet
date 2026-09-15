@@ -120,10 +120,22 @@ export interface TransactionRepository {
   /**
    * SPEC-005's bulk-import counterpart to `nextOccurrence`: one query for
    * every natural key a staged batch touches, rather than one query per row.
-   * A key absent from the result has no existing occurrence at all (count 0)
-   * — `core/ingestion/occurrence.ts`'s `planOccurrences` treats a missing
-   * entry and an explicit 0 identically, so the repository is free to omit
-   * keys with no rows rather than return a sparse zero-filled map.
+   * A key absent from the result has no row at all — the repository omits it
+   * rather than return a zero-filled map.
    */
-  occurrenceCounts(naturalKeys: readonly string[]): Promise<ReadonlyMap<string, number>>;
+  occurrenceTallies(naturalKeys: readonly string[]): Promise<ReadonlyMap<string, OccurrenceTally>>;
+}
+
+/**
+ * #110 — both numbers, because they differ once occurrences have gaps.
+ *
+ * `highest` is the largest stored occurrence. `count` is how many rows there
+ * are. A key's own occurrences can skip numbers: a row whose earlier identical
+ * twin was already stored under another key form of the same B3 row (BR-005-17
+ * amended) is stored at its file ordinal, so `{2}` with no `1`. Summing
+ * `highest` across forms then counts the twin twice.
+ */
+export interface OccurrenceTally {
+  readonly count: number;
+  readonly highest: number;
 }

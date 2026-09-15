@@ -52,6 +52,13 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-09-14'),
     parserFingerprint: '3c568ee6f4525d7623382f305c71634e13315d4d067400891152e8778a3f3607',
   },
+  {
+    // #110: movement map v3 and the ignored mirrors. Only the table grew, from
+    // the type strings in the same real Movimentação verified above; no parser
+    // and no B3 screen moved, so the guide's steps stand as of that entry.
+    asOf: BusinessDate.of('2026-09-14'),
+    parserFingerprint: '3895ecf3dede3f2f604ff6ce64193882e377fbafe8347873ec76824c2a14d1e1',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

@@ -22,8 +22,9 @@ export async function withIngestionDeps<T>(
 }
 
 /**
- * For the one ingestion path that writes a **quantity-moving** transaction
- * outside the commit queue: accepting a reconciliation figure (BR-005-25).
+ * For the ingestion paths that write a **quantity-moving** transaction
+ * outside the commit queue: accepting a reconciliation figure (BR-005-25) and
+ * classifying a row by hand (BR-005-20).
  *
  * `handleImportCommit` adjusts allocations in the same tenant transaction as
  * the ledger write, for the reason stated there — a ledger that no longer
