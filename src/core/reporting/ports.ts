@@ -355,13 +355,26 @@ export interface ReportDataPort {
 // ---------------------------------------------------------------------------
 
 /**
- * BR-014-01/02 — the four provento types, reported apart.
+ * BR-014-01/02 — the five provento types, reported apart.
  *
  * JCP is not folded into dividends: Brazil withholds tax at source on one and
  * currently exempts the other, so a combined figure cannot answer the question
- * every user eventually asks (DL-014-02).
+ * every user eventually asks (DL-014-02). `leilao_fracoes` — the cash for a
+ * bonificação fraction sold at auction — is kept apart for the same reason
+ * (DL-014-08): folded into dividends or rendimentos it would inflate that
+ * type's total and yield with money that is neither.
+ *
+ * Restated rather than imported from `core/ledger/` (AR-01: reporting never
+ * imports the ledger). `tests/structural/earning-types-match-ledger.test.ts`
+ * keeps the two lists equal; BR-014-13 fails the day they drift.
  */
-export const EARNING_TYPES = ['dividend', 'jcp', 'rendimento', 'amortization'] as const;
+export const EARNING_TYPES = [
+  'dividend',
+  'jcp',
+  'rendimento',
+  'amortization',
+  'leilao_fracoes',
+] as const;
 export type EarningType = (typeof EARNING_TYPES)[number];
 
 /**

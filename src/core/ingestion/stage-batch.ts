@@ -43,15 +43,17 @@ import type {
  * #108 — ledger types whose effect depends on `unitPrice`: a buy, sell or
  * subscription moves cost basis at the price (SPEC-007 BR-007-02/03/06), a
  * `transfer_in` opens the destination lot at the cost carried on the price
- * (`core/positions/apply-transaction.ts`), and proventos are quantity × price.
+ * (`core/positions/apply-transaction.ts`), and proventos — `leilao_fracoes`
+ * included (SPEC-014 BR-014-01) — are quantity × price.
  *
  * The real Movimentação leaves the price as `-` on 146 such rows, custody
  * transfers above all. Committed at the placeholder zero, a transfer would open
  * a lot at no cost and a dividend would pay nothing, both silently. So such a
  * row is staged `unclassified` instead (BR-005-19): stored, excluded from
  * calculations, and in Needs attention. `bonificacao` is absent because
- * BR-007-05 allows a zero attributed value; `transfer_out`, `split` and
- * `grupamento` never read the price.
+ * BR-007-05 allows a zero attributed value; `transfer_out`, `split`,
+ * `grupamento` and `fracao_bonificacao` (SPEC-007 BR-007-05a) never read the
+ * price.
  */
 export const PRICE_BEARING_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'buy',
@@ -62,6 +64,7 @@ export const PRICE_BEARING_TYPES: ReadonlySet<TransactionType> = new Set<Transac
   'jcp',
   'rendimento',
   'amortization',
+  'leilao_fracoes',
 ]);
 
 export interface StageBatchInput {

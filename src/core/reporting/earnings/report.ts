@@ -23,7 +23,7 @@ import type { EarningsReport, IncomeSlice } from '@/core/reporting/earnings/port
  *
  * **Everything is folded from records the port already returned.** Nothing
  * re-queries, and nothing reaches the ledger: `listEarnings` is a filtered
- * index scan over four transaction types in a date range, which is a
+ * index scan over the five earning types in a date range, which is a
  * projection rather than the five-year replay DL-011-07 forbids.
  *
  * The one thing this report does that the other three do not is **attribute a

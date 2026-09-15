@@ -37,6 +37,8 @@ const POSITIVE_QUANTITY_TYPES: ReadonlySet<TransactionType> = new Set<Transactio
   'transfer_in',
   'transfer_out',
   'bonificacao',
+  // SPEC-007 BR-007-05a: a removal of nothing is not a fraction.
+  'fracao_bonificacao',
 ]);
 
 export function validateTransactionDraft(

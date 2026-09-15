@@ -17,7 +17,19 @@ import type { Money, Quantity } from '@/core/shared/money';
  * cannot be reproduced by replaying these rows.
  */
 
-/** SPEC-006 BR-006-05: the thirteen supported types, and no others. */
+/**
+ * SPEC-006 BR-006-05: the fifteen supported types, and no others.
+ *
+ * The last two arrived with #113 and are appended rather than slotted in, so
+ * no existing index moves:
+ *
+ *   - `leilao_fracoes` — the cash B3 pays for a bonificação fraction it sold at
+ *     auction. A provento (SPEC-014 BR-014-01, DL-014-08), not a sale.
+ *   - `fracao_bonificacao` — the fractional quantity a bonificação left behind,
+ *     removed at unchanged total cost with no realised gain (SPEC-007
+ *     BR-007-05a). A split or grupamento fraction is **not** this type: it is a
+ *     plain `sell` at the auction value (BR-007-04b, DL-007-09).
+ */
 export const TRANSACTION_TYPES = [
   'buy',
   'sell',
@@ -32,6 +44,8 @@ export const TRANSACTION_TYPES = [
   'transfer_in',
   'transfer_out',
   'adjustment',
+  'leilao_fracoes',
+  'fracao_bonificacao',
 ] as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
@@ -105,9 +119,9 @@ export interface Transaction {
 
 /**
  * Types that move quantity or cost basis. Everything else is recognised
- * elsewhere: dividends, JCP, rendimentos and amortizações are proventos
- * (SPEC-014), recognised at pay date and never assumed reinvested, so they
- * leave the position untouched.
+ * elsewhere: dividends, JCP, rendimentos, amortizações and leilões de frações
+ * are proventos (SPEC-014), recognised at pay date and never assumed
+ * reinvested, so they leave the position untouched.
  */
 const POSITION_AFFECTING_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'buy',
@@ -119,6 +133,8 @@ const POSITION_AFFECTING_TYPES: ReadonlySet<TransactionType> = new Set<Transacti
   'transfer_in',
   'transfer_out',
   'adjustment',
+  // SPEC-007 BR-007-05a: quantity leaves; total cost stays.
+  'fracao_bonificacao',
 ]);
 
 export function affectsPosition(type: TransactionType): boolean {
@@ -131,6 +147,8 @@ const EARNINGS_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'jcp',
   'rendimento',
   'amortization',
+  // SPEC-014 BR-014-01 / DL-014-08: a bonificação fraction's auction cash.
+  'leilao_fracoes',
 ]);
 
 export function isEarnings(type: TransactionType): boolean {

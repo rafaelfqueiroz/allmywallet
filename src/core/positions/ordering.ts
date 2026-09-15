@@ -21,13 +21,20 @@ import type { Transaction, TransactionType } from '@/core/ledger/transaction';
  * makes a same-day buy blend into the correct average. This is the ordering
  * BR-007-15 exists to pin down.
  *
- * **1 — acquisitions.** Buys, subscriptions and shares arriving by transfer.
+ * **1 — bonificação fraction removal** (`fracao_bonificacao`, SPEC-007
+ * BR-007-05a). Straight after the share-base events, because the fraction only
+ * exists once the bonificação has credited it: on a position that held no
+ * fraction before the event, removing it first would be refused as removing
+ * more than held. And before every trade, so a same-day buy or sale sees the
+ * whole-share base B3's custody shows that day, not a transient fractional one.
  *
- * **2 — adjustments.** Reconciliation corrections, after acquisitions so a
+ * **2 — acquisitions.** Buys, subscriptions and shares arriving by transfer.
+ *
+ * **3 — adjustments.** Reconciliation corrections, after acquisitions so a
  * negative adjustment nets against the day's purchases rather than against a
  * position that has not been credited yet.
  *
- * **3 — disposals.** Last, so the day's acquisitions are already in the
+ * **4 — disposals.** Last, so the day's acquisitions are already in the
  * average a sale realises against. With date-only granularity there is no
  * intraday order to consult, and incorporating the day's purchases before the
  * day's sales is the convention Brazilian brokers and Receita Federal's
@@ -35,28 +42,35 @@ import type { Transaction, TransactionType } from '@/core/ledger/transaction';
  * refuse a perfectly ordinary same-day buy-then-sell as "selling more than
  * held".
  *
- * **4 — proventos.** Dividends, JCP, rendimentos and amortizações change no
- * quantity, so their rank cannot affect a figure. They are ranked anyway,
- * because a *total* order is what makes the fold reproducible.
+ * **5 — proventos.** Dividends, JCP, rendimentos, amortizações and leilões de
+ * frações change no quantity, so their rank cannot affect a figure. They are
+ * ranked anyway, because a *total* order is what makes the fold reproducible.
+ *
+ * #113 inserted rank 1 by shifting every rank from acquisitions onwards up by
+ * one, so no pre-existing pair of types changed its relative order
+ * (`ordering.test.ts` pins that against the old table).
  */
 const TYPE_RANK: Readonly<Record<TransactionType, number>> = {
   split: 0,
   grupamento: 0,
   bonificacao: 0,
 
-  buy: 1,
-  subscription: 1,
-  transfer_in: 1,
+  fracao_bonificacao: 1,
 
-  adjustment: 2,
+  buy: 2,
+  subscription: 2,
+  transfer_in: 2,
 
-  sell: 3,
-  transfer_out: 3,
+  adjustment: 3,
 
-  dividend: 4,
-  jcp: 4,
-  rendimento: 4,
-  amortization: 4,
+  sell: 4,
+  transfer_out: 4,
+
+  dividend: 5,
+  jcp: 5,
+  rendimento: 5,
+  amortization: 5,
+  leilao_fracoes: 5,
 };
 
 export function typeRank(type: TransactionType): number {
