@@ -21,14 +21,31 @@ import type { Transaction, TransactionType } from '@/core/ledger/transaction';
  * makes a same-day buy blend into the correct average. This is the ordering
  * BR-007-15 exists to pin down.
  *
- * **1 — bonificação fraction removal** (`fracao_bonificacao`, SPEC-007
- * BR-007-05a). Straight after the share-base events, because the fraction only
- * exists once the bonificação has credited it: on a position that held no
- * fraction before the event, removing it first would be refused as removing
- * more than held. And before every trade, so a same-day buy or sale sees the
- * whole-share base B3's custody shows that day, not a transient fractional one.
+ * **1 — acquisitions.** Buys, subscriptions and shares arriving by transfer.
  *
- * **2 — acquisitions.** Buys, subscriptions and shares arriving by transfer.
+ * **2 — bonificação fraction removal** (`fracao_bonificacao`, SPEC-007
+ * BR-007-05a). After the share-base events, because the fraction only exists
+ * once the bonificação has credited it: on a position that held no fraction
+ * before the event, removing it first would be refused as removing more than
+ * held. And after the day's acquisitions, because a fraction can also *arrive*
+ * that day: a `transfer_in` bringing the bonus shares — fraction included —
+ * into an institution, followed by B3's *Fração em Ativos* at that
+ * institution, would otherwise meet an empty position and be refused
+ * (#113 review). Running it later changes no figure in the ordinary case: the
+ * removal keeps total cost (BR-007-05a), so removing q shares from (Q, C)
+ * before or after an acquisition of (a, c) ends at the same (Q + a − q, C + c)
+ * and the same average (C + c) ÷ (Q + a − q).
+ *
+ * **The one case the two orders differ**: the fraction *is* the whole position
+ * (q = Q) and carries cost (C > 0, a bonificação with an attributed value on a
+ * flat position). Removed first, it closed the lot and BR-007-07's reset
+ * dropped C, so the day's buy opened a fresh lot at (a, c). Removed after the
+ * buy, the lot never closes and C stays in it: (a, C + c). The latter is
+ * BR-007-05a read literally — a fraction's removal leaves total cost unchanged
+ * — and `replay.test.ts` pins it with a worked example.
+ *
+ * Before adjustments and disposals, so a same-day sale still sees the
+ * whole-share base B3's custody shows that day.
  *
  * **3 — adjustments.** Reconciliation corrections, after acquisitions so a
  * negative adjustment nets against the day's purchases rather than against a
@@ -46,7 +63,7 @@ import type { Transaction, TransactionType } from '@/core/ledger/transaction';
  * frações change no quantity, so their rank cannot affect a figure. They are
  * ranked anyway, because a *total* order is what makes the fold reproducible.
  *
- * #113 inserted rank 1 by shifting every rank from acquisitions onwards up by
+ * #113 inserted rank 2 by shifting adjustments, disposals and proventos up by
  * one, so no pre-existing pair of types changed its relative order
  * (`ordering.test.ts` pins that against the old table).
  */
@@ -55,11 +72,11 @@ const TYPE_RANK: Readonly<Record<TransactionType, number>> = {
   grupamento: 0,
   bonificacao: 0,
 
-  fracao_bonificacao: 1,
+  buy: 1,
+  subscription: 1,
+  transfer_in: 1,
 
-  buy: 2,
-  subscription: 2,
-  transfer_in: 2,
+  fracao_bonificacao: 2,
 
   adjustment: 3,
 

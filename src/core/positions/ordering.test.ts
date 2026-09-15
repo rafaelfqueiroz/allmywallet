@@ -52,18 +52,27 @@ describe('replay ordering', () => {
       expect(TRANSACTION_TYPES).toHaveLength(15);
     });
 
-    it('BR-007-05a — ranks the bonificação fraction after share-base events and before every trade', () => {
-      for (const event of ['split', 'grupamento', 'bonificacao'] as const) {
-        expect(typeRank(event)).toBeLessThan(typeRank('fracao_bonificacao'));
-      }
-      for (const later of [
+    it('BR-007-05a — ranks the bonificação fraction after share-base events and acquisitions', () => {
+      // After acquisitions (#113 review): a same-day transfer_in can be what
+      // brings the fraction into the institution B3 then removes it from.
+      for (const earlier of [
+        'split',
+        'grupamento',
+        'bonificacao',
         'buy',
         'subscription',
         'transfer_in',
+      ] as const) {
+        expect(typeRank(earlier)).toBeLessThan(typeRank('fracao_bonificacao'));
+      }
+      for (const later of [
         'adjustment',
         'sell',
         'transfer_out',
         'dividend',
+        'jcp',
+        'rendimento',
+        'amortization',
         'leilao_fracoes',
       ] as const) {
         expect(typeRank('fracao_bonificacao')).toBeLessThan(typeRank(later));
@@ -76,7 +85,7 @@ describe('replay ordering', () => {
       }
     });
 
-    it('#113 — inserting rank 1 changed no pre-existing relative order', () => {
+    it('#113 — inserting the fraction’s rank changed no pre-existing relative order', () => {
       // The table as it stood before #113, written out literally so this test
       // does not read the code it checks.
       const BEFORE_113 = {
@@ -184,19 +193,19 @@ describe('replay ordering', () => {
       );
     });
 
-    it('same day: bonificação, then its fraction, then buy, then sell, then provento', () => {
+    it('same day: bonificação, then buy, then the fraction, then sell, then provento', () => {
       // Built in exactly the reverse order, so ids and created_at both point
       // the wrong way and only the type rank can produce the expected order.
       const provento = aTransaction().leilaoFracoes().on('2026-03-10').build();
       const sell = aTransaction().sell().on('2026-03-10').build();
-      const buy = aTransaction().buy().on('2026-03-10').build();
       const fraction = aTransaction().fracaoBonificacao().on('2026-03-10').build();
+      const buy = aTransaction().buy().on('2026-03-10').build();
       const bonus = aTransaction().bonificacao().on('2026-03-10').build();
 
-      expect(sortForReplay([provento, sell, buy, fraction, bonus]).map((t) => t.id)).toEqual([
+      expect(sortForReplay([provento, sell, fraction, buy, bonus]).map((t) => t.id)).toEqual([
         bonus.id,
-        fraction.id,
         buy.id,
+        fraction.id,
         sell.id,
         provento.id,
       ]);
