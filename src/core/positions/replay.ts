@@ -1,7 +1,7 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
-import { type Result, ok } from '@/core/shared/result';
+import { type Result, err, ok } from '@/core/shared/result';
 import { type Transaction, isActive } from '@/core/ledger/transaction';
 import { applyTransaction } from '@/core/positions/apply-transaction';
 import { EMPTY_POSITION, type PositionState } from '@/core/positions/position-state';
@@ -82,10 +82,40 @@ export function replayPosition(
   transactions: readonly Transaction[],
   options: ReplayOptions = {},
 ): Result<PositionState, DomainError> {
+  const folded = fold(transactions, options);
+  return folded.ok ? folded : err(folded.error.error);
+}
+
+/** The transaction a replay stopped at, and why (BR-006-15). */
+export interface ReplayFailure {
+  readonly transaction: Transaction;
+  readonly error: DomainError;
+}
+
+/**
+ * SPEC-005 #117 — the same fold as `replayPosition`, naming the first
+ * transaction in replay order that cannot be applied. `null` when the whole
+ * ledger replays.
+ *
+ * An import refuses only that row rather than every row of its position:
+ * proventos never change a quantity, so they are never the row at fault.
+ */
+export function firstUnreplayable(
+  transactions: readonly Transaction[],
+  options: ReplayOptions = {},
+): ReplayFailure | null {
+  const folded = fold(transactions, options);
+  return folded.ok ? null : folded.error;
+}
+
+function fold(
+  transactions: readonly Transaction[],
+  options: ReplayOptions,
+): Result<PositionState, ReplayFailure> {
   let state = EMPTY_POSITION;
   for (const transaction of sortForReplay(selectForReplay(transactions, options))) {
     const next = applyTransaction(state, transaction);
-    if (!next.ok) return next;
+    if (!next.ok) return err({ transaction, error: next.error });
     state = next.value;
   }
   return ok(state);

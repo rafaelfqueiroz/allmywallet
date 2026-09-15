@@ -112,7 +112,7 @@ export async function stageBatch(
 
   await deps.rows.insertMany(rows);
 
-  const counts = summarize(input.extract.records.length, rows);
+  const counts = summarizeRows(input.extract.records.length, rows);
   const unmappedTypeSet = new Set<string>();
   for (const row of rows) {
     if (row.classification === 'unclassified' && row.record.kind === 'transaction') {
@@ -412,7 +412,11 @@ function countsAcrossKeyForms(
   return counts;
 }
 
-function summarize(read: number, rows: readonly ImportRow[]): ImportRowCounts {
+/**
+ * BR-005-10 — a batch's counts, from its rows' classifications. Staging counts
+ * the preview with it; commit (#117) recounts from what each row became.
+ */
+export function summarizeRows(read: number, rows: readonly ImportRow[]): ImportRowCounts {
   let newCount = 0;
   let duplicateCount = 0;
   let needsAttentionCount = 0;

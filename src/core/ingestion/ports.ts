@@ -300,6 +300,11 @@ export interface ImportRowRepository {
   attachTransactions(updates: ReadonlyMap<ImportRowId, TransactionId>): Promise<void>;
   /** BR-005-20: reclassifying a row out of `unclassified`. */
   updateClassification(id: ImportRowId, classification: ImportRowClassification): Promise<void>;
+  /**
+   * #117 / BR-005-17 — `invalid` rows staged under any of these natural keys,
+   * in any batch: an earlier commit's refusals a later commit may now apply.
+   */
+  listInvalidByNaturalKeys(keys: readonly string[]): Promise<readonly ImportRow[]>;
 }
 
 /** BR-005-08/BR-005-06: resolves a free-text B3 product name to an asset, creating it if new. */

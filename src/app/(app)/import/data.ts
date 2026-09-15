@@ -10,6 +10,7 @@ import {
   type PostImportSummary,
 } from '@/core/ingestion/post-import-summary';
 import { adjustmentBlocker, type AdjustmentBlocker } from '@/core/ingestion/accept-adjustment';
+import { explainRefusal, type RowRefusal } from '@/core/ingestion/refusal';
 import { positionKeyString } from '@/core/positions/replay';
 import { listPendingAllocations } from '@/core/wallets/pending';
 import { withIngestionDeps } from '@/app/(app)/import/composition';
@@ -94,6 +95,8 @@ export interface ImportBatchDetail {
    * with, so the page offers the button exactly where accepting would work.
    */
   readonly acceptBlockers: ReadonlyMap<string, AdjustmentBlocker>;
+  /** SPEC-005 #117 — why each `invalid` row was refused, keyed by row id. */
+  readonly refusals: ReadonlyMap<string, RowRefusal>;
   /**
    * SPEC-010 BR-010-15 — `null` until the batch is committed. Before that
    * nothing has been allocated and a summary would be describing a future.
@@ -122,10 +125,30 @@ export async function loadImportBatchDetail(
       if (blocker !== null) acceptBlockers.set(positionKeyString(discrepancy), blocker);
     }
 
+    // #117 BR-005-24: each refused row's cause, asked of the current ledger.
+    const refusals = new Map<string, RowRefusal>();
+    const ledgers = new Map<
+      string,
+      Awaited<ReturnType<typeof deps.transactions.listForPosition>>
+    >();
+    for (const row of rows) {
+      if (row.classification !== 'invalid' || row.record.kind !== 'transaction') continue;
+      const key = positionKeyString(row);
+      const ledger =
+        ledgers.get(key) ??
+        (await deps.transactions.listForPosition(row.assetId, row.institutionId));
+      ledgers.set(key, ledger);
+      refusals.set(
+        row.id,
+        explainRefusal(row, ledger, userId, deps.clock.now(), deps.clock.today()),
+      );
+    }
+
     return {
       batch,
       rows,
       acceptBlockers,
+      refusals,
       needsAttention: rows.filter(
         (row) => row.classification === 'unclassified' || row.classification === 'invalid',
       ),

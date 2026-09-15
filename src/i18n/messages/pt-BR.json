@@ -432,6 +432,14 @@
     },
     "needsAttentionTitle": "Precisa de atenção",
     "needsAttentionEmpty": "Nada esperando classificação nesta importação.",
+    "preReplayHint": "Estas contagens vêm antes de refazer o histórico de cada posição. Ao confirmar, uma linha que retiraria mais do que havia naquela data — uma venda ou transferência sem histórico anterior — é recusada sozinha e aparece em Precisa de atenção com o motivo. As demais linhas do mesmo ativo, proventos inclusive, entram normalmente.",
+    "refusal": {
+      "insufficient_quantity": "Recusada: em {date} havia {held} deste ativo nesta instituição, e a linha retira {requested}. Importe o histórico anterior e depois este arquivo de novo.",
+      "conflicts_with_ledger": "Recusada: com esta linha, uma operação de {date} já registrada ficaria sem saldo. Confira o histórico deste ativo.",
+      "malformed": "Recusada: os dados desta linha são inválidos ou contraditórios.",
+      "applicable": "O histórico já comporta esta linha. Importe este arquivo de novo para aplicá-la.",
+      "applied": "Esta linha já está no histórico, por outra importação."
+    },
     "classifyLabel": "Classificar como",
     "classifySubmit": "Classificar",
     "reconciliationTitle": "Reconciliação com a posição da B3",
