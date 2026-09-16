@@ -131,10 +131,11 @@ export const REGISTRY = {
   },
   /**
    * SPEC-008 BR-008-29 — how long a stored fetch outcome stays fresh before
-   * `refreshCorporateEventFactors` (`core/quotes/refresh-corporate-event-factors.ts`)
-   * calls B3 again for that issuer. A `failed` fetch ignores this and is
-   * always retried (BR-008-29: an unreachable factor stays unconfirmed, but
-   * that state is not allowed to persist past the next opportunity to check).
+   * the refresh use case (`core/quotes/refresh-corporate-event-factors.ts`,
+   * not yet wired to a caller — #113 PR-B) calls B3 again for that issuer. A
+   * `failed` fetch ignores this and is always retried (BR-008-29: an
+   * unreachable factor stays unconfirmed, but that state is not allowed to
+   * persist past the next opportunity to check).
    */
   'quotes.b3_factor_refresh_days': {
     key: 'quotes.b3_factor_refresh_days',
