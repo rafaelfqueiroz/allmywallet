@@ -8,6 +8,7 @@ import { applyMigrations, startTestDatabase, type TestDatabase } from '../suppor
 import { resetLedger, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
 import { AssetId } from '@/core/shared/ids';
+import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/build-deps';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { allocateToWallet } from '@/core/wallets/allocate';
 import * as schema from '@/db/schema';
@@ -849,7 +850,10 @@ describe('SPEC-005 — import pipeline (integration)', () => {
               throw new Error('simulated interruption after ledger inserts');
             },
           };
-          return commitBatch({ ...deps, positions: throwingPositions }, userId, { batchId });
+          return commitBatch({ ...deps, positions: throwingPositions }, userId, {
+            batchId,
+            corporateEventWindows: TEST_CORPORATE_EVENT_WINDOWS,
+          });
         },
         appDb,
       ),
