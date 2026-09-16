@@ -59,11 +59,7 @@ const LABEL_KIND_BY_NORMALISED: Readonly<Record<string, CorporateEventFactorKind
  * reverse-split and bonus only.
  */
 function normaliseLabel(rawLabel: string): CorporateEventFactorKind | null {
-  const normalised = rawLabel
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .trim()
-    .toUpperCase();
+  const normalised = rawLabel.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toUpperCase();
   return LABEL_KIND_BY_NORMALISED[normalised] ?? null;
 }
 

@@ -2,7 +2,10 @@ import { inArray } from 'drizzle-orm';
 import { uuidv7 } from 'uuidv7';
 import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
-import { corporateEventFactorFetches, corporateEventFactors } from '@/db/schema/corporate-event-factors';
+import {
+  corporateEventFactorFetches,
+  corporateEventFactors,
+} from '@/db/schema/corporate-event-factors';
 import { BusinessDate } from '@/core/shared/clock';
 import {
   factorMultiplier,

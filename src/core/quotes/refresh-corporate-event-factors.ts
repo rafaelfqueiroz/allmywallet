@@ -1,5 +1,8 @@
 import type { Clock } from '@/core/shared/clock';
-import type { CorporateEventFactorSource, CorporateEventFactorStore } from './corporate-event-factors';
+import type {
+  CorporateEventFactorSource,
+  CorporateEventFactorStore,
+} from './corporate-event-factors';
 
 export interface RefreshCorporateEventFactorsDeps {
   readonly source: CorporateEventFactorSource;
@@ -18,7 +21,11 @@ export interface RefreshCorporateEventFactorsSummary {
 
 const MILLISECONDS_PER_DAY = 86_400_000;
 
-function isFresh(record: { outcome: string; fetchedAt: Date }, now: Date, refreshAgeDays: number): boolean {
+function isFresh(
+  record: { outcome: string; fetchedAt: Date },
+  now: Date,
+  refreshAgeDays: number,
+): boolean {
   if (record.outcome === 'failed') return false;
   const ageMs = now.getTime() - record.fetchedAt.getTime();
   return ageMs < refreshAgeDays * MILLISECONDS_PER_DAY;
