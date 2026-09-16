@@ -628,6 +628,38 @@ describe('#113 BR-005-20b / BR-007-05a — a bonificação fraction and its auct
     expect(outcomes.size).toBe(1);
   });
 
+  it('leaves settled fractions alone — unpaired, or paired with a settled auction — beside an open row', () => {
+    const { history, fraction, auction } = scenario();
+    const removal: Transaction = {
+      ...fraction.transaction,
+      type: 'fracao_bonificacao',
+      status: 'active',
+    };
+    const income: Transaction = {
+      ...auction.transaction,
+      type: 'leilao_fracoes',
+      status: 'active',
+    };
+    const openAuction = open('leilao_de_fracao', 'ITSA4', '2026-03-02', '0.7', '12.50');
+    const ledger = [...history, removal, income];
+    // Unpaired settled fraction: only the unrelated open auction gets an outcome.
+    const unpaired = resolve(
+      [settled('fracao_em_ativos', 'ITSA4', removal), openAuction],
+      [...history, removal],
+    );
+    expect([...unpaired.keys()]).toEqual([openAuction.id]);
+    // Settled pair: nothing about either changes.
+    const pair = resolve(
+      [
+        settled('fracao_em_ativos', 'ITSA4', removal),
+        settled('leilao_de_fracao', 'ITSA4', income),
+        openAuction,
+      ],
+      ledger,
+    );
+    expect([...pair.keys()]).toEqual([openAuction.id]);
+  });
+
   it('refuses both fractions when two claim one bonificação, even when each pairs uniquely', () => {
     // F1 0,2 on 2025-12-15 ↔ A1 same day. F2 0,2 on 2026-01-05 ↔ A2 on 2026-06-20:
     // A2 is 166 days after F2 but 187 after F1; A1 is before F2. Both fractions
