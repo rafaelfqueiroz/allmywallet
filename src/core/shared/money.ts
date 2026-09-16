@@ -223,6 +223,18 @@ export class Quantity {
     return new Quantity(this.#value.negated());
   }
 
+  /**
+   * SPEC-005 BR-005-20b (#113) — what is left after the whole shares: the
+   * quantity minus its floor. `105.2` → `0.2`; `10` → `0`. Exact, no rounding
+   * (AR-09): it is a subtraction of an integer.
+   *
+   * Only meaningful for a holding, which is never negative; for a negative
+   * value it is still `x − ⌊x⌋`, so `-0.25` → `0.75`.
+   */
+  fractionalPart(): Quantity {
+    return new Quantity(this.#value.minus(this.#value.floor()));
+  }
+
   isZero(): boolean {
     return this.#value.isZero();
   }
