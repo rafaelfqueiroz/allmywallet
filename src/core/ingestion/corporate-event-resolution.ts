@@ -278,7 +278,12 @@ function walkPosition(
         status: 'active',
       };
       const combined = (ratioEventsOn.get(shape.tradeDate) as number) > 1;
-      const blocked = unresolvedRatios.length > 0;
+      // Only an earlier date blocks: every other open ratio row on this date is
+      // refused `combined_same_day` with this one, and P before the day's
+      // share-base events is still sound to show beside it.
+      const blocked = unresolvedRatios.some((t) =>
+        BusinessDate.isBefore(t.tradeDate, shape.tradeDate),
+      );
       const before = blocked ? null : replayUpTo(shape, false);
       const issuerCode = issuerCodeOf(row.ticker);
       const verdict = evaluateShareRatio({
