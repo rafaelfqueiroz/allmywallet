@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyMovement,
+  corporateEventMovementOf,
   isIgnoredMovement,
+  MOVEMENT_MAP_VERSION,
   normalizeMovementType,
 } from '@/core/ingestion/movement-map';
 
@@ -83,5 +85,38 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
 
   it('normalizeMovementType folds case, accents and whitespace', () => {
     expect(normalizeMovementType('  Ação   Ordinária ')).toBe('acao ordinaria');
+  });
+});
+
+describe('SPEC-005 BR-005-18 v4 — corporate-event rows are named, not mapped (#113)', () => {
+  it('is version 4', () => {
+    expect(MOVEMENT_MAP_VERSION).toBe(4);
+  });
+
+  it('names the four rows BR-005-20b resolves at commit, whatever the casing', () => {
+    expect(corporateEventMovementOf('Desdobro')).toBe('desdobro');
+    expect(corporateEventMovementOf('GRUPAMENTO')).toBe('grupamento');
+    expect(corporateEventMovementOf('Fração em Ativos')).toBe('fracao_em_ativos');
+    expect(corporateEventMovementOf(' Leilão de  Fração ')).toBe('leilao_de_fracao');
+  });
+
+  it('leaves them unmapped, so they stage under the key v3 stored them with (BR-005-17)', () => {
+    for (const type of ['Desdobro', 'Grupamento', 'Fração em Ativos', 'Leilão de Fração']) {
+      expect(classifyMovement(type, 'credit')).toBeNull();
+      expect(classifyMovement(type, 'debit')).toBeNull();
+      expect(isIgnoredMovement(type)).toBe(false);
+    }
+  });
+
+  it('does not name the conversions left to #121, nor an inherited prototype key', () => {
+    for (const type of [
+      'Atualização',
+      'Resgate',
+      'Incorporação',
+      'Bonificação em Ativos',
+      'constructor',
+    ]) {
+      expect(corporateEventMovementOf(type)).toBeNull();
+    }
   });
 });

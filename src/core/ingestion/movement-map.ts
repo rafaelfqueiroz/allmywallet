@@ -23,7 +23,7 @@ import type { TransactionType } from '@/core/ledger/transaction';
  * own casing and accenting of these strings is not perfectly consistent
  * across extracts.
  */
-export const MOVEMENT_MAP_VERSION = 3;
+export const MOVEMENT_MAP_VERSION = 4;
 
 function normalize(value: string): string {
   return value
@@ -76,11 +76,11 @@ const MOVEMENT_MAP: ReadonlyMap<string, readonly MappedEntry[]> = new Map(
       ['restituicao de capital', [{ type: 'amortization', direction: null }]],
       // BR-007-04: split/grupamento are deliberately absent. Their ratio is
       // not something a single Movimentação row states — B3 shows only the
-      // quantity delta the event produced, and turning that into a ratio
-      // needs the position *before* the event, which this parser does not
-      // have. Left unmapped so they surface as `unclassified` for BR-005-20
-      // manual classification, where the user supplies the ratio directly
-      // (the same path `core/ledger/edit-transaction.ts` already exposes).
+      // quantity the event produced, and turning that into a ratio needs the
+      // position *before* the event, which staging does not have. They are
+      // named in `CORPORATE_EVENT_MOVEMENTS` below and resolved at commit
+      // (BR-005-20b); what cannot be confirmed stays `unclassified` for
+      // BR-005-20 manual classification with a typed ratio.
       ['bonificacao em ativos', [{ type: 'bonificacao', direction: null }]],
       ['direitos de subscricao - exercido', [{ type: 'subscription', direction: null }]],
       ['subscricao', [{ type: 'subscription', direction: null }]],
@@ -164,6 +164,45 @@ const IGNORED_MOVEMENTS: ReadonlySet<string> = new Set([
 
 export function isIgnoredMovement(b3Type: string): boolean {
   return IGNORED_MOVEMENTS.has(normalize(b3Type));
+}
+
+/**
+ * SPEC-005 BR-005-18 v4 / BR-005-20b (#113) — the **corporate-event rows**.
+ *
+ * Named, not mapped: `classifyMovement` still returns `null` for every one of
+ * them, so they stage exactly as v3 stored them — `unclassified`, under the
+ * unmapped key form (BR-005-17). The owner's ledger already holds each of them
+ * that way, and mapping them at staging would change their keys and import
+ * them a second time (DL-005-10). Commit settlement resolves them instead,
+ * where the replayed position before the event exists.
+ *
+ * What each row states, from a real Movimentação (no extract in the
+ * repository — DV-24):
+ *
+ * - `Desdobro` (credit) — the shares **added** (70 → +630 is 10:1);
+ * - `Grupamento` (credit) — the **resulting** balance (400 → 40 is 10:1);
+ * - `Fração em Ativos` (debit) — the fractional quantity removed, no price;
+ * - `Leilão de Fração` (credit) — the auction of that fraction, price and value.
+ *
+ * `Atualização`, a class-conversion `Resgate` and `Incorporação` are not
+ * corporate-event rows here (#121).
+ */
+export const CORPORATE_EVENT_MOVEMENTS = {
+  desdobro: 'desdobro',
+  grupamento: 'grupamento',
+  'fracao em ativos': 'fracao_em_ativos',
+  'leilao de fracao': 'leilao_de_fracao',
+} as const;
+
+export type CorporateEventMovement =
+  (typeof CORPORATE_EVENT_MOVEMENTS)[keyof typeof CORPORATE_EVENT_MOVEMENTS];
+
+/** Which corporate-event row a B3 type string is, or `null`. Direction is not needed: each string has one. */
+export function corporateEventMovementOf(b3Type: string): CorporateEventMovement | null {
+  const key = normalize(b3Type);
+  return Object.hasOwn(CORPORATE_EVENT_MOVEMENTS, key)
+    ? CORPORATE_EVENT_MOVEMENTS[key as keyof typeof CORPORATE_EVENT_MOVEMENTS]
+    : null;
 }
 
 /** Exposed for `stage-batch.ts`'s Needs Attention log line and for tests. */
