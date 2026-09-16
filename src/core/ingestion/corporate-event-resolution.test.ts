@@ -92,6 +92,7 @@ function resolve(
   rows: readonly CorporateEventRow[],
   ledger: readonly Transaction[],
   factors: readonly CorporateEventFactor[] = [],
+  declined?: ReadonlySet<string>,
 ) {
   const byIssuer = new Map<string, CorporateEventFactor[]>();
   for (const f of factors) byIssuer.set(f.issuerCode, [...(byIssuer.get(f.issuerCode) ?? []), f]);
@@ -100,6 +101,7 @@ function resolve(
     history: (key) => ledger.filter((t) => positionKeyString(t) === positionKeyString(key)),
     factors: byIssuer,
     windows: WINDOWS,
+    declined,
   });
 }
 
@@ -434,6 +436,45 @@ describe('#113 BR-005-20b / BR-007-04a — Desdobro and Grupamento in the positi
     expect(position.averageCost.toString()).toBe('5');
   });
 
+  it('refuses a declined ratio row as conflicts_with_ledger, and blocks what follows it', () => {
+    // Both would agree (80 × 3 = 240; 320 × 0,1 = 32), but commit gave the desdobro up.
+    const history = [buy('MGLU3', '2020-09-01', '80', '20')];
+    const desdobro = open('desdobro', 'MGLU3', '2020-10-15', '240');
+    const grupamento = open('grupamento', 'MGLU3', '2024-05-28', '32');
+    const outcomes = resolve(
+      [desdobro, grupamento],
+      history,
+      [
+        factor('MGLU', 'desdobramento', '300', '2020-10-13'),
+        factor('MGLU', 'grupamento', '0.1', '2024-05-24'),
+      ],
+      new Set([desdobro.id]),
+    );
+    const declined = outcomeOf(outcomes, desdobro);
+    expect(declined).toMatchObject({ refusal: 'conflicts_with_ledger' });
+    if (declined.movement === 'desdobro') expect(str(declined.evidence.basis)).toBe('80');
+    expect(outcomeOf(outcomes, grupamento)).toMatchObject({ refusal: 'blocked' });
+  });
+
+  it('treats a ratio row unclassified in the ledger, outside this import, as unresolved', () => {
+    const history = [buy('MGLU3', '2020-09-01', '80', '20')];
+    const factors = [
+      factor('MGLU', 'desdobramento', '300', '2020-10-13'),
+      factor('MGLU', 'grupamento', '0.1', '2024-05-24'),
+    ];
+    const elsewhere = settled('desdobro', 'MGLU3', storedRow('MGLU3', '2020-10-15', '240'));
+    // Later: blocked. It gets no outcome itself — it is not this call's to resolve.
+    const later = open('grupamento', 'MGLU3', '2024-05-28', '32');
+    const outcomes = resolve([elsewhere, later], history, factors);
+    expect(outcomes.has(elsewhere.id)).toBe(false);
+    expect(outcomeOf(outcomes, later)).toMatchObject({ refusal: 'blocked' });
+    // Same day: combined.
+    const sameDay = open('grupamento', 'MGLU3', '2020-10-15', '32');
+    expect(outcomeOf(resolve([elsewhere, sameDay], history, factors), sameDay)).toMatchObject({
+      refusal: 'combined_same_day',
+    });
+  });
+
   it('gives no outcome for a position holding only settled rows', () => {
     const split = aTransaction().split().of('MGLU3').at(BROKER).on('2020-10-15').ratio('4').build();
     expect(resolve([settled('desdobro', 'MGLU3', split)], [split]).size).toBe(0);
@@ -658,6 +699,23 @@ describe('#113 BR-005-20b / BR-007-05a — a bonificação fraction and its auct
       ledger,
     );
     expect([...pair.keys()]).toEqual([openAuction.id]);
+  });
+
+  it('refuses a declined fraction and its auction as conflicts_with_ledger', () => {
+    const { history, fraction, auction } = scenario();
+    const outcomes = resolve([fraction, auction], history, [], new Set([fraction.id]));
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({ refusal: 'conflicts_with_ledger' });
+    expect(outcomeOf(outcomes, auction)).toMatchObject({ refusal: 'conflicts_with_ledger' });
+  });
+
+  it('refuses the open side of a pair whose partner is unclassified outside this import: partner_unresolved', () => {
+    const { history, fraction, auction } = scenario();
+    const outcomes = resolve(
+      [fraction, settled('leilao_de_fracao', 'ITSA4', auction.transaction)],
+      history,
+    );
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({ refusal: 'partner_unresolved' });
+    expect(outcomes.size).toBe(1);
   });
 
   it('refuses both fractions when two claim one bonificação, even when each pairs uniquely', () => {

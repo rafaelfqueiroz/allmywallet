@@ -48,7 +48,9 @@ export type RatioMovement = 'desdobro' | 'grupamento';
  * - `combined_same_day` — two ratio events on one position and date (VIVT3's
  *   desdobro and grupamento): which applies first is not stated, so neither is;
  * - `blocked` — an earlier ratio event on the position is unresolved, so P
- *   cannot be trusted.
+ *   cannot be trusted;
+ * - `conflicts_with_ledger` — it agrees, but applied it leaves a later row of
+ *   the position unreplayable (BR-006-15), so commit gave it up.
  */
 export type RatioRefusal =
   | 'no_basis'
@@ -57,7 +59,8 @@ export type RatioRefusal =
   | 'disagrees'
   | 'not_representable'
   | 'combined_same_day'
-  | 'blocked';
+  | 'blocked'
+  | 'conflicts_with_ledger';
 
 /** Every figure the batch page shows for a ratio row, resolved or not. */
 export interface RatioEvidence {
@@ -167,7 +170,7 @@ export function evaluateShareRatio(input: {
   readonly issuerFactors: readonly CorporateEventFactor[];
   readonly tradeDate: BusinessDate;
   readonly factorDays: number;
-  readonly structural: 'combined_same_day' | 'blocked' | null;
+  readonly structural: 'combined_same_day' | 'blocked' | 'conflicts_with_ledger' | null;
 }): RatioVerdict {
   const { movement, basis, stated } = input;
   const factors =

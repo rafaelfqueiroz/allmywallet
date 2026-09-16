@@ -94,6 +94,14 @@ export interface CorporateEventResolutionInput {
   /** Stored factors by issuer code (`CorporateEventFactorReader.listByIssuers`). */
   readonly factors: ReadonlyMap<string, readonly CorporateEventFactor[]>;
   readonly windows: CorporateEventWindows;
+  /**
+   * Open rows (by `id`) a caller gave up after applying their resolution left
+   * a later row of the position unreplayable — commit settlement's `declined`
+   * set (BR-006-15). Each is refused `conflicts_with_ledger`, and so is
+   * whatever depends on it: a later ratio event is `blocked`, a fraction's
+   * auction shares the refusal. Omitted at read time, where nothing was tried.
+   */
+  readonly declined?: ReadonlySet<string> | undefined;
 }
 
 /** Every figure the batch page shows for a fraction or auction, resolved or not. */
@@ -214,6 +222,7 @@ function walkPosition(
   forced: ReadonlySet<string>,
 ): Walk {
   const { windows } = input;
+  const declined = input.declined ?? new Set<string>();
   const first = rows[0] as CorporateEventRow;
   const openIds = new Set(rows.filter((row) => row.open).map((row) => row.transaction.id));
   const base = input
@@ -223,19 +232,20 @@ function walkPosition(
   const outcomes = new Map<string, CorporateEventOutcome>();
   /** This walk's resolved rows that move the position: ratio events and fractions. */
   const resolved: Transaction[] = [];
-  /** Open ratio events this walk refused, as they would sort. */
+  /** Ratio events this walk refused, or that sit unclassified in the ledger, as they would sort. */
   const unresolvedRatios: Transaction[] = [];
   const claims = new Map<string, string[]>();
 
-  // BR-005-20b: two ratio events on one position and date — open, or already
-  // in the ledger — and neither applies.
+  // BR-005-20b: two ratio events on one position and date — open, unclassified
+  // or already active in the ledger — and neither applies.
   const ratioEventsOn = new Map<string, number>();
   const countRatioEvent = (date: BusinessDate) =>
     ratioEventsOn.set(date, (ratioEventsOn.get(date) ?? 0) + 1);
   for (const t of base)
     if (t.type === 'split' || t.type === 'grupamento') countRatioEvent(t.tradeDate);
-  for (const row of rows)
-    if (row.open && isRatioMovement(row.movement)) countRatioEvent(row.transaction.tradeDate);
+  const unresolvedRatioRow = (row: CorporateEventRow) =>
+    isRatioMovement(row.movement) && (row.open || row.transaction.status === 'unclassified');
+  for (const row of rows) if (unresolvedRatioRow(row)) countRatioEvent(row.transaction.tradeDate);
 
   const fractions = rows.filter((row) => row.movement === 'fracao_em_ativos');
   const auctions = rows.filter((row) => row.movement === 'leilao_de_fracao');
@@ -263,9 +273,7 @@ function walkPosition(
     );
 
   const walk = rows
-    .filter(
-      (row) => (row.open && isRatioMovement(row.movement)) || row.movement === 'fracao_em_ativos',
-    )
+    .filter((row) => unresolvedRatioRow(row) || row.movement === 'fracao_em_ativos')
     .sort(walkOrder);
 
   for (const row of walk) {
@@ -277,6 +285,12 @@ function walkPosition(
         type: movement === 'desdobro' ? 'split' : 'grupamento',
         status: 'active',
       };
+      // A ratio row this call may not resolve — unclassified in the ledger, not
+      // part of this import — is still an unresolved event: later ones wait.
+      if (!row.open) {
+        unresolvedRatios.push(shape);
+        continue;
+      }
       const combined = (ratioEventsOn.get(shape.tradeDate) as number) > 1;
       // Only an earlier date blocks: every other open ratio row on this date is
       // refused `combined_same_day` with this one, and P before the day's
@@ -294,7 +308,13 @@ function walkPosition(
         issuerFactors: issuerCode === null ? [] : (input.factors.get(issuerCode) ?? []),
         tradeDate: shape.tradeDate,
         factorDays: windows.factorDays,
-        structural: combined ? 'combined_same_day' : blocked ? 'blocked' : null,
+        structural: combined
+          ? 'combined_same_day'
+          : blocked
+            ? 'blocked'
+            : declined.has(row.id)
+              ? 'conflicts_with_ledger'
+              : null,
       });
       if (verdict.ok) {
         // BR-007-04a: B3's multiplier is the ratio applied.
@@ -372,11 +392,16 @@ function walkPosition(
     else {
       const origin = originVerdict.origin.type;
       const partner = row.open ? auction : row;
-      if (
+      if (!partner.open && partner.transaction.status === 'unclassified') {
+        // Unclassified in the ledger and not in this import: never modified here.
+        refusal = 'partner_unresolved';
+      } else if (
         !partner.open &&
         !partnerAgrees(partner.transaction, row.open ? 'auction' : 'fraction', origin)
       ) {
         refusal = 'partner_conflict';
+      } else if (declined.has(row.id)) {
+        refusal = 'conflicts_with_ledger';
       } else if (row.open) {
         written = fractionTransaction(fraction, origin, auction.transaction);
         // BR-006-15: the position must be able to give the fraction up.

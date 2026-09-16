@@ -44,6 +44,10 @@ export type FractionRefusal =
   | 'no_price'
   /** The partner was classified by hand (or resolved earlier) as something this origin contradicts; it is never modified. */
   | 'partner_conflict'
+  /** The partner is `unclassified` in the ledger and not part of this import, so it cannot be resolved with it. */
+  | 'partner_unresolved'
+  /** Applied, the fraction leaves a later row of the position unreplayable (BR-006-15): commit gave it up. */
+  | 'conflicts_with_ledger'
   /** The position before the fraction cannot give it up. */
   | 'no_basis';
 
