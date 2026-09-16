@@ -1,5 +1,9 @@
 import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
 import type { ImportRowId, TransactionId } from '@/core/shared/ids';
+import type {
+  CorporateEventFactor,
+  CorporateEventFactorReader,
+} from '@/core/quotes/corporate-event-factors';
 import type { AssetResolveInput } from '@/core/ingestion/ports';
 import type {
   AssetResolverPort,
@@ -153,5 +157,31 @@ export class FakeFixedIncomeContractWriter implements FixedIncomeContractWriterP
     input: Parameters<FixedIncomeContractWriterPort['upsertByAsset']>[0],
   ): Promise<void> {
     this.calls.push(input);
+  }
+}
+
+/**
+ * SPEC-008 BR-008-29 — the shared factor table, in memory. Empty by default,
+ * which is exactly a reader outage or an issuer B3 does not list: every ratio
+ * row stays unconfirmed.
+ */
+export class FakeCorporateEventFactorReader implements CorporateEventFactorReader {
+  #factors: CorporateEventFactor[] = [];
+  readonly calls: (readonly string[])[] = [];
+
+  seed(...factors: readonly CorporateEventFactor[]): void {
+    this.#factors.push(...factors);
+  }
+
+  async listByIssuers(
+    issuerCodes: readonly string[],
+  ): Promise<ReadonlyMap<string, readonly CorporateEventFactor[]>> {
+    this.calls.push(issuerCodes);
+    const byIssuer = new Map<string, CorporateEventFactor[]>();
+    for (const factor of this.#factors) {
+      if (!issuerCodes.includes(factor.issuerCode)) continue;
+      byIssuer.set(factor.issuerCode, [...(byIssuer.get(factor.issuerCode) ?? []), factor]);
+    }
+    return byIssuer;
   }
 }

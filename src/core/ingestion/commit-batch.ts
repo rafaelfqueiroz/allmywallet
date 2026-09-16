@@ -19,12 +19,20 @@ import {
   replayPosition,
 } from '@/core/positions/replay';
 import { sortForReplay } from '@/core/positions/ordering';
+import type { CorporateEventFactor } from '@/core/quotes/corporate-event-factors';
 import type { PositionState } from '@/core/positions/position-state';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/reconcile';
-import { isIgnoredMovement } from '@/core/ingestion/movement-map';
+import { corporateEventMovementOf, isIgnoredMovement } from '@/core/ingestion/movement-map';
+import {
+  type CorporateEventRow,
+  type CorporateEventWindows,
+  corporateEventMovementOfKey,
+  resolveCorporateEvents,
+} from '@/core/ingestion/corporate-event-resolution';
+import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import { keyFormsFor, summarizeRows } from '@/core/ingestion/stage-batch';
 import {
   type CarryLeg,
@@ -74,6 +82,13 @@ export interface CommitBatchInput {
    * a Posição batch, ignored for the other two.
    */
   readonly asOf?: BusinessDate;
+  /**
+   * SPEC-005 BR-005-20b (#113) — the three corporate-event windows, resolved by
+   * the caller from `import.corporate_event_factor_window_days`,
+   * `import.fraction_origin_window_days` and `import.fraction_auction_window_days`
+   * (SPEC-002: never a default in core).
+   */
+  readonly corporateEventWindows: CorporateEventWindows;
 }
 
 export interface CommitBatchOutcome {
@@ -95,6 +110,15 @@ export interface CommitBatchOutcome {
   readonly superseded: number;
   readonly skippedDuplicates: number;
   readonly invalid: number;
+  /**
+   * BR-005-20b (#113): corporate-event rows this commit applied — Desdobro and
+   * Grupamento as `split`/`grupamento`, Fração em Ativos as `fracao_bonificacao`
+   * or `sell`, Leilão de Fração as `leilao_fracoes` — inserted, or activated in
+   * place when an earlier import stored them `unclassified`.
+   */
+  readonly resolvedCorporateEvents: number;
+  /** BR-005-19 (amended, #113): Leilão de Fração rows consumed by a split or grupamento fraction sale, now `superseded`. */
+  readonly consumedAuctions: number;
   /**
    * SPEC-010 BR-010-10/17/18 — what the caller has to apply to wallet
    * allocations, in the same transaction.
@@ -140,11 +164,45 @@ interface CarriedCredit {
   readonly transaction: Transaction;
 }
 
+/**
+ * SPEC-005 BR-005-20b (#113) — a corporate-event row as commit sees it, and what
+ * resolving it writes:
+ *
+ * - `insert` — this batch's own `unclassified` row, never stored: inserted
+ *   active (or `superseded`, when consumed) under its staged key and occurrence;
+ * - `in_place` — a `duplicate` whose stored copy an earlier import left
+ *   `unclassified` and no one touched: activated (or superseded) in place, key
+ *   kept, not a user edit (BR-005-20); `origin` is the batch that staged it;
+ * - `partner` — a stored copy this commit may not modify: resolved already,
+ *   classified by hand, or `unclassified` from a file not in this import.
+ */
+interface PlannedCorporateRow {
+  readonly event: CorporateEventRow;
+  readonly row: ImportRow | null;
+  readonly mode: 'insert' | 'in_place' | 'partner';
+  readonly origin: ImportBatchId | null;
+}
+
+interface CorporatePlan {
+  readonly rows: readonly PlannedCorporateRow[];
+  readonly byId: ReadonlyMap<string, PlannedCorporateRow>;
+  readonly factors: ReadonlyMap<string, readonly CorporateEventFactor[]>;
+  readonly windows: CorporateEventWindows;
+}
+
+/** A resolved corporate-event row in a settling round, and what it writes. */
+interface CorporateWrite {
+  readonly planned: PlannedCorporateRow;
+  readonly status: 'resolved' | 'consumed';
+  readonly transaction: Transaction;
+}
+
 interface Group {
   readonly key: PositionKey;
   readonly candidates: Candidate[];
   readonly carried: CarriedCredit[];
   readonly reclassified: Reclassification[];
+  readonly corporate: CorporateWrite[];
   /** What the group's replay folded: stored ledger plus this commit's rows. */
   readonly ledger: readonly Transaction[];
   /**
@@ -212,6 +270,8 @@ export async function commitBatch(
       superseded: 0,
       skippedDuplicates: 0,
       invalid: 0,
+      resolvedCorporateEvents: 0,
+      consumedAuctions: 0,
       committed: [],
     });
   }
@@ -283,8 +343,27 @@ export async function commitBatch(
   const vetoed = new Set<string>();
   const declined = new Set<string>();
   const reclassifications = planReclassifications(rows, stored, carryLegs, today);
+  const corporate = await planCorporateEvents(
+    deps,
+    rows,
+    stored,
+    { batchId: batch.id, userId, now, today },
+    input.corporateEventWindows,
+  );
+  /** BR-005-20b: resolved corporate-event rows given up because their group could not replay with them. */
+  const corporateDeclined = new Set<string>();
   const settleRound = () =>
-    settle(newCandidates, carryLegs, reclassifications, stored, excluded, vetoed, declined);
+    settle(
+      newCandidates,
+      carryLegs,
+      reclassifications,
+      stored,
+      excluded,
+      vetoed,
+      declined,
+      corporate,
+      corporateDeclined,
+    );
   let settlement = settleRound();
   for (
     let failed = settlement.filter((group) => group.state === null);
@@ -299,6 +378,15 @@ export async function commitBatch(
       // rows — the owner's file must import (BR-005-19).
       if (group.reclassified.length > 0) {
         for (const r of group.reclassified) declined.add(r.row.id);
+        continue;
+      }
+      // #113 BR-005-20b: then a corporate event this commit resolved — the one
+      // the replay stops at, or the nearest before it (a grupamento that leaves
+      // a later stored sale short). It stays `unclassified`; the next round
+      // refuses it `conflicts_with_ledger` and re-walks what depends on it.
+      const culprit = corporateCulprit(group);
+      if (culprit !== undefined) {
+        corporateDeclined.add(culprit);
         continue;
       }
       // #117 BR-006-15: only the rows the replay cannot accept are excluded
@@ -325,6 +413,10 @@ export async function commitBatch(
   const carriedRowIds = new Set<ImportRowId>();
   const inPlace: CarriedCredit[] = [];
   const reclassified: Reclassification[] = [];
+  /** BR-005-20b: this batch's own corporate-event rows, written resolved (`new`) or consumed (`ignored`). */
+  const corporateRowClassification = new Map<ImportRowId, 'new' | 'ignored'>();
+  const supersededInserts: Transaction[] = [];
+  const corporateInPlace: Reclassification[] = [];
 
   for (const group of settlement) {
     // Every group left in the final round replayed.
@@ -343,11 +435,31 @@ export async function commitBatch(
       carriedRowIds.add(c.leg.row.id);
     }
     reclassified.push(...group.reclassified);
+    for (const write of group.corporate) {
+      const { planned, status, transaction } = write;
+      if (planned.mode === 'in_place') {
+        corporateInPlace.push({
+          row: planned.row as ImportRow,
+          kind: status === 'resolved' ? 'activate' : 'supersede',
+          updated: transaction,
+          origin: planned.origin as ImportBatchId,
+        });
+        continue;
+      }
+      // `insert`: a consumed Leilão is still inserted, `superseded`, so its
+      // occurrence is taken and a re-import stages it a duplicate (BR-005-17).
+      const row = planned.row as ImportRow;
+      if (status === 'resolved') toInsert.push(transaction);
+      else supersededInserts.push(transaction);
+      rowToTransaction.set(row.id, transaction.id);
+      corporateRowClassification.set(row.id, status === 'resolved' ? 'new' : 'ignored');
+    }
     // A group holding only superseded rows changed no figure: nothing to write.
     const changesPosition =
       group.candidates.length > 0 ||
       group.carried.length > 0 ||
-      group.reclassified.some((r) => r.kind === 'activate');
+      group.reclassified.some((r) => r.kind === 'activate') ||
+      group.corporate.some((c) => c.status === 'resolved');
     if (changesPosition) positionUpserts.push({ ...group.key, state: group.state });
   }
 
@@ -355,8 +467,10 @@ export async function commitBatch(
   // (`selectForReplay`, SPEC-007), so they can never make a position
   // unreplayable and never need the group check above.
   for (const row of unclassifiedRows) {
-    if (carriedRowIds.has(row.id)) continue;
-    const transaction = buildCandidate(row, batch.id, userId, 'unclassified', now, today);
+    if (carriedRowIds.has(row.id) || corporateRowClassification.has(row.id)) continue;
+    const transaction =
+      corporate.byId.get(row.id)?.event.transaction ??
+      buildCandidate(row, batch.id, userId, 'unclassified', now, today);
     if (transaction === null) {
       invalidRowIds.push(row.id);
       continue;
@@ -371,8 +485,8 @@ export async function commitBatch(
   // Guarded like the two writes below it: a batch that is entirely duplicates
   // applies nothing, and should issue no statement at all rather than an empty
   // insert — which `commit-batch.test.ts` asserts by counting writes.
-  if (toInsert.length > 0) {
-    await deps.transactions.insertMany(toInsert);
+  if (toInsert.length + supersededInserts.length > 0) {
+    await deps.transactions.insertMany([...toInsert, ...supersededInserts]);
   }
   if (positionUpserts.length > 0) {
     await deps.positions.upsertMany(positionUpserts);
@@ -387,11 +501,18 @@ export async function commitBatch(
   for (const rowId of carriedRowIds) {
     await deps.rows.updateClassification(rowId, 'new');
   }
+  // BR-005-19/20b: nor does a resolved or consumed corporate-event row.
+  for (const [rowId, classification] of corporateRowClassification) {
+    await deps.rows.updateClassification(rowId, classification);
+  }
 
   const { promoted, recarried, activated, superseded } = await updateInPlace(deps, inPlace, [
     ...reclassified,
     ...reclassifications.filter((r) => r.kind === 'supersede'),
+    ...corporateInPlace,
   ]);
+  const corporateIds = new Set<string>(corporateInPlace.map((r) => r.updated.id));
+  const isCorporate = (t: Transaction) => corporateIds.has(t.id);
 
   await settleEarlierRefusals(deps, batch.id, toInsert);
 
@@ -417,9 +538,7 @@ export async function commitBatch(
 
   // BR-005-22: a Posição batch triggers reconciliation against what was just
   // committed (and everything committed before it).
-  const stillUnclassified = unclassifiedRows.filter((row) => !carriedRowIds.has(row.id));
-  const reconciliation =
-    asOf !== null ? await buildReconciliation(deps, asOf, positionRows, stillUnclassified) : null;
+  const reconciliation = asOf !== null ? await buildReconciliation(deps, asOf, positionRows) : null;
 
   const committedBatch: ImportBatch = {
     ...batch,
@@ -440,10 +559,15 @@ export async function commitBatch(
     applied: toInsert.length,
     promoted: promoted.length,
     recarried: recarried.length,
-    reclassified: activated.length,
-    superseded: superseded.length,
+    reclassified: activated.filter((t) => !isCorporate(t)).length,
+    superseded: superseded.filter((t) => !isCorporate(t)).length,
     skippedDuplicates: duplicates.length,
     invalid: invalidRowIds.length,
+    resolvedCorporateEvents:
+      corporateRowClassification.size -
+      supersededInserts.length +
+      activated.filter(isCorporate).length,
+    consumedAuctions: supersededInserts.length + superseded.filter(isCorporate).length,
     // Superseded rows are left out: they enter no calculation (BR-006-03).
     committed: [...toInsert, ...promoted, ...recarried, ...activated],
   });
@@ -460,12 +584,15 @@ async function loadLedgers(
 ): Promise<StoredLedger> {
   const ledgers = new Map<string, readonly Transaction[]>();
   for (const row of rows) {
+    if (row.record.kind !== 'transaction') continue;
     const touches =
       row.classification === 'new' ||
       row.classification === 'duplicate' ||
       row.ledgerType === 'transfer_in' ||
-      row.ledgerType === 'transfer_out';
-    if (!touches || row.record.kind !== 'transaction') continue;
+      row.ledgerType === 'transfer_out' ||
+      // #113 BR-005-20b: a staged corporate-event row resolves against its position.
+      corporateEventMovementOf(row.record.b3Type) !== null;
+    if (!touches) continue;
     const key = positionKeyString(row);
     if (ledgers.has(key)) continue;
     ledgers.set(key, await deps.transactions.listForPosition(row.assetId, row.institutionId));
@@ -707,6 +834,8 @@ function settle(
   excluded: ReadonlySet<string>,
   vetoed: ReadonlySet<string>,
   declined: ReadonlySet<string>,
+  corporate: CorporatePlan,
+  corporateDeclined: ReadonlySet<string>,
 ): Group[] {
   const live = newCandidates.filter((c) => !excluded.has(c.row.id));
   const liveReclassified = reclassifications.filter((r) => !declined.has(r.row.id));
@@ -752,6 +881,7 @@ function settle(
       candidates: Candidate[];
       carried: CarriedCredit[];
       reclassified: Reclassification[];
+      corporate: CorporateWrite[];
     }
   >();
   const groupOf = (key: PositionKey) => {
@@ -763,6 +893,7 @@ function settle(
       candidates: [],
       carried: [],
       reclassified: [],
+      corporate: [],
     };
     groups.set(id, created);
     return created;
@@ -789,12 +920,50 @@ function settle(
     ]),
   );
 
+  /**
+   * SPEC-005 BR-005-20b (#113) — corporate events, after carries and before
+   * replay, every round: each position's history is what this round writes for
+   * it (live rows, carried credits, activations) over the stored ledger, so a
+   * Desdobro's P includes a same-batch buy and a carried transfer in.
+   */
+  if (corporate.rows.length > 0) {
+    const outcomes = resolveCorporateEvents({
+      rows: corporate.rows.map((planned) => planned.event),
+      history: (key) => {
+        const group = groups.get(positionKeyString(key));
+        return [
+          ...stored(key).filter((t) => !replaced.has(t.id)),
+          ...(group === undefined
+            ? []
+            : [
+                ...group.candidates.map((c) => c.transaction),
+                ...group.carried.map((c) => c.transaction),
+                ...group.reclassified.map((r) => r.updated),
+              ]),
+        ];
+      },
+      factors: corporate.factors,
+      windows: corporate.windows,
+      declined: corporateDeclined,
+    });
+    for (const [id, outcome] of outcomes) {
+      if (outcome.status === 'refused') continue;
+      groupOf(outcome.transaction).corporate.push({
+        planned: corporate.byId.get(id) as PlannedCorporateRow,
+        status: outcome.status,
+        transaction: outcome.transaction,
+      });
+      replaced.add(outcome.transaction.id);
+    }
+  }
+
   return [...groups.values()].map((group) => {
     const ledger = [
       ...stored(group.key).filter((t) => !replaced.has(t.id)),
       ...group.candidates.map((c) => c.transaction),
       ...group.carried.map((c) => c.transaction),
       ...group.reclassified.map((r) => r.updated),
+      ...group.corporate.map((c) => c.transaction),
     ];
     const replayed = replayPosition(ledger);
     return {
@@ -804,6 +973,139 @@ function settle(
       state: replayed.ok ? replayed.value : null,
     };
   });
+}
+
+/**
+ * SPEC-005 BR-005-20b (#113) — every corporate-event row this commit can
+ * resolve or pair with, and the published factors their issuers have.
+ *
+ * - A staged `unclassified` row of a corporate-event B3 type is `open`,
+ *   written by `insert`; its unclassified transaction is built once here, so a
+ *   row that stays unclassified is inserted with the same id.
+ * - A `duplicate` whose stored copy is `unclassified`, imported and untouched
+ *   (BR-006-16) is `open`, written `in_place`. Any other stored copy — resolved
+ *   by an earlier import, classified by hand — is a `partner`, never modified.
+ * - A stored corporate-event row on the same position that this file does not
+ *   carry is a `partner` too: it takes part in pairing and blocks what it
+ *   should (Decision log row 11: pairing within one import plus the ledger).
+ *
+ * Factors are read once, through the shared-table reader (SPEC-008 BR-008-29):
+ * an issuer with none, or a reader that has none, leaves its rows unconfirmed.
+ */
+async function planCorporateEvents(
+  deps: IngestionDependencies,
+  rows: readonly ImportRow[],
+  stored: StoredLedger,
+  context: { batchId: ImportBatchId; userId: UserId; now: Date; today: BusinessDate },
+  windows: CorporateEventWindows,
+): Promise<CorporatePlan> {
+  const planned: PlannedCorporateRow[] = [];
+  const represented = new Set<string>();
+  const tickers = new Map<string, string>();
+  for (const row of rows) {
+    if (row.record.kind !== 'transaction') continue;
+    const movement = corporateEventMovementOf(row.record.b3Type);
+    if (movement === null) continue;
+    const ticker = row.record.assetCode;
+    tickers.set(positionKeyString(row), ticker);
+    if (row.classification === 'unclassified') {
+      const transaction = buildCandidate(
+        row,
+        context.batchId,
+        context.userId,
+        'unclassified',
+        context.now,
+        context.today,
+      );
+      if (transaction === null) continue;
+      planned.push({
+        event: { id: row.id, movement, ticker, transaction, open: true },
+        row,
+        mode: 'insert',
+        origin: null,
+      });
+      continue;
+    }
+    if (row.classification !== 'duplicate') continue;
+    const copy = storedCopyOf(stored, row);
+    if (copy === undefined) continue;
+    represented.add(copy.id);
+    const open =
+      copy.status === 'unclassified' &&
+      !copy.isUserModified &&
+      !copy.isManual &&
+      copy.importBatchId !== null;
+    planned.push({
+      event: { id: row.id, movement, ticker, transaction: copy, open },
+      row,
+      mode: open ? 'in_place' : 'partner',
+      origin: copy.importBatchId,
+    });
+  }
+
+  const positions = new Map<string, PositionKey>(
+    planned.map((p) => [positionKeyString(p.event.transaction), p.event.transaction]),
+  );
+  for (const [id, key] of positions) {
+    for (const t of stored(key)) {
+      const movement = corporateEventMovementOfKey(t.naturalKey);
+      if (movement === null || represented.has(t.id)) continue;
+      planned.push({
+        event: {
+          id: t.id,
+          movement,
+          ticker: tickers.get(id) as string,
+          transaction: t,
+          open: false,
+        },
+        row: null,
+        mode: 'partner',
+        origin: t.importBatchId,
+      });
+    }
+  }
+
+  const issuers = [
+    ...new Set(
+      planned
+        .filter((p) => p.event.movement === 'desdobro' || p.event.movement === 'grupamento')
+        .flatMap((p) => {
+          const code = issuerCodeOf(p.event.ticker);
+          return code === null ? [] : [code];
+        }),
+    ),
+  ];
+  const factors =
+    issuers.length === 0 ? new Map() : await deps.corporateEventFactors.listByIssuers(issuers);
+
+  return {
+    rows: planned,
+    byId: new Map(planned.map((p) => [p.event.id, p])),
+    factors,
+    windows,
+  };
+}
+
+/**
+ * #113 BR-005-20b — the resolved corporate event of a failed group to give up:
+ * the row its replay stops at, or the nearest resolved one before it in replay
+ * order. `undefined` when none precedes the failure — then it is not theirs.
+ */
+function corporateCulprit(group: Group): string | undefined {
+  const resolved = new Map(
+    group.corporate
+      .filter((c) => c.status === 'resolved')
+      .map((c) => [c.transaction.id as string, c.planned.event.id]),
+  );
+  if (resolved.size === 0) return undefined;
+  const failure = firstUnreplayable(group.ledger);
+  if (failure === null) return undefined;
+  const ordered = sortForReplay(group.ledger);
+  for (let i = ordered.findIndex((t) => t.id === failure.transaction.id); i >= 0; i -= 1) {
+    const id = resolved.get((ordered[i] as Transaction).id);
+    if (id !== undefined) return id;
+  }
+  return undefined;
 }
 
 /**
@@ -943,6 +1245,9 @@ async function updateInPlace(
         type: updated.type,
         status: updated.status,
         ratio: updated.ratio,
+        // #113 BR-007-04b: a split fraction's sale takes its auction's price
+        // (`applyEdit` recomputes the total). Every other activation keeps its own.
+        unitPrice: updated.unitPrice,
         preserveNaturalKey: true,
         flagUserModified: false,
       },
@@ -1062,12 +1367,7 @@ async function buildReconciliation(
   deps: IngestionDependencies,
   asOf: BusinessDate,
   positionRows: readonly ImportRow[],
-  unclassifiedRows: readonly ImportRow[],
 ): Promise<ImportBatch['reconciliation']> {
-  const unclassifiedAssetKeys = new Set(
-    unclassifiedRows.map((row) => `${row.assetId}|${row.institutionId ?? ''}`),
-  );
-
   // #108: the real Posição carries a `Conta` column, so one asset at one
   // institution can arrive as several rows, one per account. B3's figure for
   // the position is their sum. Compared row by row, every account would read
@@ -1108,9 +1408,11 @@ async function buildReconciliation(
       computedQuantity,
       b3Quantity,
       firstComputedTradeDate,
-      hasUnclassifiedRowsAffectingAsset: unclassifiedAssetKeys.has(
-        `${row.assetId}|${row.institutionId ?? ''}`,
-      ),
+      // SPEC-005 BR-005-24 (amended, #113): the ledger's own `unclassified`
+      // transactions on the position. A Posição batch never holds unclassified
+      // rows, so reading its rows could never give this cause — a Desdobro
+      // still unclassified read as missing history.
+      hasUnclassifiedRowsAffectingAsset: existing.some((t) => t.status === 'unclassified'),
     });
   }
 

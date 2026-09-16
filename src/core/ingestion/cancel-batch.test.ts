@@ -4,7 +4,7 @@ import { ImportBatchId, UserId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { NormalizedTransactionRecord, ParsedExtract } from '@/core/ingestion/ports';
 import { stageBatch } from '@/core/ingestion/stage-batch';
-import { commitBatch } from '@/core/ingestion/commit-batch';
+import { commitBatch } from '@/core/ingestion/test-support/commit';
 import { cancelBatch } from '@/core/ingestion/cancel-batch';
 import { buildFakeIngestionDeps } from '@/core/ingestion/test-support/build-deps';
 
