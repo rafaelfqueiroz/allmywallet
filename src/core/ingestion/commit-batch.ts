@@ -16,6 +16,7 @@ import {
   type PositionKey,
   type PositionSnapshot,
   positionKeyString,
+  type ReplayFailure,
   replayPosition,
 } from '@/core/positions/replay';
 import { sortForReplay } from '@/core/positions/ordering';
@@ -1098,8 +1099,8 @@ function corporateCulprit(group: Group): string | undefined {
       .map((c) => [c.transaction.id as string, c.planned.event.id]),
   );
   if (resolved.size === 0) return undefined;
-  const failure = firstUnreplayable(group.ledger);
-  if (failure === null) return undefined;
+  // Only a failed group is asked, so its ledger has a first unreplayable row.
+  const failure = firstUnreplayable(group.ledger) as ReplayFailure;
   const ordered = sortForReplay(group.ledger);
   for (let i = ordered.findIndex((t) => t.id === failure.transaction.id); i >= 0; i -= 1) {
     const id = resolved.get((ordered[i] as Transaction).id);

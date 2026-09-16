@@ -1699,6 +1699,85 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event rows resolve at commit'
     ]).toEqual(writes);
   });
 
+  it('a Desdobro’s P includes shares carried in by a same-file transfer (BR-005-20a before BR-005-20b)', async () => {
+    // Origem: 70 @ 100,00. Transfer of 70 to Destino carries 7.000 ÷ 70 = 100,00.
+    // At Destino P = 70; 70 × 9 = 630 = Δ → 700 shares at 10,00.
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(alzrFactor());
+    const at = (record: ParsedRecord, institutionName: string): ParsedRecord => ({
+      ...record,
+      record: { ...(record.record as NormalizedTransactionRecord), institutionName },
+    });
+    const { outcome } = await importFile(deps, [
+      at(compra('ALZR11', '2024-01-10', '70', '100'), 'Corretora Origem'),
+      at(movement('Transferência', 'debit', 'ALZR11', '2024-02-01', '70'), 'Corretora Origem'),
+      at(movement('Transferência', 'credit', 'ALZR11', '2024-02-01', '70'), 'Corretora Destino'),
+      at(desdobro('ALZR11', '2024-03-05', '630'), 'Corretora Destino'),
+    ]);
+
+    expect(outcome).toMatchObject({ resolvedCorporateEvents: 1 });
+    const destino = await deps.institutions.resolve('Corretora Destino');
+    const position = (await deps.positions.list()).find((p) => p.institutionId === destino);
+    expect(position?.state.quantity.toString()).toBe('700');
+    expect(position?.state.totalCost.toString()).toBe('7000');
+    expect(position?.state.averageCost.toString()).toBe('10');
+  });
+
+  it('asks the factor store only for issuers it can name, and a ticker with none stays unclassified', async () => {
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(alzrFactor());
+    const { batchId } = await importFile(deps, [
+      ...alzr(),
+      compra('AXIA15G', '2024-01-10', '80', '10'),
+      desdobro('AXIA15G', '2024-03-05', '80'),
+    ]);
+
+    expect(deps.corporateEventFactors.calls).toEqual([['ALZR']]);
+    const rows = await deps.rows.listByBatch(batchId);
+    const axia = rows.find(
+      (r) =>
+        r.record.kind === 'transaction' &&
+        r.record.assetCode === 'AXIA15G' &&
+        r.record.b3Type === 'Desdobro',
+    );
+    expect(axia?.classification).toBe('unclassified');
+  });
+
+  it('a future-dated Desdobro is refused as invalid, as any malformed row is', async () => {
+    // Today is 2026-03-15.
+    const deps = buildFakeIngestionDeps();
+    const { batchId, outcome } = await importFile(deps, [
+      compra('ALZR11', '2024-01-10', '70', '100'),
+      desdobro('ALZR11', '2026-04-01', '630'),
+    ]);
+
+    expect(outcome).toMatchObject({ invalid: 1, resolvedCorporateEvents: 0 });
+    expect((await rowOf(deps, batchId, 'Desdobro')).classification).toBe('invalid');
+  });
+
+  it('never resolves against an auction left unclassified by another file: both stay unclassified', async () => {
+    // File 1 carries the Leilão alone (no fraction to pair). File 2 carries the
+    // Fração: its only partner is stored unclassified and not in this import.
+    const deps = buildFakeIngestionDeps();
+    const history = [
+      compra('ITSA4', '2025-11-03', '100', '20'),
+      bonificacao('ITSA4', '2025-12-10', '5.2'),
+    ];
+    const first = await importFile(deps, [
+      ...history,
+      leilao('ITSA4', '2026-01-20', '0.2', '12.50'),
+    ]);
+    const second = await importFile(deps, [...history, fracao('ITSA4', '2025-12-15', '0.2')]);
+
+    expect(second.outcome).toMatchObject({ resolvedCorporateEvents: 0, consumedAuctions: 0 });
+    expect((await transactionOf(deps, first.batchId, 'Leilão de Fração')).status).toBe(
+      'unclassified',
+    );
+    expect((await transactionOf(deps, second.batchId, 'Fração em Ativos')).status).toBe(
+      'unclassified',
+    );
+  });
+
   it('a grupamento that disagrees with the published factor stays unclassified', async () => {
     // 80 × 0,1 = 8 ≠ 40.
     const deps = buildFakeIngestionDeps();
