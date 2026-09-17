@@ -14,6 +14,7 @@ import { Quantity } from '@/core/shared/money';
 import { ImportBatchId, UserId } from '@/core/shared/ids';
 import type { ImportBatch } from '@/core/ingestion/ports';
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
+import { DrizzleCorporateEventFactorRepository } from '@/adapters/db/corporate-event-factor-repository';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
 import {
   buildIngestionDeps,
@@ -555,6 +556,41 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
     });
     // Nothing moved: the position replays only the buy.
     expect(await positionFor('FESA4')).toMatchObject({ quantity: '10.00000000' });
+  });
+
+  it('SPEC-008 BR-008-29: an outage suppresses a previously stored factor for this commit', async () => {
+    const factors = new DrizzleCorporateEventFactorRepository(appDb);
+    await factors.recordFetch(
+      'FESA',
+      {
+        outcome: 'ok',
+        factors: [factor('FESA', 'desdobramento', '100', '2024-01-04')],
+      },
+      new Date('2026-03-01T12:00:00Z'),
+    );
+
+    const batchId = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      batchId,
+      await buildMovimentacaoXlsx([
+        compra('FESA4 - Fesa PN', '01/01/2024', '10', '1,00'),
+        desdobro('FESA4 - Fesa PN', '05/01/2024', '10'),
+      ]),
+    );
+    await handleImportStage({ batchId, userId }, handlerDeps(new FakeFactorSource()));
+
+    const source = new FakeFactorSource();
+    source.set('FESA', { outcome: 'failed', failureCode: 'timeout' });
+    await handleImportCommit({ batchId, userId }, handlerDeps(source));
+
+    const desdobro_ = (await transactionsFor('FESA4')).find((row) => row.type !== 'buy');
+    expect(desdobro_).toMatchObject({ status: 'unclassified' });
+    expect(await positionFor('FESA4')).toMatchObject({ quantity: '10.00000000' });
+    expect(await fetchOutcomeFor('FESA')).toMatchObject({
+      outcome: 'failed',
+      failure_code: 'timeout',
+    });
   });
 
   it('SPEC-008 BR-008-29: a factor source that throws also leaves the commit successful, with no fetch recorded', async () => {

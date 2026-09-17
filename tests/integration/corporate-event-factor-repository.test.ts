@@ -122,7 +122,7 @@ describe('DrizzleCorporateEventFactorRepository (integration)', () => {
     expect(rows[0]?.count).toBe(1);
   });
 
-  it('BR-008-29: a failed fetch after an ok one keeps the stored factor and records the failure', async () => {
+  it('BR-008-29: a failed fetch after an ok one keeps the stored factor but leaves it unconfirmed', async () => {
     const repo = new DrizzleCorporateEventFactorRepository(db);
     await repo.recordFetch(
       'MGLU',
@@ -136,7 +136,12 @@ describe('DrizzleCorporateEventFactorRepository (integration)', () => {
     );
 
     const factors = await repo.listByIssuers(['MGLU']);
-    expect(factors.get('MGLU')).toHaveLength(1);
+    expect(factors.get('MGLU')).toBeUndefined();
+
+    const { rows: storedRows } = await pool.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM corporate_event_factors WHERE issuer_code = 'MGLU'",
+    );
+    expect(storedRows[0]?.count).toBe(1);
 
     const lastFetches = await repo.lastFetches(['MGLU']);
     expect(lastFetches.get('MGLU')?.outcome).toBe('failed');

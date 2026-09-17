@@ -45,10 +45,21 @@ export class DrizzleCorporateEventFactorRepository implements CorporateEventFact
     const result = new Map<string, CorporateEventFactor[]>();
     if (issuerCodes.length === 0) return result;
 
+    // SPEC-008 BR-008-29: a failed current refresh leaves the event
+    // unconfirmed. Keep the previously published rows for audit/history, but
+    // do not expose them to commit while the issuer's latest fetch says the
+    // source was unreachable. Otherwise a stale factor would silently confirm
+    // a row during the very outage that must leave it open.
+    const lastFetches = await this.lastFetches(issuerCodes);
+    const confirmedIssuers = issuerCodes.filter(
+      (issuerCode) => lastFetches.get(issuerCode)?.outcome === 'ok',
+    );
+    if (confirmedIssuers.length === 0) return result;
+
     const rows = await this.db
       .select()
       .from(corporateEventFactors)
-      .where(inArray(corporateEventFactors.issuerCode, [...issuerCodes]));
+      .where(inArray(corporateEventFactors.issuerCode, confirmedIssuers));
 
     for (const row of rows) {
       const factor = toDomainFactor(row);
