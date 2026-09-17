@@ -222,9 +222,7 @@ export async function loadImportBatchDetail(
       const issuerCodes = [
         ...new Set(
           eventRows
-            .filter(
-              (r) => r.open && (r.movement === 'desdobro' || r.movement === 'grupamento'),
-            )
+            .filter((r) => r.open && (r.movement === 'desdobro' || r.movement === 'grupamento'))
             .map((r) => issuerCodeOf(r.ticker))
             .filter((code): code is string => code !== null),
         ),

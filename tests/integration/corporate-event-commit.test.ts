@@ -271,7 +271,11 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
     produto,
     quantidade,
   });
-  const bonificacao = (produto: string, data: string, quantidade: string): MovimentacaoRowInput => ({
+  const bonificacao = (
+    produto: string,
+    data: string,
+    quantidade: string,
+  ): MovimentacaoRowInput => ({
     data,
     movimentacao: 'Bonificação em Ativos',
     entradaSaida: 'Credito',
@@ -318,7 +322,10 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
     await handleImportStage({ batchId, userId }, handlerDeps(new FakeFactorSource()));
 
     const source = new FakeFactorSource();
-    source.set('BBAS', { outcome: 'ok', factors: [factor('BBAS', 'desdobramento', '900', '2024-03-01')] });
+    source.set('BBAS', {
+      outcome: 'ok',
+      factors: [factor('BBAS', 'desdobramento', '900', '2024-03-01')],
+    });
     await handleImportCommit({ batchId, userId }, handlerDeps(source));
 
     expect(source.calls).toEqual(['BBAS']);
@@ -386,9 +393,7 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
 
     const afterFirst = {
       bbasDesdobro: (await transactionsFor('BBAS3')).find((r) => r.type !== 'buy'),
-      grndGrupamento: (await transactionsFor('GRND3')).find(
-        (r) => r.quantity === '10.50000000',
-      ),
+      grndGrupamento: (await transactionsFor('GRND3')).find((r) => r.quantity === '10.50000000'),
       grndFracao: (await transactionsFor('GRND3')).find((r) => r.quantity === '0.50000000'),
       grndLeilao: (await transactionsFor('GRND3')).find((r) => r.unit_price === '98.00000000'),
     };
@@ -416,8 +421,14 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
     });
 
     // --- Import 2: the identical file, factor source now up. ---
-    source.set('BBAS', { outcome: 'ok', factors: [factor('BBAS', 'desdobramento', '900', '2024-03-01')] });
-    source.set('GRND', { outcome: 'ok', factors: [factor('GRND', 'grupamento', '0.1', '2024-05-24')] });
+    source.set('BBAS', {
+      outcome: 'ok',
+      factors: [factor('BBAS', 'desdobramento', '900', '2024-03-01')],
+    });
+    source.set('GRND', {
+      outcome: 'ok',
+      factors: [factor('GRND', 'grupamento', '0.1', '2024-05-24')],
+    });
     const second = await newPendingBatch('b3_movimentacao');
     await saveUploadedFile(uploadDir, second, file);
     await handleImportStage({ batchId: second, userId }, handlerDeps(source));
@@ -651,16 +662,17 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
     // Re-import the identical file, this time with a confirming factor
     // available — BR-006-16: a user's classification is never reverted.
     const source = new FakeFactorSource();
-    source.set('BBAS', { outcome: 'ok', factors: [factor('BBAS', 'desdobramento', '900', '2024-03-01')] });
+    source.set('BBAS', {
+      outcome: 'ok',
+      factors: [factor('BBAS', 'desdobramento', '900', '2024-03-01')],
+    });
     const second = await newPendingBatch('b3_movimentacao');
     await saveUploadedFile(uploadDir, second, file);
     await handleImportStage({ batchId: second, userId }, handlerDeps(source));
     await handleImportCommit({ batchId: second, userId }, handlerDeps(source));
 
     expect(await transactionCount()).toBe(countBefore);
-    const afterReimport = (await transactionsFor('BBAS3')).find(
-      (r) => r.id === beforeReimport?.id,
-    );
+    const afterReimport = (await transactionsFor('BBAS3')).find((r) => r.id === beforeReimport?.id);
     expect(afterReimport).toEqual(beforeReimport);
   });
 
