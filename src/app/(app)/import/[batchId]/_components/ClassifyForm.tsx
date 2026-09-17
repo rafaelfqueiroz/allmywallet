@@ -37,10 +37,13 @@ export function ClassifyForm({
   rowId,
   action,
   labels,
+  defaultRatio,
 }: {
   readonly rowId: string;
   readonly action: (state: ActionState, formData: FormData) => Promise<ActionState>;
   readonly labels: ClassifyFormLabels;
+  /** BR-005-20b: B3's published multiplier only; never the derived ratio. */
+  readonly defaultRatio?: string | null;
 }) {
   return (
     <ActionForm action={action}>
@@ -61,7 +64,7 @@ export function ClassifyForm({
           hint={labels.ratioHint}
           width="sm"
         >
-          <Input name="ratio" inputMode="decimal" />
+          <Input name="ratio" inputMode="decimal" defaultValue={defaultRatio ?? undefined} />
         </Field>
         <Button type="submit" size="sm">
           {labels.submit}

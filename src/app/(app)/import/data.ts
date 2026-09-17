@@ -3,6 +3,7 @@ import { withTenant } from '@/db/tenant';
 import { resolveConfig } from '@/config/resolve';
 import { businessDateInSaoPaulo, SystemClock, type BusinessDate } from '@/core/shared/clock';
 import type { ImportBatchId, UserId } from '@/core/shared/ids';
+import type { Transaction } from '@/core/ledger/transaction';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { daysSinceImport, isImportStale } from '@/core/ingestion/staleness';
 import {
@@ -13,8 +14,34 @@ import { adjustmentBlocker, type AdjustmentBlocker } from '@/core/ingestion/acce
 import { explainRefusal, type RowRefusal } from '@/core/ingestion/refusal';
 import { positionKeyString } from '@/core/positions/replay';
 import { listPendingAllocations } from '@/core/wallets/pending';
+import { corporateEventMovementOf } from '@/core/ingestion/movement-map';
+import { issuerCodeOf } from '@/core/ingestion/issuer-code';
+import {
+  type CorporateEventOutcome,
+  type CorporateEventWindows,
+  resolveCorporateEvents,
+} from '@/core/ingestion/corporate-event-resolution';
+import { buildCorporateEventRows } from '@/core/ingestion/corporate-event-evidence';
 import { withIngestionDeps } from '@/app/(app)/import/composition';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
+
+/**
+ * SPEC-005 BR-005-20b (#113 PR-B) — the three windows `resolveCorporateEvents`
+ * needs, resolved the same way `handleImportCommit` resolves them
+ * (`import.corporate_event_factor_window_days`,
+ * `import.fraction_origin_window_days`, `import.fraction_auction_window_days`
+ * — all deployment-level, so a plain pooled `db` read is enough, exactly as
+ * the worker handler does it). A read-time explanation using a different
+ * window than commit would use could show a factor as out-of-window that
+ * commit actually accepted, or the reverse.
+ */
+async function loadCorporateEventWindows(): Promise<CorporateEventWindows> {
+  return {
+    factorDays: (await resolveConfig('import.corporate_event_factor_window_days', { db })).value,
+    originDays: (await resolveConfig('import.fraction_origin_window_days', { db })).value,
+    auctionDays: (await resolveConfig('import.fraction_auction_window_days', { db })).value,
+  };
+}
 
 /**
  * AR-31: Server Components call a use case / repository read in `core/`
@@ -98,6 +125,19 @@ export interface ImportBatchDetail {
   /** SPEC-005 #117 — why each `invalid` row was refused, keyed by row id. */
   readonly refusals: ReadonlyMap<string, RowRefusal>;
   /**
+   * SPEC-005 BR-005-20b (#113 PR-B) — why each still-`unclassified`
+   * corporate-event row (Desdobro, Grupamento, Fração em Ativos, Leilão de
+   * Fração) has not resolved, keyed by row id. Derived at read time, the same
+   * way `refusals` is: `resolveCorporateEvents` is unchanged and pure
+   * (AR-01), called here with the current ledger and no `declined` set —
+   * "omitted at read time, where nothing was tried" (that file's own
+   * doc comment). A `status: 'resolved'`/`'consumed'` outcome for a row still
+   * `unclassified` in a **committed** batch means commit's settlement round
+   * declined it because a later row conflicted (BR-005-20b) — the page shows
+   * that as conflicting with the ledger, not as "about to resolve".
+   */
+  readonly corporateEvents: ReadonlyMap<string, CorporateEventOutcome>;
+  /**
    * SPEC-010 BR-010-15 — `null` until the batch is committed. Before that
    * nothing has been allocated and a summary would be describing a future.
    */
@@ -144,11 +184,73 @@ export async function loadImportBatchDetail(
       );
     }
 
+    // SPEC-005 BR-005-20b (#113 PR-B) — the same explanation for a
+    // corporate-event row that stays `unclassified`: derived at read time
+    // from the current ledger, sharing `ledgers`'s per-position cache with
+    // the loop above so a position needing both reads its ledger once.
+    const corporateEventRows = rows.filter(
+      (row) =>
+        row.record.kind === 'transaction' && corporateEventMovementOf(row.record.b3Type) !== null,
+    );
+    const corporateEvents = new Map<string, CorporateEventOutcome>();
+    if (corporateEventRows.length > 0) {
+      const ledgerByPosition = new Map<string, readonly Transaction[]>();
+      for (const row of corporateEventRows) {
+        const key = positionKeyString(row);
+        if (ledgerByPosition.has(key)) continue;
+        const ledger =
+          ledgers.get(key) ??
+          (await deps.transactions.listForPosition(row.assetId, row.institutionId));
+        ledgers.set(key, ledger);
+        ledgerByPosition.set(key, ledger);
+      }
+
+      const now = deps.clock.now();
+      const today = deps.clock.today();
+      const eventRows = buildCorporateEventRows({
+        rows: corporateEventRows,
+        ledgerByPosition,
+        batchId: batch.id,
+        userId,
+        now,
+        today,
+      });
+
+      // SPEC-008 BR-008-29: only an *open* ratio row needs its issuer's
+      // published factors — a settled sibling is context only (never
+      // resolved here) and its `ticker` was left blank.
+      const issuerCodes = [
+        ...new Set(
+          eventRows
+            .filter((r) => r.open && (r.movement === 'desdobro' || r.movement === 'grupamento'))
+            .map((r) => issuerCodeOf(r.ticker))
+            .filter((code): code is string => code !== null),
+        ),
+      ];
+      const factors =
+        issuerCodes.length === 0
+          ? new Map()
+          : await deps.corporateEventFactors.listByIssuers(issuerCodes);
+      const windows = await loadCorporateEventWindows();
+      const outcomes = resolveCorporateEvents({
+        rows: eventRows,
+        history: (key) => ledgerByPosition.get(positionKeyString(key)) ?? [],
+        factors,
+        windows,
+      });
+      for (const row of corporateEventRows) {
+        if (row.classification !== 'unclassified') continue;
+        const outcome = outcomes.get(row.id);
+        if (outcome !== undefined) corporateEvents.set(row.id, outcome);
+      }
+    }
+
     return {
       batch,
       rows,
       acceptBlockers,
       refusals,
+      corporateEvents,
       needsAttention: rows.filter(
         (row) => row.classification === 'unclassified' || row.classification === 'invalid',
       ),

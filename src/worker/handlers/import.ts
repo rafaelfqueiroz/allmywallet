@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { logger } from '@/lib/logger';
+import { resolveConfig } from '@/config/resolve';
 import { env } from '@/lib/env';
 import { db as globalDb, type Database } from '@/db/client';
 import { withTenant, type Tx } from '@/db/tenant';
@@ -13,6 +14,12 @@ import { commitBatch } from '@/core/ingestion/commit-batch';
 import { cancelBatch } from '@/core/ingestion/cancel-batch';
 import { failBatch } from '@/core/ingestion/fail-batch';
 import type { Transaction } from '@/core/ledger/transaction';
+import { corporateEventMovementOf } from '@/core/ingestion/movement-map';
+import { issuerCodeOf } from '@/core/ingestion/issuer-code';
+import type { CorporateEventFactorSource } from '@/core/quotes/corporate-event-factors';
+import { refreshCorporateEventFactors } from '@/core/quotes/refresh-corporate-event-factors';
+import { DrizzleCorporateEventFactorRepository } from '@/adapters/db/corporate-event-factor-repository';
+import { B3ListedCompaniesFactorSource } from '@/adapters/market-data/b3-listed-companies';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
 import type { SnapshotJobPayload } from '@/worker/handlers/valuation';
@@ -68,6 +75,12 @@ export interface ImportHandlerDeps {
    * was requested and *from when*, without standing up pg-boss.
    */
   readonly enqueueSnapshot: (payload: SnapshotJobPayload) => Promise<void>;
+  /**
+   * SPEC-008 BR-008-29 (#113) — B3's public factor source, built from
+   * `quotes.b3_factor_timeout_ms` when not overridden. A seam so integration
+   * tests never reach B3 and can simulate an outage.
+   */
+  readonly corporateEventFactorSource?: CorporateEventFactorSource;
 }
 
 function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps {
@@ -79,6 +92,9 @@ function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps 
     enqueueSnapshot:
       overrides?.enqueueSnapshot ??
       ((payload) => enqueue(QUEUE.VALUATION_SNAPSHOT, payload as Record<string, unknown>)),
+    ...(overrides?.corporateEventFactorSource === undefined
+      ? {}
+      : { corporateEventFactorSource: overrides.corporateEventFactorSource }),
   };
 }
 
@@ -92,6 +108,8 @@ export function buildIngestionDeps(tx: Tx, userId: UserId, clock: Clock): Ingest
     assets: new DrizzleAssetResolver(tx),
     institutions: new DrizzleInstitutionResolver(tx),
     fixedIncomeContracts: new DrizzleFixedIncomeContractRepository(tx, userId),
+    // AR-15: shared market data, read through the tenant's handle like `assets`.
+    corporateEventFactors: new DrizzleCorporateEventFactorRepository(tx),
     clock,
   };
 }
@@ -261,11 +279,23 @@ export async function handleImportCommit(
   const userId = UserId.of(payload.userId);
   const batchId = ImportBatchId.of(payload.batchId);
 
+  const corporateEventWindows = {
+    factorDays: (
+      await resolveConfig('import.corporate_event_factor_window_days', { db: deps.database })
+    ).value,
+    originDays: (await resolveConfig('import.fraction_origin_window_days', { db: deps.database }))
+      .value,
+    auctionDays: (await resolveConfig('import.fraction_auction_window_days', { db: deps.database }))
+      .value,
+  };
+  await refreshFactorsForBatch(deps, userId, batchId);
+
   const result = await withTenant(
     userId,
     async (tx) => {
       const committed = await commitBatch(buildIngestionDeps(tx, userId, deps.clock), userId, {
         batchId,
+        corporateEventWindows,
         ...(payload.asOf === undefined ? {} : { asOf: BusinessDate.of(payload.asOf) }),
       });
       if (!committed.ok) return committed;
@@ -353,6 +383,67 @@ export async function handleImportCommit(
     },
     'SPEC-005 BR-005-13: batch committed',
   );
+}
+
+/**
+ * SPEC-008 BR-008-29 / SPEC-005 BR-005-20b (#113) — refresh B3's published
+ * factors for the issuers of the batch's Desdobro and Grupamento rows,
+ * **before** the commit transaction.
+ *
+ * Never inside `withTenant`: the commit would hold its row locks across an
+ * HTTP call, and a pg-boss retry of `import.commit` would depend on B3 being
+ * up. And never fatal: an outage — or any failure to record one — leaves the
+ * rows unconfirmed, `unclassified`, and the commit still succeeds (BR-008-27).
+ * Only issuer codes leave the system; no user data is sent (BR-003-08).
+ */
+async function refreshFactorsForBatch(
+  deps: ImportHandlerDeps,
+  userId: UserId,
+  batchId: ImportBatchId,
+): Promise<void> {
+  try {
+    const rows = await withTenant(
+      userId,
+      async (tx) => buildIngestionDeps(tx, userId, deps.clock).rows.listByBatch(batchId),
+      deps.database,
+    );
+    const issuerCodes = new Set<string>();
+    for (const row of rows) {
+      if (row.record.kind !== 'transaction') continue;
+      const movement = corporateEventMovementOf(row.record.b3Type);
+      if (movement !== 'desdobro' && movement !== 'grupamento') continue;
+      const issuer = issuerCodeOf(row.record.assetCode);
+      if (issuer !== null) issuerCodes.add(issuer);
+    }
+    if (issuerCodes.size === 0) return;
+
+    const source =
+      deps.corporateEventFactorSource ??
+      new B3ListedCompaniesFactorSource(
+        (await resolveConfig('quotes.b3_factor_timeout_ms', { db: deps.database })).value,
+      );
+    const refreshDays = (
+      await resolveConfig('quotes.b3_factor_refresh_days', { db: deps.database })
+    ).value;
+    const summary = await refreshCorporateEventFactors(
+      {
+        source,
+        store: new DrizzleCorporateEventFactorRepository(deps.database),
+        clock: deps.clock,
+      },
+      [...issuerCodes],
+      refreshDays,
+    );
+    logger.info(
+      { queue: 'import.commit', batchId, ...summary },
+      'SPEC-008 BR-008-29: corporate-event factors refreshed',
+    );
+  } catch (error) {
+    logger.error(
+      { err: error, queue: 'import.commit', batchId },
+      'SPEC-008 BR-008-29: could not refresh corporate-event factors; rows stay unconfirmed',
+    );
+  }
 }
 
 /**

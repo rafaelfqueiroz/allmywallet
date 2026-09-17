@@ -189,6 +189,16 @@ describe('Quantity — the operations the position engine leans on', () => {
     expect(larger.equals(Quantity.fromString('100'))).toBe(true);
   });
 
+  it('takes the fractional part a corporate event leaves (#113)', () => {
+    // 105,2 − ⌊105,2⌋ = 105,2 − 105 = 0,2; a whole count leaves 0.
+    expect(Quantity.fromString('105.2').fractionalPart().toString()).toBe('0.2');
+    expect(Quantity.fromString('10').fractionalPart().isZero()).toBe(true);
+    // 0,33333333 − 0 = 0,33333333: no rounding on the way.
+    expect(Quantity.fromString('0.33333333').fractionalPart().toString()).toBe('0.33333333');
+    // −0,25 − ⌊−0,25⌋ = −0,25 − (−1) = 0,75.
+    expect(Quantity.fromString('-0.25').fractionalPart().toString()).toBe('0.75');
+  });
+
   it('sums share counts across institutions', () => {
     const lots = ['100', '250.5', '0.00000001'].map((q) => Quantity.fromString(q));
     expect(sumQuantity(lots).toString()).toBe('350.50000001');

@@ -112,6 +112,40 @@ export const REGISTRY = {
       'Max on-demand quote requests per user per minute; null means unbounded (FR-6.22).',
     range: 'positive integer, or null for unbounded',
   },
+  /**
+   * SPEC-008 BR-008-29 (#113) — the request timeout for B3's public
+   * `GetListedSupplementCompany` listed-companies endpoint
+   * (`adapters/market-data/b3-listed-companies.ts`). A registry key rather
+   * than a constant for the same reason `historyTimeoutMs` is one on brapi:
+   * the refresh runs ahead of an import commit, so a hung request must not
+   * hold that commit up indefinitely.
+   */
+  'quotes.b3_factor_timeout_ms': {
+    key: 'quotes.b3_factor_timeout_ms',
+    schema: z.number().int().min(1000).max(60000),
+    default: 10000,
+    levels: ['deployment'],
+    description:
+      "Request timeout for B3's public corporate-event-factor endpoint (SPEC-008 BR-008-29).",
+    range: 'integer milliseconds, 1000–60000',
+  },
+  /**
+   * SPEC-008 BR-008-29 — how long a stored fetch outcome stays fresh before
+   * the refresh use case (`core/quotes/refresh-corporate-event-factors.ts`,
+   * not yet wired to a caller — #113 PR-B) calls B3 again for that issuer. A
+   * `failed` fetch ignores this and is always retried (BR-008-29: an
+   * unreachable factor stays unconfirmed, but that state is not allowed to
+   * persist past the next opportunity to check).
+   */
+  'quotes.b3_factor_refresh_days': {
+    key: 'quotes.b3_factor_refresh_days',
+    schema: z.number().int().min(1).max(90),
+    default: 7,
+    levels: ['deployment'],
+    description:
+      'Days a stored B3 corporate-event-factor fetch stays fresh before refresh; a failed fetch is always retried (SPEC-008 BR-008-29).',
+    range: 'integer days, 1–90',
+  },
   'market.trading_calendar': {
     key: 'market.trading_calendar',
     // The calendar *data* (B3 holidays) is out of this spec's scope — this key
@@ -159,6 +193,51 @@ export const REGISTRY = {
     levels: ['deployment'],
     description: 'Maximum accepted extract size in megabytes (FR-2.4).',
     range: 'integer, 1–100',
+  },
+  /**
+   * SPEC-005 BR-005-20b (#113) — a split/grupamento ratio derived from
+   * custody data is confirmed against B3's published factor only when the
+   * factor's `lastDatePrior` falls within this many days of the derived
+   * event. Outside the window, or with no factor at all, the event stays
+   * unclassified rather than confirmed against an unrelated event.
+   */
+  'import.corporate_event_factor_window_days': {
+    key: 'import.corporate_event_factor_window_days',
+    schema: z.number().int().min(0).max(60),
+    default: 7,
+    levels: ['deployment'],
+    description:
+      "Days a derived split/grupamento ratio may fall from B3's published lastDatePrior and still be confirmed by it (SPEC-005 BR-005-20b).",
+    range: 'integer days, 0–60',
+  },
+  /**
+   * SPEC-005 BR-005-20b — how far back a `Fração em Ativos` debit row may
+   * look, within the same import plus the active ledger, for the
+   * split/grupamento/bonificação event it originated from.
+   */
+  'import.fraction_origin_window_days': {
+    key: 'import.fraction_origin_window_days',
+    schema: z.number().int().min(0).max(365),
+    default: 30,
+    levels: ['deployment'],
+    description:
+      'Days a Fração em Ativos row may look back for the corporate event it originated from (SPEC-005 BR-005-20b).',
+    range: 'integer days, 0–365',
+  },
+  /**
+   * SPEC-005 BR-005-20b — how far a `Fração em Ativos` debit row may pair
+   * with its `Leilão de Fração` credit on the same asset and institution
+   * (#113's decision log #11: "fractions paired within one import plus the
+   * active ledger").
+   */
+  'import.fraction_auction_window_days': {
+    key: 'import.fraction_auction_window_days',
+    schema: z.number().int().min(0).max(730),
+    default: 180,
+    levels: ['deployment'],
+    description:
+      'Days a Fração em Ativos row may pair with its Leilão de Fração credit on the same asset and institution (SPEC-005 BR-005-20b).',
+    range: 'integer days, 0–730',
   },
   'reports.concentration_threshold_pct': {
     key: 'reports.concentration_threshold_pct',

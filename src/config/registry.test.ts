@@ -33,8 +33,16 @@ describe('registry', () => {
     // that stays silent) — both are the tunables DL-018-05's accepted trade
     // is adjusted through, which is precisely why they are not constants;
     // plus one SPEC-021 addition, `personal.catchup_max_days` (BR-021-28, the
-    // bound on how far worker-start catch-up reaches back).
-    expect(CONFIG_KEYS).toHaveLength(30);
+    // bound on how far worker-start catch-up reaches back); plus five #113
+    // additions — `quotes.b3_factor_timeout_ms` and
+    // `quotes.b3_factor_refresh_days` (SPEC-008 BR-008-29, the B3
+    // listed-companies factor fetch's timeout and staleness window) and
+    // `import.corporate_event_factor_window_days`,
+    // `import.fraction_origin_window_days` and
+    // `import.fraction_auction_window_days` (SPEC-005 BR-005-20b, the three
+    // day-windows the commit-time ratio confirmation and fraction-auction
+    // pairing are bounded by, per decision log #11).
+    expect(CONFIG_KEYS).toHaveLength(35);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {

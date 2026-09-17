@@ -66,6 +66,13 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-09-15'),
     parserFingerprint: '171a38e1cfe9c71067f9a0ce8ed8f4a87706c0e585ab5ecd2aea9b537f776af7',
   },
+  {
+    // #113: movement map v4 names Desdobro, Grupamento, Fração em Ativos and
+    // Leilão de Fração, read from the same real Movimentação; they stage as v3
+    // stored them. No parser and no B3 screen moved, so the guide's steps stand.
+    asOf: BusinessDate.of('2026-09-16'),
+    parserFingerprint: '91005e373899418558c46bebf44d4330f745654d692cb248b8df53be937bf095',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

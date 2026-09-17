@@ -5,7 +5,7 @@ import { aTransaction } from '@/core/ledger/test-support/transaction-builder';
 import { Money, Quantity } from '@/core/shared/money';
 import type { NormalizedTransactionRecord, ParsedExtract } from '@/core/ingestion/ports';
 import { stageBatch } from '@/core/ingestion/stage-batch';
-import { commitBatch } from '@/core/ingestion/commit-batch';
+import { commitBatch } from '@/core/ingestion/test-support/commit';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
 import {
   buildFakeIngestionDeps,

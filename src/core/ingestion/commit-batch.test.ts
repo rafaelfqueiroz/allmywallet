@@ -9,6 +9,11 @@ import {
   type TransactionType,
 } from '@/core/ledger/transaction';
 import { replayPosition } from '@/core/positions/replay';
+import {
+  type CorporateEventFactor,
+  type CorporateEventFactorKind,
+  factorMultiplier,
+} from '@/core/quotes/corporate-event-factors';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
 import { UNCLASSIFIED_PLACEHOLDER_TYPE, importNaturalKeyFor } from '@/core/ingestion/occurrence';
 import type {
@@ -19,7 +24,7 @@ import type {
   ParsedRecord,
 } from '@/core/ingestion/ports';
 import { stageBatch } from '@/core/ingestion/stage-batch';
-import { commitBatch } from '@/core/ingestion/commit-batch';
+import { commitBatch } from '@/core/ingestion/test-support/commit';
 import {
   buildFakeIngestionDeps,
   type FakeIngestionDeps,
@@ -1389,5 +1394,534 @@ describe('SPEC-005 #117 — a failing position refuses only the rows it cannot r
     const { outcome } = await importFile(deps, [rendimento('2026-03-10')]);
 
     expect(outcome).toMatchObject({ applied: 0, invalid: 1 });
+  });
+});
+
+describe('SPEC-005 BR-005-20b (#113) — corporate-event rows resolve at commit', () => {
+  /** A Movimentação row, fees zero so every figure below is the price arithmetic alone. */
+  function movement(
+    b3Type: string,
+    direction: 'credit' | 'debit' | null,
+    assetCode: string,
+    date: string,
+    quantity: string,
+    price = '0',
+  ): ParsedRecord {
+    return buy({
+      b3Type,
+      direction,
+      assetCode,
+      assetName: assetCode,
+      tradeDate: BusinessDate.of(date),
+      quantity: Quantity.fromString(quantity),
+      unitPrice: Money.fromString(price),
+      priceStated: price !== '0',
+      fees: Money.zero(),
+    });
+  }
+  const compra = (code: string, date: string, qty: string, price: string) =>
+    movement('Compra', 'credit', code, date, qty, price);
+  const venda = (code: string, date: string, qty: string, price: string) =>
+    movement('Venda', 'debit', code, date, qty, price);
+  const desdobro = (code: string, date: string, qty: string) =>
+    movement('Desdobro', 'credit', code, date, qty);
+  const grupamento = (code: string, date: string, qty: string) =>
+    movement('Grupamento', 'credit', code, date, qty);
+  const bonificacao = (code: string, date: string, qty: string) =>
+    movement('Bonificação em Ativos', 'credit', code, date, qty);
+  const fracao = (code: string, date: string, qty: string) =>
+    movement('Fração em Ativos', 'debit', code, date, qty);
+  const leilao = (code: string, date: string, qty: string, price: string) =>
+    movement('Leilão de Fração', 'credit', code, date, qty, price);
+
+  function factor(
+    issuerCode: string,
+    kind: CorporateEventFactorKind,
+    published: string,
+    lastDatePrior: string,
+  ): CorporateEventFactor {
+    return {
+      issuerCode,
+      kind,
+      factorPublished: published,
+      multiplier: factorMultiplier(kind, published),
+      lastDatePrior: BusinessDate.of(lastDatePrior),
+      approvedOn: null,
+    };
+  }
+
+  async function importFile(deps: FakeIngestionDeps, records: readonly ParsedRecord[]) {
+    const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+    const result = await commitBatch(deps, userId, { batchId });
+    if (!result.ok) throw new Error(`commit failed: ${result.error.code}`);
+    return { batchId, outcome: result.value };
+  }
+
+  async function rowOf(deps: FakeIngestionDeps, batchId: ImportBatchId, b3Type: string) {
+    const row = (await deps.rows.listByBatch(batchId)).find(
+      (r) => r.record.kind === 'transaction' && r.record.b3Type === b3Type,
+    );
+    if (row === undefined) throw new Error(`no ${b3Type} row`);
+    return row;
+  }
+
+  async function transactionOf(deps: FakeIngestionDeps, batchId: ImportBatchId, b3Type: string) {
+    const row = await rowOf(deps, batchId, b3Type);
+    const transaction =
+      row.transactionId === null ? null : await deps.transactions.findById(row.transactionId);
+    if (transaction === null) throw new Error(`no transaction for ${b3Type}`);
+    return transaction;
+  }
+
+  async function positionOf(deps: FakeIngestionDeps, code: string) {
+    const assetId = await deps.assets.resolve({
+      code,
+      name: code,
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: true,
+    });
+    return (await deps.positions.list()).find((p) => p.assetId === assetId)?.state;
+  }
+
+  /** ALZR11: 70 @ 100,00 then a Desdobro of +630 (factor 900 → ×10). */
+  const alzr = () => [
+    compra('ALZR11', '2024-01-10', '70', '100'),
+    desdobro('ALZR11', '2024-03-05', '630'),
+  ];
+  const alzrFactor = () => factor('ALZR', 'desdobramento', '900', '2024-03-01');
+  /** GRND3: 105 @ 10,00, Grupamento → 10,5 (factor 0.1), Fração 0,5, Leilão 0,5 @ 98,00. */
+  const grnd = () => [
+    compra('GRND3', '2024-05-01', '105', '10'),
+    grupamento('GRND3', '2024-05-28', '10.5'),
+    fracao('GRND3', '2024-05-30', '0.5'),
+    leilao('GRND3', '2024-06-10', '0.5', '98'),
+  ];
+  const grndFactor = () => factor('GRND', 'grupamento', '0.1', '2024-05-24');
+
+  it('first import: 70 shares and a Desdobro of 630 with factor 900 apply as a split ×10 — 700 at 10,00', async () => {
+    // m = 1 + 900 ÷ 100 = 10; 70 × (10 − 1) = 630 = Δ. Cost 70 × 100,00 = 7.000,00;
+    // after ×10, 700 shares at 7.000 ÷ 700 = 10,00.
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(alzrFactor());
+
+    const { batchId, outcome } = await importFile(deps, alzr());
+
+    expect(outcome).toMatchObject({ applied: 2, resolvedCorporateEvents: 1, consumedAuctions: 0 });
+    const row = await rowOf(deps, batchId, 'Desdobro');
+    expect(row.classification).toBe('new');
+    const split = await transactionOf(deps, batchId, 'Desdobro');
+    expect(split).toMatchObject({
+      type: 'split',
+      status: 'active',
+      naturalKey: row.naturalKey,
+      occurrence: row.occurrence,
+      isUserModified: false,
+    });
+    expect(split.ratio?.toString()).toBe('10');
+    expect(outcome.committed.map((t) => t.id)).toContain(split.id);
+    const position = await positionOf(deps, 'ALZR11');
+    expect(position?.quantity.toString()).toBe('700');
+    expect(position?.totalCost.toString()).toBe('7000');
+    expect(position?.averageCost.toString()).toBe('10');
+    expect(deps.corporateEventFactors.calls).toEqual([['ALZR']]);
+  });
+
+  it('a bonificação fraction becomes fracao_bonificacao and its auction a 2,50 leilao_fracoes', async () => {
+    // 100 @ 20,00 = 2.000,00; bonificação 5,2 → 105,2 (fractional part 0,2);
+    // Fração 0,2 removed at unchanged cost → 105 shares, 2.000,00, average
+    // 19,047619…; Leilão 0,2 × 12,50 = 2,50 of income.
+    const deps = buildFakeIngestionDeps();
+    const { batchId, outcome } = await importFile(deps, [
+      compra('ITSA4', '2025-11-03', '100', '20'),
+      bonificacao('ITSA4', '2025-12-10', '5.2'),
+      fracao('ITSA4', '2025-12-15', '0.2'),
+      leilao('ITSA4', '2026-01-20', '0.2', '12.50'),
+    ]);
+
+    expect(outcome).toMatchObject({ resolvedCorporateEvents: 2, consumedAuctions: 0 });
+    const removal = await transactionOf(deps, batchId, 'Fração em Ativos');
+    expect(removal).toMatchObject({ type: 'fracao_bonificacao', status: 'active' });
+    expect(removal.totalValue.isZero()).toBe(true);
+    const income = await transactionOf(deps, batchId, 'Leilão de Fração');
+    expect(income).toMatchObject({ type: 'leilao_fracoes', status: 'active' });
+    expect(income.totalValue.toString()).toBe('2.5');
+    const position = await positionOf(deps, 'ITSA4');
+    expect(position?.quantity.toString()).toBe('105');
+    expect(position?.totalCost.toString()).toBe('2000');
+    expect(position?.realizedGain.isZero()).toBe(true);
+    expect(asStored(position?.averageCost as Money)).toBe('19.04761905');
+    // No ratio row: the factor store is never asked.
+    expect(deps.corporateEventFactors.calls).toEqual([]);
+  });
+
+  it('a grupamento fraction is sold at 98,00 realising −1,00, its auction superseded and ignored; the same file again writes nothing', async () => {
+    // 105 @ 10,00 = 1.050,00; ×0,1 → 10,5 at 100,00; sell 0,5 @ 98,00:
+    // 49,00 − 0,5 × 100,00 = −1,00; 10 shares, 1.000,00 left.
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(grndFactor());
+    const { batchId, outcome } = await importFile(deps, grnd());
+
+    expect(outcome).toMatchObject({ applied: 3, resolvedCorporateEvents: 2, consumedAuctions: 1 });
+    expect((await transactionOf(deps, batchId, 'Grupamento')).ratio?.toString()).toBe('0.1');
+    const sale = await transactionOf(deps, batchId, 'Fração em Ativos');
+    expect(sale).toMatchObject({ type: 'sell', status: 'active', tradeDate: '2024-05-30' });
+    expect(sale.unitPrice.toString()).toBe('98');
+    expect(sale.totalValue.toString()).toBe('49');
+    const auction = await transactionOf(deps, batchId, 'Leilão de Fração');
+    expect(auction.status).toBe('superseded');
+    expect((await rowOf(deps, batchId, 'Leilão de Fração')).classification).toBe('ignored');
+    expect(outcome.committed.map((t) => t.id)).not.toContain(auction.id);
+    expect(outcome.batch.rowCounts).toMatchObject({ new: 3, ignored: 1, needsAttention: 0 });
+    const position = await positionOf(deps, 'GRND3');
+    expect(position?.quantity.toString()).toBe('10');
+    expect(position?.totalCost.toString()).toBe('1000');
+    expect(position?.realizedGain.toString()).toBe('-1');
+
+    const writes = [
+      deps.transactions.insertCount,
+      deps.transactions.updateCount,
+      deps.positions.upsertCount,
+    ];
+    const again = await importFile(deps, grnd());
+    expect(again.outcome).toMatchObject({
+      applied: 0,
+      skippedDuplicates: 4,
+      resolvedCorporateEvents: 0,
+      consumedAuctions: 0,
+      committed: [],
+    });
+    expect([
+      deps.transactions.insertCount,
+      deps.transactions.updateCount,
+      deps.positions.upsertCount,
+    ]).toEqual(writes);
+  });
+
+  it('with no factors (reader outage) the ratio rows stay unclassified and the commit succeeds', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, outcome } = await importFile(deps, [...alzr(), ...grnd()]);
+
+    expect(outcome).toMatchObject({ resolvedCorporateEvents: 0, consumedAuctions: 0 });
+    for (const b3Type of ['Desdobro', 'Grupamento', 'Fração em Ativos', 'Leilão de Fração']) {
+      expect((await transactionOf(deps, batchId, b3Type)).status).toBe('unclassified');
+      expect((await rowOf(deps, batchId, b3Type)).classification).toBe('unclassified');
+    }
+    // Only the two buys moved a position: 70 and 105.
+    expect((await positionOf(deps, 'ALZR11'))?.quantity.toString()).toBe('70');
+    expect((await positionOf(deps, 'GRND3'))?.quantity.toString()).toBe('105');
+  });
+
+  it('re-import: all four types stored unclassified are resolved in place, key kept, not user-modified; a second re-import writes nothing', async () => {
+    const deps = buildFakeIngestionDeps();
+    const file = [...alzr(), ...grnd()];
+    // Committed before the factors were known: four rows need attention.
+    const first = await importFile(deps, file);
+    expect(first.outcome.batch.rowCounts).toMatchObject({ new: 2, needsAttention: 4, ignored: 0 });
+    const before = {
+      desdobro: await transactionOf(deps, first.batchId, 'Desdobro'),
+      grupamento: await transactionOf(deps, first.batchId, 'Grupamento'),
+      fracao: await transactionOf(deps, first.batchId, 'Fração em Ativos'),
+      leilao: await transactionOf(deps, first.batchId, 'Leilão de Fração'),
+    };
+
+    deps.corporateEventFactors.seed(alzrFactor(), grndFactor());
+    const again = await importFile(deps, file);
+
+    expect(again.outcome).toMatchObject({
+      applied: 0,
+      reclassified: 0,
+      superseded: 0,
+      resolvedCorporateEvents: 3,
+      consumedAuctions: 1,
+    });
+    expect(again.outcome.committed.map((t) => t.id).sort()).toEqual(
+      [before.desdobro.id, before.grupamento.id, before.fracao.id].sort(),
+    );
+    expect(await deps.transactions.findById(before.desdobro.id)).toMatchObject({
+      type: 'split',
+      status: 'active',
+      naturalKey: before.desdobro.naturalKey,
+      isUserModified: false,
+    });
+    expect(await deps.transactions.findById(before.grupamento.id)).toMatchObject({
+      type: 'grupamento',
+      status: 'active',
+      naturalKey: before.grupamento.naturalKey,
+      isUserModified: false,
+    });
+    const sale = await deps.transactions.findById(before.fracao.id);
+    expect(sale).toMatchObject({
+      type: 'sell',
+      status: 'active',
+      naturalKey: before.fracao.naturalKey,
+      isUserModified: false,
+    });
+    // 0,5 × 98,00 = 49,00, recomputed with the price.
+    expect(sale?.unitPrice.toString()).toBe('98');
+    expect(sale?.totalValue.toString()).toBe('49');
+    expect(await deps.transactions.findById(before.leilao.id)).toMatchObject({
+      status: 'superseded',
+      naturalKey: before.leilao.naturalKey,
+      isUserModified: false,
+    });
+    // The origin rows leave Needs attention: 3 → new, 1 → ignored; 4 − 4 = 0.
+    expect((await rowOf(deps, first.batchId, 'Desdobro')).classification).toBe('new');
+    expect((await rowOf(deps, first.batchId, 'Leilão de Fração')).classification).toBe('ignored');
+    expect((await deps.batches.findById(first.batchId))?.rowCounts).toMatchObject({
+      new: 5,
+      ignored: 1,
+      needsAttention: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(6);
+    // 700 at 10,00; 10 at 100,00 with −1,00 realised.
+    expect((await positionOf(deps, 'ALZR11'))?.quantity.toString()).toBe('700');
+    const grndPosition = await positionOf(deps, 'GRND3');
+    expect(grndPosition?.quantity.toString()).toBe('10');
+    expect(grndPosition?.realizedGain.toString()).toBe('-1');
+
+    const writes = [
+      deps.transactions.insertCount,
+      deps.transactions.updateCount,
+      deps.positions.upsertCount,
+    ];
+    const third = await importFile(deps, file);
+    expect(third.outcome).toMatchObject({
+      applied: 0,
+      resolvedCorporateEvents: 0,
+      consumedAuctions: 0,
+      committed: [],
+    });
+    expect([
+      deps.transactions.insertCount,
+      deps.transactions.updateCount,
+      deps.positions.upsertCount,
+    ]).toEqual(writes);
+  });
+
+  it('a Desdobro’s P includes shares carried in by a same-file transfer (BR-005-20a before BR-005-20b)', async () => {
+    // Origem: 70 @ 100,00. Transfer of 70 to Destino carries 7.000 ÷ 70 = 100,00.
+    // At Destino P = 70; 70 × 9 = 630 = Δ → 700 shares at 10,00.
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(alzrFactor());
+    const at = (record: ParsedRecord, institutionName: string): ParsedRecord => ({
+      ...record,
+      record: { ...(record.record as NormalizedTransactionRecord), institutionName },
+    });
+    const { outcome } = await importFile(deps, [
+      at(compra('ALZR11', '2024-01-10', '70', '100'), 'Corretora Origem'),
+      at(movement('Transferência', 'debit', 'ALZR11', '2024-02-01', '70'), 'Corretora Origem'),
+      at(movement('Transferência', 'credit', 'ALZR11', '2024-02-01', '70'), 'Corretora Destino'),
+      at(desdobro('ALZR11', '2024-03-05', '630'), 'Corretora Destino'),
+    ]);
+
+    expect(outcome).toMatchObject({ resolvedCorporateEvents: 1 });
+    const destino = await deps.institutions.resolve('Corretora Destino');
+    const position = (await deps.positions.list()).find((p) => p.institutionId === destino);
+    expect(position?.state.quantity.toString()).toBe('700');
+    expect(position?.state.totalCost.toString()).toBe('7000');
+    expect(position?.state.averageCost.toString()).toBe('10');
+  });
+
+  it('a transfer after a Desdobro carries the post-event average cost', async () => {
+    // Origem: 70 @ 100,00 becomes 700 @ 10,00 after the Desdobro. The later
+    // transfer of 50 must therefore carry 500,00 (10,00 each), not the
+    // pre-event 100,00 average cost.
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(alzrFactor());
+    const at = (record: ParsedRecord, institutionName: string): ParsedRecord => ({
+      ...record,
+      record: { ...(record.record as NormalizedTransactionRecord), institutionName },
+    });
+
+    const { outcome } = await importFile(deps, [
+      at(compra('ALZR11', '2024-01-10', '70', '100'), 'Corretora Origem'),
+      at(desdobro('ALZR11', '2024-03-05', '630'), 'Corretora Origem'),
+      at(movement('Transferência', 'debit', 'ALZR11', '2024-04-01', '50'), 'Corretora Origem'),
+      at(movement('Transferência', 'credit', 'ALZR11', '2024-04-01', '50'), 'Corretora Destino'),
+    ]);
+
+    expect(outcome).toMatchObject({ resolvedCorporateEvents: 1 });
+    const carried = deps.transactions.rows.find(
+      (transaction) => transaction.type === 'transfer_in' && transaction.status === 'active',
+    );
+    expect(carried?.unitPrice.toString()).toBe('10');
+    expect(carried?.totalValue.toString()).toBe('500');
+
+    const origem = await deps.institutions.resolve('Corretora Origem');
+    const destino = await deps.institutions.resolve('Corretora Destino');
+    const positions = await deps.positions.list();
+    expect(positions.find((position) => position.institutionId === origem)?.state).toMatchObject({
+      quantity: Quantity.fromString('650'),
+      totalCost: Money.fromString('6500'),
+    });
+    expect(positions.find((position) => position.institutionId === destino)?.state).toMatchObject({
+      quantity: Quantity.fromString('50'),
+      totalCost: Money.fromString('500'),
+    });
+  });
+
+  it('asks the factor store only for issuers it can name, and a ticker with none stays unclassified', async () => {
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(alzrFactor());
+    const { batchId } = await importFile(deps, [
+      ...alzr(),
+      compra('AXIA15G', '2024-01-10', '80', '10'),
+      desdobro('AXIA15G', '2024-03-05', '80'),
+    ]);
+
+    expect(deps.corporateEventFactors.calls).toEqual([['ALZR']]);
+    const rows = await deps.rows.listByBatch(batchId);
+    const axia = rows.find(
+      (r) =>
+        r.record.kind === 'transaction' &&
+        r.record.assetCode === 'AXIA15G' &&
+        r.record.b3Type === 'Desdobro',
+    );
+    expect(axia?.classification).toBe('unclassified');
+  });
+
+  it('a future-dated Desdobro is refused as invalid, as any malformed row is', async () => {
+    // Today is 2026-03-15.
+    const deps = buildFakeIngestionDeps();
+    const { batchId, outcome } = await importFile(deps, [
+      compra('ALZR11', '2024-01-10', '70', '100'),
+      desdobro('ALZR11', '2026-04-01', '630'),
+    ]);
+
+    expect(outcome).toMatchObject({ invalid: 1, resolvedCorporateEvents: 0 });
+    expect((await rowOf(deps, batchId, 'Desdobro')).classification).toBe('invalid');
+  });
+
+  it('never resolves against an auction left unclassified by another file: both stay unclassified', async () => {
+    // File 1 carries the Leilão alone (no fraction to pair). File 2 carries the
+    // Fração: its only partner is stored unclassified and not in this import.
+    const deps = buildFakeIngestionDeps();
+    const history = [
+      compra('ITSA4', '2025-11-03', '100', '20'),
+      bonificacao('ITSA4', '2025-12-10', '5.2'),
+    ];
+    const first = await importFile(deps, [
+      ...history,
+      leilao('ITSA4', '2026-01-20', '0.2', '12.50'),
+    ]);
+    const second = await importFile(deps, [...history, fracao('ITSA4', '2025-12-15', '0.2')]);
+
+    expect(second.outcome).toMatchObject({ resolvedCorporateEvents: 0, consumedAuctions: 0 });
+    expect((await transactionOf(deps, first.batchId, 'Leilão de Fração')).status).toBe(
+      'unclassified',
+    );
+    expect((await transactionOf(deps, second.batchId, 'Fração em Ativos')).status).toBe(
+      'unclassified',
+    );
+  });
+
+  it('a grupamento that disagrees with the published factor stays unclassified', async () => {
+    // 80 × 0,1 = 8 ≠ 40.
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(factor('MGLU', 'grupamento', '0.1', '2024-05-24'));
+    const { batchId, outcome } = await importFile(deps, [
+      compra('MGLU3', '2024-01-02', '80', '10'),
+      grupamento('MGLU3', '2024-05-28', '40'),
+    ]);
+
+    expect(outcome.resolvedCorporateEvents).toBe(0);
+    expect(await transactionOf(deps, batchId, 'Grupamento')).toMatchObject({
+      type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+      status: 'unclassified',
+    });
+    expect((await rowOf(deps, batchId, 'Grupamento')).classification).toBe('unclassified');
+    expect((await positionOf(deps, 'MGLU3'))?.quantity.toString()).toBe('80');
+  });
+
+  it('never touches a Desdobro the user classified by hand', async () => {
+    const deps = buildFakeIngestionDeps();
+    const first = await importFile(deps, alzr());
+    const row = await rowOf(deps, first.batchId, 'Desdobro');
+    const classified = await classifyImportRow(deps, {
+      rowId: row.id,
+      type: 'split',
+      ratio: Quantity.fromString('10'),
+    });
+    expect(classified.ok).toBe(true);
+    const stored = await transactionOf(deps, first.batchId, 'Desdobro');
+    const updates = deps.transactions.updateCount;
+
+    deps.corporateEventFactors.seed(alzrFactor());
+    const again = await importFile(deps, alzr());
+
+    expect(again.outcome).toMatchObject({ resolvedCorporateEvents: 0, applied: 0 });
+    expect(await deps.transactions.findById(stored.id)).toEqual(stored);
+    expect(deps.transactions.updateCount).toBe(updates);
+  });
+
+  it('declines a resolved grupamento that would starve a later stored sale; the rest of the commit applies', async () => {
+    // SIMH3: 220 bought, 200 sold after the grupamento date. ×0,5 would leave
+    // 110 < 200, so the grupamento is given up and stays unclassified. The new
+    // dividend on the same position and ALZR11's desdobro still apply.
+    const deps = buildFakeIngestionDeps();
+    const simh = [
+      compra('SIMH3', '2024-01-02', '220', '11'),
+      grupamento('SIMH3', '2024-08-12', '110'),
+      venda('SIMH3', '2024-09-02', '200', '15'),
+    ];
+    const first = await importFile(deps, simh);
+    expect((await positionOf(deps, 'SIMH3'))?.quantity.toString()).toBe('20');
+
+    deps.corporateEventFactors.seed(
+      factor('SIMH', 'grupamento', '0.5', '2024-08-09'),
+      alzrFactor(),
+    );
+    const again = await importFile(deps, [
+      ...simh,
+      movement('Dividendo', 'credit', 'SIMH3', '2024-10-01', '20', '0.50'),
+      ...alzr(),
+    ]);
+
+    expect(again.outcome).toMatchObject({ applied: 3, resolvedCorporateEvents: 1 });
+    expect(await transactionOf(deps, first.batchId, 'Grupamento')).toMatchObject({
+      status: 'unclassified',
+      isUserModified: false,
+    });
+    expect((await rowOf(deps, first.batchId, 'Grupamento')).classification).toBe('unclassified');
+    expect((await transactionOf(deps, again.batchId, 'Dividendo')).status).toBe('active');
+    // 220 − 200 = 20 SIMH3; 700 ALZR11.
+    expect((await positionOf(deps, 'SIMH3'))?.quantity.toString()).toBe('20');
+    expect((await positionOf(deps, 'ALZR11'))?.quantity.toString()).toBe('700');
+  });
+
+  it('BR-005-24 (amended): a Posição discrepancy is blamed on the ledger’s unclassified Desdobro', async () => {
+    // Movimentação: 70 ALZR11 and a Desdobro no factor confirms — the ledger
+    // replays 70; B3 holds 700.
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, alzr());
+    const posicao = await stagedBatch(deps, {
+      extractType: 'b3_posicao',
+      records: [
+        {
+          raw: { Produto: 'ALZR11' },
+          record: {
+            kind: 'position',
+            assetCode: 'ALZR11',
+            assetName: 'ALZR11',
+            assetClass: 'fii',
+            institutionName: 'Corretora Teste',
+            quantity: Quantity.fromString('700'),
+            fixedIncome: null,
+          },
+        },
+      ],
+    });
+
+    const result = await commitBatch(deps, userId, {
+      batchId: posicao,
+      asOf: BusinessDate.of('2026-03-01'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const [discrepancy] = result.value.batch.reconciliation?.discrepancies ?? [];
+    expect(discrepancy).toMatchObject({ cause: 'unclassified_rows_affecting_asset' });
+    expect(discrepancy?.computedQuantity.toString()).toBe('70');
   });
 });

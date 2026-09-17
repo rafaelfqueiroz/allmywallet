@@ -9,7 +9,7 @@ import type {
   ParsedExtract,
 } from '@/core/ingestion/ports';
 import { stageBatch } from '@/core/ingestion/stage-batch';
-import { commitBatch } from '@/core/ingestion/commit-batch';
+import { commitBatch } from '@/core/ingestion/test-support/commit';
 import {
   acceptReconciliationAdjustment,
   adjustmentBlocker,
