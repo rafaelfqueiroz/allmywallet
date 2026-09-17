@@ -391,6 +391,15 @@ export async function commitBatch(
         corporateDeclined.add(culprit);
         continue;
       }
+      // #113 follow-up: a consumed Leilão is a corporate write but does not
+      // enter replay. If the pre-existing ledger already fails on its own,
+      // there is therefore no resolved transaction for `corporateCulprit` to
+      // identify. Decline every remaining corporate write in the group so the
+      // next round leaves the rows unclassified instead of spinning forever.
+      if (group.corporate.length > 0) {
+        for (const write of group.corporate) corporateDeclined.add(write.planned.event.id);
+        continue;
+      }
       // #117 BR-006-15: only the rows the replay cannot accept are excluded
       // (never written, surfaced as `invalid`); the group's proventos and every
       // other row still apply.

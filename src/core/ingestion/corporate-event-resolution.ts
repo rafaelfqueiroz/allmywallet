@@ -400,7 +400,7 @@ function walkPosition(
         !partnerAgrees(partner.transaction, row.open ? 'auction' : 'fraction', origin)
       ) {
         refusal = 'partner_conflict';
-      } else if (declined.has(row.id)) {
+      } else if (declined.has(row.id) || declined.has(auction.id)) {
         refusal = 'conflicts_with_ledger';
       } else if (row.open) {
         written = fractionTransaction(fraction, origin, auction.transaction);

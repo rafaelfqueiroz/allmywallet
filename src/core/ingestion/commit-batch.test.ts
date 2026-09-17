@@ -1598,6 +1598,49 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event rows resolve at commit'
     ]).toEqual(writes);
   });
 
+  it('leaves a consumed auction unresolved when its pre-existing ledger cannot replay', async () => {
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(grndFactor());
+
+    // This reproduces the owner's pre-#113 ledger shape: the fraction was
+    // already classified, while its later auction was still absent.
+    const first = await importFile(deps, grnd().slice(0, 3));
+    const storedFraction = await transactionOf(deps, first.batchId, 'Fração em Ativos');
+    await deps.transactions.update({
+      ...storedFraction,
+      type: 'sell',
+      status: 'active',
+      unitPrice: Money.fromString('98'),
+      totalValue: Money.fromString('49'),
+    });
+
+    // Only reachable by editing around the write guard: a later stored sale
+    // makes this old ledger fail independently of the auction being consumed.
+    const holding = deps.transactions.rows.find((transaction) => transaction.type === 'buy');
+    if (holding === undefined) throw new Error('missing fixture holding');
+    await deps.transactions.insert({
+      ...holding,
+      id: TransactionId.generate(),
+      naturalKey: 'fixture|stored-overdraw',
+      occurrence: 1,
+      type: 'sell',
+      tradeDate: BusinessDate.of('2024-07-01'),
+      quantity: Quantity.fromString('100'),
+      unitPrice: Money.fromString('1'),
+      totalValue: Money.fromString('100'),
+      importBatchId: null,
+      isManual: true,
+    });
+
+    const again = await importFile(deps, grnd());
+
+    expect(again.outcome).toMatchObject({ resolvedCorporateEvents: 0, consumedAuctions: 0 });
+    expect(await transactionOf(deps, again.batchId, 'Leilão de Fração')).toMatchObject({
+      type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+      status: 'unclassified',
+    });
+  });
+
   it('with no factors (reader outage) the ratio rows stay unclassified and the commit succeeds', async () => {
     const deps = buildFakeIngestionDeps();
     const { batchId, outcome } = await importFile(deps, [...alzr(), ...grnd()]);
