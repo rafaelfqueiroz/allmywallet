@@ -44,6 +44,14 @@ describe('ClassifyForm', () => {
     expect(screen.getByText('Só para desdobramento e grupamento.')).toBeInTheDocument();
   });
 
+  it('pre-fills only the published multiplier supplied by the read-time resolver', () => {
+    render(
+      <ClassifyForm rowId="row-1" action={async () => IDLE} labels={labels} defaultRatio="0.1" />,
+    );
+
+    expect(screen.getByLabelText('Proporção')).toHaveValue('0.1');
+  });
+
   it('submits the row id, the chosen type and the typed ratio', async () => {
     const submitted: FormData[] = [];
     const action = async (_state: ActionState, formData: FormData): Promise<ActionState> => {

@@ -5,6 +5,8 @@ import { positionKeyString } from '@/core/positions/replay';
 import { SystemClock } from '@/core/shared/clock';
 import { formatBusinessDate, formatDateTime, formatQuantity } from '@/i18n/format';
 import type { RowRefusal } from '@/core/ingestion/refusal';
+import type { CorporateEventOutcome } from '@/core/ingestion/corporate-event-resolution';
+import { ratioPrefillFor } from '@/core/ingestion/corporate-event-evidence';
 import {
   acceptAdjustmentAction,
   cancelBatchAction,
@@ -13,6 +15,7 @@ import {
 } from '@/app/(app)/import/actions';
 import { loadImportBatchDetail } from '@/app/(app)/import/data';
 import { ClassifyForm } from '@/app/(app)/import/[batchId]/_components/ClassifyForm';
+import { corporateEventRefusalKey } from '@/app/(app)/import/[batchId]/_components/corporate-event-refusal';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletOptions, walletName } from '@/app/(app)/import/wallet-options';
 import { allocateAction } from '@/app/(app)/wallets/actions';
@@ -72,7 +75,16 @@ export default async function ImportBatchDetailPage({
   const detail = await loadImportBatchDetail(userId, batchId);
   if (detail === null) notFound();
 
-  const { batch, rows, needsAttention, ignored, summary, acceptBlockers, refusals } = detail;
+  const {
+    batch,
+    rows,
+    needsAttention,
+    ignored,
+    summary,
+    acceptBlockers,
+    refusals,
+    corporateEvents,
+  } = detail;
   // SPEC-005 #117 BR-005-24: a refused row says why, with the figures behind it.
   const refusalText = (refusal: RowRefusal) => {
     switch (refusal.kind) {
@@ -88,10 +100,70 @@ export default async function ImportBatchDetailPage({
         return t(`refusal.${refusal.kind}`);
     }
   };
-  const classifyForm = (rowId: string) => (
+  const corporateEventEvidence = (outcome: CorporateEventOutcome) => {
+    const refusal =
+      outcome.status === 'refused'
+        ? outcome.refusal
+        : batch.status === 'committed'
+          ? 'conflicts_with_ledger'
+          : null;
+
+    return (
+      <Stack gap="xs">
+        {(outcome.movement === 'desdobro' || outcome.movement === 'grupamento') && (
+          <>
+            <Text as="span" size="xs">
+              {t('corporateEvent.figures', {
+                basis:
+                  outcome.evidence.basis === null
+                    ? t('corporateEvent.unavailable')
+                    : formatQuantity(outcome.evidence.basis),
+                stated: formatQuantity(outcome.evidence.stated),
+                derived:
+                  outcome.evidence.derivedRatio === null
+                    ? t('corporateEvent.unavailable')
+                    : formatQuantity(outcome.evidence.derivedRatio),
+              })}
+            </Text>
+            {outcome.evidence.factors.length === 0 ? (
+              <Text as="span" size="xs" tone="muted">
+                {t('corporateEvent.noFactor')}
+              </Text>
+            ) : (
+              outcome.evidence.factors.map((factor) => (
+                <Text
+                  as="span"
+                  size="xs"
+                  tone="muted"
+                  key={`${factor.kind}:${factor.lastDatePrior}:${factor.factorPublished}`}
+                >
+                  {t('corporateEvent.factor', {
+                    factor: factor.factorPublished.replace('.', ','),
+                    multiplier: formatQuantity(factor.multiplier),
+                    date: formatBusinessDate(factor.lastDatePrior),
+                  })}
+                </Text>
+              ))
+            )}
+          </>
+        )}
+        {refusal === null ? (
+          <Text as="span" size="xs">
+            {t('corporateEvent.willResolve')}
+          </Text>
+        ) : (
+          <Text as="span" size="xs">
+            {t(`corporateEvent.refusal.${corporateEventRefusalKey(refusal)}`)}
+          </Text>
+        )}
+      </Stack>
+    );
+  };
+  const classifyForm = (rowId: string, outcome?: CorporateEventOutcome) => (
     <ClassifyForm
       rowId={rowId}
       action={classifyRowAction}
+      defaultRatio={outcome === undefined ? null : ratioPrefillFor(outcome)}
       labels={{
         type: t('classifyLabel'),
         ratio: t('classifyRatioLabel'),
@@ -267,24 +339,28 @@ export default async function ImportBatchDetailPage({
           <EmptyState title={t('needsAttentionEmpty')} />
         ) : (
           <List gap="md">
-            {needsAttention.map((row) => (
-              <ListItem key={row.id} separated>
-                <Stack gap="sm" align="start">
-                  <span className="font-medium">{row.record.assetCode}</span>
-                  <Text as="span" size="xs" tone="muted">
-                    {row.record.kind === 'transaction'
-                      ? `${row.record.b3Type} · ${formatBusinessDate(row.record.tradeDate)}`
-                      : ''}
-                  </Text>
-                  {refusals.has(row.id) && (
-                    <Text as="span" size="xs">
-                      {refusalText(refusals.get(row.id) as RowRefusal)}
+            {needsAttention.map((row) => {
+              const corporateEvent = corporateEvents.get(row.id);
+              return (
+                <ListItem key={row.id} separated>
+                  <Stack gap="sm" align="start">
+                    <span className="font-medium">{row.record.assetCode}</span>
+                    <Text as="span" size="xs" tone="muted">
+                      {row.record.kind === 'transaction'
+                        ? `${row.record.b3Type} · ${formatBusinessDate(row.record.tradeDate)}`
+                        : ''}
                     </Text>
-                  )}
-                  {row.classification === 'unclassified' && classifyForm(row.id)}
-                </Stack>
-              </ListItem>
-            ))}
+                    {refusals.has(row.id) && (
+                      <Text as="span" size="xs">
+                        {refusalText(refusals.get(row.id) as RowRefusal)}
+                      </Text>
+                    )}
+                    {corporateEvent !== undefined && corporateEventEvidence(corporateEvent)}
+                    {row.classification === 'unclassified' && classifyForm(row.id, corporateEvent)}
+                  </Stack>
+                </ListItem>
+              );
+            })}
           </List>
         )}
       </Section>

@@ -445,6 +445,31 @@
     "classifyRatioLabel": "Proporção",
     "classifyRatioHint": "Só para desdobramento e grupamento — 10 para desdobramento 1:10, 0,1 para grupamento 10:1.",
     "classifySubmit": "Classificar",
+    "corporateEvent": {
+      "figures": "Antes do evento (P): {basis} · Quantidade informada pela B3: {stated} · Proporção derivada: {derived}",
+      "factor": "Fator publicado pela B3: {factor} (multiplicador {multiplier}) · última data com: {date}",
+      "noFactor": "Nenhum fator publicado pela B3 foi encontrado na janela configurada.",
+      "unavailable": "indisponível",
+      "willResolve": "Os dados conferem; esta linha será resolvida ao confirmar a importação.",
+      "refusal": {
+        "no_basis": "Não foi possível resolver: não há posição positiva e confiável antes deste evento.",
+        "no_factor": "Não foi possível resolver: não há um fator publicado pela B3 para confirmar a proporção.",
+        "ambiguous_factor": "Não foi possível resolver: mais de um fator publicado pela B3 corresponde a este evento.",
+        "disagrees": "Não foi possível resolver: a proporção derivada da posição e da quantidade informada não confere com o fator publicado pela B3.",
+        "not_representable": "Não foi possível resolver: o fator publicado não pode ser armazenado exatamente com oito casas decimais.",
+        "combined_same_day": "Não foi possível resolver: há desdobramento e grupamento na mesma posição e data, sem ordem definida.",
+        "blocked": "Não foi possível resolver: um evento anterior desta posição ainda está pendente.",
+        "conflicts_with_ledger": "Não foi possível resolver: aplicar este evento deixaria uma operação já registrada sem saldo.",
+        "no_origin": "Não foi possível resolver: nenhum evento anterior deixou exatamente esta fração.",
+        "ambiguous_origin": "Não foi possível resolver: mais de um evento anterior pode ter originado esta fração.",
+        "origin_unresolved": "Não foi possível resolver: há um evento anterior pendente que pode ter originado esta fração.",
+        "no_pair": "Não foi possível resolver: não há uma fração ou leilão correspondente na janela configurada.",
+        "ambiguous_pair": "Não foi possível resolver: há mais de uma fração ou leilão correspondente.",
+        "no_price": "Não foi possível resolver: o leilão correspondente não informa um preço positivo.",
+        "partner_conflict": "Não foi possível resolver: a classificação já aplicada à linha correspondente contradiz a origem da fração.",
+        "partner_unresolved": "Não foi possível resolver: a linha correspondente está pendente em outra importação. Importe novamente o arquivo que contém as duas linhas."
+      }
+    },
     "reconciliationTitle": "Reconciliação com a posição da B3",
     "reconciliationStatus": {
       "reconciled": "Sem divergências",

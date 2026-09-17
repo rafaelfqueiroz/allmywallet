@@ -7,6 +7,7 @@ import { seedUser } from '../support/users';
 import { withTenantContext } from '../support/tenant-context';
 import * as schema from '@/db/schema';
 import { UserId } from '@/core/shared/ids';
+import { withTenant } from '@/db/tenant';
 import { resolveConfig, setConfigValue, invalidateDeploymentCache } from '@/config/resolve';
 import { setRuntimeState } from '@/config/runtime-state';
 
@@ -51,6 +52,21 @@ describe('SPEC-002 — config resolution (integration)', () => {
     expect(resolved).toEqual({
       key: 'reports.concentration_threshold_pct',
       value: 20,
+      source: 'default',
+    });
+  });
+
+  it('reads deployment config after the pooled connection has carried tenant context (#113)', async () => {
+    // AR-11: after COMMIT, a transaction-local custom GUC is known-but-empty
+    // on this session. Migration 0022 makes the tenant RLS predicate treat
+    // that value as NULL before its UUID cast, so a worker can resolve its
+    // deployment keys before the next tenant transaction.
+    await withTenant(userA, async () => undefined, db);
+    invalidateDeploymentCache();
+
+    await expect(resolveConfig('import.fraction_auction_window_days', { db })).resolves.toEqual({
+      key: 'import.fraction_auction_window_days',
+      value: 180,
       source: 'default',
     });
   });
