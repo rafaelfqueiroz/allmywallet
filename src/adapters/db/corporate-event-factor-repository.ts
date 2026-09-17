@@ -107,9 +107,28 @@ export class DrizzleCorporateEventFactorRepository implements CorporateEventFact
     fetch: CorporateEventFactorFetch,
     fetchedAt: Date,
   ): Promise<void> {
+    if ('transaction' in this.db) {
+      await this.db.transaction((tx) => this.recordFetchIn(tx, issuerCode, fetch, fetchedAt));
+      return;
+    }
+    await this.recordFetchIn(this.db, issuerCode, fetch, fetchedAt);
+  }
+
+  /**
+   * SPEC-008 BR-008-29 / AR-19 — the factor rows and the fetch outcome are one
+   * fact. When this repository owns a pooled `Database`, `recordFetch` wraps
+   * both writes in one transaction; when it was constructed with a `Tx`, the
+   * caller's existing transaction already supplies that boundary.
+   */
+  private async recordFetchIn(
+    db: Tx,
+    issuerCode: string,
+    fetch: CorporateEventFactorFetch,
+    fetchedAt: Date,
+  ): Promise<void> {
     const failureCode = fetch.outcome === 'failed' ? fetch.failureCode : null;
 
-    await this.db
+    await db
       .insert(corporateEventFactorFetches)
       .values({ issuerCode, fetchedAt, outcome: fetch.outcome, failureCode })
       .onConflictDoUpdate({
@@ -119,7 +138,7 @@ export class DrizzleCorporateEventFactorRepository implements CorporateEventFact
 
     if (fetch.outcome !== 'ok' || fetch.factors.length === 0) return;
 
-    await this.db
+    await db
       .insert(corporateEventFactors)
       .values(
         fetch.factors.map((factor) => ({

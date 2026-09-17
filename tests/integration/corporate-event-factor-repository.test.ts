@@ -188,4 +188,22 @@ describe('DrizzleCorporateEventFactorRepository (integration)', () => {
     );
     expect(rows[0]?.count).toBe(1);
   });
+
+  it('records a successful fetch marker and its factors atomically', async () => {
+    const repo = new DrizzleCorporateEventFactorRepository(db);
+    const invalid = { ...grupamento, kind: 'invalid-kind' as CorporateEventFactor['kind'] };
+
+    await expect(
+      repo.recordFetch(
+        'MGLU',
+        { outcome: 'ok', factors: [invalid] },
+        new Date('2026-03-16T12:00:00Z'),
+      ),
+    ).rejects.toThrow();
+
+    // The factor table's CHECK rejects the second write. The fetch marker
+    // must roll back with it, otherwise a later commit sees a false `ok`.
+    expect(await repo.lastFetches(['MGLU'])).toEqual(new Map());
+    expect(await repo.listByIssuers(['MGLU'])).toEqual(new Map());
+  });
 });

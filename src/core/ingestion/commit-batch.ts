@@ -2,7 +2,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
-import { type Quantity, asStored } from '@/core/shared/money';
+import { type Money, type Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
 import {
@@ -28,6 +28,7 @@ import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/reconcile';
 import { corporateEventMovementOf, isIgnoredMovement } from '@/core/ingestion/movement-map';
 import {
+  type CorporateEventOutcome,
   type CorporateEventRow,
   type CorporateEventWindows,
   corporateEventMovementOfKey,
@@ -826,7 +827,17 @@ function planCarries(
   return planned;
 }
 
-/** One settling round: resolve carries against what is not excluded, then replay every group. */
+/**
+ * One settling round: resolve transfer carries and corporate events together,
+ * then replay every group.
+ *
+ * BR-005-20a/20b + BR-007-15: these two derived effects can alternate in
+ * replay order. A transfer into a position can establish P for a later split;
+ * that split changes the average cost a still-later transfer carries. The
+ * dependency graph is chronological, so each pass moves the known derived
+ * state forward and at most one pass per derived row, plus a stability pass,
+ * reaches the fixed point.
+ */
 function settle(
   newCandidates: readonly Candidate[],
   carryLegs: readonly PlannedCarry[],
@@ -853,22 +864,80 @@ function settle(
   // A promoted or re-carried credit is stored too; its stored self leaves the
   // source history while it is a leg, so it is never counted twice.
   const legCredits = new Set<string>(legs.map((leg) => leg.credit.id));
-  const costs = resolveCarriedCosts(legs, (assetId, institutionId) => [
-    ...stored({ assetId, institutionId }).filter((t) => !legCredits.has(t.id)),
+  const activations = liveReclassified
+    .filter((reclassification) => reclassification.kind === 'activate')
+    .map((reclassification) => reclassification.updated);
+  const historyFor = (
+    key: PositionKey,
+    carried: readonly Transaction[],
+    corporateTransactions: readonly Transaction[],
+  ): readonly Transaction[] => [
+    ...stored(key).filter((transaction) => !legCredits.has(transaction.id)),
     ...live
-      .filter((c) => c.row.assetId === assetId && c.row.institutionId === institutionId)
-      .map((c) => c.transaction),
-    // An activated row is part of the source's history, as it would have been
-    // had the older map known its type.
-    ...liveReclassified
       .filter(
-        (r) =>
-          r.kind === 'activate' &&
-          r.updated.assetId === assetId &&
-          r.updated.institutionId === institutionId,
+        (candidate) =>
+          candidate.row.assetId === key.assetId &&
+          candidate.row.institutionId === key.institutionId,
       )
-      .map((r) => r.updated),
-  ]);
+      .map((candidate) => candidate.transaction),
+    ...activations.filter(
+      (transaction) =>
+        transaction.assetId === key.assetId && transaction.institutionId === key.institutionId,
+    ),
+    ...carried.filter(
+      (transaction) =>
+        transaction.assetId === key.assetId && transaction.institutionId === key.institutionId,
+    ),
+    ...corporateTransactions.filter(
+      (transaction) =>
+        transaction.assetId === key.assetId && transaction.institutionId === key.institutionId,
+    ),
+  ];
+
+  let costs = new Map<string, Money>();
+  let outcomes = new Map<string, CorporateEventOutcome>();
+  let previousSignature: string | null = null;
+  const maximumPasses = legs.length + corporate.rows.length + 2;
+  for (let pass = 0; pass < maximumPasses; pass += 1) {
+    const priorCorporate = [...outcomes.values()].flatMap((outcome) =>
+      outcome.status === 'refused' ? [] : [outcome.transaction],
+    );
+    costs = new Map(
+      resolveCarriedCosts(legs, (assetId, institutionId) =>
+        historyFor({ assetId, institutionId }, [], priorCorporate),
+      ),
+    );
+    const carried = legs.flatMap((leg) => {
+      const cost = costs.get(leg.id);
+      return cost === undefined ? [] : [withCarriedCost(leg.credit, cost)];
+    });
+    outcomes =
+      corporate.rows.length === 0
+        ? new Map()
+        : new Map(
+            resolveCorporateEvents({
+              rows: corporate.rows.map((planned) => planned.event),
+              history: (key) => historyFor(key, carried, []),
+              factors: corporate.factors,
+              windows: corporate.windows,
+              declined: corporateDeclined,
+            }),
+          );
+
+    const signature = [
+      ...[...costs].map(([id, cost]) => `carry:${id}:${asStored(cost)}`),
+      ...[...outcomes].map(([id, outcome]) =>
+        outcome.status === 'refused'
+          ? `corporate:${id}:refused:${outcome.refusal}`
+          : `corporate:${id}:${outcome.status}:${outcome.transaction.type}:${outcome.transaction.status}:${outcome.transaction.unitPrice.toString()}:${outcome.transaction.ratio?.toString() ?? ''}`,
+      ),
+    ]
+      .sort()
+      .join('|');
+    if (signature === previousSignature) break;
+    previousSignature = signature;
+  }
+
   const waiting = new Set<string>(
     legs
       .filter((leg) => leg.debit !== null && !costs.has(leg.id))
@@ -921,41 +990,14 @@ function settle(
     ]),
   );
 
-  /**
-   * SPEC-005 BR-005-20b (#113) — corporate events, after carries and before
-   * replay, every round: each position's history is what this round writes for
-   * it (live rows, carried credits, activations) over the stored ledger, so a
-   * Desdobro's P includes a same-batch buy and a carried transfer in.
-   */
-  if (corporate.rows.length > 0) {
-    const outcomes = resolveCorporateEvents({
-      rows: corporate.rows.map((planned) => planned.event),
-      history: (key) => {
-        const group = groups.get(positionKeyString(key));
-        return [
-          ...stored(key).filter((t) => !replaced.has(t.id)),
-          ...(group === undefined
-            ? []
-            : [
-                ...group.candidates.map((c) => c.transaction),
-                ...group.carried.map((c) => c.transaction),
-                ...group.reclassified.map((r) => r.updated),
-              ]),
-        ];
-      },
-      factors: corporate.factors,
-      windows: corporate.windows,
-      declined: corporateDeclined,
+  for (const [id, outcome] of outcomes) {
+    if (outcome.status === 'refused') continue;
+    groupOf(outcome.transaction).corporate.push({
+      planned: corporate.byId.get(id) as PlannedCorporateRow,
+      status: outcome.status,
+      transaction: outcome.transaction,
     });
-    for (const [id, outcome] of outcomes) {
-      if (outcome.status === 'refused') continue;
-      groupOf(outcome.transaction).corporate.push({
-        planned: corporate.byId.get(id) as PlannedCorporateRow,
-        status: outcome.status,
-        transaction: outcome.transaction,
-      });
-      replaced.add(outcome.transaction.id);
-    }
+    replaced.add(outcome.transaction.id);
   }
 
   return [...groups.values()].map((group) => {

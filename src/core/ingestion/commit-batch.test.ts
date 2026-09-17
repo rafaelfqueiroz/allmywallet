@@ -1723,6 +1723,44 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event rows resolve at commit'
     expect(position?.state.averageCost.toString()).toBe('10');
   });
 
+  it('a transfer after a Desdobro carries the post-event average cost', async () => {
+    // Origem: 70 @ 100,00 becomes 700 @ 10,00 after the Desdobro. The later
+    // transfer of 50 must therefore carry 500,00 (10,00 each), not the
+    // pre-event 100,00 average cost.
+    const deps = buildFakeIngestionDeps();
+    deps.corporateEventFactors.seed(alzrFactor());
+    const at = (record: ParsedRecord, institutionName: string): ParsedRecord => ({
+      ...record,
+      record: { ...(record.record as NormalizedTransactionRecord), institutionName },
+    });
+
+    const { outcome } = await importFile(deps, [
+      at(compra('ALZR11', '2024-01-10', '70', '100'), 'Corretora Origem'),
+      at(desdobro('ALZR11', '2024-03-05', '630'), 'Corretora Origem'),
+      at(movement('Transferência', 'debit', 'ALZR11', '2024-04-01', '50'), 'Corretora Origem'),
+      at(movement('Transferência', 'credit', 'ALZR11', '2024-04-01', '50'), 'Corretora Destino'),
+    ]);
+
+    expect(outcome).toMatchObject({ resolvedCorporateEvents: 1 });
+    const carried = deps.transactions.rows.find(
+      (transaction) => transaction.type === 'transfer_in' && transaction.status === 'active',
+    );
+    expect(carried?.unitPrice.toString()).toBe('10');
+    expect(carried?.totalValue.toString()).toBe('500');
+
+    const origem = await deps.institutions.resolve('Corretora Origem');
+    const destino = await deps.institutions.resolve('Corretora Destino');
+    const positions = await deps.positions.list();
+    expect(positions.find((position) => position.institutionId === origem)?.state).toMatchObject({
+      quantity: Quantity.fromString('650'),
+      totalCost: Money.fromString('6500'),
+    });
+    expect(positions.find((position) => position.institutionId === destino)?.state).toMatchObject({
+      quantity: Quantity.fromString('50'),
+      totalCost: Money.fromString('500'),
+    });
+  });
+
   it('asks the factor store only for issuers it can name, and a ticker with none stays unclassified', async () => {
     const deps = buildFakeIngestionDeps();
     deps.corporateEventFactors.seed(alzrFactor());

@@ -53,7 +53,29 @@ export function buildCorporateEventRows(
     if (movement === null) continue;
 
     if (row.classification === 'unclassified') {
-      // BR-005-20b: staged, untouched by a user — this call may resolve it.
+      // A committed batch already has this row in the ledger. Reuse that
+      // exact copy (id, timestamps and stored figures) and cover it before the
+      // ledger sweep; rebuilding it would add the stored copy a second time,
+      // making one unresolved split look like a same-day pair.
+      const ledger = ledgerByPosition.get(positionKeyString(row)) ?? [];
+      const copy =
+        row.transactionId === null
+          ? undefined
+          : ledger.find((transaction) => transaction.id === row.transactionId);
+      if (copy !== undefined) {
+        covered.add(copy.id);
+        result.push({
+          id: row.id,
+          movement,
+          ticker: row.record.assetCode,
+          transaction: copy,
+          open: true,
+        });
+        continue;
+      }
+
+      // A previewed batch has no stored copy yet. Build the same placeholder
+      // commit would insert so the evidence remains available before commit.
       const transaction = buildCandidate(row, batchId, userId, 'unclassified', now, today);
       if (transaction === null) continue;
       result.push({ id: row.id, movement, ticker: row.record.assetCode, transaction, open: true });
