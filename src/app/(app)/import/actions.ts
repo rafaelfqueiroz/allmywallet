@@ -170,7 +170,13 @@ export async function commitBatchAction(formData: FormData): Promise<void> {
   }
 
   const batchId = ImportBatchId.of(parsed.data.batchId);
-  await enqueue(QUEUE.IMPORT_COMMIT, { batchId, userId, ...(asOf === undefined ? {} : { asOf }) });
+  // AR-19: the batch id is also the pg-boss job id. A second click while the
+  // first commit is queued or active therefore inserts no duplicate job.
+  await enqueue(
+    QUEUE.IMPORT_COMMIT,
+    { batchId, userId, ...(asOf === undefined ? {} : { asOf }) },
+    { id: batchId },
+  );
   revalidatePath(`/import/${batchId}`);
 }
 

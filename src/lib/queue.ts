@@ -1,4 +1,4 @@
-import { PgBoss } from 'pg-boss';
+import { PgBoss, type SendOptions } from 'pg-boss';
 import { env } from '@/lib/env';
 import { db } from '@/db/client';
 import { resolveConfig } from '@/config/resolve';
@@ -100,8 +100,12 @@ async function ensureQueue(instance: PgBoss, queue: QueueName): Promise<void> {
 }
 
 /** AR-21: payloads carry ids, not objects — every call site here passes exactly that. */
-export async function enqueue<T extends object>(queue: QueueName, payload: T): Promise<void> {
+export async function enqueue<T extends object>(
+  queue: QueueName,
+  payload: T,
+  options?: Pick<SendOptions, 'id'>,
+): Promise<void> {
   const instance = await getBoss();
   await ensureQueue(instance, queue);
-  await instance.send(queue, payload);
+  await instance.send(queue, payload, options);
 }
