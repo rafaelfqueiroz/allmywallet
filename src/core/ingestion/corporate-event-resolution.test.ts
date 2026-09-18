@@ -93,6 +93,7 @@ function resolve(
   ledger: readonly Transaction[],
   factors: readonly CorporateEventFactor[] = [],
   declined?: ReadonlySet<string>,
+  windows: CorporateEventWindows = WINDOWS,
 ) {
   const byIssuer = new Map<string, CorporateEventFactor[]>();
   for (const f of factors) byIssuer.set(f.issuerCode, [...(byIssuer.get(f.issuerCode) ?? []), f]);
@@ -100,7 +101,7 @@ function resolve(
     rows,
     history: (key) => ledger.filter((t) => positionKeyString(t) === positionKeyString(key)),
     factors: byIssuer,
-    windows: WINDOWS,
+    windows,
     declined,
   });
 }
@@ -529,6 +530,93 @@ describe('#113 BR-005-20b / BR-007-05a — a bonificação fraction and its auct
     expect(position.totalCost.toString()).toBe('2000');
     expect(position.realizedGain.isZero()).toBe(true);
     expect(asStored(position.averageCost)).toBe('19.04761905');
+  });
+
+  it('accepts an origin exactly 45 calendar days before the fraction and refuses one 46 days before', () => {
+    // SPEC-005 BR-005-20b (#113 decision 35): the configured origin window is
+    // inclusive. 2025-01-01 → 2025-02-15 is 45 days; → 2025-02-16 is 46.
+    const history = [
+      buy('BOUND3', '2024-12-01', '100', '10'),
+      bonus('BOUND3', '2025-01-01', '5.2'),
+    ];
+    const auction = open('leilao_de_fracao', 'BOUND3', '2025-03-01', '0.2', '11');
+    const atBoundary = open('fracao_em_ativos', 'BOUND3', '2025-02-15', '0.2');
+    expect(
+      outcomeOf(
+        resolve([atBoundary, auction], history, [], undefined, {
+          factorDays: 7,
+          originDays: 45,
+          auctionDays: 180,
+        }),
+        atBoundary,
+      ),
+    ).toMatchObject({ status: 'resolved' });
+
+    const outside = open('fracao_em_ativos', 'BOUND3', '2025-02-16', '0.2');
+    const outsideAuction = open('leilao_de_fracao', 'BOUND3', '2025-03-01', '0.2', '11');
+    expect(
+      outcomeOf(
+        resolve([outside, outsideAuction], history, [], undefined, {
+          factorDays: 7,
+          originDays: 45,
+          auctionDays: 180,
+        }),
+        outside,
+      ),
+    ).toMatchObject({ status: 'refused', refusal: 'no_origin' });
+  });
+
+  it('resolves the three ALUP11 yearly chains at 45 days; a 30-day window misses the first two and changes replay so the third also has no origin', () => {
+    // Hand calculation (TS-04/TS-05): 130 + 5,2 − 0,2 + 5,4 − 0,4
+    // + 5,6 − 0,6 = 145. With 30 days the 37- and 38-day removals do not
+    // apply, so the 2025 bonus sees 140,6 + 5,6 = 146,2; its fractional part
+    // is then 0,2 rather than the stated 0,6, blocking the third chain too.
+    const history = [
+      buy('ALUP11', '2023-01-02', '130', '10'),
+      bonus('ALUP11', '2023-04-19', '5.2'),
+      bonus('ALUP11', '2024-04-23', '5.4'),
+      bonus('ALUP11', '2025-04-22', '5.6'),
+    ];
+    const fractions = [
+      open('fracao_em_ativos', 'ALUP11', '2023-05-26', '0.2'),
+      open('fracao_em_ativos', 'ALUP11', '2024-05-31', '0.4'),
+      open('fracao_em_ativos', 'ALUP11', '2025-05-21', '0.6'),
+    ];
+    const auctions = [
+      open('leilao_de_fracao', 'ALUP11', '2023-06-15', '0.2', '10'),
+      open('leilao_de_fracao', 'ALUP11', '2024-06-20', '0.4', '10'),
+      open('leilao_de_fracao', 'ALUP11', '2025-06-20', '0.6', '10'),
+    ];
+    const rows = [...fractions, ...auctions];
+    const underThirty = resolve(rows, history, [], undefined, {
+      factorDays: 7,
+      originDays: 30,
+      auctionDays: 180,
+    });
+    expect(fractions.map((row) => outcomeOf(underThirty, row))).toEqual([
+      expect.objectContaining({ status: 'refused', refusal: 'no_origin' }),
+      expect.objectContaining({ status: 'refused', refusal: 'no_origin' }),
+      expect.objectContaining({ status: 'refused', refusal: 'no_origin' }),
+    ]);
+
+    const atFortyFive = resolve(rows, history, [], undefined, {
+      factorDays: 7,
+      originDays: 45,
+      auctionDays: 180,
+    });
+    const removals = fractions.map((row) => written(atFortyFive, row));
+    const incomes = auctions.map((row) => written(atFortyFive, row));
+    expect(removals.map((transaction) => transaction.type)).toEqual([
+      'fracao_bonificacao',
+      'fracao_bonificacao',
+      'fracao_bonificacao',
+    ]);
+    expect(incomes.map((transaction) => transaction.type)).toEqual([
+      'leilao_fracoes',
+      'leilao_fracoes',
+      'leilao_fracoes',
+    ]);
+    expect(replayed([...history, ...removals, ...incomes]).quantity.toString()).toBe('145');
   });
 
   it('refuses two bonificações that each leave 0,2 as ambiguous_origin, with both candidates shown', () => {

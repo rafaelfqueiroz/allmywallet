@@ -43,11 +43,11 @@ export function buildFakeIngestionDeps(today = '2026-03-15'): FakeIngestionDeps 
 /**
  * #113 — the three corporate-event windows at the values the config registry
  * seeds (`import.corporate_event_factor_window_days` 7,
- * `import.fraction_origin_window_days` 30, `import.fraction_auction_window_days`
+ * `import.fraction_origin_window_days` 45, `import.fraction_auction_window_days`
  * 180). Tests pass them explicitly, as the handler does; core has no default.
  */
 export const TEST_CORPORATE_EVENT_WINDOWS = {
   factorDays: 7,
-  originDays: 30,
+  originDays: 45,
   auctionDays: 180,
 } as const;

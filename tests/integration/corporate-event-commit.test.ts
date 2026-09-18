@@ -37,6 +37,7 @@ import {
   type CorporateEventFactorSource,
 } from '@/core/quotes/corporate-event-factors';
 import { BusinessDate } from '@/core/shared/clock';
+import { invalidateDeploymentCache, setConfigValue } from '@/config/resolve';
 
 // `buildWalletDeps` is unused here but re-exported from the same module as
 // `buildIngestionDeps` — importing it under `_` avoids an unused-import
@@ -93,6 +94,7 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
 
   beforeEach(async () => {
     // TS-03: CI runs every suite against one shared Postgres.
+    clock.set('2026-03-20T12:00:00-03:00');
     await resetLedger(testDb.migrationUrl);
     await resetUsers(testDb.migrationUrl);
     await truncateFactorTables();
@@ -349,6 +351,129 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
 
     const { status } = (await batchRow(batchId)) ?? { status: undefined };
     expect(status).toBe('committed');
+  });
+
+  it('BR-005-20b/BR-005-17: the 45-day default activates the generated ALUP11 and DEXP3 fraction chains in place, then re-import writes nothing', async () => {
+    // Generated regression data only (DV-24/TS-19). Hand calculation:
+    // ALUP11 130 + 5,2 − 0,2 + 5,4 − 0,4 + 5,6 − 0,6 = 145.
+    // The first two origins are 37 and 38 calendar days before their fractions.
+    // Under 30 days they remain unclassified; that leaves 0,6 on the replay,
+    // so the 2025 bonus reaches 146,2 and cannot originate the stated 0,6.
+    // DEXP3 100 + 12,5 − 0,5 = 112; its origin is 35 days before its fraction.
+    const file = await buildMovimentacaoXlsx([
+      compra('ALUP11 - Alupar UNT', '02/01/2023', '130', '10,00'),
+      bonificacao('ALUP11 - Alupar UNT', '19/04/2023', '5,2'),
+      fracao('ALUP11 - Alupar UNT', '26/05/2023', '0,2'),
+      leilao('ALUP11 - Alupar UNT', '15/06/2023', '0,2', '10,00'),
+      bonificacao('ALUP11 - Alupar UNT', '23/04/2024', '5,4'),
+      fracao('ALUP11 - Alupar UNT', '31/05/2024', '0,4'),
+      leilao('ALUP11 - Alupar UNT', '20/06/2024', '0,4', '10,00'),
+      bonificacao('ALUP11 - Alupar UNT', '22/04/2025', '5,6'),
+      fracao('ALUP11 - Alupar UNT', '21/05/2025', '0,6'),
+      leilao('ALUP11 - Alupar UNT', '20/06/2025', '0,6', '10,00'),
+      compra('DEXP3 - Dexxos ON', '02/01/2025', '100', '8,00'),
+      bonificacao('DEXP3 - Dexxos ON', '23/12/2025', '12,5'),
+      fracao('DEXP3 - Dexxos ON', '27/01/2026', '0,5'),
+      leilao('DEXP3 - Dexxos ON', '10/02/2026', '0,5', '9,00'),
+    ]);
+
+    const configuredThirty = await setConfigValue(appDb, {
+      key: 'import.fraction_origin_window_days',
+      level: 'deployment',
+      value: 30,
+      actor: { kind: 'operator' },
+    });
+    expect(configuredThirty.ok).toBe(true);
+
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, file);
+    await handleImportStage({ batchId: first, userId }, handlerDeps(new FakeFactorSource()));
+    await handleImportCommit({ batchId: first, userId }, handlerDeps(new FakeFactorSource()));
+
+    const alupBefore = await transactionsFor('ALUP11');
+    const dexpBefore = await transactionsFor('DEXP3');
+    const unresolvedAlup = alupBefore.filter(
+      (row) =>
+        row.status === 'unclassified' &&
+        (row.quantity === '0.20000000' ||
+          row.quantity === '0.40000000' ||
+          row.quantity === '0.60000000'),
+    );
+    const unresolvedDexp = dexpBefore.filter(
+      (row) => row.status === 'unclassified' && row.quantity === '0.50000000',
+    );
+    expect(unresolvedAlup).toHaveLength(6);
+    expect(unresolvedDexp).toHaveLength(2);
+    expect(await positionFor('ALUP11')).toMatchObject({ quantity: '146.20000000' });
+    expect(await positionFor('DEXP3')).toMatchObject({ quantity: '112.50000000' });
+
+    // Remove the deployment override so the next commit exercises the registry
+    // default itself (45), not a second test-only override.
+    await migratorPool.query(
+      "DELETE FROM config_overrides WHERE key = 'import.fraction_origin_window_days' AND level = 'deployment'",
+    );
+    invalidateDeploymentCache();
+
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, file);
+    await handleImportStage({ batchId: second, userId }, handlerDeps(new FakeFactorSource()));
+    await handleImportCommit({ batchId: second, userId }, handlerDeps(new FakeFactorSource()));
+
+    const alupAfter = await transactionsFor('ALUP11');
+    const dexpAfter = await transactionsFor('DEXP3');
+    const alupRemovals = alupAfter.filter((row) => row.type === 'fracao_bonificacao');
+    const alupIncome = alupAfter.filter((row) => row.type === 'leilao_fracoes');
+    const dexpRemovals = dexpAfter.filter((row) => row.type === 'fracao_bonificacao');
+    const dexpIncome = dexpAfter.filter((row) => row.type === 'leilao_fracoes');
+    expect(alupRemovals).toHaveLength(3);
+    expect(alupIncome).toHaveLength(3);
+    expect(dexpRemovals).toHaveLength(1);
+    expect(dexpIncome).toHaveLength(1);
+    expect([...alupRemovals, ...alupIncome, ...dexpRemovals, ...dexpIncome]).toEqual(
+      expect.arrayContaining(
+        [...unresolvedAlup, ...unresolvedDexp].map((before) =>
+          expect.objectContaining({
+            id: before.id,
+            natural_key: before.natural_key,
+            occurrence: before.occurrence,
+            is_user_modified: false,
+            status: 'active',
+          }),
+        ),
+      ),
+    );
+    expect(await positionFor('ALUP11')).toMatchObject({ quantity: '145.00000000' });
+    expect(await positionFor('DEXP3')).toMatchObject({ quantity: '112.00000000' });
+
+    const beforeThird = {
+      count: await transactionCount(),
+      updatedAt: new Map(
+        [...alupRemovals, ...alupIncome, ...dexpRemovals, ...dexpIncome].map((row) => [
+          row.id,
+          row.updated_at,
+        ]),
+      ),
+    };
+    // An accidental update copies `deps.clock.now()` into `updated_at`.
+    // Advancing makes the timestamp assertion capable of detecting that write;
+    // the fixed clock used by the first three commits would otherwise mask it.
+    clock.advanceMinutes(1);
+    const third = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, third, file);
+    await handleImportStage({ batchId: third, userId }, handlerDeps(new FakeFactorSource()));
+    await handleImportCommit({ batchId: third, userId }, handlerDeps(new FakeFactorSource()));
+
+    expect(await transactionCount()).toBe(beforeThird.count);
+    const afterThird = [
+      ...(await transactionsFor('ALUP11')),
+      ...(await transactionsFor('DEXP3')),
+    ].filter((row) => beforeThird.updatedAt.has(row.id));
+    expect(afterThird).toHaveLength(8);
+    for (const row of afterThird) {
+      expect(row.updated_at).toEqual(beforeThird.updatedAt.get(row.id));
+    }
+    expect(await positionFor('ALUP11')).toMatchObject({ quantity: '145.00000000' });
+    expect(await positionFor('DEXP3')).toMatchObject({ quantity: '112.00000000' });
   });
 
   it('BR-005-20b/BR-005-17: re-importing activates Desdobro, Grupamento, Fração em Ativos and Leilão de Fração in place once the factor is available; a further re-import writes nothing', async () => {
