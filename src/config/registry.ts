@@ -213,12 +213,13 @@ export const REGISTRY = {
   /**
    * SPEC-005 BR-005-20b — how far back a `Fração em Ativos` debit row may
    * look, within the same import plus the active ledger, for the
-   * split/grupamento/bonificação event it originated from.
+   * split/grupamento/bonificação event it originated from. The configured
+   * default is 45 calendar days (#113 decision 35).
    */
   'import.fraction_origin_window_days': {
     key: 'import.fraction_origin_window_days',
     schema: z.number().int().min(0).max(365),
-    default: 30,
+    default: 45,
     levels: ['deployment'],
     description:
       'Days a Fração em Ativos row may look back for the corporate event it originated from (SPEC-005 BR-005-20b).',

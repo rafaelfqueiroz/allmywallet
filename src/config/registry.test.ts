@@ -62,6 +62,10 @@ describe('registry', () => {
     }
   });
 
+  it('uses the SPEC-005 BR-005-20b 45-calendar-day default for fraction origins', () => {
+    expect(REGISTRY['import.fraction_origin_window_days'].default).toBe(45);
+  });
+
   it('quotes.cadence_minutes rejects 0 — DL-002-01: never silently "poll continuously"', () => {
     const result = REGISTRY['quotes.cadence_minutes'].schema.safeParse(0);
     expect(result.success).toBe(false);
