@@ -5,7 +5,21 @@ import type { Transaction } from '@/core/ledger/transaction';
 import { PositionErrorCode } from '@/core/positions/errors';
 import { firstUnreplayable } from '@/core/positions/replay';
 import { buildCandidate } from '@/core/ingestion/commit-batch';
+import { corporateEventMovementOfKey } from '@/core/ingestion/corporate-event-resolution';
 import type { ImportRow } from '@/core/ingestion/ports';
+
+/**
+ * SPEC-005 BR-005-24 — the likely cause of an `insufficient_quantity`
+ * refusal, in the order this rule states them: an uncaptured corporate
+ * event first (the position's ledger already has evidence of one),
+ * unclassified rows next (something on the position was never classified,
+ * but none of it is a corporate event), and missing history last (nothing
+ * unclassified sits on the position at all, so the shortfall traces to
+ * history that predates what was imported). `null` when none of the three
+ * is determinable.
+ */
+export type InsufficientQuantityCause =
+  'uncaptured_corporate_event' | 'unclassified_rows' | 'missing_history' | null;
 
 /**
  * SPEC-005 BR-005-19/24, SPEC-006 BR-006-15 (#117) — why a committed row is
@@ -24,6 +38,8 @@ export type RowRefusal =
       readonly held: Quantity;
       readonly requested: Quantity;
       readonly date: BusinessDate;
+      /** SPEC-005 BR-005-24: the likely explanation, read off the same ledger. */
+      readonly likelyCause: InsufficientQuantityCause;
     }
   /** It fits, but a later stored row would then no longer replay. */
   | { readonly kind: 'conflicts_with_ledger'; readonly date: BusinessDate }
@@ -64,5 +80,30 @@ export function explainRefusal(
     held: Quantity.fromString(String(failure.error.context['held'])),
     requested: Quantity.fromString(String(failure.error.context['requested'])),
     date: candidate.tradeDate,
+    likelyCause: likelyCauseOf(ledger),
   };
+}
+
+/**
+ * SPEC-005 BR-005-24 — "unclassified rows affecting that asset" reads the
+ * **ledger's** `unclassified` transactions on this position, not the
+ * Posição batch's own rows (`buildReconciliation`'s
+ * `hasUnclassifiedRowsAffectingAsset` does the analogous read for a
+ * discrepancy). `listForPosition` already returns every status
+ * (`core/ledger/ports.ts`), so `ledger` here already carries them — no
+ * second query.
+ *
+ * A stored `unclassified` row keeps its unmapped natural key even once
+ * classified by hand or resolved (BR-005-17), so `corporateEventMovementOfKey`
+ * — the same reader `commit-batch.ts` uses to find a corporate-event row's
+ * still-open partners — is what tells a Desdobro/Grupamento/Fração apart
+ * from any other unclassified row.
+ */
+function likelyCauseOf(ledger: readonly Transaction[]): InsufficientQuantityCause {
+  const unclassified = ledger.filter((t) => t.status === 'unclassified');
+  if (unclassified.some((t) => corporateEventMovementOfKey(t.naturalKey) !== null)) {
+    return 'uncaptured_corporate_event';
+  }
+  if (unclassified.length > 0) return 'unclassified_rows';
+  return 'missing_history';
 }

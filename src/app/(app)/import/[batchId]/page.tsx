@@ -100,6 +100,13 @@ export default async function ImportBatchDetailPage({
         return t(`refusal.${refusal.kind}`);
     }
   };
+  // SPEC-005 BR-005-24: the likely explanation for an insufficient-quantity
+  // refusal — missing history, an uncaptured corporate event, or an
+  // unclassified row on the same position — read off the current ledger.
+  const refusalCauseText = (refusal: RowRefusal) =>
+    refusal.kind === 'insufficient_quantity' && refusal.likelyCause !== null
+      ? t(`refusal.cause.${refusal.likelyCause}`)
+      : null;
   const corporateEventEvidence = (outcome: CorporateEventOutcome) => {
     const refusal =
       outcome.status === 'refused'
@@ -355,6 +362,12 @@ export default async function ImportBatchDetailPage({
                         {refusalText(refusals.get(row.id) as RowRefusal)}
                       </Text>
                     )}
+                    {refusals.has(row.id) &&
+                      refusalCauseText(refusals.get(row.id) as RowRefusal) !== null && (
+                        <Text as="span" size="xs" tone="muted">
+                          {refusalCauseText(refusals.get(row.id) as RowRefusal)}
+                        </Text>
+                      )}
                     {corporateEvent !== undefined && corporateEventEvidence(corporateEvent)}
                     {row.classification === 'unclassified' && classifyForm(row.id, corporateEvent)}
                   </Stack>

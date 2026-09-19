@@ -441,7 +441,12 @@
       "conflicts_with_ledger": "Recusada: com esta linha, uma operação de {date} já registrada ficaria sem saldo. Confira o histórico deste ativo.",
       "malformed": "Recusada: os dados desta linha são inválidos ou contraditórios.",
       "applicable": "O histórico já comporta esta linha. Importe este arquivo de novo para aplicá-la.",
-      "applied": "Esta linha já está no histórico, por outra importação."
+      "applied": "Esta linha já está no histórico, por outra importação.",
+      "cause": {
+        "uncaptured_corporate_event": "Causa provável: há uma linha de evento societário (desdobramento, grupamento ou fração) ainda não classificada nesta posição. Classifique-a para que este saldo se ajuste.",
+        "unclassified_rows": "Causa provável: há linhas não classificadas nesta posição. Classifique-as para que este saldo se ajuste.",
+        "missing_history": "Causa provável: falta histórico anterior a este período. Importar este arquivo de novo não resolve — registre a posição de abertura com um lançamento manual (Ajuste)."
+      }
     },
     "classifyLabel": "Classificar como",
     "classifyRatioLabel": "Proporção",
