@@ -473,12 +473,12 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(deps.transactions.rows).toHaveLength(afterPromotion);
   });
 
-  it('resolves CPLE7 175 to CPLE3 when target statement precedes source Resgate', async () => {
+  it('resolves CPLE6 175 to CPLE3 when the target statement precedes a source Resgate', async () => {
     const deps = buildFakeIngestionDeps();
     await importRows(deps, [
       buy({
-        assetCode: 'CPLE7',
-        assetName: 'CPLE7',
+        assetCode: 'CPLE6',
+        assetName: 'CPLE6',
         tradeDate: BusinessDate.of('2025-01-02'),
         quantity: Quantity.fromString('175'),
         unitPrice: Money.fromString('8'),
@@ -487,7 +487,7 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     ]);
     const result = await importRows(deps, [
       evidence('Atualização', 'CPLE3', '2025-02-01', '175'),
-      evidence('Resgate', 'CPLE7', '2025-02-10', '175'),
+      evidence('Resgate', 'CPLE6', '2025-02-10', '175'),
     ]);
 
     expect(result.outcome).toMatchObject({
@@ -496,6 +496,121 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     });
     const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
     expect(legs.find((row) => row.type === 'conversion_in')?.costBasis?.toString()).toBe('1400');
+  });
+
+  /**
+   * #129 D2 — the owner's real CPLE shape, generated (DV-24 / TS-19).
+   *
+   * `cple7-to-cple3` could never match it: CPLE7 holds no position. It appears
+   * only as an `Atualização` balance statement — evidence, never an
+   * acquisition (BR-005-20c) — and is then redeemed for cash, so
+   * `resolveAssetConversion` refused `insufficient_quantity` and gave up the
+   * group. CPLE3 computed **0** against B3's 175.
+   *
+   * The shares B3 converted are the 175 CPLE6, whose position goes to zero on
+   * the same date. Hand-computed (DV-17): 100 at 7,39 = 739,00 plus 75 at
+   * 8,11 = 608,25 → 175 held at **1.347,25**, all of it carried into CPLE3.
+   *
+   * CPLE7 is left where it belongs — outside the group. Its `Atualização`
+   * stays `unclassified`, and its priced `Resgate` maps to a `sell` of shares
+   * the ledger never held (map v5 keeps v3's meaning for a priced Resgate), so
+   * it is refused `invalid` and surfaced in Needs attention rather than
+   * inventing a cost basis for it. See the issue's open question.
+   */
+  it('#129: sources CPLE3 from CPLE6 and leaves the CPLE7 rows alone', async () => {
+    const deps = buildFakeIngestionDeps('2026-09-19');
+    const file = [
+      buy({
+        assetCode: 'CPLE6',
+        assetName: 'CPLE6',
+        tradeDate: BusinessDate.of('2022-02-11'),
+        quantity: Quantity.fromString('100'),
+        unitPrice: Money.fromString('7.39'),
+        fees: Money.zero(),
+      }),
+      buy({
+        assetCode: 'CPLE6',
+        assetName: 'CPLE6',
+        tradeDate: BusinessDate.of('2023-07-14'),
+        quantity: Quantity.fromString('75'),
+        unitPrice: Money.fromString('8.11'),
+        fees: Money.zero(),
+      }),
+      evidence('Atualização', 'CPLE7', '2025-12-23', '175'),
+      evidence('Atualização', 'CPLE3', '2025-12-23', '175'),
+      buy({
+        b3Type: 'Resgate',
+        direction: 'debit',
+        assetCode: 'CPLE7',
+        assetName: 'CPLE7',
+        tradeDate: BusinessDate.of('2025-12-30'),
+        quantity: Quantity.fromString('175'),
+        unitPrice: Money.fromString('0.775'),
+        fees: Money.zero(),
+      }),
+    ];
+
+    const first = await importRows(deps, file);
+    expect(first.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 2,
+    });
+
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const assetOf = (code: string) =>
+      deps.assets.resolve({
+        code,
+        name: code,
+        assetClass: 'stock',
+        classStated: false,
+        nameStated: false,
+      });
+    const replayedOf = async (code: string) =>
+      replayPosition(await deps.transactions.listForPosition(await assetOf(code), institution));
+
+    // 100 × 7,39 = 739,00 plus 75 × 8,11 = 608,25 → 1.347,25 carried whole.
+    const cple3 = await replayedOf('CPLE3');
+    const cple6 = await replayedOf('CPLE6');
+    expect(cple3.ok && cple3.value.quantity.toString()).toBe('175');
+    expect(cple3.ok && cple3.value.totalCost.toString()).toBe('1347.25');
+    expect(cple6.ok && cple6.value.quantity.toString()).toBe('0');
+    expect(cple6.ok && cple6.value.realizedGain.toString()).toBe('0');
+
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    expect(
+      legs.map((row) => [row.type, row.quantity.toString(), row.costBasis?.toString()]),
+    ).toEqual([
+      ['conversion_out', '175', '1347.25'],
+      ['conversion_in', '175', '1347.25'],
+    ]);
+
+    // The CPLE7 balance statement is evidence no definition claims, so it
+    // stays `unclassified` and moves nothing (BR-005-19/20c).
+    const cple7 = await assetOf('CPLE7');
+    const statement = deps.transactions.rows.find(
+      (row) => row.assetId === cple7 && row.tradeDate === '2025-12-23',
+    );
+    expect(statement).toMatchObject({ status: 'unclassified' });
+    expect(statement?.conversionGroupId).toBeNull();
+
+    // The priced `Resgate` is a sale of shares CPLE7 never held: refused
+    // `invalid` and surfaced, never silently written. Its R$ 135,63 is
+    // therefore not yet recorded anywhere.
+    const rows = await deps.rows.listByBatch(first.batchId);
+    const redemption = rows.find(
+      (row) => row.record.kind === 'transaction' && row.record.b3Type === 'Resgate',
+    );
+    expect(redemption?.classification).toBe('invalid');
+
+    // BR-005-17/20: the same file again changes nothing.
+    const beforeReimport = deps.transactions.rows.length;
+    const second = await importRows(deps, file);
+    expect(second.outcome).toMatchObject({
+      applied: 0,
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(beforeReimport);
   });
 
   // #128 D3: AXIA15G is sourced from AXIA7 alone, so the file carries no
@@ -990,6 +1105,252 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(fraction).toMatchObject({ type: 'fracao_bonificacao', status: 'active' });
     expect(auction).toMatchObject({ type: 'leilao_fracoes', status: 'active' });
     expect(auction?.totalValue.toString()).toBe('3');
+  });
+
+  /**
+   * #129 D1 — **a fraction on a conversion target**, the whole KLBN chain in
+   * one generated file (DV-24 / TS-19: no extract, no CPF, no captured row).
+   *
+   * B3's bonificação left KLBN11 holding a fractional unit; B3 then decomposed
+   * that unit into its component shares and auctioned the fractions off the
+   * **targets**. KLBN3 and KLBN4 own no share-base event, so before this every
+   * candidate list was empty, both `Fração em Ativos` rows refused `no_origin`,
+   * and both auctions went with them — KLBN4 reconciled at 2,4 against B3's 2,
+   * and KLBN3 silently kept 0,6 phantom shares B3 had sold.
+   *
+   * Hand-computed (DV-17), one institution:
+   *
+   * | date | what | KLBN11 | KLBN3 | KLBN4 |
+   * |---|---|---|---|---|
+   * | 2023-01-02 | buy 100 @ 10,66 → 1.066,00 | 100 | — | — |
+   * | 2025-12-19 | bonificação +6,6, nothing attributed | 106,6 | — | — |
+   * | 2025-12-23 | the fractional unit decomposes | 106 | 0,6 | 2,4 |
+   * | 2026-01-22 | `Fração em Ativos` | 106 | 0 | 2 |
+   * | 2026-02-24 | `Leilão de Fração` (a provento) | 106 | 0 | 2 |
+   *
+   * The cost: 1.066,00 ÷ 106,6 = **10,00** average, so the 0,6 unit carries
+   * 6,00 out (BR-007-05b). One KLBN11 unit holds 1 KLBN3 and 4 KLBN4, so
+   * 6,00 × 1 ÷ 5 = **1,20** to KLBN3 and the residual **4,80** to KLBN4.
+   *
+   * The trail (BR-005-20b): KLBN11 after its bonificação holds 106,6, leaving
+   * **0,6** — exactly the group's outgoing quantity — so the origin is that
+   * bonificação and both fractions are `fracao_bonificacao` (BR-007-05a):
+   * total cost unchanged, nothing realised, each auction a `leilao_fracoes`
+   * provento. KLBN3's whole holding leaves, closing the position and taking
+   * its 1,20 with it; KLBN4 keeps 2 shares at 4,80, an average of 2,40.
+   */
+  it('#129: traces a fraction on a conversion target back to the source bonificação', async () => {
+    const deps = buildFakeIngestionDeps('2026-09-19');
+    const row = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      assetCode: string,
+      tradeDate: string,
+      quantity: string,
+      unitPrice = '0',
+    ): ParsedRecord =>
+      buy({
+        b3Type,
+        direction,
+        assetCode,
+        assetName: assetCode,
+        tradeDate: BusinessDate.of(tradeDate),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.fromString(unitPrice),
+        fees: Money.zero(),
+        priceStated: unitPrice !== '0',
+      });
+
+    const file = [
+      buy({
+        assetCode: 'KLBN11',
+        assetName: 'KLBN11',
+        tradeDate: BusinessDate.of('2023-01-02'),
+        quantity: Quantity.fromString('100'),
+        unitPrice: Money.fromString('10.66'),
+        fees: Money.zero(),
+      }),
+      row('Bonificação em Ativos', 'credit', 'KLBN11', '2025-12-19', '6.6'),
+      row('Transferência', 'debit', 'KLBN11', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN3', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN4', '2025-12-23', '2'),
+      row('Transferência', 'credit', 'KLBN4', '2025-12-23', '0.4'),
+      row('Fração em Ativos', 'debit', 'KLBN3', '2026-01-22', '0.6'),
+      row('Fração em Ativos', 'debit', 'KLBN4', '2026-01-22', '0.4'),
+      row('Leilão de Fração', 'credit', 'KLBN3', '2026-02-24', '0.6', '3.942'),
+      row('Leilão de Fração', 'credit', 'KLBN4', '2026-02-24', '0.4', '3.943'),
+    ];
+
+    const first = await importRows(deps, file);
+    expect(first.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 4,
+      // Two fractions and two auctions (BR-005-20b).
+      resolvedCorporateEvents: 4,
+    });
+
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const assetOf = (code: string) =>
+      deps.assets.resolve({
+        code,
+        name: code,
+        assetClass: 'stock',
+        classStated: false,
+        nameStated: false,
+      });
+    const replayedOf = async (code: string) =>
+      replayPosition(await deps.transactions.listForPosition(await assetOf(code), institution));
+
+    const klbn11 = await replayedOf('KLBN11');
+    const klbn3 = await replayedOf('KLBN3');
+    const klbn4 = await replayedOf('KLBN4');
+
+    // The divergence the issue reports: KLBN4 computed 2,4 against B3's 2.
+    expect(klbn4.ok && klbn4.value.quantity.toString()).toBe('2');
+    expect(klbn4.ok && klbn4.value.totalCost.toString()).toBe('4.8');
+    // BR-007-05a: total cost unchanged, so the average rises with the removal.
+    expect(klbn4.ok && klbn4.value.averageCost.toString()).toBe('2.4');
+    expect(klbn4.ok && klbn4.value.realizedGain.toString()).toBe('0');
+
+    // The invisible half: absent from B3's Posição, so reconciliation never
+    // reported it, and the ledger kept 0,6 shares B3 auctioned away.
+    expect(klbn3.ok && klbn3.value.quantity.toString()).toBe('0');
+    expect(klbn3.ok && klbn3.value.realizedGain.toString()).toBe('0');
+
+    expect(klbn11.ok && klbn11.value.quantity.toString()).toBe('106');
+    expect(klbn11.ok && klbn11.value.totalCost.toString()).toBe('1060');
+    expect(klbn11.ok && klbn11.value.averageCost.toString()).toBe('10');
+
+    const legOf = async (code: string) => {
+      const assetId = await assetOf(code);
+      const legs = deps.transactions.rows.filter(
+        (r) => r.conversionGroupId !== null && r.assetId === assetId,
+      );
+      return legs.map((leg) => [leg.type, leg.quantity.toString(), leg.costBasis?.toString()]);
+    };
+    expect(await legOf('KLBN11')).toEqual([['conversion_out', '0.6', '6']]);
+    expect(await legOf('KLBN3')).toEqual([['conversion_in', '0.6', '1.2']]);
+    // Two same-day credits share the target's 4,80, the residual on the last.
+    expect(await legOf('KLBN4')).toEqual([
+      ['conversion_in', '2', '4'],
+      ['conversion_in', '0.4', '0.8'],
+    ]);
+
+    const rowAt = async (code: string, tradeDate: string) => {
+      const assetId = await assetOf(code);
+      return deps.transactions.rows.find((r) => r.assetId === assetId && r.tradeDate === tradeDate);
+    };
+    for (const code of ['KLBN3', 'KLBN4']) {
+      expect(await rowAt(code, '2026-01-22')).toMatchObject({
+        type: 'fracao_bonificacao',
+        status: 'active',
+      });
+      expect(await rowAt(code, '2026-02-24')).toMatchObject({
+        type: 'leilao_fracoes',
+        status: 'active',
+      });
+    }
+    // 0,6 × 3,942 = 2,3652 and 0,4 × 3,943 = 1,5772 — proventos, not sales.
+    expect((await rowAt('KLBN3', '2026-02-24'))?.totalValue.toString()).toBe('2.3652');
+    expect((await rowAt('KLBN4', '2026-02-24'))?.totalValue.toString()).toBe('1.5772');
+
+    // BR-005-17/20: the same file again changes nothing.
+    const beforeReimport = deps.transactions.rows.length;
+    const second = await importRows(deps, file);
+    expect(second.outcome).toMatchObject({
+      applied: 0,
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+      resolvedCorporateEvents: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(beforeReimport);
+  });
+
+  /**
+   * #129 D1, the other arrival order. Above, the conversion and the fractions
+   * it leaves come in one file, so the outgoing leg exists only as a plan. In
+   * the owner's real history the Movimentação was imported in stages: the
+   * group is already in the ledger, on a **different position**, and the
+   * fraction's commit must read it and the source's own history from there.
+   *
+   * Same arithmetic as the chain above: KLBN11 106,6 at 1.066,00 leaves 0,6,
+   * 6,00 of cost moves out, KLBN4 receives 2,4 at 4,80, and the 0,4 fraction
+   * is a `fracao_bonificacao` leaving 2 shares at 4,80 — an average of 2,40.
+   */
+  it('#129: traces a fraction against a conversion group an earlier batch stored', async () => {
+    const deps = buildFakeIngestionDeps('2026-09-19');
+    const row = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      assetCode: string,
+      tradeDate: string,
+      quantity: string,
+      unitPrice = '0',
+    ): ParsedRecord =>
+      buy({
+        b3Type,
+        direction,
+        assetCode,
+        assetName: assetCode,
+        tradeDate: BusinessDate.of(tradeDate),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.fromString(unitPrice),
+        fees: Money.zero(),
+        priceStated: unitPrice !== '0',
+      });
+
+    const conversionFile = [
+      buy({
+        assetCode: 'KLBN11',
+        assetName: 'KLBN11',
+        tradeDate: BusinessDate.of('2023-01-02'),
+        quantity: Quantity.fromString('100'),
+        unitPrice: Money.fromString('10.66'),
+        fees: Money.zero(),
+      }),
+      row('Bonificação em Ativos', 'credit', 'KLBN11', '2025-12-19', '6.6'),
+      row('Transferência', 'debit', 'KLBN11', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN3', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN4', '2025-12-23', '2'),
+      row('Transferência', 'credit', 'KLBN4', '2025-12-23', '0.4'),
+    ];
+    const conversion = await importRows(deps, conversionFile);
+    expect(conversion.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 4,
+    });
+
+    // A later file, holding the fractions alone. Neither KLBN11 nor the group
+    // is mentioned in it; both are reached through the stored legs.
+    const fractionFile = [
+      row('Fração em Ativos', 'debit', 'KLBN4', '2026-01-22', '0.4'),
+      row('Leilão de Fração', 'credit', 'KLBN4', '2026-02-24', '0.4', '3.943'),
+    ];
+    const fractions = await importRows(deps, fractionFile);
+    expect(fractions.outcome).toMatchObject({ resolvedCorporateEvents: 2 });
+
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const klbn4 = replayPosition(
+      await deps.transactions.listForPosition(
+        await deps.assets.resolve({
+          code: 'KLBN4',
+          name: 'KLBN4',
+          assetClass: 'stock',
+          classStated: false,
+          nameStated: false,
+        }),
+        institution,
+      ),
+    );
+    expect(klbn4.ok && klbn4.value.quantity.toString()).toBe('2');
+    expect(klbn4.ok && klbn4.value.totalCost.toString()).toBe('4.8');
+    expect(klbn4.ok && klbn4.value.averageCost.toString()).toBe('2.4');
+    expect(klbn4.ok && klbn4.value.realizedGain.toString()).toBe('0');
+
+    const beforeReimport = deps.transactions.rows.length;
+    const again = await importRows(deps, fractionFile);
+    expect(again.outcome).toMatchObject({ applied: 0, resolvedCorporateEvents: 0 });
+    expect(deps.transactions.rows).toHaveLength(beforeReimport);
   });
 
   it('keeps incomplete target evidence unclassified', async () => {

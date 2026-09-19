@@ -16,6 +16,7 @@ import {
   pairFractionAuctions,
   pairingRefusalOf,
   partnerAgrees,
+  tracedConversionOrigin,
 } from '@/core/ingestion/fraction-auction';
 
 const q = (value: string) => Quantity.fromString(value);
@@ -27,6 +28,78 @@ describe('#113 BR-005-20b — isShareBaseType', () => {
     );
     expect(isShareBaseType('buy')).toBe(false);
     expect(isShareBaseType('fracao_bonificacao')).toBe(false);
+  });
+});
+
+describe('#129 BR-005-20b — tracedConversionOrigin', () => {
+  function event(id: string, type: OriginCandidate['type'], after: string): OriginCandidate {
+    return {
+      id,
+      type,
+      tradeDate: BusinessDate.of('2025-12-19'),
+      quantityAfter: q(after),
+      fractionalPart: q(after).fractionalPart(),
+    };
+  }
+
+  it("is the source's share-base event when the outgoing quantity is exactly the fraction it left", () => {
+    // KLBN11 holds 106,6 after its bonificação, leaving 0,6 — precisely the
+    // quantity the group moved out. The trail is exact, not inferred.
+    const bonus = event('bonus', 'bonificacao', '106.6');
+    expect(
+      tracedConversionOrigin([
+        { id: 'out', quantity: q('0.6'), candidates: [bonus], unresolved: false },
+      ]),
+    ).toEqual({ conversionOutId: 'out', event: bonus });
+  });
+
+  it('traces nothing when the outgoing quantity is not a fraction any event left', () => {
+    // A whole position converted: 100,6 out, and no event leaves 100,6.
+    expect(
+      tracedConversionOrigin([
+        {
+          id: 'out',
+          quantity: q('100.6'),
+          candidates: [event('bonus', 'bonificacao', '106.6')],
+          unresolved: false,
+        },
+      ]),
+    ).toBeNull();
+  });
+
+  it('traces nothing through an unresolved ratio event on the source, or with no outgoing leg', () => {
+    expect(
+      tracedConversionOrigin([
+        {
+          id: 'out',
+          quantity: q('0.6'),
+          candidates: [event('bonus', 'bonificacao', '106.6')],
+          unresolved: true,
+        },
+      ]),
+    ).toBeNull();
+    expect(tracedConversionOrigin([])).toBeNull();
+  });
+
+  it('traces only where every outgoing leg reaches the same origin type', () => {
+    const legs = (secondType: OriginCandidate['type']) => [
+      {
+        id: 'out-a',
+        quantity: q('0.6'),
+        candidates: [event('a', 'bonificacao', '106.6')],
+        unresolved: false,
+      },
+      {
+        id: 'out-b',
+        quantity: q('0.25'),
+        candidates: [event('b', secondType, '40.25')],
+        unresolved: false,
+      },
+    ];
+    expect(tracedConversionOrigin(legs('bonificacao'))?.conversionOutId).toBe('out-a');
+    // One bonificação and one grupamento: exempt income or a realised
+    // disposal, and nothing says which. Refuse rather than pick.
+    expect(tracedConversionOrigin(legs('grupamento'))).toBeNull();
   });
 });
 

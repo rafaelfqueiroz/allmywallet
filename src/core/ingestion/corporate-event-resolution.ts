@@ -1,4 +1,5 @@
 import { BusinessDate } from '@/core/shared/clock';
+import type { ConversionGroupId } from '@/core/shared/ids';
 import type { Money } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
 import { compareForReplay } from '@/core/positions/ordering';
@@ -11,6 +12,7 @@ import {
 } from '@/core/ingestion/movement-map';
 import {
   auctionTransaction,
+  type ConversionOutTrace,
   type FractionRefusal,
   fractionTransaction,
   isShareBaseType,
@@ -19,6 +21,7 @@ import {
   pairFractionAuctions,
   pairingRefusalOf,
   partnerAgrees,
+  tracedConversionOrigin,
 } from '@/core/ingestion/fraction-auction';
 import {
   calendarDaysBetween,
@@ -102,6 +105,18 @@ export interface CorporateEventResolutionInput {
    * auction shares the refusal. Omitted at read time, where nothing was tried.
    */
   readonly declined?: ReadonlySet<string> | undefined;
+  /**
+   * BR-005-20b (#129 D1) — every leg of a conversion group, by group id: this
+   * commit's planned legs and the stored ones together. It is how a fraction on
+   * a **conversion target** reaches the share-base event behind the group's
+   * `conversion_out` (`tracedConversionOrigin`), one asset upstream.
+   *
+   * `history` is called with the outgoing leg's own position key, so a caller
+   * supplying this must be able to answer for the source position too.
+   * Omitted where no conversion is in scope — nothing is refused for its
+   * absence, the candidate list is simply the position's own events.
+   */
+  readonly conversionLegs?: ((groupId: ConversionGroupId) => readonly Transaction[]) | undefined;
 }
 
 /** Every figure the batch page shows for a fraction or auction, resolved or not. */
@@ -272,6 +287,52 @@ function walkPosition(
       }),
     );
 
+  /**
+   * BR-005-20b (#129 D1) — the outgoing legs of the group a `conversion_in`
+   * belongs to, each with the share-base events on **its own source position**
+   * and the fraction each left there.
+   *
+   * `inWindow` is the fraction's origin window, so a source event too far
+   * before the fraction is no candidate — the window is measured from the
+   * underlying event, never from the conversion that carried its shares
+   * across. An unresolved ratio event on the source is the same uncertainty
+   * `originOf` refuses on a position's own events: it might be the real origin,
+   * so nothing is traced through it.
+   */
+  const outgoingTraces = (
+    leg: Transaction,
+    inWindow: (t: Transaction) => boolean,
+  ): readonly ConversionOutTrace[] => {
+    const groupId = leg.conversionGroupId;
+    if (input.conversionLegs === undefined || groupId === null) return [];
+    const outLegs = input
+      .conversionLegs(groupId)
+      .filter((l) => l.type === 'conversion_out' && l.status === 'active');
+    return outLegs.map((out) => {
+      const sourceHistory = input.history(out);
+      const active = sourceHistory.filter((t) => t.status === 'active');
+      const candidates: OriginCandidate[] = active
+        .filter((t) => isShareBaseType(t.type) && inWindow(t))
+        .sort(compareForReplay)
+        .map((event) => {
+          const upTo = replayPosition(active.filter((t) => compareForReplay(t, event) <= 0));
+          return {
+            id: event.id,
+            type: event.type as OriginCandidate['type'],
+            tradeDate: event.tradeDate,
+            quantityAfter: upTo.ok ? upTo.value.quantity : null,
+            fractionalPart: upTo.ok ? upTo.value.quantity.fractionalPart() : null,
+          };
+        });
+      const unresolved = sourceHistory.some((t) => {
+        if (t.status !== 'unclassified' || !inWindow(t)) return false;
+        const movement = corporateEventMovementOfKey(t.naturalKey);
+        return movement !== null && isRatioMovement(movement);
+      });
+      return { id: out.id, quantity: out.quantity, candidates, unresolved };
+    });
+  };
+
   const walk = rows
     .filter((row) => unresolvedRatioRow(row) || row.movement === 'fracao_em_ativos')
     .sort(walkOrder);
@@ -344,7 +405,7 @@ function walkPosition(
       const days = calendarDaysBetween(t.tradeDate, fraction.tradeDate);
       return days >= 0 && days <= windows.originDays;
     };
-    const origins: OriginCandidate[] = [...base, ...resolved]
+    const ownOrigins: OriginCandidate[] = [...base, ...resolved]
       .filter((t) => isShareBaseType(t.type) && inOriginWindow(t))
       .sort(compareForReplay)
       .map((event) => {
@@ -357,6 +418,49 @@ function walkPosition(
           fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
         };
       });
+
+    /**
+     * BR-005-20b (#129 D1) — candidates this position inherited through a
+     * conversion. A `conversion_in` is not itself a share-base event, so it
+     * carries the type of the one the group's outgoing leg traces back to on
+     * the **source** position, and the origin window is measured from that
+     * event's date rather than the conversion's. The fractional part is still
+     * this position's own, immediately after the leg: KLBN4 holds 2,4 there,
+     * leaving 0,4 — the fraction B3 auctioned.
+     */
+    const incomingByGroup = new Map<string, Transaction[]>();
+    for (const t of [...base, ...resolved]) {
+      const groupId = t.conversionGroupId;
+      if (t.type !== 'conversion_in' || groupId === null) continue;
+      if (BusinessDate.isBefore(fraction.tradeDate, t.tradeDate)) continue;
+      incomingByGroup.set(groupId, [...(incomingByGroup.get(groupId) ?? []), t]);
+    }
+    const tracedOrigins: OriginCandidate[] = [...incomingByGroup]
+      .map(([groupId, legs]) => ({ groupId, legs: [...legs].sort(compareForReplay) }))
+      .sort((a, b) => compareForReplay(a.legs[0] as Transaction, b.legs[0] as Transaction))
+      .flatMap(({ groupId, legs }) => {
+        const last = legs[legs.length - 1] as Transaction;
+        const trace = tracedConversionOrigin(outgoingTraces(last, inOriginWindow));
+        if (trace === null) return [];
+        // A group is atomic (BR-005-20c), so the fraction it left this position
+        // is the one after **all** its incoming legs, not after each. KLBN4
+        // receives 2 and 0,4 on one date; taken singly their replay order is a
+        // UUID tiebreak, and one ordering leaves 0,4 twice — `ambiguous_origin`
+        // by coin flip. Taken as the group it is 2,4, leaving 0,4, once.
+        const after = replayUpTo(last, true);
+        return [
+          {
+            id: groupId,
+            type: trace.event.type,
+            tradeDate: trace.event.tradeDate,
+            quantityAfter: after.ok ? after.value.quantity : null,
+            fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
+            tracedFrom: trace,
+          },
+        ];
+      });
+
+    const origins: OriginCandidate[] = [...ownOrigins, ...tracedOrigins];
     const originVerdict = originOf(
       fraction.quantity,
       origins,

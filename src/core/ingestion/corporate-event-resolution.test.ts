@@ -1025,3 +1025,181 @@ describe('#113 BR-005-20b / BR-007-04b — a grupamento fraction sold at auction
     for (const order of all) expect(summary(resolve(order, history, allFactors))).toEqual(expected);
   });
 });
+
+/**
+ * SPEC-005 BR-005-20b (#129 D1) — **a fraction on a conversion target.**
+ *
+ * KLBN3 and KLBN4 own no share-base event: their only prior row is a
+ * `conversion_in`, so every candidate list was empty and both fractions
+ * refused `no_origin` for good. The origin is reached one asset upstream,
+ * through the group's outgoing leg, and only where the trail is exact.
+ *
+ * Hand-computed (DV-17): KLBN11 holds 100 and a bonificação of 6,6 takes it to
+ * **106,6**, leaving 0,6 — precisely what the group moved out. KLBN4 receives
+ * 2 and 0,4 on one date, so the group leaves it **2,4**, whose fractional part
+ * is the 0,4 B3 auctioned.
+ */
+describe('#129 BR-005-20b — a fraction whose origin is one asset upstream', () => {
+  const GROUP = '00000000-c0de-7000-8000-00000000abcd';
+
+  const klbn11 = [
+    buy('KLBN11', '2023-01-02', '100', '10.66'),
+    bonus('KLBN11', '2025-12-19', '6.6'),
+    aTransaction()
+      .conversionOut(GROUP, '6')
+      .of('KLBN11')
+      .at(BROKER)
+      .on('2025-12-23')
+      .quantity('0.6')
+      .build(),
+  ];
+  const into = (ticker: string, quantity: string, costBasis: string) =>
+    aTransaction()
+      .conversionIn(costBasis, GROUP)
+      .of(ticker)
+      .at(BROKER)
+      .on('2025-12-23')
+      .quantity(quantity)
+      .build();
+
+  /** The group's legs, as commit supplies them: both sides, one lookup. */
+  const legs = [...klbn11.slice(2), into('KLBN3', '0.6', '1.2')];
+
+  function resolveTraced(
+    rows: readonly CorporateEventRow[],
+    ledger: readonly Transaction[],
+    groupLegs: readonly Transaction[] = legs,
+    windows: CorporateEventWindows = { factorDays: 7, originDays: 60, auctionDays: 180 },
+  ) {
+    return resolveCorporateEvents({
+      rows,
+      history: (key) => ledger.filter((t) => positionKeyString(t) === positionKeyString(key)),
+      factors: new Map(),
+      windows,
+      conversionLegs: (groupId) => (groupId === GROUP ? groupLegs : []),
+    });
+  }
+
+  it("takes a target fraction's origin from the bonificação behind the group's outgoing leg", () => {
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const outcomes = resolveTraced([fraction, auction], [...klbn11, into('KLBN3', '0.6', '1.2')]);
+
+    // A bonificação origin, so the fraction leaves at unchanged total cost and
+    // its auction is a provento: 0,6 × 3,942 = 2,3652 (SPEC-014 BR-014-01).
+    expect(written(outcomes, fraction)).toMatchObject({
+      type: 'fracao_bonificacao',
+      status: 'active',
+    });
+    const paid = written(outcomes, auction);
+    expect(paid.type).toBe('leilao_fracoes');
+    expect(paid.totalValue.toString()).toBe('2.3652');
+    // The trail is recorded, not just its conclusion.
+    const outcome = outcomeOf(outcomes, fraction);
+    const traced =
+      outcome.movement === 'fracao_em_ativos' ? outcome.evidence.origin?.tracedFrom : undefined;
+    expect(traced?.event.type).toBe('bonificacao');
+    expect(traced?.event.tradeDate).toBe('2025-12-19');
+  });
+
+  it('reads the group as one arrival, so repeated same-day credits leave one fraction', () => {
+    // Taken singly the two legs' replay order is a UUID tiebreak, and one
+    // ordering leaves 0,4 twice — `ambiguous_origin` by coin flip.
+    const fraction = open('fracao_em_ativos', 'KLBN4', '2026-01-22', '0.4');
+    const auction = open('leilao_de_fracao', 'KLBN4', '2026-02-24', '0.4', '3.943');
+    const credits = [into('KLBN4', '2', '4'), into('KLBN4', '0.4', '0.8')];
+    for (const order of [credits, [...credits].reverse()]) {
+      const outcomes = resolveTraced(
+        [fraction, auction],
+        [...klbn11, ...order],
+        [...klbn11.slice(2), ...credits],
+      );
+      expect(written(outcomes, fraction)).toMatchObject({ type: 'fracao_bonificacao' });
+      expect(written(outcomes, auction).totalValue.toString()).toBe('1.5772');
+    }
+  });
+
+  it('refuses when the outgoing quantity is not a fraction the source event left', () => {
+    // A whole position converted: 100,6 out, and nothing leaves 100,6.
+    const wholeOut = aTransaction()
+      .conversionOut(GROUP, '1066')
+      .of('KLBN11')
+      .at(BROKER)
+      .on('2025-12-23')
+      .quantity('106.6')
+      .build();
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const outcomes = resolveTraced(
+      [fraction, auction],
+      [...klbn11.slice(0, 2), wholeOut, into('KLBN3', '0.6', '1.2')],
+      [wholeOut, into('KLBN3', '0.6', '1.2')],
+    );
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'no_origin',
+    });
+  });
+
+  it('measures the origin window from the source event, not from the conversion', () => {
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const ledger = [...klbn11, into('KLBN3', '0.6', '1.2')];
+    // 2025-12-19 → 2026-01-22 is 34 days; 2025-12-23 → 2026-01-22 is 30.
+    // A 32-day window therefore reaches the conversion but not the bonificação.
+    const outcomes = resolveTraced([fraction, auction], ledger, legs, {
+      factorDays: 7,
+      originDays: 32,
+      auctionDays: 180,
+    });
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'no_origin',
+    });
+  });
+
+  it('traces nothing without the group lookup, which is how the defect read', () => {
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const outcomes = resolve([fraction, auction], [...klbn11, into('KLBN3', '0.6', '1.2')]);
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'no_origin',
+    });
+    expect(outcomeOf(outcomes, auction)).toMatchObject({
+      status: 'refused',
+      refusal: 'no_origin',
+    });
+  });
+
+  it('is ambiguous when the position has its own event leaving the same fraction', () => {
+    // KLBN3 receives 0,6 through the group and its own bonificação of 1 takes
+    // it to 1,6 — the same 0,6. Two readings, neither preferred.
+    const credit = into('KLBN3', '0.6', '1.2');
+    const own = bonus('KLBN3', '2026-01-05', '1');
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const outcomes = resolveTraced([fraction, auction], [...klbn11, credit, own]);
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'ambiguous_origin',
+    });
+  });
+
+  it('ignores a conversion that arrives after the fraction', () => {
+    const late = aTransaction()
+      .conversionIn('1.2', GROUP)
+      .of('KLBN3')
+      .at(BROKER)
+      .on('2026-02-01')
+      .quantity('0.6')
+      .build();
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const outcomes = resolveTraced([fraction, auction], [...klbn11, late]);
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'no_origin',
+    });
+  });
+});
