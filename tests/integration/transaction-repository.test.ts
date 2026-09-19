@@ -5,7 +5,7 @@ import * as schema from '@/db/schema';
 import { withTenant } from '@/db/tenant';
 import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
-import { TransactionId, UserId, WalletId } from '@/core/shared/ids';
+import { ConversionGroupId, TransactionId, UserId, WalletId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
@@ -115,6 +115,58 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
   }
 
   describe('NUMERIC(20,8) ⇄ Money through the ledger', () => {
+    it('round-trips an exact conversion group and incoming cost basis', async () => {
+      const groupId = ConversionGroupId.generate();
+      const incomingId = TransactionId.generate();
+      const now = clock.now();
+      const stored = await asTenant(async (deps) => {
+        const common = {
+          userId,
+          institutionId: clear,
+          status: 'active',
+          tradeDate: BusinessDate.of('2026-01-05'),
+          unitPrice: Money.zero(),
+          fees: Money.zero(),
+          totalValue: Money.zero(),
+          ratio: null,
+          conversionGroupId: groupId,
+          costBasis: Money.fromString('123.45678901'),
+          occurrence: 1,
+          importBatchId: null,
+          isManual: false,
+          isUserModified: false,
+          createdAt: now,
+          updatedAt: now,
+        } as const;
+        await deps.transactions.insertMany([
+          {
+            ...common,
+            id: TransactionId.generate(),
+            assetId: petr4,
+            type: 'conversion_out',
+            quantity: Quantity.fromString('6'),
+            naturalKey: 'conversion:test:outgoing',
+          },
+          {
+            ...common,
+            id: incomingId,
+            assetId: vale3,
+            type: 'conversion_in',
+            quantity: Quantity.fromString('12'),
+            naturalKey: 'conversion:test:incoming',
+          },
+        ]);
+        return deps.transactions.listByConversionGroup(groupId);
+      });
+
+      expect(stored).toHaveLength(2);
+      expect(stored.every((leg) => leg.conversionGroupId === groupId)).toBe(true);
+      expect(stored.map((leg) => leg.costBasis?.toString())).toEqual([
+        '123.45678901',
+        '123.45678901',
+      ]);
+    });
+
     it('round-trips the eighth decimal place exactly', async () => {
       // The last digit the column holds. Truncation here is silent data loss,
       // and it is exactly what a `Number()` in the driver path would cause.

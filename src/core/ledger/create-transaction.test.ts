@@ -4,7 +4,11 @@ import { Money, Quantity } from '@/core/shared/money';
 import { createTransaction, type CreateTransactionInput } from '@/core/ledger/create-transaction';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
-import { TRANSACTION_TYPES, type TransactionType } from '@/core/ledger/transaction';
+import {
+  TRANSACTION_TYPES,
+  USER_EDITABLE_TRANSACTION_TYPES,
+  type TransactionType,
+} from '@/core/ledger/transaction';
 import {
   FakePositionRepository,
   FakeTransactionRepository,
@@ -152,7 +156,7 @@ describe('SPEC-006 BR-006-11 — createTransaction', () => {
       buyInput({ quantity: Quantity.fromString('1000') }),
     );
 
-    for (const type of TRANSACTION_TYPES) {
+    for (const type of USER_EDITABLE_TRANSACTION_TYPES) {
       const result = await createTransaction(state, TEST_USER_ID, {
         ...buyInput({
           type,
@@ -366,7 +370,7 @@ describe('SPEC-006 BR-006-11 — createTransaction', () => {
     // A cheap structural guard: the input type is what is stored, with no
     // silent remapping in between.
     const types: TransactionType[] = [...TRANSACTION_TYPES];
-    expect(new Set(types).size).toBe(15);
+    expect(new Set(types).size).toBe(17);
     expect(aTransaction().build().type).toBe('buy');
   });
 });

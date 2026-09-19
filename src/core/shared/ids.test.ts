@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AssetId,
+  ConversionGroupId,
   ImportBatchId,
   InstitutionId,
   PositionId,
@@ -21,6 +22,7 @@ const kinds = [
   ['AssetId', AssetId],
   ['WalletId', WalletId],
   ['TransactionId', TransactionId],
+  ['ConversionGroupId', ConversionGroupId],
   ['PositionId', PositionId],
   ['ImportBatchId', ImportBatchId],
   ['InstitutionId', InstitutionId],

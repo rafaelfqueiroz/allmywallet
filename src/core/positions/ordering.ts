@@ -15,15 +15,27 @@ import type { Transaction, TransactionType } from '@/core/ledger/transaction';
 /**
  * Rank within a single trade date. Lower applies first.
  *
- * **0 — share-base events.** A desdobramento, grupamento or bonificação has an
+ * **0 — incoming custody carry.** SPEC-005 BR-005-20c resolves carried cost
+ * before asset conversions, so `transfer_in` applies first at the destination.
+ * A same-day conversion can then remove the shares and exact basis that
+ * arrived there instead of failing against an empty lot. `transfer_out` is
+ * deliberately not in this phase: at the source, a same-day buy must enter the
+ * average before its cost is carried out (SPEC-005 BR-005-20a / #110).
+ *
+ * **1 — asset conversions.** SPEC-007 BR-007-05b conversion groups establish
+ * the asset and quantity to which every dependent same-day share-base event
+ * or trade applies. Ranking both legs first also makes chained conversions
+ * deterministic through the existing `(created_at, id)` tie-breaks.
+ *
+ * **2 — share-base events.** A desdobramento, grupamento or bonificação has an
  * ex-date: from that date the share base is the new one, and a trade printed
  * on that date already prices the new shares. Applying the event first is what
  * makes a same-day buy blend into the correct average. This is the ordering
  * BR-007-15 exists to pin down.
  *
- * **1 — acquisitions.** Buys, subscriptions and shares arriving by transfer.
+ * **3 — ordinary acquisitions.** Buys and subscriptions.
  *
- * **2 — bonificação fraction removal** (`fracao_bonificacao`, SPEC-007
+ * **4 — bonificação fraction removal** (`fracao_bonificacao`, SPEC-007
  * BR-007-05a). After the share-base events, because the fraction only exists
  * once the bonificação has credited it: on a position that held no fraction
  * before the event, removing it first would be refused as removing more than
@@ -47,47 +59,58 @@ import type { Transaction, TransactionType } from '@/core/ledger/transaction';
  * Before adjustments and disposals, so a same-day sale still sees the
  * whole-share base B3's custody shows that day.
  *
- * **3 — adjustments.** Reconciliation corrections, after acquisitions so a
+ * **5 — adjustments.** Reconciliation corrections, after acquisitions so a
  * negative adjustment nets against the day's purchases rather than against a
  * position that has not been credited yet.
  *
- * **4 — disposals.** Last, so the day's acquisitions are already in the
- * average a sale realises against. With date-only granularity there is no
+ * **6 — outgoing custody carry and ordinary disposals.** Last, so the day's
+ * acquisitions are already in the average a transfer carries or a sale
+ * realises against. With date-only granularity there is no
  * intraday order to consult, and incorporating the day's purchases before the
  * day's sales is the convention Brazilian brokers and Receita Federal's
  * average-cost basis both work from. Ranking disposals first would instead
  * refuse a perfectly ordinary same-day buy-then-sell as "selling more than
  * held".
  *
- * **5 — proventos.** Dividends, JCP, rendimentos, amortizações and leilões de
+ * **7 — proventos.** Dividends, JCP, rendimentos, amortizações and leilões de
  * frações change no quantity, so their rank cannot affect a figure. They are
  * ranked anyway, because a *total* order is what makes the fold reproducible.
  *
  * #113 inserted rank 2 by shifting adjustments, disposals and proventos up by
  * one, so no pre-existing pair of types changed its relative order
  * (`ordering.test.ts` pins that against the old table).
+ * #121 then inserted conversions ahead of the table, shifting every existing
+ * rank together and therefore preserving those relative orders again.
+ * BR-005-20c subsequently placed the destination's incoming custody carry
+ * ahead of conversion. This intentionally moves `transfer_in`; `transfer_out`
+ * keeps its disposal-phase rank so BR-005-20a's same-day source buy is carried.
+ * Every non-transfer pair keeps its BR-007-15 relative order.
  */
 const TYPE_RANK: Readonly<Record<TransactionType, number>> = {
-  split: 0,
-  grupamento: 0,
-  bonificacao: 0,
+  transfer_in: 0,
 
-  buy: 1,
-  subscription: 1,
-  transfer_in: 1,
+  conversion_out: 1,
+  conversion_in: 1,
 
-  fracao_bonificacao: 2,
+  split: 2,
+  grupamento: 2,
+  bonificacao: 2,
 
-  adjustment: 3,
+  buy: 3,
+  subscription: 3,
 
-  sell: 4,
-  transfer_out: 4,
+  fracao_bonificacao: 4,
 
-  dividend: 5,
-  jcp: 5,
-  rendimento: 5,
-  amortization: 5,
-  leilao_fracoes: 5,
+  adjustment: 5,
+
+  sell: 6,
+  transfer_out: 6,
+
+  dividend: 7,
+  jcp: 7,
+  rendimento: 7,
+  amortization: 7,
+  leilao_fracoes: 7,
 };
 
 export function typeRank(type: TransactionType): number {

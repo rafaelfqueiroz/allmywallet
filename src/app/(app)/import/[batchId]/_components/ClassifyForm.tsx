@@ -1,4 +1,7 @@
-import { TRANSACTION_TYPES, type TransactionType } from '@/core/ledger/transaction';
+import {
+  USER_EDITABLE_TRANSACTION_TYPES,
+  type UserEditableTransactionType,
+} from '@/core/ledger/transaction';
 import type { ActionState } from '@/lib/action-state';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Field } from '@/components/patterns/field';
@@ -30,7 +33,7 @@ export interface ClassifyFormLabels {
   readonly ratio: string;
   readonly ratioHint: string;
   readonly submit: string;
-  readonly typeName: (type: TransactionType) => string;
+  readonly typeName: (type: UserEditableTransactionType) => string;
 }
 
 export function ClassifyForm({
@@ -51,7 +54,7 @@ export function ClassifyForm({
       <Cluster gap="sm" align="end">
         <Field id={`classify-${rowId}`} label={labels.type} width="lg">
           <NativeSelect name="type" required>
-            {TRANSACTION_TYPES.map((type) => (
+            {USER_EDITABLE_TRANSACTION_TYPES.map((type) => (
               <option key={type} value={type}>
                 {labels.typeName(type)}
               </option>

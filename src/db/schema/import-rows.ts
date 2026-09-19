@@ -63,7 +63,11 @@ export const importRows = pgTable(
     /** Null for a `position` row — Posição rows never carry a natural key. */
     naturalKey: text('natural_key'),
     occurrence: integer('occurrence'),
-    /** The `TransactionType` this row was/will be written to the ledger as. Null for `position` rows. */
+    /**
+     * The `TransactionType` this row was/will be written to the ledger as.
+     * SPEC-006 BR-006-05's full seventeen-type list is shared with the ledger
+     * CHECK below; null remains reserved for `position` rows.
+     */
     ledgerType: text('ledger_type'),
     transactionId: uuid('transaction_id').references(() => transactions.id, {
       onDelete: 'set null',

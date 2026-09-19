@@ -56,6 +56,10 @@ services:
     restart: on-failure
     env_file: !override
       - ${ALLMYWALLET_ENV_FILE:?ALLMYWALLET_ENV_FILE must name the personal env file, outside the repository}
+    environment:
+      # AR-69/#121: start.sh holds this false only during a new image's health
+      # window, so the previous 15-type image can still be rolled back safely.
+      ASSET_CONVERSIONS_ENABLED: ${ASSET_CONVERSIONS_ENABLED:-true}
 
   caddy:
     # BR-021-11: no Caddy. Moved out of the `app` profile rather than deleted,

@@ -1,5 +1,11 @@
 import type { BusinessDate } from '@/core/shared/clock';
-import type { AssetId, InstitutionId, TransactionId, WalletId } from '@/core/shared/ids';
+import type {
+  AssetId,
+  ConversionGroupId,
+  InstitutionId,
+  TransactionId,
+  WalletId,
+} from '@/core/shared/ids';
 import type { Transaction, TransactionStatus, TransactionType } from '@/core/ledger/transaction';
 
 /**
@@ -71,6 +77,8 @@ export interface TransactionPage {
 
 export interface TransactionRepository {
   findById(id: TransactionId): Promise<Transaction | null>;
+  /** SPEC-006 BR-006-05: every leg must be loaded before a grouped mutation. */
+  listByConversionGroup(groupId: ConversionGroupId): Promise<readonly Transaction[]>;
 
   /**
    * The commit path's write (SPEC-005 BR-005-13). Separate from `insert`

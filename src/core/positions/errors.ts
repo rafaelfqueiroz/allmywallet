@@ -18,6 +18,8 @@ export const PositionErrorCode = {
   MISSING_EVENT_RATIO: 'MISSING_EVENT_RATIO',
   /** A ratio of zero or less would erase or invert a position rather than rescale it. */
   INVALID_EVENT_RATIO: 'INVALID_EVENT_RATIO',
+  /** SPEC-007 BR-007-05b: an incoming conversion must state the exact carried cost. */
+  MISSING_CONVERSION_COST_BASIS: 'MISSING_CONVERSION_COST_BASIS',
 } as const;
 
 export type PositionErrorCode = (typeof PositionErrorCode)[keyof typeof PositionErrorCode];
@@ -51,4 +53,10 @@ export function invalidEventRatio(
   date: BusinessDate,
 ): DomainError<typeof PositionErrorCode.INVALID_EVENT_RATIO> {
   return domainError(PositionErrorCode.INVALID_EVENT_RATIO, { ratio: ratio.toString(), date });
+}
+
+export function missingConversionCostBasis(
+  date: BusinessDate,
+): DomainError<typeof PositionErrorCode.MISSING_CONVERSION_COST_BASIS> {
+  return domainError(PositionErrorCode.MISSING_CONVERSION_COST_BASIS, { date });
 }

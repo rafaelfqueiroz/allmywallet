@@ -1,4 +1,4 @@
-import type { AssetId, InstitutionId, TransactionId } from '@/core/shared/ids';
+import type { AssetId, ConversionGroupId, InstitutionId, TransactionId } from '@/core/shared/ids';
 import type {
   OccurrenceTally,
   Pagination,
@@ -59,6 +59,10 @@ export class FakeTransactionRepository implements TransactionRepository {
 
   async findById(id: TransactionId): Promise<Transaction | null> {
     return this.#rows.find((row) => row.id === id) ?? null;
+  }
+
+  async listByConversionGroup(groupId: ConversionGroupId): Promise<readonly Transaction[]> {
+    return this.#rows.filter((row) => row.conversionGroupId === groupId);
   }
 
   async listForPosition(

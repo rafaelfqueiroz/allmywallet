@@ -28,6 +28,8 @@ export const LedgerErrorCode = {
   EMPTY_SELECTION: 'EMPTY_SELECTION',
   /** BR-006-07: a page size outside the supported range. */
   INVALID_PAGINATION: 'INVALID_PAGINATION',
+  /** BR-006-05: conversion legs are complete, cost-conserving atomic groups. */
+  INVALID_CONVERSION_GROUP: 'INVALID_CONVERSION_GROUP',
 } as const;
 
 export type LedgerErrorCode = (typeof LedgerErrorCode)[keyof typeof LedgerErrorCode];

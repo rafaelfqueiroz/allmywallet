@@ -5,7 +5,7 @@ import { Money, Quantity } from '@/core/shared/money';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { editTransaction, editTransactions } from '@/core/ledger/edit-transaction';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
-import { TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
+import { USER_EDITABLE_TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
 import {
   FakePositionRepository,
   FakeTransactionRepository,
@@ -50,7 +50,7 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
    * test had, and it failed on those two types.
    */
   it('AC — every one of the fifteen types can be edited', async () => {
-    for (const type of TRANSACTION_TYPES) {
+    for (const type of USER_EDITABLE_TRANSACTION_TYPES) {
       resetTransactionSequence();
       const opening = aTransaction().buy().on('2026-01-05').quantity('1000').price('10.00').build();
       const isRatioEvent = type === 'split' || type === 'grupamento';

@@ -125,6 +125,9 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
           <Button asChild variant="outline">
             <a href={exportHref}>{t('export.csv')}</a>
           </Button>
+          <Button asChild variant="outline">
+            <Link href="/transactions/conversions/new">{t('newConversion')}</Link>
+          </Button>
           {/* BR-006-11 — the only way a CDB that no extract carries gets in. */}
           <Button asChild>
             <Link href="/transactions/new">{t('new')}</Link>

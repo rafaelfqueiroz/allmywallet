@@ -1,7 +1,14 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, max, or } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import { BusinessDate } from '@/core/shared/clock';
-import { AssetId, ImportBatchId, InstitutionId, TransactionId, UserId } from '@/core/shared/ids';
+import {
+  AssetId,
+  ConversionGroupId,
+  ImportBatchId,
+  InstitutionId,
+  TransactionId,
+  UserId,
+} from '@/core/shared/ids';
 import type {
   OccurrenceTally,
   Pagination,
@@ -39,6 +46,14 @@ export class DrizzleTransactionRepository implements TransactionRepository {
   async findById(id: TransactionId): Promise<Transaction | null> {
     const [row] = await this.tx.select().from(transactions).where(eq(transactions.id, id));
     return row ? toDomain(row) : null;
+  }
+
+  async listByConversionGroup(groupId: ConversionGroupId): Promise<readonly Transaction[]> {
+    const rows = await this.tx
+      .select()
+      .from(transactions)
+      .where(eq(transactions.conversionGroupId, groupId));
+    return rows.map(toDomain);
   }
 
   async listForPosition(
@@ -149,6 +164,8 @@ export class DrizzleTransactionRepository implements TransactionRepository {
         fees: row.fees,
         totalValue: row.totalValue,
         ratio: row.ratio,
+        conversionGroupId: row.conversionGroupId,
+        costBasis: row.costBasis,
         naturalKey: row.naturalKey,
         isUserModified: row.isUserModified,
         updatedAt: row.updatedAt,
@@ -318,6 +335,8 @@ function toRow(transaction: Transaction, userId: UserId): typeof transactions.$i
     fees: transaction.fees,
     totalValue: transaction.totalValue,
     ratio: transaction.ratio,
+    conversionGroupId: transaction.conversionGroupId,
+    costBasis: transaction.costBasis,
     naturalKey: transaction.naturalKey,
     occurrence: transaction.occurrence,
     importBatchId: transaction.importBatchId,
@@ -347,6 +366,9 @@ function toDomain(row: TransactionRow): Transaction {
     fees: row.fees,
     totalValue: row.totalValue,
     ratio: row.ratio,
+    conversionGroupId:
+      row.conversionGroupId === null ? null : ConversionGroupId.of(row.conversionGroupId),
+    costBasis: row.costBasis,
     naturalKey: row.naturalKey,
     occurrence: row.occurrence,
     importBatchId: row.importBatchId === null ? null : ImportBatchId.of(row.importBatchId),

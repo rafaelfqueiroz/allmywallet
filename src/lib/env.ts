@@ -76,6 +76,16 @@ const envSchema = z.object({
   IMPORT_UPLOAD_DIR: z.string().default('.data/imports'),
 
   /**
+   * AR-69 rollout latch for #121. Personal upgrades start the new worker with
+   * this false during the rollback health window, then recreate it with true
+   * only after the new image becomes last-known-good.
+   */
+  ASSET_CONVERSIONS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+
+  /**
    * SPEC-021 BR-021-34 — the transactional email provider's credential and
    * sender. Secrets, so here rather than in the registry (AR-43); *which*
    * provider sends is `notifications.email_provider`, which is registry config.

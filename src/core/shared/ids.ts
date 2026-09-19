@@ -20,6 +20,7 @@ export type AssetId = Branded<string, 'AssetId'>;
 export type WalletId = Branded<string, 'WalletId'>;
 export type WalletGoalId = Branded<string, 'WalletGoalId'>;
 export type TransactionId = Branded<string, 'TransactionId'>;
+export type ConversionGroupId = Branded<string, 'ConversionGroupId'>;
 export type PositionId = Branded<string, 'PositionId'>;
 export type ImportBatchId = Branded<string, 'ImportBatchId'>;
 export type InstitutionId = Branded<string, 'InstitutionId'>;
@@ -71,6 +72,11 @@ export const WalletGoalId = {
 export const TransactionId = {
   of: (value: string): TransactionId => brandId<TransactionId>(value, 'TransactionId'),
   generate: (): TransactionId => uuidv7() as TransactionId,
+};
+
+export const ConversionGroupId = {
+  of: (value: string): ConversionGroupId => brandId<ConversionGroupId>(value, 'ConversionGroupId'),
+  generate: (): ConversionGroupId => uuidv7() as ConversionGroupId,
 };
 
 export const PositionId = {

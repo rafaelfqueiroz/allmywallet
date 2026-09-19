@@ -11,7 +11,11 @@ import {
   importNaturalKeyFor,
   planOccurrences,
 } from '@/core/ingestion/occurrence';
-import { classifyMovement, isIgnoredMovement } from '@/core/ingestion/movement-map';
+import {
+  classifyMovement,
+  conversionEvidenceMovementOf,
+  isIgnoredMovement,
+} from '@/core/ingestion/movement-map';
 import type { OccurrenceTally } from '@/core/ledger/ports';
 import type {
   ExtractType,
@@ -119,7 +123,13 @@ export async function stageBatch(
   const unmappedTypeSet = new Set<string>();
   for (const row of rows) {
     if (row.classification === 'unclassified' && row.record.kind === 'transaction') {
-      unmappedTypeSet.add(row.record.b3Type);
+      const conversionEvidence = conversionEvidenceMovementOf(row.record.b3Type, {
+        assetClass: row.record.assetClass,
+        priceStated: row.record.priceStated,
+      });
+      // BR-005-21 logs genuinely unrecognised strings. V5 conversion evidence
+      // is deliberately *unmapped* for key compatibility, but it is known.
+      if (conversionEvidence === null) unmappedTypeSet.add(row.record.b3Type);
     }
   }
   const unmappedTypes = [...unmappedTypeSet];
@@ -250,7 +260,17 @@ async function stageTransactionRows(
     // never dropped — it is staged `unclassified` with a placeholder type
     // (`occurrence.ts`), not rejected. `direction` disambiguates a handful of
     // Movimentação strings that mean opposite things by Entrada/Saída.
-    const resolvedType = classifyMovement(record.b3Type, record.direction);
+    // SPEC-005 BR-005-18 v5 / BR-005-20c: conversion evidence keeps the
+    // unmapped key form. In particular, a price-less listed `Resgate` must not
+    // inherit v3's `sell` key: older stored evidence already has the raw type
+    // suffix, and re-import must find and activate that exact row in place.
+    // Ordinary priced, bank-paper and FII redemptions still map to `sell`.
+    const conversionEvidence = conversionEvidenceMovementOf(record.b3Type, {
+      assetClass: record.assetClass,
+      priceStated: record.priceStated,
+    });
+    const resolvedType =
+      conversionEvidence === null ? classifyMovement(record.b3Type, record.direction) : null;
     const isUnclassified =
       resolvedType === null || (!record.priceStated && PRICE_BEARING_TYPES.has(resolvedType));
     const ledgerType = resolvedType ?? UNCLASSIFIED_PLACEHOLDER_TYPE;

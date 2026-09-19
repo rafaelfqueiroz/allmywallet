@@ -56,10 +56,16 @@ describe('ClassifySchema — ratio parsing (#113)', () => {
     if (withoutRatio.success) expect(withoutRatio.data.ratio).toBeNull();
   });
 
-  it('accepts every SPEC-006 transaction type, including the two #113 added', () => {
+  it('accepts every user-editable SPEC-006 transaction type, including the two #113 added', () => {
     for (const type of ['leilao_fracoes', 'fracao_bonificacao']) {
       const parsed = ClassifySchema.safeParse({ rowId: 'row-1', type });
       expect(parsed.success).toBe(true);
+    }
+  });
+
+  it('refuses grouped conversion legs at the single-row classification boundary', () => {
+    for (const type of ['conversion_out', 'conversion_in']) {
+      expect(ClassifySchema.safeParse({ rowId: 'row-1', type }).success).toBe(false);
     }
   });
 });

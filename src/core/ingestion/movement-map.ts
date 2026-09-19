@@ -23,7 +23,7 @@ import type { TransactionType } from '@/core/ledger/transaction';
  * own casing and accenting of these strings is not perfectly consistent
  * across extracts.
  */
-export const MOVEMENT_MAP_VERSION = 4;
+export const MOVEMENT_MAP_VERSION = 5;
 
 function normalize(value: string): string {
   return value
@@ -203,6 +203,52 @@ export function corporateEventMovementOf(b3Type: string): CorporateEventMovement
   return Object.hasOwn(CORPORATE_EVENT_MOVEMENTS, key)
     ? CORPORATE_EVENT_MOVEMENTS[key as keyof typeof CORPORATE_EVENT_MOVEMENTS]
     : null;
+}
+
+/**
+ * SPEC-005 BR-005-18 v5 — B3 rows that may be evidence for an explicitly
+ * defined cross-asset conversion. They remain unmapped at staging: the row
+ * alone never says which other asset is involved or what cost it carries.
+ */
+export const ASSET_CONVERSION_EVIDENCE_MOVEMENTS = {
+  atualizacao: 'atualizacao',
+  incorporacao: 'incorporacao',
+} as const;
+
+export type AssetConversionEvidenceMovement =
+  | (typeof ASSET_CONVERSION_EVIDENCE_MOVEMENTS)[keyof typeof ASSET_CONVERSION_EVIDENCE_MOVEMENTS]
+  | 'resgate'
+  | 'transfer_in'
+  | 'transfer_out';
+
+export interface ConversionEvidenceContext {
+  readonly assetClass: 'stock' | 'fii' | 'bdr' | 'etf' | 'tesouro_direto' | 'cdb' | 'lci' | 'lca';
+  readonly priceStated: boolean;
+}
+
+/**
+ * A plain `Resgate` keeps v3's sell meaning. Only a price-less row on a listed
+ * class that can undergo a code/class conversion is named as evidence; FII
+ * and bank-paper redemptions remain sales.
+ */
+export function conversionEvidenceMovementOf(
+  b3Type: string,
+  context: ConversionEvidenceContext,
+): AssetConversionEvidenceMovement | null {
+  const key = normalize(b3Type);
+  if (Object.hasOwn(ASSET_CONVERSION_EVIDENCE_MOVEMENTS, key)) {
+    return ASSET_CONVERSION_EVIDENCE_MOVEMENTS[
+      key as keyof typeof ASSET_CONVERSION_EVIDENCE_MOVEMENTS
+    ];
+  }
+  if (
+    key === 'resgate' &&
+    !context.priceStated &&
+    (context.assetClass === 'stock' || context.assetClass === 'bdr' || context.assetClass === 'etf')
+  ) {
+    return 'resgate';
+  }
+  return null;
 }
 
 /** Exposed for `stage-batch.ts`'s Needs Attention log line and for tests. */

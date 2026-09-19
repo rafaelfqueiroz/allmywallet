@@ -344,6 +344,411 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
   });
 });
 
+describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
+  function evidence(
+    b3Type: 'Atualização' | 'Resgate' | 'Incorporação',
+    assetCode: string,
+    tradeDate: string,
+    quantity: string,
+    institutionName = 'Corretora Teste',
+  ): ParsedRecord {
+    return buy({
+      b3Type,
+      direction: b3Type === 'Resgate' ? 'debit' : 'credit',
+      assetCode,
+      assetName: assetCode,
+      institutionName,
+      tradeDate: BusinessDate.of(tradeDate),
+      quantity: Quantity.fromString(quantity),
+      unitPrice: Money.zero(),
+      fees: Money.zero(),
+      priceStated: false,
+    });
+  }
+
+  async function importRows(deps: FakeIngestionDeps, records: readonly ParsedRecord[]) {
+    const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+    const result = await commitBatch(deps, userId, { batchId });
+    if (!result.ok) throw new Error(result.error.code);
+    return { batchId, outcome: result.value };
+  }
+
+  it('moves ELET3 260 at exact cost to AXIA3 from target-only Atualização, then re-imports as a no-op', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const file = [evidence('Atualização', 'AXIA3', '2025-02-03', '260')];
+    const first = await importRows(deps, file);
+
+    expect(first.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 2,
+    });
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    expect(legs.map((row) => row.type).sort()).toEqual(['conversion_in', 'conversion_out']);
+    expect(new Set(legs.map((row) => row.conversionGroupId))).toHaveLength(1);
+    expect(legs.every((row) => row.totalValue.isZero())).toBe(true);
+    expect(legs.find((row) => row.type === 'conversion_in')?.costBasis?.toString()).toBe('2600');
+
+    const eletId = await deps.assets.resolve({
+      code: 'ELET3',
+      name: 'ELET3',
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: false,
+    });
+    const axiaId = await deps.assets.resolve({
+      code: 'AXIA3',
+      name: 'AXIA3',
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: false,
+    });
+    const elet = replayPosition(
+      await deps.transactions.listForPosition(eletId, legs[0]?.institutionId ?? null),
+    );
+    const axia = replayPosition(
+      await deps.transactions.listForPosition(axiaId, legs[0]?.institutionId ?? null),
+    );
+    expect(elet.ok && elet.value.quantity.toString()).toBe('0');
+    expect(elet.ok && elet.value.realizedGain.toString()).toBe('0');
+    expect(axia.ok && axia.value.quantity.toString()).toBe('260');
+    expect(axia.ok && axia.value.totalCost.toString()).toBe('2600');
+
+    const transactionCount = deps.transactions.rows.length;
+    const second = await importRows(deps, file);
+    expect(second.outcome).toMatchObject({
+      applied: 0,
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(transactionCount);
+  });
+
+  it('promotes stored evidence in place, keeps its key and inserts its companion exactly once', async () => {
+    const deps = buildFakeIngestionDeps();
+    const file = [evidence('Atualização', 'AXIA3', '2025-02-03', '260')];
+    const unresolved = await importRows(deps, file);
+    const stored = deps.transactions.rows[0];
+    expect(stored).toMatchObject({ status: 'unclassified', isUserModified: false });
+
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const resolved = await importRows(deps, file);
+    expect(resolved.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 2,
+    });
+    const promoted = deps.transactions.rows.find((row) => row.id === stored?.id);
+    expect(promoted).toMatchObject({
+      type: 'conversion_in',
+      status: 'active',
+      naturalKey: stored?.naturalKey,
+      importBatchId: unresolved.batchId,
+      isUserModified: false,
+    });
+    expect((await deps.rows.listByBatch(unresolved.batchId))[0]?.classification).toBe('new');
+    const afterPromotion = deps.transactions.rows.length;
+    const again = await importRows(deps, file);
+    expect(again.outcome).toMatchObject({
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(afterPromotion);
+  });
+
+  it('resolves CPLE7 175 to CPLE3 when target statement precedes source Resgate', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'CPLE7',
+        assetName: 'CPLE7',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('175'),
+        unitPrice: Money.fromString('8'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const result = await importRows(deps, [
+      evidence('Atualização', 'CPLE3', '2025-02-01', '175'),
+      evidence('Resgate', 'CPLE7', '2025-02-10', '175'),
+    ]);
+
+    expect(result.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 2,
+    });
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    expect(legs.find((row) => row.type === 'conversion_in')?.costBasis?.toString()).toBe('1400');
+  });
+
+  it('chains AXIA7/AXIA13 conversions and writes AXIA15 evidence to the AXIA15G ledger alias', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'AXIA7',
+        assetName: 'AXIA7',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('68'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const first = await importRows(deps, [
+      evidence('Atualização', 'AXIA7', '2025-02-03', '64'),
+      evidence('Atualização', 'AXIA13', '2025-02-03', '4'),
+    ]);
+    expect(first.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 2,
+    });
+
+    const second = await importRows(deps, [
+      evidence('Atualização', 'AXIA7', '2025-03-03', '52'),
+      evidence('Atualização', 'AXIA13', '2025-03-03', '0'),
+      evidence('Atualização', 'AXIA15', '2025-03-03', '12'),
+    ]);
+    expect(second.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 3,
+    });
+    const axia15g = await deps.assets.resolve({
+      code: 'AXIA15G',
+      name: 'AXIA15G',
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: false,
+    });
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const target = replayPosition(await deps.transactions.listForPosition(axia15g, institution));
+    expect(target.ok && target.value.quantity.toString()).toBe('12');
+    expect(target.ok && target.value.totalCost.toString()).toBe('160');
+    const incoming = deps.transactions.rows.find(
+      (row) => row.assetId === axia15g && row.type === 'conversion_in',
+    );
+    expect(incoming?.costBasis?.toString()).toBe('160');
+  });
+
+  it('resolves the complete AXIA chain from one full-history file and re-imports it as a no-op', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'AXIA7',
+        assetName: 'AXIA7',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('68'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const fullHistory = [
+      evidence('Atualização', 'AXIA7', '2025-02-03', '64'),
+      evidence('Atualização', 'AXIA13', '2025-02-03', '4'),
+      evidence('Atualização', 'AXIA7', '2025-03-03', '52'),
+      evidence('Atualização', 'AXIA13', '2025-03-03', '0'),
+      evidence('Atualização', 'AXIA15', '2025-03-03', '12'),
+    ];
+
+    const first = await importRows(deps, fullHistory);
+    expect(first.outcome).toMatchObject({
+      resolvedAssetConversions: 2,
+      committedConversionLegs: 5,
+    });
+    const beforeReimport = deps.transactions.rows.length;
+    const second = await importRows(deps, fullHistory);
+    expect(second.outcome).toMatchObject({
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+      applied: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(beforeReimport);
+  });
+
+  it('converts a fractional KLBN11 unit into repeated KLBN3/KLBN4 transfer credits atomically', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'KLBN11',
+        assetName: 'KLBN11',
+        tradeDate: BusinessDate.of('2025-12-19'),
+        quantity: Quantity.fromString('0.6'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const transfer = (
+      assetCode: string,
+      direction: 'credit' | 'debit',
+      quantity: string,
+    ): ParsedRecord =>
+      buy({
+        b3Type: 'Transferência',
+        direction,
+        assetCode,
+        assetName: assetCode,
+        tradeDate: BusinessDate.of('2025-12-23'),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.zero(),
+        fees: Money.zero(),
+        priceStated: false,
+      });
+    const file = [
+      transfer('KLBN11', 'debit', '0.6'),
+      transfer('KLBN3', 'credit', '0.6'),
+      transfer('KLBN4', 'credit', '2'),
+      transfer('KLBN4', 'credit', '0.4'),
+    ];
+
+    const first = await importRows(deps, file);
+    expect(first.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 4,
+    });
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    expect(legs.map((row) => [row.type, row.costBasis?.toString()])).toEqual([
+      ['conversion_out', '6'],
+      ['conversion_in', '1.2'],
+      ['conversion_in', '4'],
+      ['conversion_in', '0.8'],
+    ]);
+    expect(legs.every((row) => row.importBatchId === first.batchId)).toBe(true);
+    const beforeReimport = deps.transactions.rows.length;
+
+    const second = await importRows(deps, file);
+    expect(second.outcome).toMatchObject({
+      applied: 0,
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(beforeReimport);
+  });
+
+  it('keeps incomplete target evidence unclassified', async () => {
+    const deps = buildFakeIngestionDeps();
+    const result = await importRows(deps, [evidence('Atualização', 'AXIA3', '2025-02-03', '260')]);
+    expect(result.outcome).toMatchObject({
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(1);
+    expect(deps.transactions.rows[0]?.status).toBe('unclassified');
+  });
+
+  it('keeps complete evidence unclassified while the rollback-safety latch is disabled', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [evidence('Atualização', 'AXIA3', '2025-02-03', '260')],
+    });
+    const result = await commitBatch(deps, userId, {
+      batchId,
+      assetConversionsEnabled: false,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedAssetConversions).toBe(0);
+    expect(deps.transactions.rows.at(-1)?.status).toBe('unclassified');
+  });
+
+  it('sees a same-day carried source before conversion but leaves an ordinary same-day buy after it', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        institutionName: 'Origem',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const day = BusinessDate.of('2025-02-03');
+    const result = await importRows(deps, [
+      buy({
+        b3Type: 'Transferência',
+        direction: 'credit',
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        institutionName: 'Destino',
+        tradeDate: day,
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.zero(),
+        fees: Money.zero(),
+        priceStated: false,
+      }),
+      buy({
+        b3Type: 'Transferência',
+        direction: 'debit',
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        institutionName: 'Origem',
+        tradeDate: day,
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.zero(),
+        fees: Money.zero(),
+        priceStated: false,
+      }),
+      evidence('Atualização', 'AXIA3', '2025-02-03', '260', 'Destino'),
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        institutionName: 'Destino',
+        tradeDate: day,
+        quantity: Quantity.fromString('10'),
+        unitPrice: Money.fromString('20'),
+        fees: Money.zero(),
+      }),
+    ]);
+
+    expect(result.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 2,
+    });
+    const incoming = deps.transactions.rows.find((row) => row.type === 'conversion_in');
+    expect(incoming?.costBasis?.toString()).toBe('2600');
+    const sourceId = await deps.assets.resolve({
+      code: 'ELET3',
+      name: 'ELET3',
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: false,
+    });
+    const destinationInstitution = await deps.institutions.resolve('Destino');
+    const source = replayPosition(
+      await deps.transactions.listForPosition(sourceId, destinationInstitution),
+    );
+    expect(source.ok && source.value.quantity.toString()).toBe('10');
+    expect(source.ok && source.value.totalCost.toString()).toBe('200');
+  });
+});
+
 describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its source cost at commit', () => {
   const ORIGEM = 'Corretora Origem';
   const DESTINO = 'Corretora Destino';
@@ -433,6 +838,8 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
         fees: record.fees,
         totalValue: computeTotalValue(type, record.quantity, record.unitPrice, record.fees),
         ratio: null,
+        conversionGroupId: null,
+        costBasis: null,
         naturalKey: row.naturalKey as string,
         occurrence: row.occurrence as number,
         importBatchId: batchId,
@@ -548,19 +955,19 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     await expectRebuildEqualsIncremental(deps);
   });
 
-  it('defect 6: a same-day buy at the source is in the carried average — (1.000,00 + 2.000,00) ÷ 200 = 15,00', async () => {
+  it('#121 ordering: a source-day buy funds transfer_out before the carry reaches a conversion', async () => {
     const deps = buildFakeIngestionDeps();
     await importFile(deps, [history()]);
 
     await importFile(deps, [
-      // Rank 1 on the transfer day: applied before the rank-3 debit.
+      // BR-005-20a: the source-day buy participates in the outgoing carried cost.
       history({ tradeDate: TRANSFER_DAY, unitPrice: Money.fromString('20') }),
       credit(),
       debit(),
     ]);
 
     expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('15');
-    // ORIGEM: 200 @ 15,00 less 100 at average → 100 @ 15,00 = 1.500,00.
+    // 100 @ 10,00 plus 100 @ 20,00 is averaged before 100 leaves at 15,00.
     expect(await positionAt(deps, ORIGEM)).toEqual({
       quantity: '100',
       averageCost: '15',
@@ -992,6 +1399,8 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
           record.fees,
         ),
         ratio: null,
+        conversionGroupId: null,
+        costBasis: null,
         naturalKey,
         occurrence: 1,
         importBatchId: batchId,

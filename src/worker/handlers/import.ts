@@ -288,6 +288,9 @@ export async function handleImportCommit(
     auctionDays: (await resolveConfig('import.fraction_auction_window_days', { db: deps.database }))
       .value,
   };
+  const assetConversionWindowDays = (
+    await resolveConfig('import.asset_conversion_window_days', { db: deps.database })
+  ).value;
   await refreshFactorsForBatch(deps, userId, batchId);
 
   const result = await withTenant(
@@ -296,6 +299,8 @@ export async function handleImportCommit(
       const committed = await commitBatch(buildIngestionDeps(tx, userId, deps.clock), userId, {
         batchId,
         corporateEventWindows,
+        assetConversionWindowDays,
+        assetConversionsEnabled: env().ASSET_CONVERSIONS_ENABLED,
         ...(payload.asOf === undefined ? {} : { asOf: BusinessDate.of(payload.asOf) }),
       });
       if (!committed.ok) return committed;
@@ -378,6 +383,8 @@ export async function handleImportCommit(
       applied: result.value.applied,
       skippedDuplicates: result.value.skippedDuplicates,
       invalid: result.value.invalid,
+      resolvedAssetConversions: result.value.resolvedAssetConversions,
+      committedConversionLegs: result.value.committedConversionLegs,
       reconciliationStatus: result.value.batch.reconciliation?.status ?? null,
       rebuildFrom,
     },

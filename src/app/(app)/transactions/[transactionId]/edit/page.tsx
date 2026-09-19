@@ -1,7 +1,10 @@
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { TransactionId } from '@/core/shared/ids';
-import { editTransactionAction } from '@/app/(app)/transactions/actions';
+import {
+  editAssetConversionGroupAction,
+  editTransactionAction,
+} from '@/app/(app)/transactions/actions';
 import { withTransactionsDeps } from '@/app/(app)/transactions/composition';
 import {
   ASSET_CLASSES,
@@ -10,6 +13,7 @@ import {
 } from '@/app/(app)/transactions/data';
 import { tryUserId } from '@/lib/session';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
+import { ConversionGroupForm } from '@/app/(app)/transactions/_components/ConversionGroupForm';
 import { PageShell } from '@/components/patterns/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 
@@ -40,17 +44,43 @@ export default async function EditTransactionPage({ params }: PageProps) {
 
   const { transactionId } = await params;
 
-  const loaded = await withTransactionsDeps(userId, async (deps, tx) => ({
+  const loaded = await withTransactionsDeps(userId, async (deps, tx) => {
     // RLS scopes this to the tenant, so another user's id is `null` here
     // rather than a forbidden row — the 404 below is the honest answer either
     // way, and says nothing about whether the row exists for someone else.
-    transaction: await deps.transactions.findById(TransactionId.of(transactionId)),
-    assetOptions: await listAssetOptions(tx),
-    institutionOptions: await listInstitutionOptions(),
-  }));
+    const transaction = await deps.transactions.findById(TransactionId.of(transactionId));
+    return {
+      transaction,
+      conversionGroup:
+        transaction?.conversionGroupId === null || transaction === null
+          ? []
+          : await deps.transactions.listByConversionGroup(transaction.conversionGroupId),
+      assetOptions: await listAssetOptions(tx),
+      institutionOptions: await listInstitutionOptions(),
+    };
+  });
 
   if (loaded.transaction === null) notFound();
   const tx = loaded.transaction;
+
+  if (tx.conversionGroupId !== null) {
+    return (
+      <PageShell width="wide" title={t('form.editTitle')} description={t('form.editDescription')}>
+        <ConversionGroupForm
+          action={editAssetConversionGroupAction}
+          conversionGroupId={tx.conversionGroupId}
+          legs={loaded.conversionGroup.map((leg) => ({
+            id: leg.id,
+            assetId: leg.assetId,
+            type: leg.type === 'conversion_out' ? 'conversion_out' : 'conversion_in',
+            tradeDate: leg.tradeDate,
+            quantity: leg.quantity.toString(),
+            costBasis: leg.costBasis?.toString() ?? '',
+          }))}
+        />
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell width="wide" title={t('form.editTitle')} description={t('form.editDescription')}>

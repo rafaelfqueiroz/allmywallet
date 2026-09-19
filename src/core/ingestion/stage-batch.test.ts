@@ -125,6 +125,70 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
     expect(result.value.unmappedTypes).toEqual(['Baixa Por Liquidação Antecipada']);
   });
 
+  it('BR-005-18 v5: stages listed price-less Resgate as unmapped conversion evidence', async () => {
+    const deps = buildFakeIngestionDeps();
+    const batchId = await seedPendingBatch(deps);
+    const parsed = transactionRecord({
+      b3Type: 'Resgate',
+      direction: 'debit',
+      priceStated: false,
+      unitPrice: Money.zero(),
+      assetClass: 'stock',
+    });
+    const result = await stageBatch(deps, userId, {
+      batchId,
+      extract: { extractType: 'b3_movimentacao', records: [parsed] },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || parsed.record.kind !== 'transaction') return;
+    const row = result.value.rows[0];
+    expect(row).toMatchObject({
+      classification: 'unclassified',
+      ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE,
+    });
+    expect(row?.naturalKey).toBe(
+      importNaturalKeyFor(
+        {
+          assetId: row?.assetId as AssetId,
+          institutionId: row?.institutionId as InstitutionId,
+          type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+          ...priceParts(parsed.record),
+        },
+        'Resgate',
+      ),
+    );
+    expect(result.value.unmappedTypes).toEqual([]);
+  });
+
+  it.each(['fii', 'cdb'] as const)(
+    'BR-005-18 v5: keeps ordinary price-less %s Resgate mapped as sell evidence only when appropriate',
+    async (assetClass) => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await seedPendingBatch(deps);
+      const result = await stageBatch(deps, userId, {
+        batchId,
+        extract: {
+          extractType: 'b3_movimentacao',
+          records: [
+            transactionRecord({
+              b3Type: 'Resgate',
+              priceStated: false,
+              unitPrice: Money.zero(),
+              assetClass,
+            }),
+          ],
+        },
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rows[0]).toMatchObject({
+        classification: 'unclassified',
+        ledgerType: 'sell',
+      });
+    },
+  );
+
   describe('BR-005-19 (amended, #110) — rows mirroring another extract', () => {
     it('stages them ignored, in file order, outside Needs attention and the unmapped log', async () => {
       const deps = buildFakeIngestionDeps();
@@ -437,6 +501,8 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
         fees: Money.zero(),
         totalValue: Money.fromString('3219.90'),
         ratio: null,
+        conversionGroupId: null,
+        costBasis: null,
         naturalKey: key,
         occurrence,
         importBatchId: null,

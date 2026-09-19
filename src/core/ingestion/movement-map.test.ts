@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyMovement,
+  conversionEvidenceMovementOf,
   corporateEventMovementOf,
   isIgnoredMovement,
   MOVEMENT_MAP_VERSION,
@@ -88,9 +89,9 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
   });
 });
 
-describe('SPEC-005 BR-005-18 v4 — corporate-event rows are named, not mapped (#113)', () => {
-  it('is version 4', () => {
-    expect(MOVEMENT_MAP_VERSION).toBe(4);
+describe('SPEC-005 BR-005-18 v5 — corporate-event and conversion rows are named, not mapped', () => {
+  it('is version 5', () => {
+    expect(MOVEMENT_MAP_VERSION).toBe(5);
   });
 
   it('names the four rows BR-005-20b resolves at commit, whatever the casing', () => {
@@ -117,6 +118,33 @@ describe('SPEC-005 BR-005-18 v4 — corporate-event rows are named, not mapped (
       'constructor',
     ]) {
       expect(corporateEventMovementOf(type)).toBeNull();
+    }
+  });
+});
+
+describe('SPEC-005 BR-005-18 v5 — asset-conversion evidence', () => {
+  const listedWithoutPrice = { assetClass: 'stock' as const, priceStated: false };
+
+  it('names Atualização and Incorporação without mapping them', () => {
+    expect(conversionEvidenceMovementOf(' Atualização ', listedWithoutPrice)).toBe('atualizacao');
+    expect(conversionEvidenceMovementOf('INCORPORACAO', listedWithoutPrice)).toBe('incorporacao');
+    expect(classifyMovement('Atualização')).toBeNull();
+    expect(classifyMovement('Incorporação')).toBeNull();
+  });
+
+  it('names only a price-less listed Resgate as conversion evidence', () => {
+    expect(conversionEvidenceMovementOf('Resgate', listedWithoutPrice)).toBe('resgate');
+    expect(
+      conversionEvidenceMovementOf('Resgate', { assetClass: 'stock', priceStated: true }),
+    ).toBeNull();
+  });
+
+  it('keeps ordinary FII and bank-paper Resgate as a sell', () => {
+    for (const assetClass of ['fii', 'tesouro_direto', 'cdb', 'lci', 'lca'] as const) {
+      expect(
+        conversionEvidenceMovementOf('Resgate', { assetClass, priceStated: false }),
+      ).toBeNull();
+      expect(classifyMovement('Resgate')).toBe('sell');
     }
   });
 });

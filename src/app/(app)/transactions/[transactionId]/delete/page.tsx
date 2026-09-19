@@ -70,17 +70,57 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
   // A read, through the write composition root: `describeDeletionImpact`
   // replays the position, so it needs the ledger deps rather than the
   // repository alone. Nothing here writes.
-  const { impact, exists } = await withTransactionWriteDeps(userId, async (deps) => ({
-    exists: (await deps.ledger.transactions.findById(id)) !== null,
-    impact: await describeDeletionImpact(deps.ledger, id),
-  }));
+  const { impact, target, conversionGroup } = await withTransactionWriteDeps(
+    userId,
+    async (deps) => {
+      const target = await deps.ledger.transactions.findById(id);
+      return {
+        target,
+        conversionGroup:
+          target?.conversionGroupId === null || target === null
+            ? []
+            : await deps.ledger.transactions.listByConversionGroup(target.conversionGroupId),
+        impact:
+          target?.conversionGroupId === null || target === null
+            ? await describeDeletionImpact(deps.ledger, id)
+            : null,
+      };
+    },
+  );
 
-  if (!exists) notFound();
+  if (target === null) notFound();
+
+  if (target.conversionGroupId !== null) {
+    const earliest = conversionGroup.reduce(
+      (date, leg) => (leg.tradeDate < date ? leg.tradeDate : date),
+      conversionGroup[0]?.tradeDate ?? target.tradeDate,
+    );
+    return (
+      <PageShell title={t('title')} description={t('description')}>
+        <Stack gap="lg">
+          <Section title={t('impactTitle')}>
+            <Stack gap="sm">
+              <Text>{t('conversionGroup', { count: conversionGroup.length })}</Text>
+              <Text>{t('impactFrom', { date: formatBusinessDate(earliest) })}</Text>
+            </Stack>
+          </Section>
+          <Note>{t('impactAllocations')}</Note>
+          <DeleteConfirm action={deleteTransactionAction} transactionId={transactionId} />
+        </Stack>
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell title={t('title')} description={t('description')}>
-      {!impact.ok ? (
-        <ErrorState title={tErrors(impact.error.code, messageValues(impact.error.context))} />
+      {impact === null || !impact.ok ? (
+        <ErrorState
+          title={
+            impact === null
+              ? tErrors('UNEXPECTED')
+              : tErrors(impact.error.code, messageValues(impact.error.context))
+          }
+        />
       ) : (
         <Stack gap="lg">
           <Section title={t('impactTitle')}>

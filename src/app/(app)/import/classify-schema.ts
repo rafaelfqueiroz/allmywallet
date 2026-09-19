@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
+import { USER_EDITABLE_TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { normalizeDecimalInput } from '@/lib/decimal-input';
 
 /**
@@ -39,6 +39,8 @@ export const optionalRatio = z
 
 export const ClassifySchema = z.object({
   rowId: z.string(),
-  type: z.enum(TRANSACTION_TYPES),
+  // SPEC-006 BR-006-05: conversion legs are emitted by the grouped resolver,
+  // never manufactured one row at a time through manual classification.
+  type: z.enum(USER_EDITABLE_TRANSACTION_TYPES),
   ratio: optionalRatio,
 });

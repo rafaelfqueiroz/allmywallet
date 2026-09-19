@@ -31,6 +31,15 @@ export interface DisposalInput {
   readonly date: BusinessDate;
 }
 
+export interface ExactCostAcquisitionInput {
+  readonly quantity: Quantity;
+  readonly costBasis: Money;
+}
+
+export interface ExactCostWithdrawalInput extends ExactCostAcquisitionInput {
+  readonly date: BusinessDate;
+}
+
 /**
  * SPEC-007 BR-007-02 — **Buy:**
  * `new average = (existing qty × existing average + purchase qty × purchase
@@ -65,6 +74,51 @@ export function applyAcquisition(state: PositionState, input: AcquisitionInput):
     state.totalCost.plus(addedCost),
     state.realizedGain,
   );
+}
+
+/**
+ * SPEC-007 BR-007-05b — an incoming asset-conversion leg adds its stated
+ * quantity and its **exact allocated cost basis**. It must not reconstruct the
+ * cost as `unitPrice × quantity`: an allocation such as R$ 1.000,00 over 3
+ * shares has a repeating unit price, so multiplying a finite stored price back
+ * would lose cents over a long conversion chain.
+ *
+ * Worked example (DV-17): 100 source shares costing R$ 1.000,00 convert into
+ * 50 target shares. The target receives quantity 50 and cost R$ 1.000,00
+ * directly, so its average is 1.000 ÷ 50 = R$ 20,00. If the target already
+ * held 10 shares costing R$ 150,00, the result is 60 shares costing R$ 1.150,00,
+ * average R$ 19,1666…; neither source price nor a synthetic cash trade enters.
+ */
+export function applyExactCostAcquisition(
+  state: PositionState,
+  input: ExactCostAcquisitionInput,
+): PositionState {
+  return makePosition(
+    state.quantity.plus(input.quantity),
+    state.totalCost.plus(input.costBasis),
+    state.realizedGain,
+  );
+}
+
+/**
+ * SPEC-007 BR-007-05b: removes the exact persisted cost carried by the
+ * matching incoming legs. The planner rounds once to NUMERIC(20,8), then both
+ * sides replay that same decimal so a partial conversion cannot create or
+ * destroy a storage unit of cost at a repeating-average boundary.
+ */
+export function applyExactCostWithdrawal(
+  state: PositionState,
+  input: ExactCostWithdrawalInput,
+): Result<PositionState, DomainError> {
+  const remainingQuantity = state.quantity.minus(input.quantity);
+  if (remainingQuantity.isNegative()) {
+    return err(insufficientQuantity(state.quantity, input.quantity, input.date));
+  }
+  const remainingCost = state.totalCost.minus(input.costBasis);
+  if (remainingCost.isNegative()) {
+    return err(insufficientQuantity(state.quantity, input.quantity, input.date));
+  }
+  return ok(makePosition(remainingQuantity, remainingCost, state.realizedGain));
 }
 
 /**

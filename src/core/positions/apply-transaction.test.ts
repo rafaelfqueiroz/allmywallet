@@ -180,6 +180,122 @@ describe('applyTransaction — the type → effect dispatch', () => {
     });
   });
 
+  describe('BR-007-05b — asset conversion legs', () => {
+    it('removes a partial source quantity at moving-average cost with no realised gain', () => {
+      // 100 @ 10,00 = 1.000,00. Converting out 40 removes 40 × 10,00 =
+      // 400,00, leaving 60 shares / 600,00 / 10,00. There is no disposal,
+      // therefore realised gain stays exactly zero whatever price the row has.
+      const result = applyTransaction(
+        HOLDING,
+        aTransaction().conversionOut(undefined, '400').quantity('40').price('99.00').build(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('60');
+      expect(result.value.totalCost.toString()).toBe('600');
+      expect(result.value.averageCost.toString()).toBe('10');
+      expect(result.value.realizedGain.toString()).toBe('0');
+    });
+
+    it('refuses a conversion_out larger than the source position', () => {
+      // Only 100 shares exist; 100,00000001 is larger by one stored-scale unit.
+      const result = applyTransaction(
+        HOLDING,
+        aTransaction().conversionOut(undefined, '1000').quantity('100.00000001').build(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('INSUFFICIENT_QUANTITY');
+      expect(result.error.context['held']).toBe('100');
+      expect(result.error.context['requested']).toBe('100.00000001');
+    });
+
+    it('refuses a conversion_out whose allocated cost exceeds the source cost', () => {
+      // Quantity alone is not enough to validate a persisted conversion leg:
+      // removing 1.000,00000001 from a 1.000,00 lot would make its exact
+      // remaining cost negative even though the requested 40 shares exist.
+      const result = applyTransaction(
+        HOLDING,
+        aTransaction().conversionOut(undefined, '1000.00000001').quantity('40').build(),
+      );
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('INSUFFICIENT_QUANTITY');
+    });
+
+    it('fails explicitly when conversion_out has no exact cost basis', () => {
+      // Replay remains a trust boundary even though the database CHECK rejects
+      // this shape on new writes.
+      const transaction = {
+        ...aTransaction().conversionOut(undefined, '400').quantity('40').build(),
+        costBasis: null,
+      };
+      const result = applyTransaction(HOLDING, transaction);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('MISSING_CONVERSION_COST_BASIS');
+      expect(result.error.context['date']).toBe('2026-01-05');
+    });
+
+    it('adds exact carried cost rather than reconstructing it from unit price', () => {
+      // Source: 100 @ 10,00 = 1.000,00. Conversion target: 50 shares receive
+      // exactly 1.000,00, so average = 1.000,00 ÷ 50 = 20,00. The builder's
+      // unit price is deliberately zero: cost_basis is the only authority.
+      const result = applyTransaction(
+        EMPTY_POSITION,
+        aTransaction().conversionIn('1000.00000000').quantity('50').build(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('50');
+      expect(result.value.totalCost.toString()).toBe('1000');
+      expect(result.value.averageCost.toString()).toBe('20');
+      expect(result.value.realizedGain.toString()).toBe('0');
+    });
+
+    it('blends exact carried cost into an existing target position', () => {
+      // Existing target: 100 / 1.000,00. Incoming: 50 / 1.000,00.
+      // Combined: 150 / 2.000,00; average = 2.000 ÷ 150 = 13,33333333…
+      const result = applyTransaction(
+        HOLDING,
+        aTransaction().conversionIn('1000').quantity('50').build(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('150');
+      expect(result.value.totalCost.toString()).toBe('2000');
+      expect(result.value.averageCost.toDecimal().toFixed(8)).toBe('13.33333333');
+    });
+
+    it('permits an explicitly allocated zero cost', () => {
+      // A zero-cost conversion leg is distinct from a missing allocation:
+      // 10 target shares / 0,00 cost = average 0,00, but is still a position.
+      const result = applyTransaction(
+        EMPTY_POSITION,
+        aTransaction().conversionIn('0').quantity('10').build(),
+      );
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('10');
+      expect(result.value.totalCost.toString()).toBe('0');
+      expect(result.value.averageCost.toString()).toBe('0');
+    });
+
+    it('fails explicitly when conversion_in has no exact cost basis', () => {
+      // The database CHECK rejects this shape, but replay must not silently
+      // turn corrupt historical data into a plausible zero-cost holding.
+      const transaction = {
+        ...aTransaction().conversionIn('1000').quantity('50').build(),
+        costBasis: null,
+      };
+      const result = applyTransaction(EMPTY_POSITION, transaction);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('MISSING_CONVERSION_COST_BASIS');
+      expect(result.error.context['date']).toBe('2026-01-05');
+    });
+  });
+
   describe('adjustment — the one type whose quantity is signed', () => {
     it('a positive adjustment acquires at the stated price', () => {
       // 1.000,00 + 10 × 9,00 = 1.090,00 over 110 shares.
@@ -238,10 +354,10 @@ describe('applyTransaction — the type → effect dispatch', () => {
     );
   });
 
-  it('covers all fifteen BR-006-05 types without a default case', () => {
-    // The dispatch has no `default`, so a sixteenth type would fail to
+  it('covers all seventeen BR-006-05 types without a default case', () => {
+    // The dispatch has no `default`, so an eighteenth type would fail to
     // compile rather than silently becoming a no-op. This asserts the other
-    // half: that all fifteen are actually reachable today.
+    // half: that all seventeen are actually reachable today.
     const handled: TransactionType[] = [
       'buy',
       'sell',
@@ -258,13 +374,19 @@ describe('applyTransaction — the type → effect dispatch', () => {
       'adjustment',
       'leilao_fracoes',
       'fracao_bonificacao',
+      'conversion_out',
+      'conversion_in',
     ];
     expect([...handled].sort()).toEqual([...TRANSACTION_TYPES].sort());
     for (const type of handled) {
       const base =
         type === 'split' || type === 'grupamento'
           ? aTransaction().split().ratio('2').build()
-          : aTransaction().quantity('1').price('1').build();
+          : type === 'conversion_in'
+            ? aTransaction().conversionIn('1').quantity('1').build()
+            : type === 'conversion_out'
+              ? aTransaction().conversionOut().quantity('1').build()
+              : aTransaction().quantity('1').price('1').build();
       const result = applyTransaction(HOLDING, { ...base, type });
       expect(result.ok, `type ${type} must be handled`).toBe(true);
     }

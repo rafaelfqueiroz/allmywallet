@@ -127,6 +127,8 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
       fees: Money.zero(),
       totalValue: computeTotalValue(type, q, price, Money.zero()),
       ratio: null,
+      conversionGroupId: null,
+      costBasis: null,
       naturalKey: `${tradeDate}|${assetId}|${type}|${quantity}|${unitPrice}|${sequence}`,
       occurrence: 1,
       importBatchId: null,
