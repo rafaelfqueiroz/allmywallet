@@ -11,8 +11,8 @@ import {
 } from '@/core/ledger/transaction';
 import { aTransaction } from '@/core/ledger/test-support/transaction-builder';
 
-describe('SPEC-006 BR-006-05 — the fifteen supported types', () => {
-  it('names exactly the fifteen the spec lists, #113’s two appended', () => {
+describe('SPEC-006 BR-006-05 — the seventeen supported types', () => {
+  it('names exactly the seventeen the spec lists', () => {
     expect([...TRANSACTION_TYPES]).toEqual([
       'buy',
       'sell',
@@ -29,6 +29,8 @@ describe('SPEC-006 BR-006-05 — the fifteen supported types', () => {
       'adjustment',
       'leilao_fracoes',
       'fracao_bonificacao',
+      'conversion_out',
+      'conversion_in',
     ]);
   });
 
@@ -107,6 +109,11 @@ describe('computeTotalValue', () => {
         Money.zero(),
       ).toString(),
     ).toBe('2.8');
+  });
+
+  it('BR-006-05 / BR-007-05b — is zero for both conversion legs', () => {
+    expect(computeTotalValue('conversion_out', quantity, price, fees).toString()).toBe('0');
+    expect(computeTotalValue('conversion_in', quantity, price, fees).toString()).toBe('0');
   });
 
   it('values a provento at quantity × per-share amount', () => {

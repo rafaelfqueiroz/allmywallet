@@ -240,6 +240,20 @@ export const REGISTRY = {
       'Days a Fração em Ativos row may pair with its Leilão de Fração credit on the same asset and institution (SPEC-005 BR-005-20b).',
     range: 'integer days, 0–730',
   },
+  /**
+   * SPEC-005 BR-005-20c (#121) — maximum span of the evidence rows that may
+   * form one explicitly defined asset-conversion group. Core receives the
+   * resolved value from its caller; this is the only default (SPEC-002).
+   */
+  'import.asset_conversion_window_days': {
+    key: 'import.asset_conversion_window_days',
+    schema: z.number().int().min(0).max(365),
+    default: 45,
+    levels: ['deployment'],
+    description:
+      'Days within which complete, unique asset-conversion evidence may form one group (SPEC-005 BR-005-20c).',
+    range: 'integer days, 0–365',
+  },
   'reports.concentration_threshold_pct': {
     key: 'reports.concentration_threshold_pct',
     schema: z.number().int().min(1).max(100),

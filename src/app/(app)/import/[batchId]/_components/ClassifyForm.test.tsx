@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import userEvent from '@testing-library/user-event';
-import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
+import { USER_EDITABLE_TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import { failure, IDLE, type ActionState } from '@/lib/action-state';
 import { audit, render, screen } from '@/components/test-utils';
@@ -27,14 +27,16 @@ const labels: ClassifyFormLabels = {
 };
 
 describe('ClassifyForm', () => {
-  it('offers every SPEC-006 transaction type, including leilao_fracoes and fracao_bonificacao', () => {
+  it('offers every user-editable type but no standalone conversion leg', () => {
     render(<ClassifyForm rowId="row-1" action={async () => IDLE} labels={labels} />);
 
     const select = screen.getByLabelText('Classificar como') as HTMLSelectElement;
     const values = Array.from(select.options).map((option) => option.value);
-    expect(values).toEqual([...TRANSACTION_TYPES]);
+    expect(values).toEqual([...USER_EDITABLE_TRANSACTION_TYPES]);
     expect(values).toContain('leilao_fracoes');
     expect(values).toContain('fracao_bonificacao');
+    expect(values).not.toContain('conversion_out');
+    expect(values).not.toContain('conversion_in');
   });
 
   it('always renders the ratio field, with its "split/grupamento only" hint', () => {

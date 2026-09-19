@@ -73,6 +73,21 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-09-16'),
     parserFingerprint: '91005e373899418558c46bebf44d4330f745654d692cb248b8df53be937bf095',
   },
+  {
+    // #121: movement map v5 names Atualização, Incorporação and contextual
+    // Resgate evidence from the same real Movimentação layout verified above.
+    // B3's current official portal documentation still describes consolidated
+    // positions/extracts and Excel export; no parser columns or guide step moved.
+    asOf: BusinessDate.of('2026-09-19'),
+    parserFingerprint: '81544e464ddd3c8af5b32469af75f3ea1d426db0aa9853081318457cc09c3f86',
+  },
+  {
+    // #121 follow-up: price-less Transferência rows are also recognised as
+    // evidence only inside the explicit KLBN11 cross-asset definition. The
+    // export columns and the already-verified guide path did not change.
+    asOf: BusinessDate.of('2026-09-19'),
+    parserFingerprint: 'c87f78b6c34213630d033613f19dadef337903c162970bd43aac166edb5eb00d',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

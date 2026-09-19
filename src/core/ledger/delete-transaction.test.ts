@@ -4,7 +4,7 @@ import { TransactionId } from '@/core/shared/ids';
 import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { deleteTransaction, describeDeletionImpact } from '@/core/ledger/delete-transaction';
-import { TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
+import { USER_EDITABLE_TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
 import {
   FakePositionRepository,
   FakeTransactionRepository,
@@ -40,7 +40,7 @@ describe('SPEC-006 BR-006-13 — deleteTransaction', () => {
    * only row of a position would test the empty case fifteen times instead.
    */
   it('AC — every one of the fifteen types can be deleted', async () => {
-    for (const type of TRANSACTION_TYPES) {
+    for (const type of USER_EDITABLE_TRANSACTION_TYPES) {
       resetTransactionSequence();
       const opening = aTransaction().buy().on('2026-01-05').quantity('1000').price('10.00').build();
       const isRatioEvent = type === 'split' || type === 'grupamento';

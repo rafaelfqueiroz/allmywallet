@@ -4,7 +4,13 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { BusinessDate } from '@/core/shared/clock';
-import { AssetId, InstitutionId, TransactionId, WalletId } from '@/core/shared/ids';
+import {
+  AssetId,
+  ConversionGroupId,
+  InstitutionId,
+  TransactionId,
+  WalletId,
+} from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { Result } from '@/core/shared/result';
 import type { DomainError } from '@/core/shared/domain-error';
@@ -13,7 +19,12 @@ import { createTransaction } from '@/core/ledger/create-transaction';
 import { editTransaction } from '@/core/ledger/edit-transaction';
 import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
 import { deleteTransaction } from '@/core/ledger/delete-transaction';
-import { TRANSACTION_TYPES } from '@/core/ledger/transaction';
+import {
+  createAssetConversionGroup,
+  deleteAssetConversionGroup,
+  replaceAssetConversionGroup,
+} from '@/core/ledger/manage-asset-conversion';
+import { USER_EDITABLE_TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { assignTransactionsToWallet } from '@/core/wallets/assign-transactions';
 import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
@@ -92,7 +103,9 @@ const InstitutionChoiceSchema = z.object({
 });
 
 const TransactionFieldsSchema = z.object({
-  type: z.enum(TRANSACTION_TYPES),
+  // SPEC-006 BR-006-05: conversion legs only exist as an atomic group and
+  // therefore cannot cross this generic single-transaction boundary.
+  type: z.enum(USER_EDITABLE_TRANSACTION_TYPES),
   tradeDate: isoDate,
   quantity: decimal,
   unitPrice: decimal,
@@ -158,6 +171,74 @@ export async function createTransactionAction(
   redirect('/transactions');
 }
 
+const CreateConversionGroupSchema = z.object({
+  sourceAssetId: z.string(),
+  targetAssetId: z.string(),
+  institutionId: optionalId,
+  tradeDate: isoDate,
+  sourceQuantity: decimal,
+  targetQuantity: decimal,
+  costBasis: decimal,
+});
+
+export async function createAssetConversionGroupAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await requireUserId();
+  const parsed = CreateConversionGroupSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return INVALID_INPUT;
+  const input = parsed.data;
+  const outcome = await withTransactionWriteDeps(userId, async (deps) => {
+    const groupId = ConversionGroupId.generate();
+    const now = deps.ledger.clock.now();
+    const common = {
+      userId,
+      institutionId: input.institutionId === null ? null : InstitutionId.of(input.institutionId),
+      status: 'active' as const,
+      tradeDate: BusinessDate.of(input.tradeDate),
+      unitPrice: Money.zero(),
+      fees: Money.zero(),
+      totalValue: Money.zero(),
+      ratio: null,
+      conversionGroupId: groupId,
+      costBasis: Money.fromString(input.costBasis),
+      occurrence: 1,
+      importBatchId: null,
+      isManual: true,
+      isUserModified: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const legs: readonly Transaction[] = [
+      {
+        ...common,
+        id: TransactionId.generate(),
+        assetId: AssetId.of(input.sourceAssetId),
+        type: 'conversion_out',
+        quantity: Quantity.fromString(input.sourceQuantity),
+        naturalKey: `manual-conversion:${groupId}:out`,
+      },
+      {
+        ...common,
+        id: TransactionId.generate(),
+        assetId: AssetId.of(input.targetAssetId),
+        type: 'conversion_in',
+        quantity: Quantity.fromString(input.targetQuantity),
+        naturalKey: `manual-conversion:${groupId}:in`,
+      },
+    ];
+    const created = await createAssetConversionGroup(deps.ledger, legs);
+    if (!created.ok) return failure(created.error);
+    const effects = await applyLedgerEffects(deps.assign, userId, legs);
+    if (!effects.ok) return failure(effects.error);
+    return IDLE;
+  });
+  if (outcome.status === 'error') return outcome;
+  revalidateLedger();
+  redirect('/transactions');
+}
+
 const EditSchema = TransactionFieldsSchema.merge(AssetChoiceSchema)
   .merge(InstitutionChoiceSchema)
   .extend({ transactionId: z.string() });
@@ -172,6 +253,9 @@ export async function editTransactionAction(
   const input = parsed.data;
 
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
+    const target = await deps.ledger.transactions.findById(TransactionId.of(input.transactionId));
+    if (isConversion(target)) return INVALID_INPUT;
+
     const assetId = await resolveAsset(deps, input);
     if (assetId === null) return INVALID_INPUT;
     const institutionId = await resolveInstitution(deps, input);
@@ -205,6 +289,62 @@ export async function editTransactionAction(
   redirect('/transactions');
 }
 
+const ConversionGroupSchema = z.object({ conversionGroupId: z.string() });
+
+/** SPEC-006 BR-006-05: every editable field is submitted for every leg together. */
+export async function editAssetConversionGroupAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await requireUserId();
+  const parsed = ConversionGroupSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return INVALID_INPUT;
+  const ids = formData
+    .getAll('legId')
+    .filter((value): value is string => typeof value === 'string');
+  const quantities = formData
+    .getAll('quantity')
+    .filter((value): value is string => typeof value === 'string');
+  const costs = formData
+    .getAll('costBasis')
+    .filter((value): value is string => typeof value === 'string');
+  if (ids.length === 0 || ids.length !== quantities.length || ids.length !== costs.length) {
+    return INVALID_INPUT;
+  }
+
+  const groupId = ConversionGroupId.of(parsed.data.conversionGroupId);
+  const outcome = await withTransactionWriteDeps(userId, async (deps) => {
+    const existing = await deps.ledger.transactions.listByConversionGroup(groupId);
+    if (existing.length !== ids.length || new Set(ids).size !== ids.length) return INVALID_INPUT;
+    const byId = new Map(existing.map((leg) => [leg.id, leg]));
+    const replacements: Transaction[] = [];
+    for (const [index, rawId] of ids.entries()) {
+      const original = byId.get(TransactionId.of(rawId));
+      const quantity = normalizeDecimalInput(quantities[index] ?? '');
+      const costBasis = normalizeDecimalInput(costs[index] ?? '');
+      if (!isConversion(original) || quantity === null || costBasis === null) return INVALID_INPUT;
+      replacements.push({
+        ...original,
+        quantity: Quantity.fromString(quantity),
+        costBasis: Money.fromString(costBasis),
+        isUserModified: true,
+        updatedAt: deps.ledger.clock.now(),
+      });
+    }
+    const replaced = await replaceAssetConversionGroup(deps.ledger, groupId, replacements);
+    if (!replaced.ok) return failure(replaced.error);
+    return reconcile(
+      deps,
+      userId,
+      replacements.map((leg) => leg.assetId),
+    );
+  });
+
+  if (outcome.status === 'error') return outcome;
+  revalidateLedger();
+  redirect('/transactions');
+}
+
 const TransactionIdSchema = z.object({ transactionId: z.string() });
 
 export async function deleteTransactionAction(
@@ -218,6 +358,16 @@ export async function deleteTransactionAction(
 
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
     const target = await deps.ledger.transactions.findById(id);
+    if (isConversion(target)) {
+      const group = await deps.ledger.transactions.listByConversionGroup(target.conversionGroupId);
+      const deleted = await deleteAssetConversionGroup(deps.ledger, target.conversionGroupId);
+      if (!deleted.ok) return failure(deleted.error);
+      return reconcile(
+        deps,
+        userId,
+        group.map((leg) => leg.assetId),
+      );
+    }
     const deleted = await deleteTransaction(deps.ledger, id);
     if (!deleted.ok) return failure(deleted.error);
     return reconcile(deps, userId, target === null ? [] : [target.assetId]);
@@ -273,6 +423,10 @@ export async function bulkTransactionsAction(
     const touched: string[] = [];
     for (const id of ids) {
       const found = await deps.ledger.transactions.findById(id);
+      // SPEC-006 BR-006-05: the generic bulk operation cannot prove that a
+      // whole conversion group was selected, so it refuses every conversion
+      // leg instead of risking a partial deletion.
+      if (isConversion(found)) return INVALID_INPUT;
       if (found !== null) touched.push(found.assetId);
     }
 
@@ -290,6 +444,24 @@ export async function bulkTransactionsAction(
   // what refreshes the list, and the returned state is what says it happened.
   revalidateLedger();
   return outcome;
+}
+
+type ConversionTransaction = Transaction & {
+  readonly type: 'conversion_out' | 'conversion_in';
+  readonly conversionGroupId: ConversionGroupId;
+  readonly costBasis: Money;
+};
+
+function isConversion(
+  transaction: Transaction | null | undefined,
+): transaction is ConversionTransaction {
+  return (
+    (transaction?.type === 'conversion_out' || transaction?.type === 'conversion_in') &&
+    transaction.conversionGroupId !== null &&
+    transaction.conversionGroupId !== undefined &&
+    transaction.costBasis !== null &&
+    transaction.costBasis !== undefined
+  );
 }
 
 /**

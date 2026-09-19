@@ -1,6 +1,7 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type {
   AssetId,
+  ConversionGroupId,
   ImportBatchId,
   InstitutionId,
   TransactionId,
@@ -18,7 +19,7 @@ import { Money, type Quantity } from '@/core/shared/money';
  */
 
 /**
- * SPEC-006 BR-006-05: the fifteen supported types, and no others.
+ * SPEC-006 BR-006-05: the seventeen supported types, and no others.
  *
  * The last two arrived with #113 and are appended rather than slotted in, so
  * no existing index moves:
@@ -46,9 +47,26 @@ export const TRANSACTION_TYPES = [
   'adjustment',
   'leilao_fracoes',
   'fracao_bonificacao',
+  'conversion_out',
+  'conversion_in',
 ] as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPES)[number];
+
+/**
+ * SPEC-006 BR-006-05: conversion legs are internal members of an atomic
+ * group. Generic single-row forms may display them in history, but must never
+ * offer them as standalone create/edit/classification choices.
+ */
+export type UserEditableTransactionType = Exclude<
+  TransactionType,
+  'conversion_out' | 'conversion_in'
+>;
+
+export const USER_EDITABLE_TRANSACTION_TYPES = TRANSACTION_TYPES.filter(
+  (type): type is UserEditableTransactionType =>
+    type !== 'conversion_out' && type !== 'conversion_in',
+) as unknown as readonly [UserEditableTransactionType, ...UserEditableTransactionType[]];
 
 /**
  * SPEC-006 BR-006-03: only `active` rows enter calculations.
@@ -97,6 +115,18 @@ export interface Transaction {
    * other type; a database CHECK enforces the pairing (AR-30).
    */
   readonly ratio: Quantity | null;
+  /**
+   * SPEC-006 BR-006-05: every conversion leg belongs to one atomic group.
+   * Null for every non-conversion transaction.
+   */
+  readonly conversionGroupId: ConversionGroupId | null;
+  /**
+   * SPEC-006 BR-006-05 / SPEC-007 BR-007-05b: exact cost moved by a
+   * conversion leg. Required on both conversion directions and null for
+   * ordinary rows. Persisting the same exact amount on the outgoing leg and
+   * its allocated incoming peer prevents independent rounding at replay.
+   */
+  readonly costBasis: Money | null;
   /** BR-006-04: unique per user together with `occurrence`. */
   readonly naturalKey: string;
   /**
@@ -135,6 +165,9 @@ const POSITION_AFFECTING_TYPES: ReadonlySet<TransactionType> = new Set<Transacti
   'adjustment',
   // SPEC-007 BR-007-05a: quantity leaves; total cost stays.
   'fracao_bonificacao',
+  // SPEC-007 BR-007-05b: both linked legs change positions without cash.
+  'conversion_out',
+  'conversion_in',
 ]);
 
 export function affectsPosition(type: TransactionType): boolean {
@@ -192,7 +225,9 @@ export function computeTotalValue(
   unitPrice: Money,
   fees: Money,
 ): Money {
-  if (type === 'fracao_bonificacao') return Money.zero();
+  if (type === 'fracao_bonificacao' || type === 'conversion_out' || type === 'conversion_in') {
+    return Money.zero();
+  }
   const gross = unitPrice.times(quantity);
   if (type === 'sell' || type === 'transfer_out') return gross.minus(fees);
   return gross.plus(fees);

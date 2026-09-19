@@ -1,5 +1,12 @@
 import { BusinessDate } from '@/core/shared/clock';
-import { AssetId, ImportBatchId, InstitutionId, TransactionId, UserId } from '@/core/shared/ids';
+import {
+  AssetId,
+  ConversionGroupId,
+  ImportBatchId,
+  InstitutionId,
+  TransactionId,
+  UserId,
+} from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import {
   computeTotalValue,
@@ -94,6 +101,8 @@ interface BuilderState {
   readonly unitPrice: Money;
   readonly fees: Money;
   readonly ratio: Quantity | null;
+  readonly conversionGroupId: ConversionGroupId | null;
+  readonly costBasis: Money | null;
   readonly importBatchName: string | null;
   readonly createdAt: Date | null;
 }
@@ -108,6 +117,8 @@ const DEFAULTS: BuilderState = {
   unitPrice: Money.fromString('10'),
   fees: Money.zero(),
   ratio: null,
+  conversionGroupId: null,
+  costBasis: null,
   importBatchName: null,
   createdAt: null,
 };
@@ -175,6 +186,30 @@ export class TransactionBuilder {
     // Ativos` row states none — so it defaults away, as a split's does.
     return this.#with({ type: 'fracao_bonificacao', unitPrice: Money.zero() });
   }
+  conversionOut(
+    groupId = '00000000-c0de-7000-8000-000000000001',
+    costBasis = '0',
+  ): TransactionBuilder {
+    return this.#with({
+      type: 'conversion_out',
+      unitPrice: Money.zero(),
+      fees: Money.zero(),
+      conversionGroupId: ConversionGroupId.of(groupId),
+      costBasis: Money.fromString(costBasis),
+    });
+  }
+  conversionIn(
+    costBasis: string,
+    groupId = '00000000-c0de-7000-8000-000000000001',
+  ): TransactionBuilder {
+    return this.#with({
+      type: 'conversion_in',
+      unitPrice: Money.zero(),
+      fees: Money.zero(),
+      conversionGroupId: ConversionGroupId.of(groupId),
+      costBasis: Money.fromString(costBasis),
+    });
+  }
 
   of(assetCode: string): TransactionBuilder {
     return this.#with({ assetCode });
@@ -228,6 +263,8 @@ export class TransactionBuilder {
       fees: state.fees,
       totalValue: computeTotalValue(state.type, state.quantity, state.unitPrice, state.fees),
       ratio: state.ratio,
+      conversionGroupId: state.conversionGroupId,
+      costBasis: state.costBasis,
       naturalKey: `${state.tradeDate}|${state.assetCode}|${state.type}|${state.quantity.toString()}|${state.unitPrice.toString()}`,
       occurrence: 1,
       importBatchId,

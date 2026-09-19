@@ -172,12 +172,15 @@ if ! IMAGE_TAG=$new_tag personal_compose run --rm --no-deps -T \
   exit 1
 fi
 
-# 4–5. Start the new image and let /api/health decide.
-start_services "$new_tag"
+# 4–5. Start the new image and let /api/health decide. #121's new ledger
+# values stay latched off until this image is last-known-good: if health fails,
+# the previous 15-type image can replay every row on the migrated schema.
+ASSET_CONVERSIONS_ENABLED=false start_services "$new_tag"
 if healthy; then
   write_state current-tag "$new_tag"
   write_state last-good-tag "$new_tag"
   write_state current-digest "$digest"
+  ASSET_CONVERSIONS_ENABLED=true IMAGE_TAG=$new_tag personal_compose up -d --force-recreate worker
   log "upgraded to $new_tag; recorded as last-known-good"
   exit 0
 fi

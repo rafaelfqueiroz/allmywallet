@@ -1,10 +1,11 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
-import { TransactionId } from '@/core/shared/ids';
+import { ConversionGroupId, TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
-import { type Money, type Quantity, asStored } from '@/core/shared/money';
+import { Money, Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
+import { validateAssetConversionGroup } from '@/core/ledger/manage-asset-conversion';
 import {
   computeTotalValue,
   type Transaction,
@@ -26,7 +27,17 @@ import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/reconcile';
-import { corporateEventMovementOf, isIgnoredMovement } from '@/core/ingestion/movement-map';
+import {
+  conversionEvidenceMovementOf,
+  corporateEventMovementOf,
+  isIgnoredMovement,
+  normalizeMovementType,
+} from '@/core/ingestion/movement-map';
+import { ASSET_CONVERSION_DEFINITIONS } from '@/core/ingestion/asset-conversion-definitions';
+import {
+  type AssetConversionEvidence,
+  resolveAssetConversion,
+} from '@/core/ingestion/asset-conversion-resolution';
 import {
   type CorporateEventOutcome,
   type CorporateEventRow,
@@ -91,6 +102,10 @@ export interface CommitBatchInput {
    * (SPEC-002: never a default in core).
    */
   readonly corporateEventWindows: CorporateEventWindows;
+  /** SPEC-005 BR-005-20c: resolved by the caller from SPEC-002. */
+  readonly assetConversionWindowDays: number;
+  /** AR-69: personal upgrades enable new ledger values only after health succeeds. */
+  readonly assetConversionsEnabled: boolean;
 }
 
 export interface CommitBatchOutcome {
@@ -119,6 +134,10 @@ export interface CommitBatchOutcome {
    * place when an earlier import stored them `unclassified`.
    */
   readonly resolvedCorporateEvents: number;
+  /** BR-005-20c: complete conversion groups resolved by this commit. */
+  readonly resolvedAssetConversions: number;
+  /** BR-005-20c: active conversion legs inserted or activated in place. */
+  readonly committedConversionLegs: number;
   /** BR-005-19 (amended, #113): Leilão de Fração rows consumed by a split or grupamento fraction sale, now `superseded`. */
   readonly consumedAuctions: number;
   /**
@@ -199,11 +218,23 @@ interface CorporateWrite {
   readonly transaction: Transaction;
 }
 
+interface ConversionWrite {
+  readonly transaction: Transaction;
+  readonly row: ImportRow | null;
+  readonly mode: 'insert' | 'in_place' | 'companion';
+  readonly origin: ImportBatchId | null;
+}
+
+interface ConversionPlan {
+  readonly writes: readonly ConversionWrite[];
+}
+
 interface Group {
   readonly key: PositionKey;
   readonly candidates: Candidate[];
   readonly carried: CarriedCredit[];
   readonly reclassified: Reclassification[];
+  readonly conversions: ConversionWrite[];
   readonly corporate: CorporateWrite[];
   /** What the group's replay folded: stored ledger plus this commit's rows. */
   readonly ledger: readonly Transaction[];
@@ -243,7 +274,9 @@ interface Reclassification {
   readonly origin: ImportBatchId;
 }
 
-type StoredLedger = (key: PositionKey) => readonly Transaction[];
+type StoredLedger = ((key: PositionKey) => readonly Transaction[]) & {
+  prime(key: PositionKey, transactions: readonly Transaction[]): void;
+};
 
 export async function commitBatch(
   deps: IngestionDependencies,
@@ -273,6 +306,8 @@ export async function commitBatch(
       skippedDuplicates: 0,
       invalid: 0,
       resolvedCorporateEvents: 0,
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
       consumedAuctions: 0,
       committed: [],
     });
@@ -322,6 +357,17 @@ export async function commitBatch(
 
   const stored = await loadLedgers(deps, rows);
   const carryLegs = planCarries(rows, newCandidates, stored, batch.id, userId, now, today);
+  const conversionPlan = input.assetConversionsEnabled
+    ? await planAssetConversions(
+        deps,
+        rows,
+        newCandidates,
+        carryLegs,
+        stored,
+        { batchId: batch.id, userId, now, today },
+        input.assetConversionWindowDays,
+      )
+    : { writes: [] };
 
   /**
    * SPEC-005 BR-005-20a (#110) — carries are resolved here, at commit, where
@@ -344,6 +390,7 @@ export async function commitBatch(
   const excluded = new Set<string>();
   const vetoed = new Set<string>();
   const declined = new Set<string>();
+  const conversionDeclined = new Set<string>();
   const reclassifications = planReclassifications(rows, stored, carryLegs, today);
   const corporate = await planCorporateEvents(
     deps,
@@ -363,6 +410,11 @@ export async function commitBatch(
       excluded,
       vetoed,
       declined,
+      conversionPlan.writes.filter(
+        (write) =>
+          write.transaction.conversionGroupId === null ||
+          !conversionDeclined.has(write.transaction.conversionGroupId),
+      ),
       corporate,
       corporateDeclined,
     );
@@ -408,6 +460,16 @@ export async function commitBatch(
         for (const c of refused) excluded.add(c.row.id);
         continue;
       }
+      // BR-005-20c: one failed position declines the complete conversion
+      // group. The next round removes every leg, including those whose own
+      // position replayed, and the evidence rows fall back to unclassified.
+      if (group.conversions.length > 0) {
+        for (const write of group.conversions) {
+          const id = write.transaction.conversionGroupId;
+          if (id !== null) conversionDeclined.add(id);
+        }
+        continue;
+      }
       // Nothing of this batch explains it — the stored ledger fails on its own,
       // which the write path never lets happen: every `new` row in the group is
       // excluded, and a carried credit in it falls back to `unclassified`.
@@ -428,6 +490,10 @@ export async function commitBatch(
   const corporateRowClassification = new Map<ImportRowId, 'new' | 'ignored'>();
   const supersededInserts: Transaction[] = [];
   const corporateInPlace: Reclassification[] = [];
+  const conversionRowIds = new Set<ImportRowId>();
+  const insertedConversionRowIds = new Set<ImportRowId>();
+  const conversionInPlace: ConversionWrite[] = [];
+  const committedConversions: Transaction[] = [];
 
   for (const group of settlement) {
     // Every group left in the final round replayed.
@@ -446,6 +512,19 @@ export async function commitBatch(
       carriedRowIds.add(c.leg.row.id);
     }
     reclassified.push(...group.reclassified);
+    for (const write of group.conversions) {
+      committedConversions.push(write.transaction);
+      if (write.row !== null) conversionRowIds.add(write.row.id);
+      if (write.mode === 'in_place') {
+        conversionInPlace.push(write);
+        continue;
+      }
+      toInsert.push(write.transaction);
+      if (write.row !== null) {
+        insertedConversionRowIds.add(write.row.id);
+        rowToTransaction.set(write.row.id, write.transaction.id);
+      }
+    }
     for (const write of group.corporate) {
       const { planned, status, transaction } = write;
       if (planned.mode === 'in_place') {
@@ -470,6 +549,7 @@ export async function commitBatch(
       group.candidates.length > 0 ||
       group.carried.length > 0 ||
       group.reclassified.some((r) => r.kind === 'activate') ||
+      group.conversions.length > 0 ||
       group.corporate.some((c) => c.status === 'resolved');
     if (changesPosition) positionUpserts.push({ ...group.key, state: group.state });
   }
@@ -478,7 +558,13 @@ export async function commitBatch(
   // (`selectForReplay`, SPEC-007), so they can never make a position
   // unreplayable and never need the group check above.
   for (const row of unclassifiedRows) {
-    if (carriedRowIds.has(row.id) || corporateRowClassification.has(row.id)) continue;
+    if (
+      carriedRowIds.has(row.id) ||
+      corporateRowClassification.has(row.id) ||
+      conversionRowIds.has(row.id)
+    ) {
+      continue;
+    }
     const transaction =
       corporate.byId.get(row.id)?.event.transaction ??
       buildCandidate(row, batch.id, userId, 'unclassified', now, today);
@@ -499,6 +585,12 @@ export async function commitBatch(
   if (toInsert.length + supersededInserts.length > 0) {
     await deps.transactions.insertMany([...toInsert, ...supersededInserts]);
   }
+  // SPEC-005 BR-005-20c: row-backed conversion legs activate the existing
+  // imported transaction in place. All updates share this commit's tenant
+  // transaction, so no partial group can become durable.
+  for (const write of conversionInPlace) {
+    await deps.transactions.update(write.transaction);
+  }
   if (positionUpserts.length > 0) {
     await deps.positions.upsertMany(positionUpserts);
   }
@@ -510,6 +602,9 @@ export async function commitBatch(
   }
   // BR-005-19/20a: a carried credit no longer needs attention.
   for (const rowId of carriedRowIds) {
+    await deps.rows.updateClassification(rowId, 'new');
+  }
+  for (const rowId of insertedConversionRowIds) {
     await deps.rows.updateClassification(rowId, 'new');
   }
   // BR-005-19/20b: nor does a resolved or consumed corporate-event row.
@@ -524,6 +619,7 @@ export async function commitBatch(
   ]);
   const corporateIds = new Set<string>(corporateInPlace.map((r) => r.updated.id));
   const isCorporate = (t: Transaction) => corporateIds.has(t.id);
+  await markConversionOrigins(deps, conversionInPlace);
 
   await settleEarlierRefusals(deps, batch.id, toInsert);
 
@@ -578,9 +674,21 @@ export async function commitBatch(
       corporateRowClassification.size -
       supersededInserts.length +
       activated.filter(isCorporate).length,
+    resolvedAssetConversions: new Set(
+      committedConversions.flatMap((transaction) =>
+        transaction.conversionGroupId === null ? [] : [transaction.conversionGroupId],
+      ),
+    ).size,
+    committedConversionLegs: committedConversions.length,
     consumedAuctions: supersededInserts.length + superseded.filter(isCorporate).length,
     // Superseded rows are left out: they enter no calculation (BR-006-03).
-    committed: [...toInsert, ...promoted, ...recarried, ...activated],
+    committed: [
+      ...toInsert,
+      ...conversionInPlace.map((write) => write.transaction),
+      ...promoted,
+      ...recarried,
+      ...activated,
+    ],
   });
 }
 
@@ -601,14 +709,19 @@ async function loadLedgers(
       row.classification === 'duplicate' ||
       row.ledgerType === 'transfer_in' ||
       row.ledgerType === 'transfer_out' ||
-      // #113 BR-005-20b: a staged corporate-event row resolves against its position.
-      corporateEventMovementOf(row.record.b3Type) !== null;
+      corporateEventMovementOf(row.record.b3Type) !== null ||
+      conversionEvidenceMovementOf(row.record.b3Type, {
+        assetClass: row.record.assetClass,
+        priceStated: row.record.priceStated,
+      }) !== null;
     if (!touches) continue;
     const key = positionKeyString(row);
     if (ledgers.has(key)) continue;
     ledgers.set(key, await deps.transactions.listForPosition(row.assetId, row.institutionId));
   }
-  return (key) => ledgers.get(positionKeyString(key)) ?? [];
+  const read = ((key: PositionKey) => ledgers.get(positionKeyString(key)) ?? []) as StoredLedger;
+  read.prime = (key, transactions) => ledgers.set(positionKeyString(key), transactions);
+  return read;
 }
 
 /** The stored transaction a staged `duplicate` row stands for — same key, same occurrence. */
@@ -836,6 +949,449 @@ function planCarries(
   return planned;
 }
 
+interface ConversionEvidenceRef {
+  readonly evidence: AssetConversionEvidence;
+  readonly transaction: Transaction;
+  readonly row: ImportRow | null;
+  readonly mode: 'insert' | 'in_place';
+  readonly origin: ImportBatchId | null;
+}
+
+function dateDistance(a: BusinessDate, b: BusinessDate): number {
+  const toDay = (value: BusinessDate) => Date.parse(`${value}T00:00:00Z`) / 86_400_000;
+  return Math.abs(toDay(a) - toDay(b));
+}
+
+function movementFromStoredKey(naturalKey: string) {
+  return conversionEvidenceMovementOf(naturalKey.slice(naturalKey.lastIndexOf('|') + 1), {
+    assetClass: 'stock',
+    priceStated: false,
+  });
+}
+
+function conversionEvidenceForRow(row: ImportRow): AssetConversionEvidence['movement'] | null {
+  if (row.record.kind !== 'transaction') return null;
+  const named = conversionEvidenceMovementOf(row.record.b3Type, {
+    assetClass: row.record.assetClass,
+    priceStated: row.record.priceStated,
+  });
+  if (named !== null) return named;
+  // #121 follow-up: B3 decomposes a fractional KLBN11 unit through price-less
+  // Transferência rows on KLBN11/KLBN3/KLBN4. They remain ordinary custody
+  // transfers everywhere else; only an explicit conversion definition can
+  // consume this evidence as one cross-asset group.
+  if (
+    normalizeMovementType(row.record.b3Type) === 'transferencia' &&
+    (row.ledgerType === 'transfer_in' || row.ledgerType === 'transfer_out')
+  ) {
+    return row.ledgerType;
+  }
+  return null;
+}
+
+function isBeforeConversion(transaction: Transaction, date: BusinessDate): boolean {
+  return (
+    BusinessDate.isBefore(transaction.tradeDate, date) ||
+    // BR-005-20c is planned after BR-005-20a. A same-day carried credit is
+    // therefore established evidence for the conversion, while an ordinary
+    // same-day buy remains a later trade and must not inflate its source.
+    (transaction.tradeDate === date && transaction.type === 'transfer_in')
+  );
+}
+
+function chronologicalEvidenceGroups(
+  definition: (typeof ASSET_CONVERSION_DEFINITIONS)[number],
+  refs: readonly ConversionEvidenceRef[],
+  conversionWindowDays: number,
+  usedEvidence: ReadonlySet<string>,
+  allTargetAnchorDates: readonly BusinessDate[],
+): readonly (readonly ConversionEvidenceRef[])[] {
+  const targetAnchorCode =
+    definition.targets[0]?.evidenceAssetCode ?? definition.targets[0]?.assetCode;
+  if (targetAnchorCode === undefined) return [];
+  const targetCodes = new Set(
+    definition.targets.map((target) => target.evidenceAssetCode ?? target.assetCode),
+  );
+  const expectedCodes = new Set([...definition.sourceAssetCodes, ...targetCodes]);
+  const anchors = refs
+    .filter(
+      (ref) =>
+        ref.evidence.assetCode === targetAnchorCode &&
+        ref.evidence.movement !== 'resgate' &&
+        !usedEvidence.has(ref.evidence.id),
+    )
+    .sort((a, b) => BusinessDate.compare(a.evidence.tradeDate, b.evidence.tradeDate));
+
+  return anchors.map((anchor) => {
+    const selected: ConversionEvidenceRef[] = [];
+    for (const code of expectedCodes) {
+      const candidates = refs.filter(
+        (ref) =>
+          ref.evidence.assetCode === code &&
+          // A custody credit into a source position establishes its history;
+          // it is not evidence that the source converted. Conversely, a debit
+          // from a target is not the target arrival. This distinction keeps a
+          // same-day ELET3 custody transfer from stealing AXIA3's target-only
+          // conversion while still recognising KLBN's cross-asset legs.
+          (!definition.sourceAssetCodes.includes(code) ||
+            ref.evidence.movement !== 'transfer_in') &&
+          (!targetCodes.has(code) || ref.evidence.movement !== 'transfer_out') &&
+          !usedEvidence.has(ref.evidence.id) &&
+          dateDistance(anchor.evidence.tradeDate, ref.evidence.tradeDate) <= conversionWindowDays &&
+          // A source row belongs to the nearest target statement in a full
+          // history file. This keeps March AXIA7/AXIA13 debits with the
+          // same-day AXIA15 target instead of stealing them for February's
+          // AXIA13 target, while still pairing CPLE's sole later Resgate.
+          !allTargetAnchorDates.some(
+            (date) =>
+              date !== anchor.evidence.tradeDate &&
+              dateDistance(date, ref.evidence.tradeDate) <
+                dateDistance(anchor.evidence.tradeDate, ref.evidence.tradeDate),
+          ),
+      );
+      const sameDate = candidates.filter(
+        (ref) => ref.evidence.tradeDate === anchor.evidence.tradeDate,
+      );
+      if (sameDate.length > 0) {
+        // More than one same-code row on the event date remains ambiguous;
+        // pass all of them to the pure resolver so it refuses rather than a
+        // file-order choice silently selecting one.
+        selected.push(...sameDate);
+      } else if (candidates.length === 1) {
+        // CPLE's target statement precedes its unique source Resgate. The
+        // configured window permits that cross-date pair without guessing.
+        selected.push(candidates[0] as ConversionEvidenceRef);
+      } else if (candidates.length > 1) {
+        // Several non-same-day candidates are genuinely ambiguous. Preserve
+        // them so `resolveAssetConversion` returns `ambiguous`.
+        selected.push(...candidates);
+      }
+    }
+    return [...new Map(selected.map((ref) => [ref.evidence.id, ref])).values()];
+  });
+}
+
+/**
+ * SPEC-005 BR-005-20c: gather current and stored untouched evidence, replay
+ * each involved position immediately before its statement, then ask the pure
+ * resolver for an all-or-nothing group. Transfer carries are supplied first;
+ * the resulting conversion legs are supplied to corporate-event settlement.
+ */
+async function planAssetConversions(
+  deps: IngestionDependencies,
+  rows: readonly ImportRow[],
+  candidates: readonly Candidate[],
+  carryLegs: readonly PlannedCarry[],
+  stored: StoredLedger,
+  context: { batchId: ImportBatchId; userId: UserId; now: Date; today: BusinessDate },
+  conversionWindowDays: number,
+): Promise<ConversionPlan> {
+  const currentEvidence = rows.filter((row) => conversionEvidenceForRow(row) !== null);
+  if (currentEvidence.length === 0) return { writes: [] };
+
+  const candidateTransactions = candidates.map((candidate) => candidate.transaction);
+  const carriedCosts = resolveCarriedCosts(carryLegs, (assetId, institutionId) => [
+    ...stored({ assetId, institutionId }).filter(
+      (transaction) => !carryLegs.some((leg) => leg.credit.id === transaction.id),
+    ),
+    ...candidateTransactions.filter(
+      (transaction) =>
+        transaction.assetId === assetId && transaction.institutionId === institutionId,
+    ),
+  ]);
+  const carriedTransactions = carryLegs.flatMap((leg) => {
+    const cost = carriedCosts.get(leg.id);
+    return cost === undefined ? [] : [withCarriedCost(leg.credit, cost)];
+  });
+
+  const writes: ConversionWrite[] = [];
+  const usedEvidence = new Set<string>();
+  const institutions = [...new Set(currentEvidence.map((row) => row.institutionId))];
+
+  for (const institutionId of institutions) {
+    const rowsAtInstitution = currentEvidence.filter((row) => row.institutionId === institutionId);
+    const targetEvidenceCodes = new Set(
+      ASSET_CONVERSION_DEFINITIONS.flatMap((definition) =>
+        definition.targets.map((target) => target.evidenceAssetCode ?? target.assetCode),
+      ),
+    );
+    const allTargetAnchorDates = rowsAtInstitution.flatMap((row) => {
+      if (row.record.kind !== 'transaction' || !targetEvidenceCodes.has(row.record.assetCode)) {
+        return [];
+      }
+      const movement = conversionEvidenceForRow(row);
+      return movement === null || movement === 'resgate' ? [] : [row.record.tradeDate];
+    });
+    for (const definition of ASSET_CONVERSION_DEFINITIONS) {
+      const evidenceCodes = new Set([
+        ...definition.sourceAssetCodes,
+        ...definition.targets.map((target) => target.evidenceAssetCode ?? target.assetCode),
+      ]);
+      const triggering = rowsAtInstitution.filter(
+        (row) => row.record.kind === 'transaction' && evidenceCodes.has(row.record.assetCode),
+      );
+      if (triggering.length === 0) continue;
+
+      const codeToAsset = new Map<string, Awaited<ReturnType<typeof deps.assets.resolve>>>();
+      const allCodes = new Set([
+        ...evidenceCodes,
+        ...definition.targets.map((target) => target.assetCode),
+      ]);
+      for (const code of allCodes) {
+        const staged = rowsAtInstitution.find(
+          (row) => row.record.kind === 'transaction' && row.record.assetCode === code,
+        );
+        const assetId =
+          staged?.assetId ??
+          (await deps.assets.resolve({
+            code,
+            name: code,
+            assetClass: 'stock',
+            classStated: false,
+            nameStated: false,
+          }));
+        codeToAsset.set(code, assetId);
+      }
+
+      const ledgerByCode = new Map<string, readonly Transaction[]>();
+      for (const code of evidenceCodes) {
+        const assetId = codeToAsset.get(code);
+        if (assetId === undefined) continue;
+        const ledger = await deps.transactions.listForPosition(assetId, institutionId);
+        ledgerByCode.set(code, ledger);
+        // Target-only evidence does not otherwise make the source position a
+        // touched row of this batch; settlement still needs its ledger to
+        // replay the generated conversion_out leg.
+        stored.prime({ assetId, institutionId }, ledger);
+      }
+
+      const refs: ConversionEvidenceRef[] = [];
+      const represented = new Set<string>();
+      for (const row of triggering) {
+        if (row.record.kind !== 'transaction') continue;
+        const movement = conversionEvidenceForRow(row);
+        if (movement === null) continue;
+        let transaction: Transaction | undefined;
+        let mode: ConversionEvidenceRef['mode'] = 'insert';
+        let origin: ImportBatchId | null = null;
+        if (row.classification === 'unclassified' || row.classification === 'new') {
+          transaction =
+            buildCandidate(
+              row,
+              context.batchId,
+              context.userId,
+              row.classification === 'new' ? 'active' : 'unclassified',
+              context.now,
+              context.today,
+            ) ?? undefined;
+        } else if (row.classification === 'duplicate') {
+          const copy = storedCopyOf(stored, row);
+          if (
+            copy !== undefined &&
+            (copy.status === 'unclassified' ||
+              (copy.status === 'active' &&
+                (copy.type === 'transfer_in' || copy.type === 'transfer_out'))) &&
+            !copy.isUserModified &&
+            !copy.isManual &&
+            copy.importBatchId !== null
+          ) {
+            transaction = copy;
+            mode = 'in_place';
+            origin = copy.importBatchId;
+          }
+        }
+        if (transaction === undefined) continue;
+        represented.add(transaction.id);
+        refs.push({
+          evidence: {
+            id: transaction.id,
+            movement,
+            assetCode: row.record.assetCode,
+            tradeDate: row.record.tradeDate,
+            beforeQuantity: Quantity.zero(),
+            statementQuantity: row.record.quantity,
+          },
+          transaction,
+          row,
+          mode,
+          origin,
+        });
+      }
+
+      // Evidence stored by another import can complete the current group.
+      for (const [code, ledger] of ledgerByCode) {
+        for (const transaction of ledger) {
+          if (
+            represented.has(transaction.id) ||
+            (transaction.status !== 'unclassified' &&
+              !(
+                transaction.status === 'active' &&
+                (transaction.type === 'transfer_in' || transaction.type === 'transfer_out')
+              )) ||
+            transaction.isUserModified ||
+            transaction.isManual ||
+            transaction.importBatchId === null
+          ) {
+            continue;
+          }
+          const movement =
+            transaction.type === 'transfer_in' || transaction.type === 'transfer_out'
+              ? transaction.type
+              : movementFromStoredKey(transaction.naturalKey);
+          if (movement === null) continue;
+          refs.push({
+            evidence: {
+              id: transaction.id,
+              movement,
+              assetCode: code,
+              tradeDate: transaction.tradeDate,
+              beforeQuantity: Quantity.zero(),
+              statementQuantity: transaction.quantity,
+            },
+            transaction,
+            row: null,
+            mode: 'in_place',
+            origin: transaction.importBatchId,
+          });
+        }
+      }
+      if (refs.length === 0 || refs.every((ref) => ref.row === null)) continue;
+      const historyForCode = (code: string): readonly Transaction[] => {
+        const assetId = codeToAsset.get(code);
+        if (assetId === undefined) return [];
+        const storedRows = ledgerByCode.get(code) ?? [];
+        const replacedCarries = new Set(carryLegs.map((leg) => leg.credit.id));
+        return [
+          ...storedRows.filter((transaction) => !replacedCarries.has(transaction.id)),
+          ...candidateTransactions.filter(
+            (transaction) =>
+              transaction.assetId === assetId && transaction.institutionId === institutionId,
+          ),
+          ...carriedTransactions.filter(
+            (transaction) =>
+              transaction.assetId === assetId && transaction.institutionId === institutionId,
+          ),
+          ...writes
+            .map((write) => write.transaction)
+            .filter(
+              (transaction) =>
+                transaction.assetId === assetId && transaction.institutionId === institutionId,
+            ),
+        ];
+      };
+      const groups = chronologicalEvidenceGroups(
+        definition,
+        refs,
+        conversionWindowDays,
+        usedEvidence,
+        allTargetAnchorDates,
+      );
+      for (const nearby of groups) {
+        if (nearby.length === 0 || nearby.every((ref) => ref.row === null)) continue;
+        const enriched: ConversionEvidenceRef[] = [];
+        for (const ref of nearby) {
+          const before = replayPosition(
+            historyForCode(ref.evidence.assetCode).filter((transaction) =>
+              isBeforeConversion(transaction, ref.evidence.tradeDate),
+            ),
+          );
+          if (!before.ok) continue;
+          const statementQuantity =
+            ref.evidence.movement === 'resgate' || ref.evidence.movement === 'transfer_out'
+              ? before.value.quantity.minus(ref.transaction.quantity)
+              : ref.evidence.movement === 'transfer_in'
+                ? before.value.quantity.plus(ref.transaction.quantity)
+                : ref.transaction.quantity;
+          enriched.push({
+            ...ref,
+            evidence: {
+              ...ref.evidence,
+              beforeQuantity: before.value.quantity,
+              statementQuantity,
+            },
+          });
+        }
+
+        const fallbackDate = enriched[0]?.evidence.tradeDate;
+        if (fallbackDate === undefined) continue;
+        const sourcePositions = definition.sourceAssetCodes.map((assetCode) => {
+          const sourceEvidence = enriched.find((ref) => ref.evidence.assetCode === assetCode);
+          const asAt = sourceEvidence?.evidence.tradeDate ?? fallbackDate;
+          const replayed = replayPosition(
+            historyForCode(assetCode).filter((transaction) =>
+              isBeforeConversion(transaction, asAt),
+            ),
+          );
+          return {
+            assetCode,
+            quantity: replayed.ok ? replayed.value.quantity : Quantity.zero(),
+            totalCost: replayed.ok ? replayed.value.totalCost : null,
+          };
+        });
+        const resolution = resolveAssetConversion({
+          definitions: [definition],
+          evidence: enriched.map((ref) => ref.evidence),
+          sourcePositions,
+          conversionWindowDays,
+        });
+        if (resolution.status !== 'resolved') continue;
+
+        const groupId = ConversionGroupId.generate();
+        const refById = new Map(enriched.map((ref) => [ref.evidence.id, ref]));
+        const groupWrites: ConversionWrite[] = [];
+        for (const leg of resolution.legs) {
+          const ref = leg.evidenceId === null ? undefined : refById.get(leg.evidenceId);
+          const assetId = codeToAsset.get(leg.assetCode);
+          if (assetId === undefined) continue;
+          const base = ref?.transaction;
+          const transaction: Transaction = {
+            ...(base ?? {
+              id: TransactionId.generate(),
+              userId: context.userId,
+              assetId,
+              institutionId,
+              status: 'active' as const,
+              naturalKey: leg.key,
+              occurrence: 1,
+              importBatchId: context.batchId,
+              isManual: false,
+              isUserModified: false,
+              createdAt: context.now,
+            }),
+            assetId,
+            institutionId,
+            type: leg.type,
+            status: 'active',
+            tradeDate: leg.tradeDate,
+            quantity: leg.quantity,
+            unitPrice: Money.zero(),
+            fees: Money.zero(),
+            totalValue: Money.zero(),
+            ratio: null,
+            conversionGroupId: groupId,
+            costBasis: leg.costBasis,
+            importBatchId: base?.importBatchId ?? context.batchId,
+            isUserModified: false,
+            updatedAt: context.now,
+          };
+          groupWrites.push({
+            transaction,
+            row: ref?.row ?? null,
+            mode: ref === undefined ? 'companion' : ref.mode,
+            origin: ref?.origin ?? null,
+          });
+        }
+        if (!validateAssetConversionGroup(groupWrites.map((write) => write.transaction)).ok) {
+          continue;
+        }
+        writes.push(...groupWrites);
+        for (const ref of enriched) usedEvidence.add(ref.evidence.id);
+      }
+    }
+  }
+  return { writes };
+}
+
 /**
  * One settling round: resolve transfer carries and corporate events together,
  * then replay every group.
@@ -855,10 +1411,20 @@ function settle(
   excluded: ReadonlySet<string>,
   vetoed: ReadonlySet<string>,
   declined: ReadonlySet<string>,
+  conversionWrites: readonly ConversionWrite[],
   corporate: CorporatePlan,
   corporateDeclined: ReadonlySet<string>,
 ): Group[] {
-  const live = newCandidates.filter((c) => !excluded.has(c.row.id));
+  const convertedRowIds = new Set(
+    conversionWrites.flatMap((write) => (write.row === null ? [] : [write.row.id])),
+  );
+  // A mapped transfer row can be one of an explicit cross-asset conversion's
+  // row-backed legs. In that round the conversion write replaces the ordinary
+  // transfer candidate; if the complete group is declined on replay, the
+  // write disappears next round and the original candidate returns.
+  const live = newCandidates.filter(
+    (candidate) => !excluded.has(candidate.row.id) && !convertedRowIds.has(candidate.row.id),
+  );
   const liveReclassified = reclassifications.filter((r) => !declined.has(r.row.id));
   const excludedTransactions = new Set<string>(
     newCandidates.filter((c) => excluded.has(c.row.id)).map((c) => c.transaction.id),
@@ -897,6 +1463,12 @@ function settle(
       (transaction) =>
         transaction.assetId === key.assetId && transaction.institutionId === key.institutionId,
     ),
+    ...conversionWrites
+      .map((write) => write.transaction)
+      .filter(
+        (transaction) =>
+          transaction.assetId === key.assetId && transaction.institutionId === key.institutionId,
+      ),
     ...corporateTransactions.filter(
       (transaction) =>
         transaction.assetId === key.assetId && transaction.institutionId === key.institutionId,
@@ -960,6 +1532,7 @@ function settle(
       candidates: Candidate[];
       carried: CarriedCredit[];
       reclassified: Reclassification[];
+      conversions: ConversionWrite[];
       corporate: CorporateWrite[];
     }
   >();
@@ -972,6 +1545,7 @@ function settle(
       candidates: [],
       carried: [],
       reclassified: [],
+      conversions: [],
       corporate: [],
     };
     groups.set(id, created);
@@ -992,10 +1566,14 @@ function settle(
   for (const r of liveReclassified) {
     if (r.kind === 'activate') groupOf(r.updated).reclassified.push(r);
   }
+  for (const write of conversionWrites) groupOf(write.transaction).conversions.push(write);
   const replaced = new Set<string>(
     [...groups.values()].flatMap((group) => [
       ...group.carried.map((c) => c.transaction.id),
       ...group.reclassified.map((r) => r.updated.id),
+      ...group.conversions
+        .filter((write) => write.mode === 'in_place')
+        .map((write) => write.transaction.id),
     ]),
   );
 
@@ -1015,6 +1593,7 @@ function settle(
       ...group.candidates.map((c) => c.transaction),
       ...group.carried.map((c) => c.transaction),
       ...group.reclassified.map((r) => r.updated),
+      ...group.conversions.map((write) => write.transaction),
       ...group.corporate.map((c) => c.transaction),
     ];
     const replayed = replayPosition(ledger);
@@ -1368,6 +1947,45 @@ async function updateInPlace(
   return outcome;
 }
 
+/** Keep the original evidence row and batch counters in step with an in-place conversion activation. */
+async function markConversionOrigins(
+  deps: IngestionDependencies,
+  writes: readonly ConversionWrite[],
+): Promise<void> {
+  const byOrigin = new Map<ImportBatchId, Set<string>>();
+  for (const write of writes) {
+    if (write.origin === null) continue;
+    byOrigin.set(
+      write.origin,
+      (byOrigin.get(write.origin) ?? new Set<string>()).add(write.transaction.id),
+    );
+  }
+  for (const [origin, transactionIds] of byOrigin) {
+    let changed = 0;
+    for (const row of await deps.rows.listByBatch(origin)) {
+      if (
+        row.transactionId === null ||
+        !transactionIds.has(row.transactionId) ||
+        row.classification !== 'unclassified'
+      ) {
+        continue;
+      }
+      await deps.rows.updateClassification(row.id, 'new');
+      changed += 1;
+    }
+    const batch = await deps.batches.findById(origin);
+    if (batch === null || batch.rowCounts === null || changed === 0) continue;
+    await deps.batches.update({
+      ...batch,
+      rowCounts: {
+        ...batch.rowCounts,
+        new: batch.rowCounts.new + changed,
+        needsAttention: batch.rowCounts.needsAttention - changed,
+      },
+    });
+  }
+}
+
 /** `null` when the row's own fields fail `validateTransactionDraft` — a corrupt or contradictory extract row. */
 export function buildCandidate(
   row: ImportRow,
@@ -1405,6 +2023,8 @@ export function buildCandidate(
     fees: record.fees,
     totalValue: computeTotalValue(row.ledgerType, record.quantity, record.unitPrice, record.fees),
     ratio: record.ratio,
+    conversionGroupId: null,
+    costBasis: null,
     naturalKey: row.naturalKey,
     occurrence: row.occurrence ?? 1,
     importBatchId: batchId,

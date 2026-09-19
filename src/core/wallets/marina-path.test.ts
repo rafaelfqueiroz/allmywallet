@@ -54,6 +54,8 @@ describe('SPEC-010 AC-010-19 — Marina assigns six payers and imports again', (
       unitPrice: Money.fromString('10'),
       fees: Money.zero(),
       ratio: null,
+      conversionGroupId: null,
+      costBasis: null,
       totalValue: Money.fromString('100'),
       naturalKey: `marina-${assetId}-${quantity}`,
       occurrence: 1,

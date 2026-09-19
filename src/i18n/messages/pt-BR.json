@@ -205,6 +205,7 @@
     "INSUFFICIENT_QUANTITY": "Em {date} você tinha {held} cota(s) deste ativo e a operação pede {requested}. Registre a compra que está faltando ou ajuste a quantidade.",
     "MISSING_EVENT_RATIO": "O evento de {date} não informa a proporção do desdobramento ou grupamento, então não é possível recalcular o preço médio.",
     "INVALID_EVENT_RATIO": "A proporção {ratio} informada para o evento de {date} não é válida — ela precisa ser maior que zero.",
+    "MISSING_CONVERSION_COST_BASIS": "A conversão de {date} não informa o custo exato transferido para o ativo de destino.",
     "TRANSACTION_NOT_FOUND": "Esta transação não existe mais. Atualize a página e tente de novo.",
     "INVALID_QUANTITY": "A quantidade {quantity} não é válida para este tipo de transação.",
     "NEGATIVE_UNIT_PRICE": "O preço unitário não pode ser negativo.",
@@ -215,6 +216,7 @@
     "FUTURE_TRADE_DATE": "A data {tradeDate} está no futuro. O extrato registra apenas operações já realizadas.",
     "EMPTY_SELECTION": "Selecione ao menos uma transação.",
     "INVALID_PAGINATION": "Não foi possível carregar esta página da lista.",
+    "INVALID_CONVERSION_GROUP": "A conversão precisa ter todas as saídas e entradas, com o mesmo custo total exato.",
     "IMPORT_BATCH_NOT_FOUND": "Esta importação não existe mais.",
     "IMPORT_BATCH_NOT_PENDING": "Este arquivo já foi processado.",
     "IMPORT_BATCH_NOT_PREVIEWED": "Revise a prévia antes de confirmar a importação.",
@@ -532,7 +534,9 @@
       "transfer_out": "Transferência de saída",
       "adjustment": "Ajuste",
       "leilao_fracoes": "Leilão de frações",
-      "fracao_bonificacao": "Fração de bonificação"
+      "fracao_bonificacao": "Fração de bonificação",
+      "conversion_out": "Saída por conversão",
+      "conversion_in": "Entrada por conversão"
     },
     "summary": {
       "title": "O que esta importação mudou nas suas carteiras",
@@ -718,6 +722,7 @@
       "filteredBody": "Nenhuma transação corresponde aos filtros escolhidos. Tente ampliar o período ou limpar algum filtro."
     },
     "new": "Nova transação",
+    "newConversion": "Nova conversão",
     "form": {
       "createTitle": "Nova transação",
       "createDescription": "Registre manualmente uma operação que não veio de um extrato da B3 — um CDB do seu banco, por exemplo.",
@@ -759,6 +764,7 @@
       "confirm": "Confirmar exclusão",
       "cancel": "Voltar sem excluir",
       "impactTitle": "O que muda",
+      "conversionGroup": "As {count} pernas vinculadas desta conversão serão excluídas juntas.",
       "impactFrom": "Tudo que deriva desta posição a partir de {date} será recalculado.",
       "impactSubsequent": "{count} outra(s) transação(ões) desta posição entram no recálculo.",
       "impactPosition": "Posição",
@@ -771,6 +777,26 @@
     },
     "edit": {
       "action": "Editar"
+    },
+    "conversionGroup": {
+      "createTitle": "Nova conversão de ativos",
+      "createDescription": "Registre a troca de um ativo por outro sem criar caixa ou ganho realizado.",
+      "hint": "Todas as pernas desta conversão são salvas juntas. O custo total das saídas deve ser exatamente igual ao das entradas.",
+      "leg": "Perna {index}: {type} · ativo {assetId}",
+      "sourceAsset": "Ativo de origem",
+      "targetAsset": "Ativo de destino",
+      "chooseAsset": "Escolha um ativo",
+      "institution": "Instituição",
+      "noInstitution": "Sem instituição",
+      "date": "Data da conversão",
+      "sourceQuantity": "Quantidade que sai",
+      "targetQuantity": "Quantidade que entra",
+      "quantity": "Quantidade",
+      "costBasis": "Custo transferido",
+      "submitCreate": "Registrar conversão",
+      "submit": "Salvar conversão",
+      "submitting": "Salvando…",
+      "cancel": "Cancelar"
     },
     "bulk": {
       "label": "Ações em massa",

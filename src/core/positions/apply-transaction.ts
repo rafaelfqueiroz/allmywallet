@@ -2,20 +2,26 @@ import type { DomainError } from '@/core/shared/domain-error';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { Transaction } from '@/core/ledger/transaction';
 import type { PositionState } from '@/core/positions/position-state';
-import { applyAcquisition, applySale, applyWithdrawal } from '@/core/positions/average-cost';
+import {
+  applyAcquisition,
+  applyExactCostAcquisition,
+  applyExactCostWithdrawal,
+  applySale,
+  applyWithdrawal,
+} from '@/core/positions/average-cost';
 import {
   applyBonus,
   applyBonusFractionRemoval,
   applyShareRatioEvent,
   applySubscription,
 } from '@/core/positions/corporate-events';
-import { missingEventRatio } from '@/core/positions/errors';
+import { missingConversionCostBasis, missingEventRatio } from '@/core/positions/errors';
 
 /**
  * The one place a transaction type is turned into an effect on a position.
  *
- * Exhaustive by construction: every one of BR-006-05's fifteen types has a
- * case, and the switch has **no `default`**, so adding a sixteenth type stops
+ * Exhaustive by construction: every one of BR-006-05's seventeen types has a
+ * case, and the switch has **no `default`**, so adding an eighteenth type stops
  * the build rather than silently falling through to "no effect". A default
  * branch here would be the cheapest possible way to lose a corporate event.
  */
@@ -77,6 +83,36 @@ export function applyTransaction(
      */
     case 'transfer_out':
       return applyWithdrawal(state, quantity, tradeDate);
+
+    /**
+     * SPEC-007 BR-007-05b: a conversion changes the instrument, not the
+     * investment's economic cost. The outgoing leg therefore removes shares
+     * at their moving average without realising gain. Worked example: 40 of
+     * 100 shares held at 10,00 remove 400,00 of cost, leaving 60 / 600,00 /
+     * 10,00 and realised gain unchanged.
+     */
+    case 'conversion_out':
+      if (transaction.costBasis === null) return err(missingConversionCostBasis(tradeDate));
+      return applyExactCostWithdrawal(state, {
+        quantity,
+        costBasis: transaction.costBasis,
+        date: tradeDate,
+      });
+
+    /**
+     * SPEC-007 BR-007-05b: the incoming leg carries an exact allocated total,
+     * not a price to multiply. The database rejects a missing allocation, but
+     * replay is a second trust boundary and fails explicitly if one reaches
+     * the engine instead of silently opening a zero-cost position.
+     */
+    case 'conversion_in':
+      if (transaction.costBasis === null) return err(missingConversionCostBasis(tradeDate));
+      return ok(
+        applyExactCostAcquisition(state, {
+          quantity,
+          costBasis: transaction.costBasis,
+        }),
+      );
 
     case 'adjustment':
       return applyAdjustment(state, transaction);

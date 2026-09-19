@@ -100,6 +100,11 @@ export async function createTransaction(
     fees: input.fees,
     totalValue: computeTotalValue(input.type, input.quantity, input.unitPrice, input.fees),
     ratio,
+    // SPEC-006 BR-006-05 / SPEC-007 BR-007-05b: manual single-row entry
+    // never creates half of an asset conversion. The grouped import/manual
+    // conversion use case supplies these fields atomically.
+    conversionGroupId: null,
+    costBasis: null,
     naturalKey,
     // BR-006-04 / TS-21: two genuinely identical same-day trades are real, so
     // uniqueness is on `(natural_key, occurrence)` and the second one gets 2.

@@ -105,7 +105,7 @@ export const importBatches = pgTable(
 
 /**
  * The CHECK lists are generated from the same constants the domain uses
- * (`core/ledger/transaction.ts`), so BR-006-05's thirteen types and BR-006-03's
+ * (`core/ledger/transaction.ts`), so BR-006-05's seventeen types and BR-006-03's
  * three statuses cannot drift between the type system and the database. A
  * hand-copied list is a list that is wrong exactly once.
  */
@@ -140,6 +140,18 @@ export const transactions = pgTable(
     unitPrice: money('unit_price').notNull(),
     fees: money('fees').notNull(),
     totalValue: money('total_value').notNull(),
+    /**
+     * SPEC-007 BR-007-05b: all legs in one non-taxable asset conversion share
+     * a UUID. Nullable for every pre-conversion ledger row, keeping this
+     * additive change safe for the previous application version (AR-69).
+     */
+    conversionGroupId: uuid('conversion_group_id'),
+    /**
+     * SPEC-007 BR-007-05b: exact cost removed or allocated by a conversion
+     * leg. Both directions carry the same conserved group total; ordinary
+     * rows carry null.
+     */
+    costBasis: money('cost_basis'),
     /**
      * SPEC-007 BR-007-04: the multiplier a split or grupamento applies to
      * quantity — 2 for a 1:2 desdobramento, 0.1 for a 10:1 grupamento.
@@ -184,6 +196,7 @@ export const transactions = pgTable(
       table.assetId,
       table.tradeDate,
     ),
+    index('transactions_user_id_conversion_group_id_idx').on(table.userId, table.conversionGroupId),
     check('transactions_type_check', sql`${table.type} IN (${sql.raw(typeList)})`),
     check('transactions_status_check', sql`${table.status} IN (${sql.raw(statusList)})`),
     // SPEC-007 BR-007-04/BR-007-15. A split with no ratio cannot be replayed,
@@ -197,6 +210,24 @@ export const transactions = pgTable(
     ),
     check('transactions_fees_non_negative_check', sql`${table.fees} >= 0`),
     check('transactions_unit_price_non_negative_check', sql`${table.unitPrice} >= 0`),
+    // SPEC-007 BR-007-05b: conversion legs are grouped, only incoming legs
+    // carry allocated cost, and no conversion produces a cash flow.
+    check(
+      'transactions_conversion_pairing_check',
+      sql`(${table.type} = 'conversion_in'
+            AND ${table.conversionGroupId} IS NOT NULL
+            AND ${table.costBasis} IS NOT NULL
+            AND ${table.costBasis} >= 0
+            AND ${table.totalValue} = 0)
+          OR (${table.type} = 'conversion_out'
+            AND ${table.conversionGroupId} IS NOT NULL
+            AND ${table.costBasis} IS NOT NULL
+            AND ${table.costBasis} >= 0
+            AND ${table.totalValue} = 0)
+          OR (${table.type} NOT IN ('conversion_in', 'conversion_out')
+            AND ${table.conversionGroupId} IS NULL
+            AND ${table.costBasis} IS NULL)`,
+    ),
     check('transactions_occurrence_positive_check', sql`${table.occurrence} >= 1`),
   ],
 );

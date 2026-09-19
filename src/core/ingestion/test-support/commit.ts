@@ -15,11 +15,21 @@ import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/buil
 export function commitBatch(
   deps: IngestionDependencies,
   userId: UserId,
-  input: Omit<CommitBatchInput, 'corporateEventWindows'> &
-    Partial<Pick<CommitBatchInput, 'corporateEventWindows'>>,
+  input: Omit<
+    CommitBatchInput,
+    'corporateEventWindows' | 'assetConversionWindowDays' | 'assetConversionsEnabled'
+  > &
+    Partial<
+      Pick<
+        CommitBatchInput,
+        'corporateEventWindows' | 'assetConversionWindowDays' | 'assetConversionsEnabled'
+      >
+    >,
 ) {
   return commitBatchWithWindows(deps, userId, {
     corporateEventWindows: TEST_CORPORATE_EVENT_WINDOWS,
+    assetConversionWindowDays: 45,
+    assetConversionsEnabled: true,
     ...input,
   } as CommitBatchInput);
 }

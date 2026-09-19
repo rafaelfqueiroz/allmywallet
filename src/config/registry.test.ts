@@ -41,8 +41,9 @@ describe('registry', () => {
     // `import.fraction_origin_window_days` and
     // `import.fraction_auction_window_days` (SPEC-005 BR-005-20b, the three
     // day-windows the commit-time ratio confirmation and fraction-auction
-    // pairing are bounded by, per decision log #11).
-    expect(CONFIG_KEYS).toHaveLength(35);
+    // pairing are bounded by, per decision log #11); plus #121's
+    // `import.asset_conversion_window_days` (SPEC-005 BR-005-20c).
+    expect(CONFIG_KEYS).toHaveLength(36);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {
@@ -64,6 +65,10 @@ describe('registry', () => {
 
   it('uses the SPEC-005 BR-005-20b 45-calendar-day default for fraction origins', () => {
     expect(REGISTRY['import.fraction_origin_window_days'].default).toBe(45);
+  });
+
+  it('uses the SPEC-005 BR-005-20c 45-calendar-day default for asset conversions', () => {
+    expect(REGISTRY['import.asset_conversion_window_days'].default).toBe(45);
   });
 
   it('quotes.cadence_minutes rejects 0 — DL-002-01: never silently "poll continuously"', () => {

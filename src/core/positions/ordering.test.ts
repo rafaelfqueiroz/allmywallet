@@ -17,24 +17,43 @@ describe('replay ordering', () => {
   });
 
   describe('typeRank', () => {
-    it('ranks share-base events before every trade on the same date', () => {
+    it('ranks share-base events before every ordinary trade on the same date', () => {
       for (const event of ['split', 'grupamento', 'bonificacao'] as const) {
-        for (const trade of [
-          'buy',
-          'sell',
-          'subscription',
-          'transfer_in',
-          'transfer_out',
-        ] as const) {
+        for (const trade of ['buy', 'sell', 'subscription'] as const) {
           expect(typeRank(event)).toBeLessThan(typeRank(trade));
         }
       }
     });
 
-    it('ranks acquisitions before disposals, so a same-day buy is in the average a sale realises against', () => {
+    it('BR-005-20c — ranks the destination transfer carry before asset conversion legs', () => {
+      for (const conversion of ['conversion_out', 'conversion_in'] as const) {
+        expect(typeRank('transfer_in')).toBeLessThan(typeRank(conversion));
+      }
+    });
+
+    it('BR-007-05b — ranks conversion groups before dependent share-base events and ordinary trades', () => {
+      for (const conversion of ['conversion_out', 'conversion_in'] as const) {
+        for (const dependent of [
+          'split',
+          'grupamento',
+          'bonificacao',
+          'buy',
+          'sell',
+          'subscription',
+        ] as const) {
+          expect(typeRank(conversion)).toBeLessThan(typeRank(dependent));
+        }
+      }
+    });
+
+    it('ranks ordinary acquisitions before disposals, so a same-day buy is in the average a sale realises against', () => {
       expect(typeRank('buy')).toBeLessThan(typeRank('sell'));
-      expect(typeRank('transfer_in')).toBeLessThan(typeRank('transfer_out'));
       expect(typeRank('subscription')).toBeLessThan(typeRank('sell'));
+    });
+
+    it('BR-005-20a — ranks a same-day source buy before transfer_out carries its cost', () => {
+      expect(typeRank('buy')).toBeLessThan(typeRank('transfer_out'));
+      expect(typeRank('subscription')).toBeLessThan(typeRank('transfer_out'));
     });
 
     it('ranks adjustments between acquisitions and disposals', () => {
@@ -42,14 +61,14 @@ describe('replay ordering', () => {
       expect(typeRank('adjustment')).toBeLessThan(typeRank('sell'));
     });
 
-    it('assigns every one of BR-006-05’s fifteen types a rank', () => {
+    it('assigns every one of BR-006-05’s seventeen types a rank', () => {
       // A type with no rank would sort as NaN and make the comparator
       // non-transitive — which corrupts the fold in a way that depends on the
       // input array's length.
       for (const type of TRANSACTION_TYPES) {
         expect(Number.isInteger(typeRank(type))).toBe(true);
       }
-      expect(TRANSACTION_TYPES).toHaveLength(15);
+      expect(TRANSACTION_TYPES).toHaveLength(17);
     });
 
     it('BR-007-05a — ranks the bonificação fraction after share-base events and acquisitions', () => {
@@ -85,7 +104,7 @@ describe('replay ordering', () => {
       }
     });
 
-    it('#113 — inserting the fraction’s rank changed no pre-existing relative order', () => {
+    it('#113 / BR-005-20c — non-transfer types keep their pre-existing relative order', () => {
       // The table as it stood before #113, written out literally so this test
       // does not read the code it checks.
       const BEFORE_113 = {
@@ -94,17 +113,15 @@ describe('replay ordering', () => {
         bonificacao: 0,
         buy: 1,
         subscription: 1,
-        transfer_in: 1,
         adjustment: 2,
         sell: 3,
-        transfer_out: 3,
         dividend: 4,
         jcp: 4,
         rendimento: 4,
         amortization: 4,
       } as const;
       const types = Object.keys(BEFORE_113) as (keyof typeof BEFORE_113)[];
-      expect(types).toHaveLength(13);
+      expect(types).toHaveLength(11);
       for (const a of types) {
         for (const b of types) {
           expect(Math.sign(typeRank(a) - typeRank(b)), `${a} vs ${b}`).toBe(
@@ -208,6 +225,26 @@ describe('replay ordering', () => {
         fraction.id,
         sell.id,
         provento.id,
+      ]);
+    });
+
+    it('BR-005-20c / BR-007-05b — same day: transfer, conversion, share-base event, trade', () => {
+      // Built in reverse: only type rank can establish the target quantity
+      // before the split and the split-adjusted base before the buy.
+      const buy = aTransaction().buy().on('2026-03-10').build();
+      const split = aTransaction().split().ratio('2').on('2026-03-10').build();
+      const conversion = aTransaction()
+        .conversionIn('1000')
+        .quantity('50')
+        .on('2026-03-10')
+        .build();
+      const transfer = aTransaction().transferIn().quantity('10').on('2026-03-10').build();
+
+      expect(sortForReplay([buy, split, conversion, transfer]).map((t) => t.id)).toEqual([
+        transfer.id,
+        conversion.id,
+        split.id,
+        buy.id,
       ]);
     });
 

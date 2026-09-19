@@ -77,7 +77,15 @@ const RATIO_EVENTS = new Set(['split', 'grupamento']);
  * shares, so a wallet still holding them would leave allocated > held and fail
  * `assertWithinHoldings`, rolling back the whole commit.
  */
-const REDUCING_TYPES = new Set(['sell', 'transfer_out', 'fracao_bonificacao']);
+const REDUCING_TYPES = new Set([
+  'sell',
+  'transfer_out',
+  'fracao_bonificacao',
+  // SPEC-007 BR-007-05b: the source asset leaves the portfolio. Its linked
+  // target arrives unallocated, because the conversion says nothing about
+  // which purpose the new instrument should serve.
+  'conversion_out',
+]);
 
 export interface AllocationMade {
   readonly assetId: AssetId;

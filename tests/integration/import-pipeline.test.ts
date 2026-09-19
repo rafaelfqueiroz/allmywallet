@@ -493,6 +493,165 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     expect(positionAfterSecond[0]?.quantity).toBe('130.00000000');
   });
 
+  it('BR-005-20c/AC: commits an exact grouped conversion and re-imports it without another companion', async () => {
+    const importFile = async (rows: Parameters<typeof buildMovimentacaoXlsx>[0]) => {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    };
+    await importFile([
+      {
+        entradaSaida: 'Credito',
+        data: '02/01/2025',
+        movimentacao: 'Compra',
+        produto: 'ELET3 - Eletrobras ON',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '260',
+        precoUnitario: '10,00',
+      },
+    ]);
+    const conversion = [
+      {
+        entradaSaida: 'Credito',
+        data: '03/02/2025',
+        movimentacao: 'Atualização',
+        produto: 'AXIA3 - Axia ON',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '260',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      },
+    ];
+    const first = await importFile(conversion);
+
+    const { rows: legs } = await migratorPool.query<{
+      id: string;
+      type: string;
+      natural_key: string;
+      conversion_group_id: string;
+      cost_basis: string | null;
+      total_value: string;
+    }>(
+      `SELECT id, type, natural_key, conversion_group_id, cost_basis, total_value
+         FROM transactions WHERE conversion_group_id IS NOT NULL ORDER BY type`,
+    );
+    expect(legs).toHaveLength(2);
+    expect(new Set(legs.map((row) => row.conversion_group_id))).toHaveLength(1);
+    expect(legs.map((row) => row.type)).toEqual(['conversion_in', 'conversion_out']);
+    expect(legs.find((row) => row.type === 'conversion_in')?.cost_basis).toBe('2600.00000000');
+    expect(legs.every((row) => row.total_value === '0.00000000')).toBe(true);
+    const { rows: firstEvidence } = await migratorPool.query(
+      'SELECT classification, natural_key FROM import_rows WHERE batch_id = $1',
+      [first],
+    );
+    expect(firstEvidence).toEqual([{ classification: 'new', natural_key: legs[0]?.natural_key }]);
+
+    await importFile(conversion);
+    const { rows: after } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM transactions WHERE conversion_group_id IS NOT NULL',
+    );
+    expect(Number(after[0]?.n)).toBe(2);
+    const { rows: positions } = await migratorPool.query(
+      `SELECT a.code, p.quantity, p.total_cost, p.realized_gain
+         FROM positions p JOIN assets a ON a.id = p.asset_id
+        WHERE a.code IN ('ELET3', 'AXIA3') ORDER BY a.code`,
+    );
+    expect(positions).toEqual([
+      {
+        code: 'AXIA3',
+        quantity: '260.00000000',
+        total_cost: '2600.00000000',
+        realized_gain: '0.00000000',
+      },
+      {
+        code: 'ELET3',
+        quantity: '0.00000000',
+        total_cost: '0.00000000',
+        realized_gain: '0.00000000',
+      },
+    ]);
+  });
+
+  it('BR-005-20c: commits the observed KLBN11 one-to-many transfer evidence as one group', async () => {
+    const importFile = async (rows: Parameters<typeof buildMovimentacaoXlsx>[0]) => {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+    };
+    await importFile([
+      {
+        entradaSaida: 'Credito',
+        data: '19/12/2025',
+        movimentacao: 'Compra',
+        produto: 'KLBN11 - Klabin Units',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '0,6',
+        precoUnitario: '10,00',
+      },
+    ]);
+    const conversion = [
+      {
+        entradaSaida: 'Debito',
+        data: '23/12/2025',
+        movimentacao: 'Transferência',
+        produto: 'KLBN11 - Klabin Units',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '0,6',
+        precoUnitario: '-',
+      },
+      {
+        entradaSaida: 'Credito',
+        data: '23/12/2025',
+        movimentacao: 'Transferência',
+        produto: 'KLBN3 - Klabin ON',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '0,6',
+        precoUnitario: '-',
+      },
+      {
+        entradaSaida: 'Credito',
+        data: '23/12/2025',
+        movimentacao: 'Transferência',
+        produto: 'KLBN4 - Klabin PN',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '2',
+        precoUnitario: '-',
+      },
+      {
+        entradaSaida: 'Credito',
+        data: '23/12/2025',
+        movimentacao: 'Transferência',
+        produto: 'KLBN4 - Klabin PN',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '0,4',
+        precoUnitario: '-',
+      },
+    ];
+    await importFile(conversion);
+
+    const { rows: legs } = await migratorPool.query<{
+      type: string;
+      cost_basis: string;
+    }>(
+      `SELECT type, cost_basis FROM transactions
+        WHERE conversion_group_id IS NOT NULL ORDER BY type DESC, cost_basis DESC`,
+    );
+    expect(legs).toEqual([
+      { type: 'conversion_out', cost_basis: '6.00000000' },
+      { type: 'conversion_in', cost_basis: '4.00000000' },
+      { type: 'conversion_in', cost_basis: '1.20000000' },
+      { type: 'conversion_in', cost_basis: '0.80000000' },
+    ]);
+    await importFile(conversion);
+    const { rows: after } = await migratorPool.query(
+      'SELECT count(*)::int AS n FROM transactions WHERE conversion_group_id IS NOT NULL',
+    );
+    expect(Number(after[0]?.n)).toBe(4);
+  });
+
   /**
    * SPEC-005 BR-005-17 + BR-005-20 — the two rules meeting.
    *
@@ -853,6 +1012,8 @@ describe('SPEC-005 — import pipeline (integration)', () => {
           return commitBatch({ ...deps, positions: throwingPositions }, userId, {
             batchId,
             corporateEventWindows: TEST_CORPORATE_EVENT_WINDOWS,
+            assetConversionWindowDays: 45,
+            assetConversionsEnabled: true,
           });
         },
         appDb,
@@ -1651,6 +1812,8 @@ describe('SPEC-005 — import pipeline (integration)', () => {
               record.fees,
             ),
             ratio: null,
+            conversionGroupId: null,
+            costBasis: null,
             naturalKey: importNaturalKeyFor(
               {
                 assetId: row.assetId,
