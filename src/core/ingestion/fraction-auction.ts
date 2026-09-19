@@ -67,6 +67,74 @@ export interface OriginCandidate {
   readonly quantityAfter: Quantity | null;
   /** `quantityAfter − ⌊quantityAfter⌋`; `null` with it. */
   readonly fractionalPart: Quantity | null;
+  /**
+   * #129 D1 — the share-base event this candidate stands in for, when the
+   * candidate is itself a `conversion_in` (`tracedConversionOrigin`). `null`
+   * for an ordinary share-base event on the position, which is its own origin.
+   */
+  readonly tracedFrom?: TracedOrigin | null | undefined;
+}
+
+/**
+ * #129 D1 — the share-base event behind a `conversion_in`, reached through the
+ * group's outgoing leg.
+ */
+export interface TracedOrigin {
+  /** The `conversion_out` leg's id. */
+  readonly conversionOutId: string;
+  /** The share-base event on the **source** position. */
+  readonly event: OriginCandidate;
+}
+
+/** One outgoing leg of a conversion group, with the source position's share-base events. */
+export interface ConversionOutTrace {
+  readonly id: string;
+  /** How much the group removed from this source position. */
+  readonly quantity: Quantity;
+  /** Share-base events on the source position, each with the fraction it left there. */
+  readonly candidates: readonly OriginCandidate[];
+  /** An unresolved ratio event sits on the source position too: nothing may be traced through it. */
+  readonly unresolved: boolean;
+}
+
+/**
+ * BR-005-20b (#129 D1) — **a fraction on a conversion target takes its origin
+ * from the group's source.**
+ *
+ * KLBN11's bonificação of 2025-12-19 left a fractional unit; B3 decomposed
+ * that unit into its component shares (0,6 KLBN11 → 0,6 KLBN3 and 2,4 KLBN4)
+ * and auctioned the fractions off the **targets**. KLBN3 and KLBN4 have no
+ * share-base event of their own — their only prior row is a `conversion_in` —
+ * so every candidate list was empty and both fractions refused `no_origin`.
+ *
+ * The trail is exact rather than inferred: the group's outgoing quantity must
+ * itself be **precisely the fractional part a unique share-base event left on
+ * the source position** — the same arithmetic `originOf` runs on a fraction,
+ * applied one asset upstream. KLBN11 after its bonificação holds X,6; the
+ * `conversion_out` is 0,6; they agree, so the origin is that bonificação and
+ * the target's fraction is a `fracao_bonificacao` whose auction is a
+ * `leilao_fracoes` provento (BR-007-05a) — exactly what it would have been had
+ * the units never crossed assets.
+ *
+ * Every other shape refuses. A group with several outgoing legs traces only
+ * where **all** of them reach the same origin type; a conversion of a whole
+ * position (outgoing 100,6, no event leaving 100,6) traces to nothing and the
+ * fraction stays `unclassified`. Guessing here would decide a fraction's tax
+ * treatment — exempt income or a realised disposal — without evidence.
+ */
+export function tracedConversionOrigin(
+  outLegs: readonly ConversionOutTrace[],
+): TracedOrigin | null {
+  if (outLegs.length === 0) return null;
+  const traced: TracedOrigin[] = [];
+  for (const leg of outLegs) {
+    const verdict = originOf(leg.quantity, leg.candidates, leg.unresolved);
+    if (!verdict.ok) return null;
+    traced.push({ conversionOutId: leg.id, event: verdict.origin });
+  }
+  const [only] = traced;
+  if (only === undefined) return null;
+  return traced.every((t) => t.event.type === only.event.type) ? only : null;
 }
 
 export type OriginVerdict =

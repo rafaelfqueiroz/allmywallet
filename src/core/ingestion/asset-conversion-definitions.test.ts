@@ -7,8 +7,9 @@ import {
 describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
   it('is explicitly versioned and contains no dates, quantities or personal data', () => {
     // #128 D3: v2 replaced `axia7-and-axia13-to-axia15g` with a definition
-    // sourced from AXIA7 alone.
-    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(2);
+    // sourced from AXIA7 alone. #129 D2: v3 did the same for CPLE3, which is
+    // sourced from CPLE6 — the only CPLE code that ever holds a position.
+    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(3);
     expect(
       ASSET_CONVERSION_DEFINITIONS.map((definition) => ({
         id: definition.id,
@@ -25,8 +26,8 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
         targets: [{ evidence: 'AXIA3', ledger: 'AXIA3' }],
       },
       {
-        id: 'cple7-to-cple3',
-        sources: ['CPLE7'],
+        id: 'cple6-to-cple3',
+        sources: ['CPLE6'],
         targets: [{ evidence: 'CPLE3', ledger: 'CPLE3' }],
       },
       {

@@ -4,13 +4,18 @@ import { Quantity } from '@/core/shared/money';
  * SPEC-005 BR-005-20c: the explicit, reviewable conversion-definition table.
  *
  * **v2 (#128 D3)** — `axia7-and-axia13-to-axia15g` became `axia7-to-axia15g`,
- * sourced from AXIA7 alone. The version is part of every `groupKey`
- * (`asset-conversion-resolution.ts`), so a group already written under a v1
- * key keeps it: `commit-batch.ts` never re-resolves evidence whose stored
- * transaction is already an active conversion leg, so a re-import is still a
- * no-op rather than a second group under a v2 key.
+ * sourced from AXIA7 alone.
+ *
+ * **v3 (#129 D2)** — `cple7-to-cple3` became `cple6-to-cple3`, for the same
+ * reason: CPLE7 never holds a position.
+ *
+ * The version is part of every `groupKey` (`asset-conversion-resolution.ts`),
+ * so a group already written under an older key keeps it: `commit-batch.ts`
+ * never re-resolves evidence whose stored transaction is already an active
+ * conversion leg, so a re-import is still a no-op rather than a second group
+ * under a newer key.
  */
-export const ASSET_CONVERSION_DEFINITIONS_VERSION = 2;
+export const ASSET_CONVERSION_DEFINITIONS_VERSION = 3;
 
 export interface AssetConversionTargetDefinition {
   /** B3 Movimentação code; omitted when it equals the canonical ledger code. */
@@ -51,7 +56,13 @@ function oneTarget(
  */
 export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] = [
   oneTarget('elet3-to-axia3', ['ELET3'], 'AXIA3'),
-  oneTarget('cple7-to-cple3', ['CPLE7'], 'CPLE3'),
+  // #129 D2: sourced from **CPLE6**, the only CPLE code that ever holds a
+  // position. CPLE7 appears solely as an `Atualização` balance statement —
+  // evidence, never an acquisition (BR-005-20c) — and is then redeemed for
+  // cash, so a definition sourcing it refused the complete group
+  // `insufficient_quantity` and CPLE3 stayed at 0. The 175 shares B3 actually
+  // converted are the CPLE6 ones, whose position goes to zero on that date.
+  oneTarget('cple6-to-cple3', ['CPLE6'], 'CPLE3'),
   oneTarget('axia7-to-axia13', ['AXIA7'], 'AXIA13'),
   // #128 D3: sourced from AXIA7 **alone**. B3's own arithmetic is one-to-one
   // from AXIA7 (64 → 52, with 12 into AXIA15); AXIA13's units were redeemed

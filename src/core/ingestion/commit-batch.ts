@@ -209,6 +209,14 @@ interface CorporatePlan {
   readonly byId: ReadonlyMap<string, PlannedCorporateRow>;
   readonly factors: ReadonlyMap<string, readonly CorporateEventFactor[]>;
   readonly windows: CorporateEventWindows;
+  /**
+   * BR-005-20b (#129 D1) — every leg of each conversion group already stored
+   * on a position that carries a corporate-event row, keyed by group id. A
+   * fraction on a conversion target reaches its origin through the group's
+   * outgoing leg, which sits on a different position; the legs are read once
+   * here so the settling rounds never query again.
+   */
+  readonly conversionGroups: ReadonlyMap<string, readonly Transaction[]>;
 }
 
 /** A resolved corporate-event row in a settling round, and what it writes. */
@@ -1547,6 +1555,25 @@ function settle(
   const activations = liveReclassified
     .filter((reclassification) => reclassification.kind === 'activate')
     .map((reclassification) => reclassification.updated);
+  /**
+   * BR-005-20b (#129 D1) — a conversion group's legs, whether this commit is
+   * planning them or an earlier import stored them. Both sources are needed:
+   * the KLBN11 decomposition and the fractions it leaves arrive in the same
+   * file, so on a first import the outgoing leg exists only as a plan, while
+   * on a re-import it is already in the ledger. Deduplicated by id, the
+   * planned copy winning — a row-backed leg promoted in place is both.
+   */
+  const legsOfConversionGroup = (groupId: ConversionGroupId): readonly Transaction[] => {
+    const byId = new Map<string, Transaction>(
+      (corporate.conversionGroups.get(groupId) ?? []).map((leg) => [leg.id, leg]),
+    );
+    for (const write of conversionWrites) {
+      if (write.transaction.conversionGroupId === groupId)
+        byId.set(write.transaction.id, write.transaction);
+    }
+    return [...byId.values()];
+  };
+
   const historyFor = (
     key: PositionKey,
     carried: readonly Transaction[],
@@ -1607,6 +1634,7 @@ function settle(
               factors: corporate.factors,
               windows: corporate.windows,
               declined: corporateDeclined,
+              conversionLegs: legsOfConversionGroup,
             }),
           );
 
@@ -1814,11 +1842,38 @@ async function planCorporateEvents(
   const factors =
     issuers.length === 0 ? new Map() : await deps.corporateEventFactors.listByIssuers(issuers);
 
+  /**
+   * #129 D1 — the conversion groups that brought shares onto these positions.
+   * Each group's outgoing leg sits on its **source** position, whose ledger
+   * `stored` has no reason to hold yet, so it is primed here: `settle`'s
+   * `historyFor` reads the source's share-base events through it.
+   */
+  const conversionGroups = new Map<string, readonly Transaction[]>();
+  for (const [, key] of positions) {
+    for (const t of stored(key)) {
+      const groupId = t.conversionGroupId;
+      if (t.type !== 'conversion_in' || t.status !== 'active' || groupId === null) continue;
+      if (conversionGroups.has(groupId)) continue;
+      const legs = await deps.transactions.listByConversionGroup(groupId);
+      conversionGroups.set(groupId, legs);
+      for (const leg of legs) {
+        if (leg.type !== 'conversion_out') continue;
+        const sourceKey = { assetId: leg.assetId, institutionId: leg.institutionId };
+        if (stored(sourceKey).length > 0) continue;
+        stored.prime(
+          sourceKey,
+          await deps.transactions.listForPosition(leg.assetId, leg.institutionId),
+        );
+      }
+    }
+  }
+
   return {
     rows: planned,
     byId: new Map(planned.map((p) => [p.event.id, p])),
     factors,
     windows,
+    conversionGroups,
   };
 }
 

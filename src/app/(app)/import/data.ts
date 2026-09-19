@@ -231,12 +231,48 @@ export async function loadImportBatchDetail(
         issuerCodes.length === 0
           ? new Map()
           : await deps.corporateEventFactors.listByIssuers(issuerCodes);
+      /**
+       * SPEC-005 BR-005-20b (#129 D1) — a fraction on a **conversion target**
+       * takes its origin one asset upstream, through the group's outgoing leg.
+       * Commit reads those legs and the source position's ledger; so must the
+       * explanation, or the page says `no_origin` for a row commit resolves.
+       *
+       * Kept in its own map rather than added to `ledgerByPosition`, which
+       * `buildCorporateEventRows` sweeps for context rows — a source position
+       * is history here, never a row of this batch.
+       */
+      const conversionGroups = new Map<string, readonly Transaction[]>();
+      const sourceLedgers = new Map<string, readonly Transaction[]>();
+      for (const ledger of ledgerByPosition.values()) {
+        for (const t of ledger) {
+          const groupId = t.conversionGroupId;
+          if (t.type !== 'conversion_in' || t.status !== 'active' || groupId === null) continue;
+          if (conversionGroups.has(groupId)) continue;
+          const legs = await deps.transactions.listByConversionGroup(groupId);
+          conversionGroups.set(groupId, legs);
+          for (const leg of legs) {
+            const key = positionKeyString(leg);
+            if (leg.type !== 'conversion_out') continue;
+            if (ledgerByPosition.has(key) || sourceLedgers.has(key)) continue;
+            sourceLedgers.set(
+              key,
+              ledgers.get(key) ??
+                (await deps.transactions.listForPosition(leg.assetId, leg.institutionId)),
+            );
+          }
+        }
+      }
+
       const windows = await loadCorporateEventWindows();
       const outcomes = resolveCorporateEvents({
         rows: eventRows,
-        history: (key) => ledgerByPosition.get(positionKeyString(key)) ?? [],
+        history: (key) => {
+          const id = positionKeyString(key);
+          return ledgerByPosition.get(id) ?? sourceLedgers.get(id) ?? [];
+        },
         factors,
         windows,
+        conversionLegs: (groupId) => conversionGroups.get(groupId) ?? [],
       });
       for (const row of corporateEventRows) {
         if (row.classification !== 'unclassified') continue;
