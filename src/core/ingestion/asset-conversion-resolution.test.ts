@@ -238,7 +238,7 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
     const first = expectResolved(resolve([oneToOne], rows, sources));
     const second = expectResolved(resolve([oneToOne], [...rows].reverse(), [...sources].reverse()));
     expect(second.groupKey).toBe(first.groupKey);
-    expect(first.groupKey.startsWith('conversion:v1:')).toBe(true);
+    expect(first.groupKey.startsWith('conversion:v2:')).toBe(true);
     expect(second.legs.map((leg) => leg.key).sort()).toEqual(
       first.legs.map((leg) => leg.key).sort(),
     );
@@ -246,7 +246,7 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
 
   it('maps AXIA15 movement evidence to the canonical AXIA15G ledger asset', () => {
     const definition = ASSET_CONVERSION_DEFINITIONS.find(
-      (candidate) => candidate.id === 'axia7-and-axia13-to-axia15g',
+      (candidate) => candidate.id === 'axia7-to-axia15g',
     );
     expect(definition).toBeDefined();
     if (definition === undefined) return;
@@ -254,7 +254,9 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
       resolve(
         [definition],
         [evidence('axia-target', 'AXIA15', '0', '12')],
-        [source('AXIA7', '4', '10'), source('AXIA13', '8', '20')],
+        // #128 D3: AXIA7 alone. 12 of the 12 held leave, so the whole
+        // 12 × 10,00 = 120,00 goes to the single AXIA15G target.
+        [source('AXIA7', '12', '10')],
       ),
     );
     expect(

@@ -214,12 +214,24 @@ export const REGISTRY = {
    * SPEC-005 BR-005-20b — how far back a `Fração em Ativos` debit row may
    * look, within the same import plus the active ledger, for the
    * split/grupamento/bonificação event it originated from. The configured
-   * default is 45 calendar days (#113 decision 35).
+   * default is **60 calendar days** (#113 decision 35, widened by #128 D1).
+   *
+   * DL-005-10 set 45 as "the observed maximum (38) with a seven-day margin".
+   * A real bonificação on 2025-12-23 left its `Fração em Ativos` on
+   * 2026-02-09 — **48 days** — so 45 refused it `no_origin` and the fraction
+   * stayed unclassified for good.
+   *
+   * **Widening is safe by construction.** The window only decides which
+   * share-base events are *candidates*; correctness comes from `originOf`,
+   * which demands an exact fractional-part equality and refuses
+   * `ambiguous_origin` the moment two candidates match. So a wider window can
+   * only ever turn a resolution into a refusal, never into a wrong
+   * attribution. 60 keeps 12 days of margin over the observed maximum.
    */
   'import.fraction_origin_window_days': {
     key: 'import.fraction_origin_window_days',
     schema: z.number().int().min(0).max(365),
-    default: 45,
+    default: 60,
     levels: ['deployment'],
     description:
       'Days a Fração em Ativos row may look back for the corporate event it originated from (SPEC-005 BR-005-20b).',

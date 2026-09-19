@@ -353,7 +353,7 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
     expect(status).toBe('committed');
   });
 
-  it('BR-005-20b/BR-005-17: the 45-day default activates the generated ALUP11 and DEXP3 fraction chains in place, then re-import writes nothing', async () => {
+  it('BR-005-20b/BR-005-17: the 60-day default activates the generated ALUP11 and DEXP3 fraction chains in place, then re-import writes nothing', async () => {
     // Generated regression data only (DV-24/TS-19). Hand calculation:
     // ALUP11 130 + 5,2 − 0,2 + 5,4 − 0,4 + 5,6 − 0,6 = 145.
     // The first two origins are 37 and 38 calendar days before their fractions.
@@ -408,7 +408,9 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
     expect(await positionFor('DEXP3')).toMatchObject({ quantity: '112.50000000' });
 
     // Remove the deployment override so the next commit exercises the registry
-    // default itself (45), not a second test-only override.
+    // default itself (60 since #128 D1), not a second test-only override.
+    // Every gap here — 37, 38, 29 and 35 days — is inside both bounds, so
+    // widening the window changes nothing this test asserts.
     await migratorPool.query(
       "DELETE FROM config_overrides WHERE key = 'import.fraction_origin_window_days' AND level = 'deployment'",
     );

@@ -229,6 +229,9 @@ interface ConversionPlan {
   readonly writes: readonly ConversionWrite[];
 }
 
+/** #128 D2: the preview settlement gives nothing up — exclusions belong to the settling rounds. */
+const NO_EXCLUSIONS: ReadonlySet<string> = new Set<string>();
+
 interface Group {
   readonly key: PositionKey;
   readonly candidates: Candidate[];
@@ -357,17 +360,75 @@ export async function commitBatch(
 
   const stored = await loadLedgers(deps, rows);
   const carryLegs = planCarries(rows, newCandidates, stored, batch.id, userId, now, today);
-  const conversionPlan = input.assetConversionsEnabled
-    ? await planAssetConversions(
-        deps,
-        rows,
-        newCandidates,
-        carryLegs,
-        stored,
-        { batchId: batch.id, userId, now, today },
-        input.assetConversionWindowDays,
-      )
-    : { writes: [] };
+  const context = { batchId: batch.id, userId, now, today };
+  const reclassifications = planReclassifications(rows, stored, carryLegs, today);
+  const corporate = await planCorporateEvents(
+    deps,
+    rows,
+    stored,
+    context,
+    input.corporateEventWindows,
+  );
+
+  /**
+   * SPEC-005 BR-005-20c (#128 D2) — **conversions are measured against a
+   * position whose corporate events have settled.**
+   *
+   * A conversion's outgoing quantity is `replayed position immediately before
+   * the statement date − the statement quantity`. An unresolved `Fração em
+   * Ativos` is stored `unclassified` and excluded from replay (BR-007-16), so
+   * planning conversions before corporate settlement replayed AXIA7 as 68,34
+   * on 2026-08-11 rather than 68, and moved 4,34 units — and 4,34/68,34 of the
+   * cost — into AXIA13 instead of 4. A quantity error and a silent cost-basis
+   * error, both indistinguishable from a correct figure on the report.
+   *
+   * **The dependency is mutual**, so the order cannot simply be swapped: the
+   * KLBN3/KLBN4 fractions need their KLBN11 conversion legs in the replay
+   * before their origin's `quantityAfter` can be computed, while AXIA7's
+   * conversion needs its fraction settled first.
+   *
+   * **Two bounded passes, never a fixpoint loop** (#125 — a settlement loop
+   * that did not terminate is why that rule exists):
+   *
+   * 1. plan conversions with no corporate settlement — enough for KLBN11,
+   *    whose legs depend on no corporate event;
+   * 2. settle corporate events once against those legs;
+   * 3. plan conversions again with the settled events in the replay.
+   *
+   * The final `settle` rounds below then resolve corporate events again with
+   * the pass-2 legs in history, keeping their existing monotonic-decline
+   * semantics. Passes 1 and 2 read the same inputs and write nothing, so the
+   * plan is deterministic: the same file always produces the same groups.
+   */
+  const planConversions = (settledCorporate: readonly Transaction[]) =>
+    input.assetConversionsEnabled
+      ? planAssetConversions(
+          deps,
+          rows,
+          newCandidates,
+          carryLegs,
+          stored,
+          context,
+          input.assetConversionWindowDays,
+          settledCorporate,
+        )
+      : Promise.resolve<ConversionPlan>({ writes: [] });
+  const firstPass = await planConversions([]);
+  const settledCorporate =
+    input.assetConversionsEnabled && corporate.rows.length > 0
+      ? settledCorporateTransactions(
+          newCandidates,
+          carryLegs,
+          reclassifications,
+          stored,
+          firstPass.writes,
+          corporate,
+        )
+      : [];
+  // Nothing settled — a commit with no corporate rows, or one whose rows all
+  // refused. Pass 2 would read exactly the inputs pass 1 did.
+  const conversionPlan =
+    settledCorporate.length === 0 ? firstPass : await planConversions(settledCorporate);
 
   /**
    * SPEC-005 BR-005-20a (#110) — carries are resolved here, at commit, where
@@ -391,14 +452,6 @@ export async function commitBatch(
   const vetoed = new Set<string>();
   const declined = new Set<string>();
   const conversionDeclined = new Set<string>();
-  const reclassifications = planReclassifications(rows, stored, carryLegs, today);
-  const corporate = await planCorporateEvents(
-    deps,
-    rows,
-    stored,
-    { batchId: batch.id, userId, now, today },
-    input.corporateEventWindows,
-  );
   /** BR-005-20b: resolved corporate-event rows given up because their group could not replay with them. */
   const corporateDeclined = new Set<string>();
   const settleRound = () =>
@@ -1072,10 +1125,53 @@ function chronologicalEvidenceGroups(
 }
 
 /**
+ * #128 D2 — the corporate-event rows this commit would settle, resolved once
+ * so `planAssetConversions` can measure its statements against a position
+ * those events have already moved (BR-005-20b before BR-005-20c).
+ *
+ * Deliberately `settle` itself rather than a second call to
+ * `resolveCorporateEvents`: the history a corporate event is resolved against
+ * — stored ledger, this batch's live candidates, carried transfers,
+ * activations and the conversion legs planned so far — is assembled in exactly
+ * one place, and a preview assembling it differently would resolve differently
+ * from the settlement that follows.
+ *
+ * Nothing is given up here (`NO_EXCLUSIONS`): this pass writes nothing, and
+ * the settling rounds below decide what a failed replay costs.
+ */
+function settledCorporateTransactions(
+  newCandidates: readonly Candidate[],
+  carryLegs: readonly PlannedCarry[],
+  reclassifications: readonly Reclassification[],
+  stored: StoredLedger,
+  conversionWrites: readonly ConversionWrite[],
+  corporate: CorporatePlan,
+): readonly Transaction[] {
+  return settle(
+    newCandidates,
+    carryLegs,
+    reclassifications,
+    stored,
+    NO_EXCLUSIONS,
+    NO_EXCLUSIONS,
+    NO_EXCLUSIONS,
+    conversionWrites,
+    corporate,
+    NO_EXCLUSIONS,
+  ).flatMap((group) => group.corporate.map((write) => write.transaction));
+}
+
+/**
  * SPEC-005 BR-005-20c: gather current and stored untouched evidence, replay
  * each involved position immediately before its statement, then ask the pure
  * resolver for an all-or-nothing group. Transfer carries are supplied first;
  * the resulting conversion legs are supplied to corporate-event settlement.
+ *
+ * `settledCorporate` (#128 D2) is what corporate-event settlement makes of
+ * this commit's Desdobro, Grupamento, Fração em Ativos and Leilão de Fração
+ * rows. Their stored copies are `unclassified` and so excluded from replay
+ * (BR-007-16); these resolved forms are what actually moves the position a
+ * conversion statement is measured against. Empty on the first pass.
  */
 async function planAssetConversions(
   deps: IngestionDependencies,
@@ -1085,6 +1181,7 @@ async function planAssetConversions(
   stored: StoredLedger,
   context: { batchId: ImportBatchId; userId: UserId; now: Date; today: BusinessDate },
   conversionWindowDays: number,
+  settledCorporate: readonly Transaction[],
 ): Promise<ConversionPlan> {
   const currentEvidence = rows.filter((row) => conversionEvidenceForRow(row) !== null);
   if (currentEvidence.length === 0) return { writes: [] };
@@ -1268,6 +1365,14 @@ async function planAssetConversions(
               transaction.assetId === assetId && transaction.institutionId === institutionId,
           ),
           ...carriedTransactions.filter(
+            (transaction) =>
+              transaction.assetId === assetId && transaction.institutionId === institutionId,
+          ),
+          // #128 D2 / SPEC-005 BR-005-20b: the settled fraction, auction,
+          // split or grupamento. Its `unclassified` stored copy may also be in
+          // `storedRows` under the same id — that copy is excluded from replay
+          // by status, so the position is never moved twice.
+          ...settledCorporate.filter(
             (transaction) =>
               transaction.assetId === assetId && transaction.institutionId === institutionId,
           ),
