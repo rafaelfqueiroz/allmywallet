@@ -50,11 +50,13 @@ describe('#129 BR-005-20b — tracedConversionOrigin', () => {
       tracedConversionOrigin([
         { id: 'out', quantity: q('0.6'), candidates: [bonus], unresolved: false },
       ]),
-    ).toEqual({ conversionOutId: 'out', event: bonus });
+    ).toEqual({ ok: true, origin: { conversionOutId: 'out', event: bonus } });
   });
 
   it('traces nothing when the outgoing quantity is not a fraction any event left', () => {
-    // A whole position converted: 100,6 out, and no event leaves 100,6.
+    // A whole position converted: 100,6 out, and no event leaves 100,6. There
+    // is no trail rather than an unreadable one, so the fraction goes on to
+    // refuse `no_origin` and not `origin_unresolved`.
     expect(
       tracedConversionOrigin([
         {
@@ -64,10 +66,12 @@ describe('#129 BR-005-20b — tracedConversionOrigin', () => {
           unresolved: false,
         },
       ]),
-    ).toBeNull();
+    ).toEqual({ ok: false, unresolved: false });
   });
 
-  it('traces nothing through an unresolved ratio event on the source, or with no outgoing leg', () => {
+  it('reports an unreadable trail separately from an absent one', () => {
+    // An unsettled ratio event on the source: traceable in principle, not
+    // readable now, so the fraction must wait rather than be classified.
     expect(
       tracedConversionOrigin([
         {
@@ -77,8 +81,20 @@ describe('#129 BR-005-20b — tracedConversionOrigin', () => {
           unresolved: true,
         },
       ]),
-    ).toBeNull();
-    expect(tracedConversionOrigin([])).toBeNull();
+    ).toEqual({ ok: false, unresolved: true });
+    // Two source events leaving the same fraction: also undecidable.
+    expect(
+      tracedConversionOrigin([
+        {
+          id: 'out',
+          quantity: q('0.6'),
+          candidates: [event('a', 'bonificacao', '106.6'), event('b', 'bonificacao', '40.6')],
+          unresolved: false,
+        },
+      ]),
+    ).toEqual({ ok: false, unresolved: true });
+    // No conversion at all on the position: nothing to trace, nothing unknown.
+    expect(tracedConversionOrigin([])).toEqual({ ok: false, unresolved: false });
   });
 
   it('traces only where every outgoing leg reaches the same origin type', () => {
@@ -96,10 +112,11 @@ describe('#129 BR-005-20b — tracedConversionOrigin', () => {
         unresolved: false,
       },
     ];
-    expect(tracedConversionOrigin(legs('bonificacao'))?.conversionOutId).toBe('out-a');
+    const agreed = tracedConversionOrigin(legs('bonificacao'));
+    expect(agreed.ok && agreed.origin.conversionOutId).toBe('out-a');
     // One bonificação and one grupamento: exempt income or a realised
-    // disposal, and nothing says which. Refuse rather than pick.
-    expect(tracedConversionOrigin(legs('grupamento'))).toBeNull();
+    // disposal, and nothing says which. Undecidable, not absent.
+    expect(tracedConversionOrigin(legs('grupamento'))).toEqual({ ok: false, unresolved: true });
   });
 });
 

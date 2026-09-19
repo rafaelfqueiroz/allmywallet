@@ -52,7 +52,12 @@ export class DrizzleTransactionRepository implements TransactionRepository {
     const rows = await this.tx
       .select()
       .from(transactions)
-      .where(eq(transactions.conversionGroupId, groupId));
+      .where(eq(transactions.conversionGroupId, groupId))
+      // #129 review: ordered, because BR-005-20b's cross-asset origin trace
+      // reports the first outgoing leg's event. Unordered, a group with more
+      // than one source would show a different trail between two runs of the
+      // same file — the verdict is order-independent, the explanation was not.
+      .orderBy(transactions.tradeDate, transactions.createdAt, transactions.id);
     return rows.map(toDomain);
   }
 
