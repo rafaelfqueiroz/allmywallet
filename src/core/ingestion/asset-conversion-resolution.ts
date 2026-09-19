@@ -160,23 +160,45 @@ function groupIdentity(
   return `conversion:v${ASSET_CONVERSION_DEFINITIONS_VERSION}:${definition.id}:${rows}:${holdings}`;
 }
 
+/**
+ * BR-005-20c — how a group's carried cost divides between its targets.
+ *
+ * A weight of **zero** is permitted (#129 D3): it says B3 put shares on this
+ * target and attributed no value to them, which is the same reading a
+ * `bonificacao` already takes of a quantity B3 states without a price
+ * (SPEC-007 BR-007-05, "B3's attributed value **or zero**"). CPLE6 converts
+ * into CPLE3 and a redeemable CPLE7 that B3 immediately cashes out; B3 states
+ * both quantities and no cost split, so the whole basis stays with CPLE3 and
+ * the redemption realises its full proceeds. At least one weight must still be
+ * positive — an all-zero split would lose the cost entirely.
+ *
+ * The storage-scale residual goes to the last **positive-weight** target
+ * rather than simply the last: a zero-weight target in final position would
+ * otherwise absorb the rounding and stop being zero-cost, which is exactly
+ * what the weight asserts.
+ */
 function targetAllocations(
   targets: readonly AssetConversionTargetDefinition[],
   totalCost: Money,
 ): readonly Money[] | null {
   if (targets.length === 1) return [totalCost];
   const weights = targets.map((target) => target.allocationWeight);
-  if (weights.some((weight) => weight === null || !weight.isPositive())) return null;
+  if (weights.some((weight) => weight === null || weight.isNegative())) return null;
   const concreteWeights = weights.filter((weight): weight is Quantity => weight !== null);
   const weightTotal = concreteWeights.reduce((sum, weight) => sum.plus(weight), Quantity.zero());
   if (!weightTotal.isPositive()) return null;
+  const residualIndex = concreteWeights.reduce(
+    (last, weight, index) => (weight.isPositive() ? index : last),
+    -1,
+  );
+  if (residualIndex < 0) return null;
 
   const allocations: Money[] = [];
   let allocated = Money.zero();
   for (let index = 0; index < targets.length; index += 1) {
-    if (index === targets.length - 1) {
-      // BR-005-20c: storage-scale residual belongs deterministically to the final target.
-      allocations.push(totalCost.minus(allocated));
+    if (index === residualIndex) {
+      // Filled in below, once every other target has taken its share.
+      allocations.push(Money.zero());
       continue;
     }
     const weight = concreteWeights[index];
@@ -185,6 +207,8 @@ function targetAllocations(
     allocations.push(allocation);
     allocated = allocated.plus(allocation);
   }
+  // BR-005-20c: the storage-scale residual belongs deterministically to one target.
+  allocations[residualIndex] = totalCost.minus(allocated);
   return allocations;
 }
 
