@@ -1281,6 +1281,108 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(deps.transactions.rows).toHaveLength(beforeReimport);
   });
 
+  /**
+   * #129 review — the arrival order the owner's real ledger was in, which
+   * neither earlier test covers. The `Fração em Ativos` and `Leilão de Fração`
+   * rows were already stored `unclassified` by an import that ran before the
+   * tracing existed, so they take the `duplicate` → `in_place` path, where
+   * "activated in place, key kept, not a user edit" lives (BR-005-20).
+   *
+   * Same arithmetic as the chain above: KLBN11 106,6 at 1.066,00 leaves 0,6,
+   * 6,00 moves out, KLBN4 receives 2,4 at 4,80, and the 0,4 fraction leaves 2
+   * shares at 4,80.
+   */
+  it('#129: activates a traced fraction in place, keeping its key', async () => {
+    const deps = buildFakeIngestionDeps('2026-09-19');
+    const row = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      assetCode: string,
+      tradeDate: string,
+      quantity: string,
+      unitPrice = '0',
+    ): ParsedRecord =>
+      buy({
+        b3Type,
+        direction,
+        assetCode,
+        assetName: assetCode,
+        tradeDate: BusinessDate.of(tradeDate),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.fromString(unitPrice),
+        fees: Money.zero(),
+        priceStated: unitPrice !== '0',
+      });
+
+    // First import: the fractions arrive with no conversion to trace, so both
+    // they and their auctions commit `unclassified` — the pre-fix ledger.
+    const fractionsOnly = [
+      row('Fração em Ativos', 'debit', 'KLBN4', '2026-01-22', '0.4'),
+      row('Leilão de Fração', 'credit', 'KLBN4', '2026-02-24', '0.4', '3.943'),
+    ];
+    const stranded = await importRows(deps, fractionsOnly);
+    expect(stranded.outcome).toMatchObject({ resolvedCorporateEvents: 0 });
+    const storedIds = deps.transactions.rows.map((r) => [r.id, r.naturalKey, r.status]);
+    expect(storedIds.every(([, , status]) => status === 'unclassified')).toBe(true);
+
+    // Then the history that makes them traceable.
+    await importRows(deps, [
+      buy({
+        assetCode: 'KLBN11',
+        assetName: 'KLBN11',
+        tradeDate: BusinessDate.of('2023-01-02'),
+        quantity: Quantity.fromString('100'),
+        unitPrice: Money.fromString('10.66'),
+        fees: Money.zero(),
+      }),
+      row('Bonificação em Ativos', 'credit', 'KLBN11', '2025-12-19', '6.6'),
+      row('Transferência', 'debit', 'KLBN11', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN3', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN4', '2025-12-23', '2'),
+      row('Transferência', 'credit', 'KLBN4', '2025-12-23', '0.4'),
+    ]);
+
+    // Re-importing the fraction file now resolves both, in place.
+    const resolved = await importRows(deps, fractionsOnly);
+    expect(resolved.outcome).toMatchObject({ resolvedCorporateEvents: 2 });
+
+    for (const [id, naturalKey] of storedIds) {
+      const promoted = deps.transactions.rows.find((r) => r.id === id);
+      expect(promoted).toMatchObject({
+        naturalKey,
+        status: 'active',
+        isUserModified: false,
+      });
+    }
+    expect(
+      deps.transactions.rows
+        .filter((r) => storedIds.some(([id]) => id === r.id))
+        .map((r) => r.type)
+        .sort(),
+    ).toEqual(['fracao_bonificacao', 'leilao_fracoes']);
+
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const klbn4 = replayPosition(
+      await deps.transactions.listForPosition(
+        await deps.assets.resolve({
+          code: 'KLBN4',
+          name: 'KLBN4',
+          assetClass: 'stock',
+          classStated: false,
+          nameStated: false,
+        }),
+        institution,
+      ),
+    );
+    expect(klbn4.ok && klbn4.value.quantity.toString()).toBe('2');
+    expect(klbn4.ok && klbn4.value.totalCost.toString()).toBe('4.8');
+
+    const beforeReimport = deps.transactions.rows.length;
+    const again = await importRows(deps, fractionsOnly);
+    expect(again.outcome).toMatchObject({ applied: 0, resolvedCorporateEvents: 0 });
+    expect(deps.transactions.rows).toHaveLength(beforeReimport);
+  });
+
   it('keeps incomplete target evidence unclassified', async () => {
     const deps = buildFakeIngestionDeps();
     const result = await importRows(deps, [evidence('Atualização', 'AXIA3', '2025-02-03', '260')]);

@@ -122,19 +122,38 @@ export interface ConversionOutTrace {
  * fraction stays `unclassified`. Guessing here would decide a fraction's tax
  * treatment — exempt income or a realised disposal — without evidence.
  */
+export type TracedOriginVerdict =
+  | { readonly ok: true; readonly origin: TracedOrigin }
+  | {
+      /**
+       * `unresolved` separates *we cannot decide* from *there is no trail*. A
+       * source whose outgoing quantity is no event's fraction has no trail, and
+       * the fraction refuses `no_origin`; a source with two matching events, an
+       * unsettled ratio event, or outgoing legs that disagree could be traced
+       * but cannot be read, and the fraction must refuse `origin_unresolved`
+       * instead — `no_origin` reads as "classify this by hand", which is the
+       * wrong instruction when the answer is unknowable rather than absent.
+       */
+      readonly ok: false;
+      readonly unresolved: boolean;
+    };
+
 export function tracedConversionOrigin(
   outLegs: readonly ConversionOutTrace[],
-): TracedOrigin | null {
-  if (outLegs.length === 0) return null;
+): TracedOriginVerdict {
   const traced: TracedOrigin[] = [];
   for (const leg of outLegs) {
     const verdict = originOf(leg.quantity, leg.candidates, leg.unresolved);
-    if (!verdict.ok) return null;
+    if (!verdict.ok) {
+      return { ok: false, unresolved: verdict.refusal !== 'no_origin' };
+    }
     traced.push({ conversionOutId: leg.id, event: verdict.origin });
   }
   const [only] = traced;
-  if (only === undefined) return null;
-  return traced.every((t) => t.event.type === only.event.type) ? only : null;
+  if (only === undefined) return { ok: false, unresolved: false };
+  return traced.every((t) => t.event.type === only.event.type)
+    ? { ok: true, origin: only }
+    : { ok: false, unresolved: true };
 }
 
 export type OriginVerdict =

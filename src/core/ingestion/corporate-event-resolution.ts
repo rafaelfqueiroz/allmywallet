@@ -324,11 +324,37 @@ function walkPosition(
             fractionalPart: upTo.ok ? upTo.value.quantity.fractionalPart() : null,
           };
         });
-      const unresolved = sourceHistory.some((t) => {
-        if (t.status !== 'unclassified' || !inWindow(t)) return false;
-        const movement = corporateEventMovementOfKey(t.naturalKey);
-        return movement !== null && isRatioMovement(movement);
-      });
+      /**
+       * An unresolved ratio event on the source, from **either** place it can
+       * hide. `history` carries the stored ledger and this batch's `new`
+       * candidates, but a `Desdobro` or `Grupamento` stages `unclassified`
+       * and so lives only in `rows` until it is committed — on a first import
+       * it is in no history at all. Reading only `history` left this guard
+       * dead on exactly the import that needs it, and a fraction traced past
+       * an in-flight ratio event is an exempt provento where a realised sale
+       * may have been right.
+       *
+       * `rows` spans the whole batch, so it is filtered to the source's own
+       * position. A row that is open here is still unresolved: whether it
+       * settles is decided in that position's own walk, which this one cannot
+       * see. Refusing is the safe direction — the next import, with the event
+       * settled in the ledger, resolves the fraction in place (BR-005-20b).
+       */
+      const sourceKey = positionKeyString(out);
+      const pendingRatioRow = input.rows.some(
+        (r) =>
+          isRatioMovement(r.movement) &&
+          (r.open || r.transaction.status === 'unclassified') &&
+          positionKeyString(r.transaction) === sourceKey &&
+          inWindow(r.transaction),
+      );
+      const unresolved =
+        pendingRatioRow ||
+        sourceHistory.some((t) => {
+          if (t.status !== 'unclassified' || !inWindow(t)) return false;
+          const movement = corporateEventMovementOfKey(t.naturalKey);
+          return movement !== null && isRatioMovement(movement);
+        });
       return { id: out.id, quantity: out.quantity, candidates, unresolved };
     });
   };
@@ -435,13 +461,19 @@ function walkPosition(
       if (BusinessDate.isBefore(fraction.tradeDate, t.tradeDate)) continue;
       incomingByGroup.set(groupId, [...(incomingByGroup.get(groupId) ?? []), t]);
     }
+    /** A group that could be traced but could not be read (`TracedOriginVerdict`). */
+    let tracedUnresolved = false;
     const tracedOrigins: OriginCandidate[] = [...incomingByGroup]
       .map(([groupId, legs]) => ({ groupId, legs: [...legs].sort(compareForReplay) }))
       .sort((a, b) => compareForReplay(a.legs[0] as Transaction, b.legs[0] as Transaction))
       .flatMap(({ groupId, legs }) => {
         const last = legs[legs.length - 1] as Transaction;
-        const trace = tracedConversionOrigin(outgoingTraces(last, inOriginWindow));
-        if (trace === null) return [];
+        const verdict = tracedConversionOrigin(outgoingTraces(last, inOriginWindow));
+        if (!verdict.ok) {
+          tracedUnresolved = tracedUnresolved || verdict.unresolved;
+          return [];
+        }
+        const trace = verdict.origin;
         // A group is atomic (BR-005-20c), so the fraction it left this position
         // is the one after **all** its incoming legs, not after each. KLBN4
         // receives 2 and 0,4 on one date; taken singly their replay order is a
@@ -464,7 +496,7 @@ function walkPosition(
     const originVerdict = originOf(
       fraction.quantity,
       origins,
-      unresolvedRatios.some(inOriginWindow),
+      unresolvedRatios.some(inOriginWindow) || tracedUnresolved,
     );
     if (originVerdict.ok) {
       claims.set(originVerdict.origin.id, [...(claims.get(originVerdict.origin.id) ?? []), row.id]);

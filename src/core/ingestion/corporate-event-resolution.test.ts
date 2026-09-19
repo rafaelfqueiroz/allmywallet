@@ -1158,6 +1158,73 @@ describe('#129 BR-005-20b — a fraction whose origin is one asset upstream', ()
     });
   });
 
+  it('refuses while a ratio event on the source is still unresolved in this batch', () => {
+    // #129 review — the guard that was dead on a first import. KLBN11 holds a
+    // bonificação leaving 0,6 *and* a grupamento whose ratio has not settled.
+    // Either could be the real origin, and they disagree on the answer: a
+    // bonificação makes the auction exempt income, a grupamento makes the
+    // fraction a realised sale. A staged ratio row is `unclassified`, so it is
+    // in no history until it commits — it must be seen through `rows`.
+    const grupamento = storedRow('KLBN11', '2026-01-10', '100');
+    const pending: CorporateEventRow = {
+      id: grupamento.id,
+      movement: 'grupamento',
+      ticker: 'KLBN11',
+      transaction: grupamento,
+      open: true,
+    };
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const ledger = [...klbn11, into('KLBN3', '0.6', '1.2')];
+
+    const outcomes = resolveCorporateEvents({
+      rows: [pending, fraction, auction],
+      history: (key) => ledger.filter((t) => positionKeyString(t) === positionKeyString(key)),
+      factors: new Map(),
+      windows: { factorDays: 7, originDays: 60, auctionDays: 180 },
+      conversionLegs: (groupId) => (groupId === GROUP ? legs : []),
+    });
+
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'origin_unresolved',
+    });
+    expect(outcomeOf(outcomes, auction)).toMatchObject({
+      status: 'refused',
+      refusal: 'origin_unresolved',
+    });
+  });
+
+  it('refuses while a ratio event on the source sits unclassified in the ledger', () => {
+    // An earlier import left it `unclassified` under the unmapped key, which
+    // is where a stored corporate row keeps its B3 type.
+    const base = storedRow('KLBN11', '2026-01-10', '100');
+    const stale: Transaction = {
+      ...base,
+      naturalKey: importNaturalKeyFor(
+        {
+          assetId: base.assetId,
+          institutionId: base.institutionId,
+          tradeDate: base.tradeDate,
+          type: 'rendimento',
+          quantity: base.quantity,
+          unitPrice: base.unitPrice,
+        },
+        'Grupamento',
+      ),
+    };
+    const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
+    const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
+    const outcomes = resolveTraced(
+      [fraction, auction],
+      [...klbn11, stale, into('KLBN3', '0.6', '1.2')],
+    );
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'origin_unresolved',
+    });
+  });
+
   it('traces nothing without the group lookup, which is how the defect read', () => {
     const fraction = open('fracao_em_ativos', 'KLBN3', '2026-01-22', '0.6');
     const auction = open('leilao_de_fracao', 'KLBN3', '2026-02-24', '0.6', '3.942');
