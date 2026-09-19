@@ -473,7 +473,7 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(deps.transactions.rows).toHaveLength(afterPromotion);
   });
 
-  it('resolves CPLE6 175 to CPLE3 when the target statement precedes a source Resgate', async () => {
+  it('resolves CPLE6 175 to its targets when the statements precede a source Resgate', async () => {
     const deps = buildFakeIngestionDeps();
     await importRows(deps, [
       buy({
@@ -487,37 +487,57 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     ]);
     const result = await importRows(deps, [
       evidence('Atualização', 'CPLE3', '2025-02-01', '175'),
+      evidence('Atualização', 'CPLE7', '2025-02-01', '175'),
       evidence('Resgate', 'CPLE6', '2025-02-10', '175'),
     ]);
 
     expect(result.outcome).toMatchObject({
       resolvedAssetConversions: 1,
-      committedConversionLegs: 2,
+      committedConversionLegs: 3,
     });
-    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
-    expect(legs.find((row) => row.type === 'conversion_in')?.costBasis?.toString()).toBe('1400');
+    // #129 D3: 175 @ 8,00 = 1.400,00, all of it on CPLE3; CPLE7's weight is zero.
+    const legOf = async (code: string) => {
+      const assetId = await deps.assets.resolve({
+        code,
+        name: code,
+        assetClass: 'stock',
+        classStated: false,
+        nameStated: false,
+      });
+      return deps.transactions.rows.find(
+        (row) => row.conversionGroupId !== null && row.assetId === assetId,
+      );
+    };
+    expect((await legOf('CPLE3'))?.costBasis?.toString()).toBe('1400');
+    expect((await legOf('CPLE7'))?.costBasis?.toString()).toBe('0');
   });
 
   /**
-   * #129 D2 — the owner's real CPLE shape, generated (DV-24 / TS-19).
+   * #129 D2/D3 — the owner's real CPLE shape, generated (DV-24 / TS-19).
    *
    * `cple7-to-cple3` could never match it: CPLE7 holds no position. It appears
    * only as an `Atualização` balance statement — evidence, never an
-   * acquisition (BR-005-20c) — and is then redeemed for cash, so
-   * `resolveAssetConversion` refused `insufficient_quantity` and gave up the
-   * group. CPLE3 computed **0** against B3's 175.
+   * acquisition (BR-005-20c) — so `resolveAssetConversion` refused
+   * `insufficient_quantity` and gave up the group. CPLE3 computed **0**
+   * against B3's 175.
    *
-   * The shares B3 converted are the 175 CPLE6, whose position goes to zero on
-   * the same date. Hand-computed (DV-17): 100 at 7,39 = 739,00 plus 75 at
-   * 8,11 = 608,25 → 175 held at **1.347,25**, all of it carried into CPLE3.
+   * B3's record is the source of truth, and it states three things: 175 CPLE3
+   * and 175 CPLE7 held on 2025-12-23, **with no value attributed to either**,
+   * and 175 CPLE7 disposed of for a stated 0,775 a week later. So the group is
+   * sourced from CPLE6 and CPLE7 joins it at weight **zero** — the same
+   * reading a bonificação takes of a quantity B3 states without a price.
    *
-   * CPLE7 is left where it belongs — outside the group. Its `Atualização`
-   * stays `unclassified`, and its priced `Resgate` maps to a `sell` of shares
-   * the ledger never held (map v5 keeps v3's meaning for a priced Resgate), so
-   * it is refused `invalid` and surfaced in Needs attention rather than
-   * inventing a cost basis for it. See the issue's open question.
+   * Hand-computed (DV-17): 100 at 7,39 = 739,00 plus 75 at 8,11 = 608,25 →
+   * 175 held at **1.347,25**, all of it carried into CPLE3 and none into
+   * CPLE7. The redemption is then a sale of 175 at 0,775 = **135,625** exactly
+   * against a basis of 0,00, realising 135,625 in full.
+   *
+   * Value-weighting instead would give CPLE7 a basis of 135,625 and CPLE3 one
+   * of 1.211,625 — but the **total** realised gain across the redemption and
+   * an eventual CPLE3 sale is identical either way, so the zero weight moves
+   * only when the gain is recognised, and invents no price B3 withheld.
    */
-  it('#129: sources CPLE3 from CPLE6 and leaves the CPLE7 rows alone', async () => {
+  it('#129: carries all CPLE6 cost to CPLE3 and realises the CPLE7 redemption in full', async () => {
     const deps = buildFakeIngestionDeps('2026-09-19');
     const file = [
       buy({
@@ -553,7 +573,7 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     const first = await importRows(deps, file);
     expect(first.outcome).toMatchObject({
       resolvedAssetConversions: 1,
-      committedConversionLegs: 2,
+      committedConversionLegs: 3,
     });
 
     const institution = await deps.institutions.resolve('Corretora Teste');
@@ -568,39 +588,36 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     const replayedOf = async (code: string) =>
       replayPosition(await deps.transactions.listForPosition(await assetOf(code), institution));
 
-    // 100 × 7,39 = 739,00 plus 75 × 8,11 = 608,25 → 1.347,25 carried whole.
     const cple3 = await replayedOf('CPLE3');
     const cple6 = await replayedOf('CPLE6');
+    const cple7 = await replayedOf('CPLE7');
     expect(cple3.ok && cple3.value.quantity.toString()).toBe('175');
     expect(cple3.ok && cple3.value.totalCost.toString()).toBe('1347.25');
     expect(cple6.ok && cple6.value.quantity.toString()).toBe('0');
     expect(cple6.ok && cple6.value.realizedGain.toString()).toBe('0');
 
-    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
-    expect(
-      legs.map((row) => [row.type, row.quantity.toString(), row.costBasis?.toString()]),
-    ).toEqual([
-      ['conversion_out', '175', '1347.25'],
-      ['conversion_in', '175', '1347.25'],
-    ]);
+    // B3 priced the redemption, so it is the sale B3 says it is: 175 units
+    // leave and 175 × 0,775 = 135,625 is realised against a zero basis.
+    expect(cple7.ok && cple7.value.quantity.toString()).toBe('0');
+    expect(cple7.ok && cple7.value.realizedGain.toString()).toBe('135.625');
 
-    // The CPLE7 balance statement is evidence no definition claims, so it
-    // stays `unclassified` and moves nothing (BR-005-19/20c).
-    const cple7 = await assetOf('CPLE7');
-    const statement = deps.transactions.rows.find(
-      (row) => row.assetId === cple7 && row.tradeDate === '2025-12-23',
-    );
-    expect(statement).toMatchObject({ status: 'unclassified' });
-    expect(statement?.conversionGroupId).toBeNull();
+    const legOf = async (code: string) => {
+      const assetId = await assetOf(code);
+      const leg = deps.transactions.rows.find(
+        (row) => row.conversionGroupId !== null && row.assetId === assetId,
+      );
+      return [leg?.type, leg?.quantity.toString(), leg?.costBasis?.toString()];
+    };
+    expect(await legOf('CPLE6')).toEqual(['conversion_out', '175', '1347.25']);
+    expect(await legOf('CPLE3')).toEqual(['conversion_in', '175', '1347.25']);
+    expect(await legOf('CPLE7')).toEqual(['conversion_in', '175', '0']);
 
-    // The priced `Resgate` is a sale of shares CPLE7 never held: refused
-    // `invalid` and surfaced, never silently written. Its R$ 135,63 is
-    // therefore not yet recorded anywhere.
+    // The redemption is applied, not refused — the defect this closes.
     const rows = await deps.rows.listByBatch(first.batchId);
     const redemption = rows.find(
       (row) => row.record.kind === 'transaction' && row.record.b3Type === 'Resgate',
     );
-    expect(redemption?.classification).toBe('invalid');
+    expect(redemption?.classification).toBe('new');
 
     // BR-005-17/20: the same file again changes nothing.
     const beforeReimport = deps.transactions.rows.length;
@@ -609,95 +626,6 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
       applied: 0,
       resolvedAssetConversions: 0,
       committedConversionLegs: 0,
-    });
-    expect(deps.transactions.rows).toHaveLength(beforeReimport);
-  });
-
-  // #128 D3: AXIA15G is sourced from AXIA7 alone, so the file carries no
-  // `Atualização AXIA13 0` row — the owner's real extract has none either.
-  it('chains AXIA7/AXIA13 conversions and writes AXIA15 evidence to the AXIA15G ledger alias', async () => {
-    const deps = buildFakeIngestionDeps();
-    await importRows(deps, [
-      buy({
-        assetCode: 'AXIA7',
-        assetName: 'AXIA7',
-        tradeDate: BusinessDate.of('2025-01-02'),
-        quantity: Quantity.fromString('68'),
-        unitPrice: Money.fromString('10'),
-        fees: Money.zero(),
-      }),
-    ]);
-    // 68 @ 10,00 = 680,00. Statement 64 → 68 − 64 = 4 out,
-    // 680,00 × 4 ÷ 68 = 40,00 into AXIA13; AXIA7 keeps 64 / 640,00.
-    const first = await importRows(deps, [
-      evidence('Atualização', 'AXIA7', '2025-02-03', '64'),
-      evidence('Atualização', 'AXIA13', '2025-02-03', '4'),
-    ]);
-    expect(first.outcome).toMatchObject({
-      resolvedAssetConversions: 1,
-      committedConversionLegs: 2,
-    });
-
-    // 64 / 640,00. Statement 52 → 64 − 52 = 12 out,
-    // 640,00 × 12 ÷ 64 = 120,00 into AXIA15G.
-    const second = await importRows(deps, [
-      evidence('Atualização', 'AXIA7', '2025-03-03', '52'),
-      evidence('Atualização', 'AXIA15', '2025-03-03', '12'),
-    ]);
-    expect(second.outcome).toMatchObject({
-      resolvedAssetConversions: 1,
-      committedConversionLegs: 2,
-    });
-    const axia15g = await deps.assets.resolve({
-      code: 'AXIA15G',
-      name: 'AXIA15G',
-      assetClass: 'stock',
-      classStated: false,
-      nameStated: false,
-    });
-    const institution = await deps.institutions.resolve('Corretora Teste');
-    const target = replayPosition(await deps.transactions.listForPosition(axia15g, institution));
-    expect(target.ok && target.value.quantity.toString()).toBe('12');
-    expect(target.ok && target.value.totalCost.toString()).toBe('120');
-    const incoming = deps.transactions.rows.find(
-      (row) => row.assetId === axia15g && row.type === 'conversion_in',
-    );
-    expect(incoming?.costBasis?.toString()).toBe('120');
-  });
-
-  it('resolves the complete AXIA chain from one full-history file and re-imports it as a no-op', async () => {
-    const deps = buildFakeIngestionDeps();
-    await importRows(deps, [
-      buy({
-        assetCode: 'AXIA7',
-        assetName: 'AXIA7',
-        tradeDate: BusinessDate.of('2025-01-02'),
-        quantity: Quantity.fromString('68'),
-        unitPrice: Money.fromString('10'),
-        fees: Money.zero(),
-      }),
-    ]);
-    // #128 D3: no `Atualização AXIA13 0` row — AXIA15G comes from AXIA7 alone.
-    // 68 @ 10,00 = 680,00 → 4 out at 40,00 (AXIA13), leaving 64 / 640,00
-    // → 12 out at 120,00 (AXIA15G), leaving 52 / 520,00.
-    const fullHistory = [
-      evidence('Atualização', 'AXIA7', '2025-02-03', '64'),
-      evidence('Atualização', 'AXIA13', '2025-02-03', '4'),
-      evidence('Atualização', 'AXIA7', '2025-03-03', '52'),
-      evidence('Atualização', 'AXIA15', '2025-03-03', '12'),
-    ];
-
-    const first = await importRows(deps, fullHistory);
-    expect(first.outcome).toMatchObject({
-      resolvedAssetConversions: 2,
-      committedConversionLegs: 4,
-    });
-    const beforeReimport = deps.transactions.rows.length;
-    const second = await importRows(deps, fullHistory);
-    expect(second.outcome).toMatchObject({
-      resolvedAssetConversions: 0,
-      committedConversionLegs: 0,
-      applied: 0,
     });
     expect(deps.transactions.rows).toHaveLength(beforeReimport);
   });

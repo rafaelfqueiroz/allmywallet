@@ -238,7 +238,7 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
     const first = expectResolved(resolve([oneToOne], rows, sources));
     const second = expectResolved(resolve([oneToOne], [...rows].reverse(), [...sources].reverse()));
     expect(second.groupKey).toBe(first.groupKey);
-    expect(first.groupKey.startsWith('conversion:v3:')).toBe(true);
+    expect(first.groupKey.startsWith('conversion:v4:')).toBe(true);
     expect(second.legs.map((leg) => leg.key).sort()).toEqual(
       first.legs.map((leg) => leg.key).sort(),
     );
@@ -292,6 +292,65 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
         [source('OLD3', '5', '10')],
       ),
     ).toEqual({ status: 'unresolved', reason: 'ambiguous' });
+  });
+
+  /**
+   * #129 D3 — a **zero** allocation weight says B3 put shares on this target
+   * and attributed no value to them: the same reading a bonificação takes of a
+   * quantity B3 states without a price (SPEC-007 BR-007-05).
+   */
+  describe('#129 BR-005-20c — a zero allocation weight', () => {
+    const weighted = (...weights: readonly (string | null)[]): AssetConversionDefinition => ({
+      id: 'old3-to-many',
+      sourceAssetCodes: ['OLD3'],
+      targets: weights.map((weight, index) => ({
+        assetCode: `T${index}`,
+        allocationWeight: weight === null ? null : Quantity.fromString(weight),
+      })),
+    });
+    const rows = (count: number) =>
+      Array.from({ length: count }, (_, index) => evidence(`t${index}`, `T${index}`, '0', '10'));
+
+    it('carries no cost, leaving the whole basis on the positive-weight target', () => {
+      const result = expectResolved(
+        resolve([weighted('1', '0')], rows(2), [source('OLD3', '10', '13.4725')]),
+      );
+      expect(
+        result.legs
+          .filter((leg) => leg.type === 'conversion_in')
+          .map((leg) => [leg.assetCode, leg.costBasis?.toString()]),
+      ).toEqual([
+        ['T0', '134.725'],
+        ['T1', '0'],
+      ]);
+    });
+
+    it('keeps the residual on the last positive-weight target, not simply the last', () => {
+      // 100,00 over three equal weights is 33,33333333 twice and a residual of
+      // 33,33333334. A zero-weight target in final position must not absorb it.
+      const result = expectResolved(
+        resolve([weighted('1', '1', '1', '0')], rows(4), [source('OLD3', '1', '100')]),
+      );
+      const incoming = result.legs.filter((leg) => leg.type === 'conversion_in');
+      expect(incoming.map((leg) => leg.costBasis?.toString())).toEqual([
+        '33.33333333',
+        '33.33333333',
+        '33.33333334',
+        '0',
+      ]);
+      expect(
+        sumMoney(incoming.flatMap((leg) => (leg.costBasis === null ? [] : [leg.costBasis]))),
+      ).toEqual(Money.fromString('100'));
+    });
+
+    it('still refuses an all-zero split, a negative weight and a missing one', () => {
+      for (const definition of [weighted('0', '0'), weighted('1', '-1'), weighted('1', null)]) {
+        expect(resolve([definition], rows(2), [source('OLD3', '10', '20')])).toEqual({
+          status: 'unresolved',
+          reason: 'missing_allocation_weights',
+        });
+      }
+    });
   });
 
   it('keeps insufficient, missing-cost and negative-cost groups unresolved', () => {
