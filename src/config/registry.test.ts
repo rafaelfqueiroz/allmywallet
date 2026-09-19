@@ -63,8 +63,10 @@ describe('registry', () => {
     }
   });
 
-  it('uses the SPEC-005 BR-005-20b 45-calendar-day default for fraction origins', () => {
-    expect(REGISTRY['import.fraction_origin_window_days'].default).toBe(45);
+  // #128 D1: the owner's real AXIA7 bonificação (2025-12-23) left its Fração
+  // em Ativos 48 calendar days later (2026-02-09), so #126's 45 refused it.
+  it('uses the SPEC-005 BR-005-20b 60-calendar-day default for fraction origins', () => {
+    expect(REGISTRY['import.fraction_origin_window_days'].default).toBe(60);
   });
 
   it('uses the SPEC-005 BR-005-20c 45-calendar-day default for asset conversions', () => {

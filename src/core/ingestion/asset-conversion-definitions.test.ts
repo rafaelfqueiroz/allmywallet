@@ -6,7 +6,9 @@ import {
 
 describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
   it('is explicitly versioned and contains no dates, quantities or personal data', () => {
-    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(1);
+    // #128 D3: v2 replaced `axia7-and-axia13-to-axia15g` with a definition
+    // sourced from AXIA7 alone.
+    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(2);
     expect(
       ASSET_CONVERSION_DEFINITIONS.map((definition) => ({
         id: definition.id,
@@ -33,8 +35,8 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
         targets: [{ evidence: 'AXIA13', ledger: 'AXIA13' }],
       },
       {
-        id: 'axia7-and-axia13-to-axia15g',
-        sources: ['AXIA7', 'AXIA13'],
+        id: 'axia7-to-axia15g',
+        sources: ['AXIA7'],
         targets: [{ evidence: 'AXIA15', ledger: 'AXIA15G' }],
       },
       {

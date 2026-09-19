@@ -498,6 +498,8 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(legs.find((row) => row.type === 'conversion_in')?.costBasis?.toString()).toBe('1400');
   });
 
+  // #128 D3: AXIA15G is sourced from AXIA7 alone, so the file carries no
+  // `Atualização AXIA13 0` row — the owner's real extract has none either.
   it('chains AXIA7/AXIA13 conversions and writes AXIA15 evidence to the AXIA15G ledger alias', async () => {
     const deps = buildFakeIngestionDeps();
     await importRows(deps, [
@@ -510,6 +512,8 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
         fees: Money.zero(),
       }),
     ]);
+    // 68 @ 10,00 = 680,00. Statement 64 → 68 − 64 = 4 out,
+    // 680,00 × 4 ÷ 68 = 40,00 into AXIA13; AXIA7 keeps 64 / 640,00.
     const first = await importRows(deps, [
       evidence('Atualização', 'AXIA7', '2025-02-03', '64'),
       evidence('Atualização', 'AXIA13', '2025-02-03', '4'),
@@ -519,14 +523,15 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
       committedConversionLegs: 2,
     });
 
+    // 64 / 640,00. Statement 52 → 64 − 52 = 12 out,
+    // 640,00 × 12 ÷ 64 = 120,00 into AXIA15G.
     const second = await importRows(deps, [
       evidence('Atualização', 'AXIA7', '2025-03-03', '52'),
-      evidence('Atualização', 'AXIA13', '2025-03-03', '0'),
       evidence('Atualização', 'AXIA15', '2025-03-03', '12'),
     ]);
     expect(second.outcome).toMatchObject({
       resolvedAssetConversions: 1,
-      committedConversionLegs: 3,
+      committedConversionLegs: 2,
     });
     const axia15g = await deps.assets.resolve({
       code: 'AXIA15G',
@@ -538,11 +543,11 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     const institution = await deps.institutions.resolve('Corretora Teste');
     const target = replayPosition(await deps.transactions.listForPosition(axia15g, institution));
     expect(target.ok && target.value.quantity.toString()).toBe('12');
-    expect(target.ok && target.value.totalCost.toString()).toBe('160');
+    expect(target.ok && target.value.totalCost.toString()).toBe('120');
     const incoming = deps.transactions.rows.find(
       (row) => row.assetId === axia15g && row.type === 'conversion_in',
     );
-    expect(incoming?.costBasis?.toString()).toBe('160');
+    expect(incoming?.costBasis?.toString()).toBe('120');
   });
 
   it('resolves the complete AXIA chain from one full-history file and re-imports it as a no-op', async () => {
@@ -557,18 +562,20 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
         fees: Money.zero(),
       }),
     ]);
+    // #128 D3: no `Atualização AXIA13 0` row — AXIA15G comes from AXIA7 alone.
+    // 68 @ 10,00 = 680,00 → 4 out at 40,00 (AXIA13), leaving 64 / 640,00
+    // → 12 out at 120,00 (AXIA15G), leaving 52 / 520,00.
     const fullHistory = [
       evidence('Atualização', 'AXIA7', '2025-02-03', '64'),
       evidence('Atualização', 'AXIA13', '2025-02-03', '4'),
       evidence('Atualização', 'AXIA7', '2025-03-03', '52'),
-      evidence('Atualização', 'AXIA13', '2025-03-03', '0'),
       evidence('Atualização', 'AXIA15', '2025-03-03', '12'),
     ];
 
     const first = await importRows(deps, fullHistory);
     expect(first.outcome).toMatchObject({
       resolvedAssetConversions: 2,
-      committedConversionLegs: 5,
+      committedConversionLegs: 4,
     });
     const beforeReimport = deps.transactions.rows.length;
     const second = await importRows(deps, fullHistory);
@@ -578,6 +585,243 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
       applied: 0,
     });
     expect(deps.transactions.rows).toHaveLength(beforeReimport);
+  });
+
+  /**
+   * #128 D1/D2/D3 — the whole AXIA chain from one full-history Movimentação.
+   *
+   * A **generated** fixture in the shape of the owner's real file (DV-24 /
+   * TS-19: no extract, no CPF, no captured row ever enters the repository).
+   * It is the acceptance test for all three defects at once, because each one
+   * alone still lands AXIA7 on the wrong number:
+   *
+   * - D1 — the bonificação (2025-12-23) and its `Fração em Ativos`
+   *   (2026-02-09) are **48 calendar days** apart, so the old 45-day origin
+   *   window refused the pair `no_origin` and AXIA7 kept the 0,34;
+   * - D2 — conversions planned before that fraction settles replay AXIA7 as
+   *   68,34 on 2026-08-11 and move 4,34 units instead of 4;
+   * - D3 — a definition sourcing AXIA13 as well finds it holding 0 on
+   *   2026-09-09 (its four units were redeemed for cash on 2026-08-24) and
+   *   abandons the group `insufficient_quantity`, stranding AXIA7 at 64.
+   *
+   * Worked arithmetic (DV-17), all of it by hand:
+   *
+   * | date | AXIA7 | why |
+   * |---|---|---|
+   * | 2025-12-23 | 68,34 | bonificação, no attributed value → cost 0,00 |
+   * | 2026-02-09 | 68 | `fracao_bonificacao` −0,34; total cost unchanged (BR-007-05a) |
+   * | 2026-03-19 | 68 | `leilao_fracoes` 0,34 × 58,539 = **19,90326**, a provento — no quantity |
+   * | 2026-06-22 | 68 | a pure balance statement: no target, stays `unclassified` |
+   * | 2026-08-11 | 64 | 68 − 64 = **4** out to AXIA13 |
+   * | 2026-09-09 | 52 | 64 − 52 = **12** out to AXIA15G |
+   *
+   * ELET3 260 @ 40,00 = 10.400,00 moves whole to AXIA3 on 2025-11-11, and
+   * AXIA13's 4 units are sold on 2026-08-24 at 53,71: proceeds 214,84 against
+   * a carried cost of 0,00, so realised gain is **214,84**.
+   */
+  it('#128: settles the fraction before measuring the AXIA conversions, and re-imports as a no-op', async () => {
+    const deps = buildFakeIngestionDeps('2026-09-19');
+    const movement = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      assetCode: string,
+      tradeDate: string,
+      quantity: string,
+      unitPrice = '0',
+    ): ParsedRecord =>
+      buy({
+        b3Type,
+        direction,
+        assetCode,
+        assetName: assetCode,
+        tradeDate: BusinessDate.of(tradeDate),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.fromString(unitPrice),
+        fees: Money.zero(),
+        priceStated: unitPrice !== '0',
+      });
+
+    const file = [
+      movement('Compra', 'credit', 'ELET3', '2023-12-18', '260', '40'),
+      movement('Atualização', 'credit', 'AXIA3', '2025-11-11', '260'),
+      movement('Bonificação em Ativos', 'credit', 'AXIA7', '2025-12-23', '68.34'),
+      movement('Fração em Ativos', 'debit', 'AXIA7', '2026-02-09', '0.34'),
+      movement('Leilão de Fração', 'credit', 'AXIA7', '2026-03-19', '0.34', '58.539'),
+      movement('Atualização', 'credit', 'AXIA7', '2026-06-22', '68'),
+      movement('Atualização', 'credit', 'AXIA7', '2026-08-11', '64'),
+      movement('Atualização', 'credit', 'AXIA13', '2026-08-11', '4'),
+      movement('Resgate', 'credit', 'AXIA13', '2026-08-24', '4', '53.71'),
+      movement('Atualização', 'credit', 'AXIA7', '2026-09-09', '52'),
+      movement('Atualização', 'credit', 'AXIA15', '2026-09-09', '12'),
+    ];
+
+    const first = await importRows(deps, file);
+    // ELET3 → AXIA3, AXIA7 → AXIA13, AXIA7 → AXIA15G: three groups, six legs.
+    expect(first.outcome).toMatchObject({
+      resolvedAssetConversions: 3,
+      committedConversionLegs: 6,
+      // The fraction and its auction (BR-005-20b).
+      resolvedCorporateEvents: 2,
+    });
+
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const assetOf = (code: string) =>
+      deps.assets.resolve({
+        code,
+        name: code,
+        assetClass: 'stock',
+        classStated: false,
+        nameStated: false,
+      });
+    const replayedOf = async (code: string) =>
+      replayPosition(await deps.transactions.listForPosition(await assetOf(code), institution));
+    const quantityOf = async (code: string) => {
+      const replayed = await replayedOf(code);
+      return replayed.ok ? replayed.value.quantity.toString() : 'unreplayable';
+    };
+
+    expect(await quantityOf('ELET3')).toBe('0');
+    expect(await quantityOf('AXIA3')).toBe('260');
+    expect(await quantityOf('AXIA7')).toBe('52');
+    expect(await quantityOf('AXIA13')).toBe('0');
+    expect(await quantityOf('AXIA15G')).toBe('12');
+
+    // The two legs the defect got wrong: 4 rather than 68,34 − 64 = 4,34.
+    const axia7 = await assetOf('AXIA7');
+    const outgoing = deps.transactions.rows
+      .filter((row) => row.assetId === axia7 && row.type === 'conversion_out')
+      .map((row) => [row.tradeDate, row.quantity.toString(), row.costBasis?.toString()]);
+    expect(outgoing).toEqual([
+      ['2026-08-11', '4', '0'],
+      ['2026-09-09', '12', '0'],
+    ]);
+
+    // BR-007-05b: both legs persist the identical exact cost.
+    const axia3 = await replayedOf('AXIA3');
+    const elet3 = await replayedOf('ELET3');
+    expect(elet3.ok && elet3.value.totalCost.toString()).toBe('0');
+    expect(elet3.ok && elet3.value.realizedGain.toString()).toBe('0');
+    expect(axia3.ok && axia3.value.totalCost.toString()).toBe('10400');
+    const axia3Id = await assetOf('AXIA3');
+    const intoAxia3 = deps.transactions.rows.find(
+      (row) => row.assetId === axia3Id && row.type === 'conversion_in',
+    );
+    expect(intoAxia3?.costBasis?.toString()).toBe('10400');
+
+    // BR-005-20b: the 0,34 pair D1's 45-day window used to refuse.
+    const byDate = (tradeDate: string) =>
+      deps.transactions.rows.find((row) => row.assetId === axia7 && row.tradeDate === tradeDate);
+    expect(byDate('2026-02-09')).toMatchObject({
+      type: 'fracao_bonificacao',
+      status: 'active',
+    });
+    expect(byDate('2026-03-19')).toMatchObject({ type: 'leilao_fracoes', status: 'active' });
+    // 0,34 × 58,539 = 19,90326 — a provento, so the position never moves.
+    expect(byDate('2026-03-19')?.totalValue.toString()).toBe('19.90326');
+
+    // A pure balance statement: 68 restates what the ledger already holds, no
+    // target asset appears beside it, and nothing may be invented for it.
+    expect(byDate('2026-06-22')).toMatchObject({ status: 'unclassified' });
+    expect(byDate('2026-06-22')?.conversionGroupId).toBeNull();
+
+    // 4 × 53,71 = 214,84 of proceeds against 0,00 of carried cost.
+    const axia13 = await replayedOf('AXIA13');
+    expect(axia13.ok && axia13.value.realizedGain.toString()).toBe('214.84');
+
+    // BR-005-17/20: the same file again is a no-op, v2 group keys and all.
+    const beforeReimport = deps.transactions.rows.length;
+    const second = await importRows(deps, file);
+    expect(second.outcome).toMatchObject({
+      applied: 0,
+      resolvedAssetConversions: 0,
+      committedConversionLegs: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(beforeReimport);
+  });
+
+  /**
+   * #128 D2, the cost-basis half. The chain above carries a zero-cost
+   * bonificação, so both the right and the wrong outgoing quantity remove
+   * 0,00. Here the position has a real average, and the two figures differ:
+   *
+   * - 68 @ 10,00 = 680,00; bonificação of 0,34 with no attributed value →
+   *   68,34 held at 680,00;
+   * - `fracao_bonificacao` −0,34 on 2026-02-09 (48 days after its origin, so
+   *   D1's 60-day window is what lets it resolve at all) → 68 at 680,00;
+   * - statement 64 on 2026-08-11 → 68 − 64 = **4** out, and
+   *   680,00 × 4 ÷ 68 = **40,00** exactly.
+   *
+   * Measured against the unsettled 68,34 it would have been 4,34 units and
+   * 680,00 × 4,34 ÷ 68,34 = 43,184079601… → 43,18407960 at the storage scale:
+   * plausible, wrong, and undetectable on any screen. (Removing the second
+   * planning pass turns this test's assertions into exactly those figures.)
+   */
+  it('#128: a conversion carries the cost of the post-fraction position, not the pre-fraction one', async () => {
+    const deps = buildFakeIngestionDeps('2026-09-19');
+    const priceless = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      assetCode: string,
+      tradeDate: string,
+      quantity: string,
+      unitPrice = '0',
+    ): ParsedRecord =>
+      buy({
+        b3Type,
+        direction,
+        assetCode,
+        assetName: assetCode,
+        tradeDate: BusinessDate.of(tradeDate),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.fromString(unitPrice),
+        fees: Money.zero(),
+        priceStated: unitPrice !== '0',
+      });
+
+    const result = await importRows(deps, [
+      buy({
+        assetCode: 'AXIA7',
+        assetName: 'AXIA7',
+        tradeDate: BusinessDate.of('2025-11-10'),
+        quantity: Quantity.fromString('68'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+      priceless('Bonificação em Ativos', 'credit', 'AXIA7', '2025-12-23', '0.34'),
+      priceless('Fração em Ativos', 'debit', 'AXIA7', '2026-02-09', '0.34'),
+      priceless('Leilão de Fração', 'credit', 'AXIA7', '2026-03-19', '0.34', '58.539'),
+      priceless('Atualização', 'credit', 'AXIA7', '2026-08-11', '64'),
+      priceless('Atualização', 'credit', 'AXIA13', '2026-08-11', '4'),
+    ]);
+
+    expect(result.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 2,
+    });
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    expect(
+      legs.map((row) => [row.type, row.quantity.toString(), row.costBasis?.toString()]),
+    ).toEqual([
+      ['conversion_out', '4', '40'],
+      ['conversion_in', '4', '40'],
+    ]);
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const axia7 = replayPosition(
+      await deps.transactions.listForPosition(
+        await deps.assets.resolve({
+          code: 'AXIA7',
+          name: 'AXIA7',
+          assetClass: 'stock',
+          classStated: false,
+          nameStated: false,
+        }),
+        institution,
+      ),
+    );
+    // 68 − 4 = 64 at 680,00 − 40,00 = 640,00, so the average is still 10,00.
+    expect(axia7.ok && axia7.value.quantity.toString()).toBe('64');
+    expect(axia7.ok && axia7.value.totalCost.toString()).toBe('640');
+    expect(axia7.ok && axia7.value.averageCost.toString()).toBe('10');
   });
 
   it('converts a fractional KLBN11 unit into repeated KLBN3/KLBN4 transfer credits atomically', async () => {
@@ -637,6 +881,115 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
       committedConversionLegs: 0,
     });
     expect(deps.transactions.rows).toHaveLength(beforeReimport);
+  });
+
+  /**
+   * #128 D2, the other direction of the mutual dependency. AXIA7's conversion
+   * needs its fraction settled first; KLBN3's fraction needs its conversion
+   * legs first, because the origin's `quantityAfter` is only right once the
+   * 0,6 has arrived. A fix that merely swapped BR-005-20b and BR-005-20c
+   * would trade one defect for this one, so it is pinned here.
+   *
+   * Hand-computed (DV-17): KLBN11 0,6 @ 10,00 = 6,00 total. One KLBN11 unit
+   * holds 1 KLBN3 and 4 KLBN4, so 6,00 × 1 ÷ 5 = **1,20** to KLBN3 and the
+   * residual 6,00 − 1,20 = **4,80** to KLBN4 (BR-005-20c: the last target
+   * takes the storage-scale residual).
+   *
+   * KLBN3 then: 0,6 at 1,20 → bonificação +1 with no attributed value → 1,6
+   * still at 1,20, whose fractional part is **0,6** — the unique origin of the
+   * 0,6 `Fração em Ativos`. Without the conversion_in the position would be
+   * 1,0 with a fractional part of 0, and the fraction would refuse
+   * `no_origin`. The fraction leaves at unchanged total cost (BR-007-05a),
+   * so 1,0 at 1,20 remains, and its auction is a 0,6 × 5,00 = **3,00**
+   * `leilao_fracoes` provento (SPEC-014 BR-014-01).
+   */
+  it('#128: a KLBN3 fraction resolves against the conversion legs planned in the same commit', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'KLBN11',
+        assetName: 'KLBN11',
+        tradeDate: BusinessDate.of('2025-12-19'),
+        quantity: Quantity.fromString('0.6'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const row = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      assetCode: string,
+      tradeDate: string,
+      quantity: string,
+      unitPrice = '0',
+    ): ParsedRecord =>
+      buy({
+        b3Type,
+        direction,
+        assetCode,
+        assetName: assetCode,
+        tradeDate: BusinessDate.of(tradeDate),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.fromString(unitPrice),
+        fees: Money.zero(),
+        priceStated: unitPrice !== '0',
+      });
+
+    const result = await importRows(deps, [
+      row('Transferência', 'debit', 'KLBN11', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN3', '2025-12-23', '0.6'),
+      row('Transferência', 'credit', 'KLBN4', '2025-12-23', '2.4'),
+      row('Bonificação em Ativos', 'credit', 'KLBN3', '2026-01-05', '1'),
+      row('Fração em Ativos', 'debit', 'KLBN3', '2026-01-22', '0.6'),
+      row('Leilão de Fração', 'credit', 'KLBN3', '2026-02-10', '0.6', '5'),
+    ]);
+
+    expect(result.outcome).toMatchObject({
+      resolvedAssetConversions: 1,
+      committedConversionLegs: 3,
+      resolvedCorporateEvents: 2,
+    });
+    const institution = await deps.institutions.resolve('Corretora Teste');
+    const assetOf = (code: string) =>
+      deps.assets.resolve({
+        code,
+        name: code,
+        assetClass: 'stock',
+        classStated: false,
+        nameStated: false,
+      });
+    // Looked up by asset rather than by insert order, which is the settling
+    // rounds' grouping order and says nothing about the figures.
+    const legOf = async (code: string) => {
+      const assetId = await assetOf(code);
+      const leg = deps.transactions.rows.find(
+        (row_) => row_.conversionGroupId !== null && row_.assetId === assetId,
+      );
+      return [leg?.type, leg?.quantity.toString(), leg?.costBasis?.toString()];
+    };
+    expect(await legOf('KLBN11')).toEqual(['conversion_out', '0.6', '6']);
+    expect(await legOf('KLBN3')).toEqual(['conversion_in', '0.6', '1.2']);
+    expect(await legOf('KLBN4')).toEqual(['conversion_in', '2.4', '4.8']);
+    const legs = deps.transactions.rows.filter((row_) => row_.conversionGroupId !== null);
+    expect(new Set(legs.map((row_) => row_.conversionGroupId))).toHaveLength(1);
+
+    const replayedOf = async (code: string) =>
+      replayPosition(await deps.transactions.listForPosition(await assetOf(code), institution));
+    const klbn11 = await replayedOf('KLBN11');
+    const klbn3 = await replayedOf('KLBN3');
+    const klbn4 = await replayedOf('KLBN4');
+    expect(klbn11.ok && klbn11.value.quantity.toString()).toBe('0');
+    expect(klbn3.ok && klbn3.value.quantity.toString()).toBe('1');
+    expect(klbn3.ok && klbn3.value.totalCost.toString()).toBe('1.2');
+    expect(klbn3.ok && klbn3.value.averageCost.toString()).toBe('1.2');
+    expect(klbn4.ok && klbn4.value.quantity.toString()).toBe('2.4');
+    expect(klbn4.ok && klbn4.value.totalCost.toString()).toBe('4.8');
+
+    const fraction = deps.transactions.rows.find((row_) => row_.tradeDate === '2026-01-22');
+    const auction = deps.transactions.rows.find((row_) => row_.tradeDate === '2026-02-10');
+    expect(fraction).toMatchObject({ type: 'fracao_bonificacao', status: 'active' });
+    expect(auction).toMatchObject({ type: 'leilao_fracoes', status: 'active' });
+    expect(auction?.totalValue.toString()).toBe('3');
   });
 
   it('keeps incomplete target evidence unclassified', async () => {
