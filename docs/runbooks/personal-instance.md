@@ -41,6 +41,7 @@ Upgrades when `:latest` has moved (backup → pull → migrate → start → hea
 | `start.sh` says the migration failed | The current image is running; the migration transaction rolled back. Do not retry by hand — report the migration as a defect. |
 | `start.sh` rolled back to last-known-good | The old image is running **on the new schema**. It will not retry that image (`failed-digest`). A later merge produces a new digest and is tried normally. |
 | Last-known-good is not healthy either | Stop. Restore (below). |
+| A holding reads zero after an upgrade whose migration deleted a position cache it could not replay (`0024`, [#136](https://github.com/rafaelfqueiroz/allmywallet/issues/136)) | Replay the ledger into the cache — it is authoritative, the cache is derived (SPEC-007 BR-007-14): `IMAGE_TAG=$(cat ~/.local/state/allmywallet/current-tag) docker compose -f docker-compose.personal.yml run --rm --no-deps -T web node dist/ops.js rebuild-positions`. It reports how many tenants disagreed with the ledger and writes the replayed figures. |
 
 **Do not** run `docker compose down -v`, `pnpm db:*`, or any test suite with the personal env loaded.
 
