@@ -1,6 +1,6 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
-import type { Money, Quantity } from '@/core/shared/money';
+import { asStored, Money, type Quantity } from '@/core/shared/money';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { compareForReplay } from '@/core/positions/ordering';
 import { replayPosition } from '@/core/positions/replay';
@@ -52,9 +52,9 @@ export interface TransferLeg {
  *
  * Such a pair moves nothing. Read through `resolveCarriedCosts` below it is
  * not a special case at all — the source position *is* the destination, so the
- * credit carries the average the debit removed the shares at, and quantity,
- * total cost and average all come back to what they were. Nothing is invented:
- * the figure is the ledger's own.
+ * credit carries the average the debit removed the shares at: the quantity
+ * comes back exactly and the cost to the scale the ledger stores (see
+ * `withCarriedCost`). Nothing is invented: the figure is the ledger's own.
  *
  * `credits` should be every `transfer_in` leg of the batch — priced or not —
  * so a debit that could equally have fed a priced credit is ambiguous too.
@@ -107,12 +107,27 @@ export interface CarryLeg {
   readonly fallback: Money | null;
 }
 
-/** The credit at the carried cost. */
+/**
+ * The credit at the carried cost, **at the scale the column holds** (#135).
+ *
+ * A carried cost is a division, so it repeats as often as not: the owner's
+ * ENBR3 is 2.074,64 ÷ 101. `NUMERIC(20,8)` keeps eight places, so writing the
+ * full-precision figure here makes the position this commit *caches* — folded
+ * from these in-memory rows — disagree with the position a **rebuild** folds
+ * from the same rows read back. `verifyPositions` reports that as drift, and
+ * DM-4 says the cache is a cache: it must equal its replay.
+ *
+ * Rounding once, here, is what keeps the two identical. It is the same reading
+ * `commit-batch.ts` already takes when deciding whether a re-carry changed
+ * anything (#112): a repeating average is compared at the column's scale,
+ * because that is the only figure that survives a round trip.
+ */
 export function withCarriedCost(credit: Transaction, cost: Money): Transaction {
+  const stored = Money.fromString(asStored(cost));
   return {
     ...credit,
-    unitPrice: cost,
-    totalValue: computeTotalValue(credit.type, credit.quantity, cost, credit.fees),
+    unitPrice: stored,
+    totalValue: computeTotalValue(credit.type, credit.quantity, stored, credit.fees),
   };
 }
 

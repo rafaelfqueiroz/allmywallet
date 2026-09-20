@@ -1626,6 +1626,58 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       expect(Number(refused[0]?.n)).toBe(0);
     });
 
+    /**
+     * The owner's figures repeat: 101 shares costing 2.074,64 average
+     * 20,540990099…, and `NUMERIC(20,8)` keeps eight places. A pair therefore
+     * returns the quantity **exactly** and the cost to the storage scale — the
+     * same residual BR-005-20a's carry has always had on a cross-broker
+     * transfer (#112). This pins how large it is rather than assuming it away.
+     */
+    it('BR-005-20a: a repeating average returns the quantity exactly and the cost to the storage scale', async () => {
+      await importMovimentacao([
+        { ...buy, quantidade: '100', precoUnitario: '10,00' },
+        { ...buy, data: '11/01/2023', quantidade: '1', precoUnitario: '5,00' },
+      ]);
+      // 1.005,00 ÷ 101 = 9,95049504950495… → 9,95049505 stored.
+      expect(await position()).toEqual({
+        quantity: '101.00000000',
+        average_cost: '9.95049505',
+        realized_gain: '0.00000000',
+      });
+
+      await importMovimentacao(pair);
+
+      const { rows: carried } = await migratorPool.query(
+        "SELECT unit_price::text AS unit_price FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(carried.map((row) => row.unit_price)).toEqual(['9.95049505']);
+      // Quantity exact. The cost carries 101 × 9,95049505 = 1.005,00000005 in
+      // and takes half of the 2.010,00000005 total back out — three hundred-
+      // millionths above where it started, which is what eight places can
+      // say about a repeating average and is the *same* figure a rebuild
+      // folds from the ledger.
+      const { rows: after } = await migratorPool.query(
+        `SELECT quantity::text AS quantity, total_cost::text AS total_cost
+           FROM positions p JOIN assets a ON a.id = p.asset_id WHERE a.code = 'ENBR3'`,
+      );
+      expect(after[0]?.quantity).toBe('101.00000000');
+      expect(after[0]?.total_cost).toBe('1005.00000003');
+
+      // DM-4 / TS-08: before #135 rounded the carried price where it is
+      // written, the cache folded a full-precision figure the ledger could
+      // not hold, and this reported permanent drift on every repeating carry.
+      const verified = await withTenant(
+        userId,
+        async (tx) =>
+          verifyPositions({
+            transactions: new DrizzleTransactionRepository(tx, userId),
+            positions: new DrizzlePositionRepository(tx, userId),
+          }),
+        appDb,
+      );
+      expect(verified.ok && verified.value.drift).toEqual([]);
+    });
+
     it('BR-005-17: re-importing both files adds nothing', async () => {
       await importMovimentacao([buy]);
       await importMovimentacao(pair);
