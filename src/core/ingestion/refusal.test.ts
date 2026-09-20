@@ -66,11 +66,92 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
     if (refusal.kind !== 'insufficient_quantity') return;
     expect(refusal.held.toString()).toBe('10');
     expect(refusal.requested.toString()).toBe('30');
+    // SPEC-005 BR-005-24: no unclassified rows on the position at all, so the
+    // shortfall traces to history that precedes what was imported.
+    expect(refusal.likelyCause).toBe('missing_history');
   });
 
-  it('a sale with no history at all held nothing', () => {
+  it('a sale with no history at all held nothing, and traces to missing history', () => {
     const refusal = explainRefusal(row('sell', '2026-02-01', '5'), [], userId, now, today);
     expect(refusal.kind === 'insufficient_quantity' && refusal.held.toString()).toBe('0');
+    expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe('missing_history');
+  });
+
+  describe('SPEC-005 BR-005-24 — likely cause of an insufficient_quantity refusal', () => {
+    // A stored unclassified row's natural key keeps the raw B3 string as its
+    // last `|`-separated component (BR-005-17) — `corporateEventMovementOfKey`
+    // reads exactly that suffix.
+    const unclassified = (naturalKeySuffix: string) => ({
+      ...aTransaction().transferIn().on('2026-01-10').quantity('3').status('unclassified').build(),
+      naturalKey: `2026-01-10|PETR4|unclassified|${naturalKeySuffix}`,
+    });
+
+    it('a shortfall on a position holding an unclassified desdobro names the corporate event', () => {
+      const refusal = explainRefusal(
+        row('transfer_out', '2026-02-01', '30'),
+        [held10(), unclassified('Desdobro')],
+        userId,
+        now,
+        today,
+      );
+      expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
+        'uncaptured_corporate_event',
+      );
+    });
+
+    it('a shortfall on a position holding an unclassified grupamento names the corporate event', () => {
+      const refusal = explainRefusal(
+        row('transfer_out', '2026-02-01', '30'),
+        [held10(), unclassified('Grupamento')],
+        userId,
+        now,
+        today,
+      );
+      expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
+        'uncaptured_corporate_event',
+      );
+    });
+
+    it('a shortfall on a position holding an unclassified non-corporate-event row names unclassified rows', () => {
+      // `Transferência` alone (no direction resolved) is not one of the
+      // named corporate-event strings — an ordinary unclassified row.
+      const refusal = explainRefusal(
+        row('transfer_out', '2026-02-01', '30'),
+        [held10(), unclassified('Transferência')],
+        userId,
+        now,
+        today,
+      );
+      expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
+        'unclassified_rows',
+      );
+    });
+
+    it('a shortfall on a position holding only active rows traces to missing history', () => {
+      const refusal = explainRefusal(
+        row('transfer_out', '2026-02-01', '30'),
+        [held10()],
+        userId,
+        now,
+        today,
+      );
+      expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
+        'missing_history',
+      );
+    });
+
+    it('a corporate-event unclassified row wins over a plain unclassified row on the same position', () => {
+      const refusal = explainRefusal(
+        row('transfer_out', '2026-02-01', '30'),
+        [held10(), unclassified('Transferência'), unclassified('Fração em Ativos')],
+        userId,
+        now,
+        today,
+      );
+      expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
+        'uncaptured_corporate_event',
+      );
+    });
   });
 
   it('a row that fits but starves a later stored sale names that sale’s date', () => {
