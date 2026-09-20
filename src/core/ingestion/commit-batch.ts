@@ -258,16 +258,15 @@ interface Group {
   readonly state: PositionState | null;
 }
 
-/** One settling round: what it made of every position, and what it refuses to write. */
+/** One settling round: what it made of every position, and what it settled. */
 interface Settlement {
   readonly groups: readonly Group[];
   /**
-   * SPEC-005 BR-005-20a (#135) — `transfer_out` transaction ids this round
-   * will not apply, because the credit of their same-position pair did not
-   * take a carried cost (`debitsHeldBack`). Applying one leg of such a pair is
-   * what emptied a position and took its shares out of *patrimônio*.
+   * SPEC-005 BR-005-20a — the carry legs this round gave a cost to, by import
+   * row id. A credit not in here will not be `active` in the ledger when the
+   * commit ends, which is what `debitsHeldBack` (#135) asks of it.
    */
-  readonly heldBackDebits: ReadonlySet<string>;
+  readonly resolvedCarryIds: ReadonlySet<string>;
 }
 
 /**
@@ -494,35 +493,64 @@ export async function commitBatch(
     );
   /**
    * SPEC-005 BR-005-20a (#135) — a same-position transfer pair is all or
-   * nothing. A round that resolved no cost for such a credit refuses its
-   * debit too: excluding it makes the row `invalid`, so nothing is written,
-   * no occurrence is taken, and importing the file again applies it once the
-   * credit can take its cost (BR-005-17). Excluding the debit sets the leg's
-   * `debit` to `null` next round, which settles the credit as unresolved and
-   * takes the pair out of `heldBackDebits` — so this runs at most once per
-   * pair and `excluded` still only grows.
+   * nothing, so a debit whose counterpart credit will not be `active` when
+   * this commit ends is never written. Excluding it makes the row `invalid`:
+   * nothing is written, no occurrence is taken, and importing the file again
+   * applies it once the credit can take its cost (BR-005-17).
+   *
+   * Asked of the **relation**, not of `pairTransfers`' one-to-one matches: the
+   * shapes where no pair forms are precisely the ones where two debits could
+   * empty a position between them (review finding 1). A credit already active
+   * in the ledger settles its debit too — an earlier import carried it, and
+   * this file is simply meeting both rows again.
    */
+  const legOf = (row: ImportRow, id: string): TransferLeg[] =>
+    row.record.kind === 'transaction'
+      ? [
+          {
+            id,
+            assetId: row.assetId,
+            institutionId: row.institutionId,
+            tradeDate: row.record.tradeDate,
+            quantity: row.record.quantity,
+          },
+        ]
+      : [];
+  const carriedRowIdOf = new Set(carryLegs.map((leg) => leg.id));
   const holdBackPairedDebits = (settlement: Settlement): boolean => {
+    const unsettled = rows
+      .filter((row) => {
+        if (!isCarryCandidate(row)) return false;
+        if (carriedRowIdOf.has(row.id)) return !settlement.resolvedCarryIds.has(row.id);
+        // Not a carry leg of this commit: only a copy the ledger already holds
+        // active keeps the position whole.
+        return storedCopyOf(stored, row)?.status !== 'active';
+      })
+      .flatMap((row) => legOf(row, row.id));
+    const debits = newCandidates
+      .filter((c) => c.transaction.type === 'transfer_out' && !excluded.has(c.row.id))
+      .flatMap((c) => legOf(c.row, c.row.id));
+
     let added = false;
-    for (const candidate of newCandidates) {
-      if (excluded.has(candidate.row.id)) continue;
-      if (!settlement.heldBackDebits.has(candidate.transaction.id)) continue;
-      excluded.add(candidate.row.id);
+    for (const rowId of debitsHeldBack(debits, unsettled)) {
+      excluded.add(rowId as ImportRowId);
       added = true;
     }
     return added;
   };
 
   let settlement = settleRound();
-  for (
-    let failed = settlement.groups.filter((group) => group.state === null);
-    failed.length > 0 || holdBackPairedDebits(settlement);
-    failed = settlement.groups.filter((group) => group.state === null)
-  ) {
-    if (failed.length === 0) {
+  for (;;) {
+    // Before the ladder below, not after (review finding 2). A round that
+    // gives up a *sale* because the position was emptied by a debit this rule
+    // was going to hold back never reconsiders it — exclusions only grow — and
+    // the batch then shows that sale as `applicable` on every re-import.
+    if (holdBackPairedDebits(settlement)) {
       settlement = settleRound();
       continue;
     }
+    const failed = settlement.groups.filter((group) => group.state === null);
+    if (failed.length === 0) break;
     const ready = failed.filter((group) => !group.waitsForCarry);
     for (const group of ready.length > 0 ? ready : failed) {
       // #110: an older import's row that no longer replays as its mapped type
@@ -1778,7 +1806,7 @@ function settle(
     }),
     // BR-005-20a (#135): read from this round's `costs`, so a credit that a
     // later round resolves releases its debit rather than refusing it for good.
-    heldBackDebits: debitsHeldBack(legs, costs),
+    resolvedCarryIds: new Set(costs.keys()),
   };
 }
 

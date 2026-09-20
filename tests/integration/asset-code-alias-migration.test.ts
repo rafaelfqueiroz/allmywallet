@@ -29,6 +29,7 @@ describe('migration 0025 — asset code aliases (integration)', () => {
   let migratorPool: Pool;
 
   const userId = UserId.generate();
+  const otherUserId = UserId.generate();
   let institutionId: string;
 
   const migration = async () =>
@@ -53,6 +54,7 @@ describe('migration 0025 — asset code aliases (integration)', () => {
     tradeDate: string,
     quantity: string,
     unitPrice: string,
+    owner: string = userId,
   ): Promise<{ id: string; naturalKey: string }> => {
     const id = randomUUID();
     const naturalKey = naturalKeyFor({
@@ -70,7 +72,7 @@ describe('migration 0025 — asset code aliases (integration)', () => {
        VALUES ($1, $2, $3, $4, 'sell', 'active', $5, $6, $7, '0', $8, $9, 1)`,
       [
         id,
-        userId,
+        owner,
         assetId,
         institutionId,
         tradeDate,
@@ -83,13 +85,33 @@ describe('migration 0025 — asset code aliases (integration)', () => {
     return { id, naturalKey };
   };
 
+  const addPosition = async (assetId: string, quantity: string, owner: string = userId) =>
+    migratorPool.query(
+      `INSERT INTO positions
+         (id, user_id, asset_id, institution_id, quantity, average_cost, total_cost, realized_gain)
+       VALUES ($1, $2, $3, $4, $5, '10', '100', '0')`,
+      [randomUUID(), owner, assetId, institutionId, quantity],
+    );
+
+  const positionsNow = async () =>
+    (
+      await migratorPool.query(
+        `SELECT user_id, asset_id, quantity::text AS quantity FROM positions
+          ORDER BY user_id, quantity`,
+      )
+    ).rows as { user_id: string; asset_id: string; quantity: string }[];
+
   /** The owner's real shape: a refused Negociação row, stored `invalid`. */
-  const addRefusedRow = async (assetId: string, code: string): Promise<string> => {
+  const addRefusedRow = async (
+    assetId: string,
+    code: string,
+    owner: string = userId,
+  ): Promise<string> => {
     const id = randomUUID();
     const batchId = randomUUID();
     await migratorPool.query(
       `INSERT INTO import_batches (id, user_id, source, status) VALUES ($1, $2, 'b3_negociacao', 'committed')`,
-      [batchId, userId],
+      [batchId, owner],
     );
     await migratorPool.query(
       `INSERT INTO import_rows
@@ -98,7 +120,7 @@ describe('migration 0025 — asset code aliases (integration)', () => {
        VALUES ($1, $2, $3, $4, $5, 'invalid', $6, $7, $8, 1, 'sell')`,
       [
         id,
-        userId,
+        owner,
         batchId,
         JSON.stringify({ 'Código de Negociação': code }),
         JSON.stringify({ kind: 'transaction', assetCode: code, assetName: code }),
@@ -133,6 +155,7 @@ describe('migration 0025 — asset code aliases (integration)', () => {
     await resetLedger(database.migrationUrl);
     await resetUsers(database.migrationUrl);
     await seedUser(database.migrationUrl, userId);
+    await seedUser(database.migrationUrl, otherUserId);
     institutionId = randomUUID();
     await migratorPool.query("INSERT INTO institutions (id, name) VALUES ($1, 'CLEAR')", [
       institutionId,
@@ -184,6 +207,7 @@ describe('migration 0025 — asset code aliases (integration)', () => {
   it('renames the asset where no canonical one exists yet, moving nothing', async () => {
     const legacy = await addAsset(LEGACY, LEGACY);
     const sale = await addSell(legacy, '2023-07-11', '101', '23.73');
+    const rowId = await addRefusedRow(legacy, LEGACY);
 
     await migration();
 
@@ -194,6 +218,95 @@ describe('migration 0025 — asset code aliases (integration)', () => {
     );
     expect(rows[0]?.asset_id).toBe(legacy);
     expect(rows[0]?.natural_key).toBe(sale.naturalKey);
+    // Review finding 4: whether a payload says ENBR3L or ENBR3 must not depend
+    // on which branch ran — the asset it names has the canonical code either way.
+    const { rows: payload } = await migratorPool.query(
+      'SELECT parsed_payload FROM import_rows WHERE id = $1',
+      [rowId],
+    );
+    expect(payload[0]?.parsed_payload).toMatchObject({
+      assetCode: CANONICAL,
+      assetName: CANONICAL,
+    });
+  });
+
+  /**
+   * Review finding 4. `positions` is a cache (BR-006-01, DM-4) and the merged
+   * position is not the sum of the parts, so a collision there deletes both
+   * cached rows for `rebuild-positions` to replay — it never aborts an upgrade
+   * over a figure the ledger can recompute.
+   */
+  it('deletes both cached positions where the merge joins two halves, rather than aborting', async () => {
+    const canonical = await addAsset(CANONICAL, 'EDP ENERGIAS DO BRASIL S.A.');
+    const legacy = await addAsset(LEGACY, LEGACY);
+    await addPosition(canonical, '50');
+    await addPosition(legacy, '101');
+
+    await migration();
+
+    expect(await positionsNow()).toEqual([]);
+    expect((await assetsNow()).map((row) => row.code)).toEqual([CANONICAL]);
+  });
+
+  it('re-points a cached position only one of the two assets held', async () => {
+    const canonical = await addAsset(CANONICAL, 'EDP ENERGIAS DO BRASIL S.A.');
+    const legacy = await addAsset(LEGACY, LEGACY);
+    await addPosition(legacy, '101');
+
+    await migration();
+
+    expect(await positionsNow()).toEqual([
+      { user_id: userId, asset_id: canonical, quantity: '101.00000000' },
+    ]);
+  });
+
+  /**
+   * The per-tenant loop and the `user_id` predicates are the part most likely
+   * to be wrong, and one seeded user never exercises them: each tenant's rows
+   * must move, and neither tenant's clash may reach the other.
+   */
+  it('merges every tenant holding the legacy asset, each against its own rows', async () => {
+    const canonical = await addAsset(CANONICAL, 'EDP ENERGIAS DO BRASIL S.A.');
+    const legacy = await addAsset(LEGACY, LEGACY);
+    const mine = await addSell(legacy, '2023-07-11', '101', '23.73');
+    const theirs = await addSell(legacy, '2023-07-12', '99', '23.73', otherUserId);
+    await addPosition(legacy, '101');
+    await addPosition(legacy, '99', otherUserId);
+
+    await migration();
+
+    expect((await assetsNow()).map((row) => row.code)).toEqual([CANONICAL]);
+    const { rows } = await migratorPool.query(
+      'SELECT id, user_id, asset_id, natural_key FROM transactions ORDER BY trade_date',
+    );
+    expect(rows.map((row) => [row.user_id, row.asset_id])).toEqual([
+      [userId, canonical],
+      [otherUserId, canonical],
+    ]);
+    expect(rows[0]?.natural_key).toBe(mine.naturalKey.replace(legacy, canonical));
+    expect(rows[1]?.natural_key).toBe(theirs.naturalKey.replace(legacy, canonical));
+    expect(await positionsNow()).toEqual([
+      { user_id: userId, asset_id: canonical, quantity: '101.00000000' },
+      { user_id: otherUserId, asset_id: canonical, quantity: '99.00000000' },
+    ]);
+  });
+
+  it('one tenant’s key clash aborts the whole migration, writing nothing for anyone', async () => {
+    const canonical = await addAsset(CANONICAL, 'EDP ENERGIAS DO BRASIL S.A.');
+    const legacy = await addAsset(LEGACY, LEGACY);
+    await addSell(legacy, '2023-07-11', '101', '23.73');
+    await addSell(canonical, '2023-07-12', '99', '23.73', otherUserId);
+    await addSell(legacy, '2023-07-12', '99', '23.73', otherUserId);
+    const before = (
+      await migratorPool.query('SELECT id, asset_id, natural_key FROM transactions ORDER BY id')
+    ).rows;
+
+    await expect(migration()).rejects.toThrow(/#135/);
+
+    expect(
+      (await migratorPool.query('SELECT id, asset_id, natural_key FROM transactions ORDER BY id'))
+        .rows,
+    ).toEqual(before);
   });
 
   it('leaves every other asset alone — no suffix rule is inferred', async () => {

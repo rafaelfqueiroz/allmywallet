@@ -1577,20 +1577,24 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       (
         await migratorPool.query(
           `SELECT quantity::text AS quantity, average_cost::text AS average_cost,
-                  realized_gain::text AS realized_gain
+                  total_cost::text AS total_cost, realized_gain::text AS realized_gain
              FROM positions p JOIN assets a ON a.id = p.asset_id WHERE a.code = 'ENBR3'`,
         )
       ).rows[0];
 
     it('BR-005-20a: the pair leaves quantity and cost exactly as they were', async () => {
       await importMovimentacao([buy]);
-      await importMovimentacao(pair);
-
-      expect(await position()).toEqual({
+      const before = await position();
+      expect(before).toEqual({
         quantity: '101.00000000',
         average_cost: '20.00000000',
+        total_cost: '2020.00000000',
         realized_gain: '0.00000000',
       });
+
+      await importMovimentacao(pair);
+
+      expect(await position()).toEqual(before);
       const { rows } = await migratorPool.query(
         "SELECT status FROM transactions WHERE type = 'transfer_in'",
       );
@@ -1618,6 +1622,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       expect(await position()).toEqual({
         quantity: '0.00000000',
         average_cost: '0.00000000',
+        total_cost: '0.00000000',
         realized_gain: '376.73000000',
       });
       const { rows: refused } = await migratorPool.query(
@@ -1642,6 +1647,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       expect(await position()).toEqual({
         quantity: '101.00000000',
         average_cost: '9.95049505',
+        total_cost: '1005.00000000',
         realized_gain: '0.00000000',
       });
 

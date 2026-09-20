@@ -232,6 +232,27 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
       ).toEqual({ kind: 'applicable' });
     });
 
+    /**
+     * Review finding 3. A stored price-less credit whose own debit was never
+     * imported is an ordinary sight — DL-005-10 records 115 of them on the
+     * owner's first import — and a debit refused for a genuine shortfall must
+     * keep the figures that say so rather than be relabelled a pair.
+     */
+    it('leaves a genuine shortfall its own figures', () => {
+      const short = aTransaction().buy().on('2026-01-05').quantity('40').price('10').build();
+      const refusal = explainRefusal(
+        row('transfer_out', '2026-02-01', '100'),
+        [short, { ...unresolvedCredit(), quantity: Quantity.fromString('100') }],
+        userId,
+        now,
+        today,
+      );
+      expect(refusal.kind).toBe('insufficient_quantity');
+      if (refusal.kind !== 'insufficient_quantity') return;
+      expect(refusal.held.toString()).toBe('40');
+      expect(refusal.requested.toString()).toBe('100');
+    });
+
     it('ignores an unclassified credit of another date or quantity', () => {
       const elsewhere = { ...unresolvedCredit(), tradeDate: BusinessDate.of('2026-02-02') };
       expect(

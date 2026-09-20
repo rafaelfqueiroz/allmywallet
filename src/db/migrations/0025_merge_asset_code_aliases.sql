@@ -27,21 +27,34 @@
 -- tenant at once, so every check and write also matches on `user_id` and a
 -- repeated pass changes nothing.
 --
---   - No canonical asset yet: the asset is renamed to its canonical code, and
---     nothing else moves — every key names it by id.
+--   - No canonical asset yet: the asset is renamed to its canonical code and
+--     nothing moves — every key names it by id. Its rows' `parsed_payload`
+--     still has to be rewritten, or whether a payload says `ENBR3L` or `ENBR3`
+--     would depend on which of the two branches ran.
 --   - Canonical asset exists: every row is re-pointed and the natural key's
 --     asset id swapped (`naturalKeyFor`: date|asset|institution|type|qty|price).
---     Occurrences are kept. Positions are the cache of the re-pointed
---     transactions and move with them.
---   - Any clash (a key, a position, an allocation, a target, a rule on both
---     assets) aborts the migration, writing nothing, rather than guessing
---     which row is real. Renumbering the second would silently double a
---     holding, and nothing in the data tells the two apart.
+--     Occurrences are kept.
+--   - A natural-key clash, an allocation, a target or a rule on both assets
+--     aborts the migration, writing nothing, rather than guessing which row is
+--     real. Renumbering a colliding transaction would silently double a
+--     holding, and nothing in the data tells two identical trades apart.
+--   - `positions` is a **cache** (BR-006-01, DM-4), so a collision there is not
+--     a reason to refuse an upgrade: both cached rows are deleted and
+--     `scripts/personal/start.sh` replays the ledger back into the cache
+--     immediately after this migration, through `dist/ops.js
+--     rebuild-positions`. `0024` takes the same reading. The merged position
+--     is not the sum of the parts — a sale removes cost at the average it met
+--     — so re-pointing one over the other would cache a plausible wrong
+--     figure, which is the outcome worth avoiding.
 --   - A fixed-income contract on the canonical asset wins; an aliased code is
 --     a listed ticker and never carries one, so none is expected.
 --   - Quotes and price gaps cascade with the deleted asset: they were fetched
 --     for a settlement ticker that trades on no other day, and the canonical
 --     asset carries the real series.
+--   - A **soft-deleted** tenant is merged like any other — its rows hold the
+--     foreign keys that would otherwise block deleting the asset — but
+--     `rebuild-positions` skips it (SPEC-004's grace window). An account
+--     restored within that window needs `positions:rebuild --user <id>`.
 DO $$
 DECLARE
   legacy record;
@@ -68,6 +81,28 @@ BEGIN
              name = CASE WHEN name = legacy.code THEN legacy.canonical_code ELSE name END,
              updated_at = now()
        WHERE id = legacy.id;
+
+      FOR tenant IN SELECT id FROM users LOOP
+        PERFORM set_config('app.user_id', tenant.id::text, true);
+        -- The normalised record the refusal screen rebuilds a candidate from:
+        -- one still naming the legacy code would read against an asset that is
+        -- not there. `raw_payload` is B3's own cells and stays as B3 wrote
+        -- them. An extract with no product name lets its code double as one,
+        -- so that name moves with the code; any other name is left alone.
+        UPDATE import_rows
+           SET parsed_payload = jsonb_set(
+                 CASE
+                   WHEN parsed_payload->>'assetName' = legacy.code
+                     THEN jsonb_set(parsed_payload, '{assetName}', to_jsonb(legacy.canonical_code))
+                   ELSE parsed_payload
+                 END,
+                 '{assetCode}', to_jsonb(legacy.canonical_code)
+               ),
+               updated_at = now()
+         WHERE asset_id = legacy.id
+           AND user_id = tenant.id
+           AND parsed_payload->>'assetCode' = legacy.code;
+      END LOOP;
       CONTINUE;
     END IF;
 
@@ -81,13 +116,6 @@ BEGIN
            AND o.occurrence = t.occurrence
            AND o.user_id = t.user_id
          WHERE t.asset_id = legacy.id AND t.user_id = tenant.id
-      ) OR EXISTS (
-        SELECT 1 FROM positions p
-          JOIN positions o
-            ON o.asset_id = canonical_id
-           AND o.institution_id IS NOT DISTINCT FROM p.institution_id
-           AND o.user_id = p.user_id
-         WHERE p.asset_id = legacy.id AND p.user_id = tenant.id
       ) OR EXISTS (
         SELECT 1 FROM wallet_allocations a
           JOIN wallet_allocations o ON o.wallet_id = a.wallet_id AND o.asset_id = canonical_id
@@ -109,6 +137,18 @@ BEGIN
           legacy.id, canonical_id;
       END IF;
 
+      -- Decided before anything moves: once the ledger is re-pointed, every
+      -- row reads as one asset and the question cannot be asked.
+      DELETE FROM positions p
+       WHERE p.user_id = tenant.id
+         AND p.asset_id IN (legacy.id, canonical_id)
+         AND EXISTS (
+           SELECT 1 FROM positions o
+            WHERE o.user_id = p.user_id
+              AND o.asset_id = CASE WHEN p.asset_id = legacy.id THEN canonical_id ELSE legacy.id END
+              AND o.institution_id IS NOT DISTINCT FROM p.institution_id
+         );
+
       UPDATE transactions
          SET asset_id = canonical_id,
              natural_key = replace(natural_key, legacy.id::text, canonical_id::text),
@@ -122,6 +162,7 @@ BEGIN
       UPDATE import_rows
          SET asset_id = canonical_id,
              natural_key = replace(natural_key, legacy.id::text, canonical_id::text),
+             -- As in the rename branch above, and for the same reason.
              parsed_payload = jsonb_set(
                CASE
                  WHEN parsed_payload->>'assetName' = legacy.code

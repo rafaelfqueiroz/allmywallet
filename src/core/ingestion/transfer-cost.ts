@@ -223,36 +223,55 @@ export function resolveCarriedCosts(
  *
  * A `transfer_out` needs no price, so it applies on its own; its credit needs
  * a carried cost and stays `unclassified` without one. Where the two legs are
- * the same position — same asset, same institution — applying one alone is not
- * a partial import but a **loss**: the shares leave the position and nothing
- * records their return. That is what took 200 ENBR3 shares out of the owner's
- * *patrimônio*, silently, with no screen in the product to say so.
+ * the same position — same asset, same institution, same date, same quantity —
+ * applying one alone is not a partial import but a **loss**: the shares leave
+ * the position and nothing records their return. That is what took 200 ENBR3
+ * shares out of the owner's *patrimônio*, silently, with no screen in the
+ * product to say so.
  *
- * So a same-position pair is all or nothing. Where the carry resolves, both
- * legs are written and net to zero; where it does not, the debit is refused
+ * So a same-position pair is all or nothing. Where the credit is settled, both
+ * legs are written and net to zero; where it is not, the debit is refused
  * (`unresolved_transfer_pair`) rather than applied, nothing is written for it,
  * no occurrence is taken, and importing the file again applies it once the
  * credit can take its cost (BR-005-17).
  *
- * A **cross-institution** pair is deliberately not held back: the debit is the
- * whole record of shares genuinely leaving that broker, and BR-005-20a has
+ * **Read off the relation, not off a formed pair** (review finding 1). An
+ * earlier version asked this of `pairTransfers`' one-to-one matches only, and
+ * so let through exactly the shapes where no pair forms: two same-position
+ * pairs of equal quantity on one date (each credit sees two debits, so neither
+ * pairs) and a same-institution debit competing with a cross-institution one.
+ * In both, every debit applied alone and the position went to zero — the
+ * ambiguity guard that protects the *cost* was removing the guard on the
+ * *quantity*. Whether a credit found a source is a different question from
+ * whether its position may be emptied without it.
+ *
+ * A **cross-institution** debit is deliberately not held back: the debit is
+ * the whole record of shares genuinely leaving that broker, and BR-005-20a has
  * always let its credit wait for history that has not been imported yet. The
  * quantity is still visible at the destination as an `unclassified` row in
  * Needs attention, which a same-position pair's credit is too — but there the
  * debit erases the same position the credit would have restored.
+ *
+ * `debits` are the `transfer_out` rows this commit would write; `unsettled`
+ * are the batch's price-less `transfer_in` legs that will *not* be active in
+ * the ledger once it is done. Both are keyed by whatever id the caller needs
+ * back.
  */
 export function debitsHeldBack(
-  legs: readonly CarryLeg[],
-  resolved: ReadonlyMap<string, Money>,
+  debits: readonly TransferLeg[],
+  unsettled: readonly TransferLeg[],
 ): ReadonlySet<string> {
   return new Set(
-    legs.flatMap((leg) =>
-      leg.debit !== null &&
-      !resolved.has(leg.id) &&
-      leg.debit.assetId === leg.credit.assetId &&
-      leg.debit.institutionId === leg.credit.institutionId
-        ? [leg.debit.id]
-        : [],
-    ),
+    debits
+      .filter((debit) =>
+        unsettled.some(
+          (credit) =>
+            credit.assetId === debit.assetId &&
+            credit.institutionId === debit.institutionId &&
+            credit.tradeDate === debit.tradeDate &&
+            credit.quantity.equals(debit.quantity),
+        ),
+      )
+      .map((debit) => debit.id),
   );
 }

@@ -8,7 +8,7 @@ import {
   InstitutionId,
   type InstitutionId as InstitutionIdType,
 } from '@/core/shared/ids';
-import { Money, Quantity } from '@/core/shared/money';
+import { asStored, Money, Quantity } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
 import {
   aTransaction,
@@ -357,31 +357,90 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
   });
 
   /**
+   * #135 — a carried cost is a division and repeats as often as not. Writing
+   * the full-precision quotient made the position a commit caches disagree
+   * with the position a rebuild folds from the same rows read back at
+   * `NUMERIC(20,8)`, which `verifyPositions` reports as drift (DM-4).
+   */
+  it('withCarriedCost writes the price at the scale the column holds', () => {
+    const credit = aTransaction().transferIn().quantity('3').price('0').build();
+    // 31,00 ÷ 3 = 10,333… — eight places, rounded half-up as Postgres casts.
+    const carried = withCarriedCost(credit, money('31').dividedBy(Quantity.fromString('3')));
+    expect(carried.unitPrice.toString()).toBe('10.33333333');
+    expect(asStored(carried.unitPrice)).toBe('10.33333333');
+    expect(carried.totalValue.toString()).toBe('30.99999999');
+  });
+
+  /**
    * #135 — one leg of a same-position pair applied alone is not a partial
    * import but a loss: the shares leave and nothing records their return.
+   * Asked of the relation rather than of a formed pair, because the shapes
+   * where no pair forms are exactly the ones where two debits could empty a
+   * position between them.
    */
   describe('debitsHeldBack', () => {
-    const idsOf = (legs: readonly CarryLeg[], resolved: ReadonlyMap<string, Money>) => [
-      ...debitsHeldBack(legs, resolved),
-    ];
+    const asset = AssetId.generate();
+    const other = AssetId.generate();
+    const origem = InstitutionId.generate();
+    const destino = InstitutionId.generate();
 
-    it('holds back a same-position debit whose credit took no cost', () => {
-      const leg = transfer('t', 'A', 'A', '2026-03-10');
-      expect(idsOf([leg], new Map())).toEqual([(leg.debit as Transaction).id]);
+    const at = (id: string, overrides: Partial<TransferLeg> = {}): TransferLeg => ({
+      id,
+      assetId: asset,
+      institutionId: origem,
+      tradeDate: BusinessDate.of('2026-03-10'),
+      quantity: Quantity.fromString('100'),
+      ...overrides,
     });
 
-    it('releases it as soon as the credit resolves', () => {
-      const leg = transfer('t', 'A', 'A', '2026-03-10');
-      expect(idsOf([leg], new Map([['t', money('15')]]))).toEqual([]);
+    it('holds back a debit whose same-position credit is unsettled', () => {
+      expect([...debitsHeldBack([at('debit')], [at('credit')])]).toEqual(['debit']);
+    });
+
+    it('releases it when no credit is left unsettled', () => {
+      expect([...debitsHeldBack([at('debit')], [])]).toEqual([]);
     });
 
     it('never holds back a cross-institution debit: the shares genuinely left that broker', () => {
-      expect(idsOf([transfer('t', 'A', 'B', '2026-03-10')], new Map())).toEqual([]);
+      expect([
+        ...debitsHeldBack([at('debit', { institutionId: destino })], [at('credit')]),
+      ]).toEqual([]);
     });
 
-    it('holds back nothing when the debit is not going to be written', () => {
-      const leg = { ...transfer('t', 'A', 'A', '2026-03-10'), debit: null };
-      expect(idsOf([leg], new Map())).toEqual([]);
+    it.each<[string, Partial<TransferLeg>]>([
+      ['another asset', { assetId: other }],
+      ['another day', { tradeDate: BusinessDate.of('2026-03-11') }],
+      ['another quantity', { quantity: Quantity.fromString('99') }],
+      ['no institution', { institutionId: null }],
+    ])('does not match an unsettled credit of %s', (_label, overrides) => {
+      expect([...debitsHeldBack([at('debit')], [at('credit', overrides)])]).toEqual([]);
+    });
+
+    /**
+     * Review finding 1A. Two same-position pairs of equal quantity on one
+     * date: each credit sees two candidate debits, so `pairTransfers` forms
+     * nothing — and a rule asked of formed pairs alone let both debits through
+     * and emptied the position.
+     */
+    it('holds back both debits where two same-position pairs of one quantity compete', () => {
+      const credits = [at('credit-1'), at('credit-2')];
+      expect(pairTransfers(credits, [at('debit-1'), at('debit-2')]).size).toBe(0);
+      expect([...debitsHeldBack([at('debit-1'), at('debit-2')], credits)].sort()).toEqual([
+        'debit-1',
+        'debit-2',
+      ]);
+    });
+
+    /**
+     * Review finding 1B. A same-institution debit competing with a
+     * cross-institution one: the credit pairs with neither, and the
+     * same-position debit must still be held back while the other applies.
+     */
+    it('holds back only the same-position debit when a cross-institution one competes', () => {
+      const credit = at('credit');
+      const debits = [at('own'), at('elsewhere', { institutionId: destino })];
+      expect(pairTransfers([credit], debits).size).toBe(0);
+      expect([...debitsHeldBack(debits, [credit])]).toEqual(['own']);
     });
   });
 });

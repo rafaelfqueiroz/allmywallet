@@ -75,16 +75,18 @@ export function explainRefusal(
   const candidate = buildCandidate(row, row.batchId, userId, 'active', now, today);
   if (candidate === null) return { kind: 'malformed' };
 
-  // BR-005-20a (#135): asked before the replay, because this row replays
-  // perfectly well — that is exactly the problem. Derived like every other
-  // kind here, so once the credit takes its cost the same row reads as
-  // `applicable` and a re-import applies it.
-  if (candidate.type === 'transfer_out' && hasUnresolvedCounterpart(ledger, candidate)) {
-    return { kind: 'unresolved_transfer_pair', date: candidate.tradeDate };
-  }
-
   const failure = firstUnreplayable([...ledger, candidate]);
-  if (failure === null) return { kind: 'applicable' };
+  // BR-005-20a (#135): asked only of a row the ledger would otherwise accept,
+  // because that is what a held-back debit is — it replays perfectly well, and
+  // that is exactly the problem. A row refused for any other reason keeps the
+  // refusal that names its own figures (review finding 3). Derived like every
+  // other kind here, so once the credit takes its cost the same row reads as
+  // `applicable` and a re-import applies it.
+  if (failure === null) {
+    return candidate.type === 'transfer_out' && hasUnresolvedCounterpart(ledger, candidate)
+      ? { kind: 'unresolved_transfer_pair', date: candidate.tradeDate }
+      : { kind: 'applicable' };
+  }
   if (failure.transaction.id !== candidate.id) {
     return { kind: 'conflicts_with_ledger', date: failure.transaction.tradeDate };
   }

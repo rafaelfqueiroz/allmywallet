@@ -2227,6 +2227,107 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     });
 
     /**
+     * Review finding 1A. Two same-position pairs of one quantity on one date:
+     * each credit sees two candidate debits, so `pairTransfers` forms nothing
+     * and a guard asked of formed pairs alone let both debits through. The
+     * position went to zero with neither credit carrying anything.
+     */
+    it('holds back both debits where two same-position pairs of one quantity compete', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history({ quantity: Quantity.fromString('200') })]);
+      const before = await positionAt(deps, ORIGEM);
+      expect(before).toEqual({ quantity: '200', averageCost: '10', totalCost: '2000' });
+
+      const { outcome } = await importFile(deps, [ownCredit(), ownCredit(), debit(), debit()]);
+
+      expect(outcome).toMatchObject({ applied: 2, invalid: 2 });
+      expect(deps.transactions.rows.some((t) => t.type === 'transfer_out')).toBe(false);
+      expect(transfersIn(deps).map((t) => t.status)).toEqual(['unclassified', 'unclassified']);
+      expect(await positionAt(deps, ORIGEM)).toEqual(before);
+    });
+
+    /**
+     * Review finding 1B. A same-institution debit competing with a
+     * cross-institution one. The credit pairs with neither — two candidate
+     * sources is exactly what the ambiguity guard refuses to choose between —
+     * but the debit at the credit's own position must still be held back,
+     * while the one at the other broker applies as it always has.
+     */
+    it('holds back only the same-position debit when a cross-institution one competes', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [
+        history(),
+        history({ institutionName: DESTINO, unitPrice: Money.fromString('20') }),
+      ]);
+
+      const { outcome } = await importFile(deps, [
+        ownCredit(),
+        debit(),
+        debit({ institutionName: DESTINO }),
+      ]);
+
+      expect(outcome).toMatchObject({ applied: 2, invalid: 1 });
+      // ORIGEM keeps its 100: the debit that would have emptied it is refused.
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '100',
+        averageCost: '10',
+        totalCost: '1000',
+      });
+      // DESTINO's own debit is written, as a cross-broker debit always is.
+      expect(await positionAt(deps, DESTINO)).toEqual({
+        quantity: '0',
+        averageCost: '0',
+        totalCost: '0',
+      });
+      expect(transfersIn(deps).map((t) => t.status)).toEqual(['unclassified']);
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
+     * Review finding 2. The hold-back runs **before** the exclusion ladder: a
+     * round that gave up a sale because the position had been emptied by a
+     * debit this rule was going to hold back never reconsiders it — exclusions
+     * only grow — so the sale was refused on that import and every one after,
+     * while the batch page called it `applicable`.
+     */
+    it('does not cost another row on the same position its place in the ledger', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [
+        buy({
+          b3Type: 'Bonificação em Ativos',
+          institutionName: ORIGEM,
+          tradeDate: BusinessDate.of('2026-01-05'),
+          priceStated: false,
+          unitPrice: Money.zero(),
+          fees: Money.zero(),
+        }),
+      ]);
+
+      const { outcome } = await importFile(deps, [
+        ownCredit(),
+        debit(),
+        buy({
+          b3Type: 'Venda',
+          direction: null,
+          institutionName: ORIGEM,
+          tradeDate: BusinessDate.of('2026-03-11'),
+          unitPrice: Money.fromString('12'),
+          fees: Money.zero(),
+        }),
+      ]);
+
+      // The credit stored unclassified and the sale applied; only the debit is refused.
+      expect(outcome).toMatchObject({ applied: 2, invalid: 1 });
+      expect(deps.transactions.rows.some((t) => t.type === 'sell')).toBe(true);
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '0',
+        averageCost: '0',
+        totalCost: '0',
+      });
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
      * A cross-institution debit is the whole record of shares genuinely
      * leaving that broker, and BR-005-20a has always let its credit wait for
      * history that has not been imported. Holding it back too would refuse
