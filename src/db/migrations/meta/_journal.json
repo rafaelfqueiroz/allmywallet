@@ -169,6 +169,13 @@
       "when": 1789743029453,
       "tag": "0023_asset_conversions",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789912375877,
+      "tag": "0024_merge_institution_spellings",
+      "breakpoints": true
     }
   ]
 }

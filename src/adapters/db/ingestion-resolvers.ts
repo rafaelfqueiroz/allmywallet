@@ -2,6 +2,10 @@ import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { assets, institutions } from '@/db/schema/assets';
 import { AssetId, InstitutionId } from '@/core/shared/ids';
+import {
+  canonicalInstitutionName,
+  institutionIdentityKey,
+} from '@/core/ingestion/institution-identity';
 import type {
   AssetResolveInput,
   AssetResolverPort,
@@ -51,16 +55,71 @@ export class DrizzleAssetResolver implements AssetResolverPort {
   }
 }
 
+/**
+ * #136 — one institution, one row, whichever way B3 spelled it.
+ *
+ * A position is keyed by `(asset, institution)` (SPEC-007 BR-007-08), so a
+ * second row for one real broker splits a holding in two and every rule keyed
+ * on the position then reads half of it. `institutionIdentityKey`
+ * (`core/ingestion/institution-identity.ts`) decides what "one institution"
+ * means; this class is where that decision reaches the catalogue.
+ *
+ * The catalogue is read once per instance and indexed by that key, so a
+ * spelling arriving for the first time finds the row an *earlier* spelling
+ * created rather than inserting beside it — which is what the name unique
+ * constraint alone cannot do. Institutions are a shared reference table
+ * (AR-15) of a handful of rows; one `SELECT` per staging or commit
+ * transaction is cheaper than the per-row upsert it replaces.
+ *
+ * The cache is per instance and never outlives its transaction: the resolvers
+ * are constructed inside the `withTenant` transaction they serve
+ * (`worker/handlers/import.ts`), so it cannot serve a stale catalogue to a
+ * later request.
+ */
 export class DrizzleInstitutionResolver implements InstitutionResolverPort {
   constructor(private readonly db: Tx | Database) {}
 
+  #byIdentity: Map<string, InstitutionId> | null = null;
+
   async resolve(name: string): Promise<InstitutionId> {
+    const known = await this.#catalogue();
+    const identity = institutionIdentityKey(name);
+    const existing = known.get(identity);
+    if (existing !== undefined) return existing;
+
+    // AR-19: a retried commit racing itself on the same spelling still creates
+    // one row — the name unique constraint is the floor under the cache.
     const [row] = await this.db
       .insert(institutions)
-      .values({ id: InstitutionId.generate(), name })
+      .values({ id: InstitutionId.generate(), name: canonicalInstitutionName(name) })
       .onConflictDoUpdate({ target: institutions.name, set: { updatedAt: new Date() } })
       .returning({ id: institutions.id });
     if (!row) throw new Error('DrizzleInstitutionResolver.resolve: upsert returned no row');
-    return InstitutionId.of(row.id);
+
+    const id = InstitutionId.of(row.id);
+    known.set(identity, id);
+    return id;
+  }
+
+  async #catalogue(): Promise<Map<string, InstitutionId>> {
+    if (this.#byIdentity !== null) return this.#byIdentity;
+    const rows = await this.db
+      .select({ id: institutions.id, name: institutions.name })
+      .from(institutions)
+      .orderBy(institutions.name);
+
+    // A ledger still holding both spellings of a split — imported before
+    // `0024` merged them — resolves to the canonical row where one exists and
+    // otherwise to the first by name, rather than starting a third. Never to
+    // whichever row Postgres returned first: two imports must not disagree.
+    const byIdentity = new Map<string, InstitutionId>();
+    for (const row of rows) {
+      const identity = institutionIdentityKey(row.name);
+      const isCanonical = row.name === canonicalInstitutionName(row.name);
+      if (isCanonical || !byIdentity.has(identity))
+        byIdentity.set(identity, InstitutionId.of(row.id));
+    }
+    this.#byIdentity = byIdentity;
+    return byIdentity;
   }
 }

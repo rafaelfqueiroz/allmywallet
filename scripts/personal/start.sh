@@ -172,6 +172,22 @@ if ! IMAGE_TAG=$new_tag personal_compose run --rm --no-deps -T \
   exit 1
 fi
 
+# 3b. Replay the ledger into the position cache, with the NEW image's ops
+#     bundle. A data migration may delete cached positions it cannot replay in
+#     SQL — #136's institution merge does, because a merged position is not the
+#     sum of the parts it joins — and until they are replayed a holding reads
+#     zero and any allocation reconciliation that meets it reads a ledger that
+#     is not all there. Positions are derived (DM-4), so a replay is safe on
+#     every upgrade, not only on the ones that needed it.
+#
+#     Not fatal: a ledger that cannot be replayed is a defect to report, not a
+#     reason to leave the instance down. The failure is logged and the new
+#     image still faces the health check.
+if ! IMAGE_TAG=$new_tag personal_compose run --rm --no-deps -T \
+  web node dist/ops.js rebuild-positions; then
+  log "position rebuild failed — starting anyway; report it and run it by hand (docs/runbooks/personal-instance.md)"
+fi
+
 # 4–5. Start the new image and let /api/health decide. #121's new ledger
 # values stay latched off until this image is last-known-good: if health fails,
 # the previous 15-type image can replay every row on the migrated schema.

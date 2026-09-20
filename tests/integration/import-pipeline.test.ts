@@ -1422,6 +1422,99 @@ describe('SPEC-005 — import pipeline (integration)', () => {
   });
 
   /**
+   * #136 — B3 spells one institution several ways across extracts and
+   * periods. A position is keyed by `(asset, institution)` (SPEC-007
+   * BR-007-08), so a second row for one broker splits a holding in two and
+   * every rule keyed on the position then reads half of its history — which is
+   * how WEGE3's `Desdobro` came to refuse `no_basis` against a position of
+   * zero while its own buys sat on the other spelling.
+   */
+  describe('#136 — one institution B3 spelled several ways', () => {
+    const INTER_FULL = 'INTER DISTRIBUIDORA DE TITULOS E VALORES MOBILIARIOS LTDA';
+    const INTER_SHORT = 'INTER DTVM LTDA';
+
+    const buy = (data: string, instituicao: string) => ({
+      data,
+      movimentacao: 'Compra',
+      produto: 'WEGE3 - WEG S.A.',
+      instituicao,
+      quantidade: '5',
+      precoUnitario: '30,00',
+      valorOperacao: '150,00',
+    });
+
+    const importMovimentacao = async (rows: Parameters<typeof buildMovimentacaoXlsx>[0]) => {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    };
+
+    it('BR-005-14/BR-007-08: two spellings of one broker in one file leave one institution and one position', async () => {
+      await importMovimentacao([buy('01/03/2021', INTER_FULL), buy('01/04/2021', INTER_SHORT)]);
+
+      const { rows: institutions } = await migratorPool.query(
+        'SELECT id, name FROM institutions ORDER BY name',
+      );
+      expect(institutions.map((row) => row.name)).toEqual([INTER_FULL]);
+
+      const { rows: positions } = await migratorPool.query(
+        'SELECT institution_id, quantity::text AS quantity FROM positions',
+      );
+      expect(positions).toEqual([{ institution_id: institutions[0]?.id, quantity: '10.00000000' }]);
+    });
+
+    it('resolves a later spelling onto the row an earlier one created, whichever came first', async () => {
+      await importMovimentacao([buy('01/03/2021', INTER_SHORT)]);
+      const { rows: first } = await migratorPool.query('SELECT id, name FROM institutions');
+      await importMovimentacao([buy('01/04/2021', INTER_FULL)]);
+
+      const { rows: after } = await migratorPool.query('SELECT id, name FROM institutions');
+      expect(after).toEqual(first);
+      const { rows: positions } = await migratorPool.query(
+        'SELECT quantity::text AS quantity FROM positions',
+      );
+      expect(positions).toEqual([{ quantity: '10.00000000' }]);
+    });
+
+    /**
+     * The state of a ledger that has not run `0024` yet, or one where an alias
+     * is added before its migration: the catalogue holds the abbreviation and
+     * an extract names the expansion. The row that exists is reused — a second
+     * one is exactly the split being fixed.
+     */
+    it('reuses the row an earlier spelling created, even when it is not the canonical one', async () => {
+      await migratorPool.query('INSERT INTO institutions (id, name) VALUES ($1, $2)', [
+        InstitutionId.generate(),
+        INTER_SHORT,
+      ]);
+
+      await importMovimentacao([buy('01/04/2021', INTER_FULL)]);
+
+      const { rows } = await migratorPool.query('SELECT name FROM institutions');
+      expect(rows.map((row) => row.name)).toEqual([INTER_SHORT]);
+      const { rows: transactions } = await migratorPool.query(
+        'SELECT institution_id FROM transactions',
+      );
+      expect(transactions).toHaveLength(1);
+    });
+
+    it('keeps two brokers of one group apart — Clear is not XP', async () => {
+      await importMovimentacao([
+        buy('01/03/2021', 'CLEAR CORRETORA - GRUPO XP'),
+        buy('01/04/2021', 'XP INVESTIMENTOS CCTVM S/A'),
+      ]);
+
+      const { rows } = await migratorPool.query('SELECT name FROM institutions ORDER BY name');
+      expect(rows.map((row) => row.name)).toEqual([
+        'CLEAR CORRETORA - GRUPO XP',
+        'XP INVESTIMENTOS CORRETORA DE CAMBIO TITULOS E VALORES MOBILIARIOS S/A',
+      ]);
+    });
+  });
+
+  /**
    * #108 — Movimentação and Negociação only *guess* an asset's class from its
    * ticker; Posição *states* it. `DrizzleAssetResolver` used to overwrite the
    * class on every resolve, so importing a Movimentação after a Posição turned
