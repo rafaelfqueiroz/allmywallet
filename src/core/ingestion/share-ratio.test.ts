@@ -9,6 +9,8 @@ import {
 } from '@/core/quotes/corporate-event-factors';
 import {
   calendarDaysBetween,
+  corroborateRatio,
+  corroborationCandidate,
   derivedRatioOf,
   evaluateShareRatio,
   factorsInWindow,
@@ -253,6 +255,95 @@ describe('#113 BR-007-04a — evaluateShareRatio', () => {
       expect(verdict).toMatchObject({ ok: false, refusal: structural });
       expect(verdict.evidence.derivedRatio?.toString()).toBe('0.1');
     }
+  });
+});
+
+describe('#120 BR-005-20b — corroborationCandidate', () => {
+  it('accepts a no_factor refusal for an issuer with no factor of any kind, returning the derivation', () => {
+    // The FII shape: P = 16, Δ = 112 → (16 + 112) ÷ 16 = 128 ÷ 16 = 8.
+    const derivedRatio = derivedRatioOf('desdobro', q('16'), q('112'));
+    expect(derivedRatio.toString()).toBe('8');
+    expect(
+      corroborationCandidate({ refusal: 'no_factor', issuerFactors: [], derivedRatio })?.toString(),
+    ).toBe('8');
+  });
+
+  it('refuses an issuer B3 publishes for, even when nothing is near the row', () => {
+    // The guard: a 2014 desdobramento is outside any window the row could use,
+    // but its existence means B3 does publish for this issuer — so the row
+    // keeps refusing `no_factor` and no set of positions may override that.
+    const stale = factor('desdobramento', '700', '2014-05-02');
+    expect(
+      corroborationCandidate({
+        refusal: 'no_factor',
+        issuerFactors: [stale],
+        derivedRatio: q('8'),
+      }),
+    ).toBeNull();
+  });
+
+  it('refuses every other refusal, which names something corroboration cannot answer', () => {
+    for (const refusal of [
+      'no_basis',
+      'ambiguous_factor',
+      'disagrees',
+      'not_representable',
+      'combined_same_day',
+      'blocked',
+      'conflicts_with_ledger',
+    ] as const) {
+      expect(
+        corroborationCandidate({ refusal, issuerFactors: [], derivedRatio: q('8') }),
+      ).toBeNull();
+    }
+  });
+});
+
+describe('#120 BR-005-20b — corroborateRatio', () => {
+  it('confirms two positions that derive the same exactly storable ratio', () => {
+    // (16 + 112) ÷ 16 = 128 ÷ 16 = 8; (49 + 343) ÷ 49 = 392 ÷ 49 = 8.
+    const first = derivedRatioOf('desdobro', q('16'), q('112'));
+    const second = derivedRatioOf('desdobro', q('49'), q('343'));
+    expect([first.toString(), second.toString()]).toEqual(['8', '8']);
+    const verdict = corroborateRatio([first, second]);
+    expect(verdict).toMatchObject({ ok: true });
+    expect(verdict.ok && verdict.ratio.toString()).toBe('8');
+  });
+
+  it('confirms a grupamento the same way: 22 ÷ 220 and 50 ÷ 500 are both 0,1', () => {
+    const verdict = corroborateRatio([
+      derivedRatioOf('grupamento', q('220'), q('22')),
+      derivedRatioOf('grupamento', q('500'), q('50')),
+    ]);
+    expect(verdict.ok && verdict.ratio.toString()).toBe('0.1');
+  });
+
+  it('refuses one derivation, and none at all, as no_factor: a position never confirms itself', () => {
+    expect(corroborateRatio([q('8')])).toEqual({ ok: false, refusal: 'no_factor' });
+    expect(corroborateRatio([])).toEqual({ ok: false, refusal: 'no_factor' });
+  });
+
+  it('refuses the whole set on any disagreement, never a majority', () => {
+    // (16 + 112) ÷ 16 = 8, (56 + 336) ÷ 56 = 392 ÷ 56 = 7: one of the two
+    // bases is wrong and nothing says which, so two 8s do not outvote the 7.
+    const eight = derivedRatioOf('desdobro', q('16'), q('112'));
+    const seven = derivedRatioOf('desdobro', q('56'), q('336'));
+    expect(seven.toString()).toBe('7');
+    expect(corroborateRatio([eight, seven])).toEqual({ ok: false, refusal: 'disagrees' });
+    expect(corroborateRatio([eight, eight, seven])).toEqual({ ok: false, refusal: 'disagrees' });
+  });
+
+  it('refuses an agreed ratio the ledger cannot hold exactly as not_representable', () => {
+    // 100 ÷ 300 and 200 ÷ 600 are the same repeating 0,333…; stored at
+    // NUMERIC(20,8) that is 0,33333333, which is a different number.
+    const first = derivedRatioOf('grupamento', q('300'), q('100'));
+    const second = derivedRatioOf('grupamento', q('600'), q('200'));
+    expect(first.equals(second)).toBe(true);
+    expect(asStored(first)).toBe('0.33333333');
+    expect(corroborateRatio([first, second])).toEqual({
+      ok: false,
+      refusal: 'not_representable',
+    });
   });
 });
 

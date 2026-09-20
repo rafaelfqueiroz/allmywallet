@@ -26,9 +26,18 @@ import type {
  * two agree they are the same number; where the derived one is a repeating
  * decimal (P = 300, R = 100 → 0,333…) it could not be stored anyway.
  *
+ * **The amendment (#120).** B3 publishes factors only for **listed companies**,
+ * so an FII (`BCFF11`) and a delisted issuer (`BIDI`) have no factor of any
+ * kind, ever, and every split or reverse split of theirs refused `no_factor`
+ * permanently. Where the issuer's factor list is empty **outright**, the row
+ * may instead be confirmed by corroboration across positions —
+ * `corroborationCandidate` and `corroborateRatio` below. `evaluateShareRatio`
+ * itself is unchanged: it still refuses `no_factor` on its own evidence, so a
+ * caller with no cross-position view behaves exactly as it did before.
+ *
  * Everything here is pure (AR-01). What P is — which history precedes the
  * event — is decided by `corporate-event-resolution.ts`, which walks each
- * position in replay order.
+ * position in replay order and is the only place with a view across them.
  */
 
 /** The two corporate-event rows whose effect is a ratio. */
@@ -201,6 +210,82 @@ export function evaluateShareRatio(input: {
       ? basis.times(m.minus(Quantity.fromString('1'))).equals(stated)
       : basis.times(m).equals(stated);
   return agrees ? { ok: true, ratio: m, evidence } : refuse('disagrees');
+}
+
+/**
+ * SPEC-005 BR-005-20b (#120) — the outcome of corroborating a ratio across
+ * positions. `no_factor` is the unchanged refusal: nothing corroborated it.
+ */
+export type RatioCorroboration =
+  | { readonly ok: true; readonly ratio: Quantity }
+  | { readonly ok: false; readonly refusal: 'no_factor' | 'disagrees' | 'not_representable' };
+
+/**
+ * SPEC-005 BR-005-20b (#120) — whether a **refused** row may be confirmed by
+ * corroboration rather than by a published factor, and with which derivation.
+ * `null` means it may not; otherwise the row's own derived ratio, for the
+ * caller to compare against what its sibling positions derived.
+ *
+ * Two conditions, both load-bearing:
+ *
+ * - the refusal is exactly `no_factor`. Every other one names something
+ *   corroboration cannot answer: `no_basis` has nothing to derive from,
+ *   `disagrees` already has B3's figure and lost to it, `blocked` and
+ *   `combined_same_day` distrust P itself, `conflicts_with_ledger` was given
+ *   up by the caller. `no_factor` also *implies* a replayable, positive,
+ *   trusted P — it is checked after `no_basis` and after the structural
+ *   refusals — so the derived ratio reaching a caller here is never absent.
+ * - **the issuer's whole factor list is empty**, not merely empty within the
+ *   window. This is the distinction that keeps the guard: an issuer B3 does
+ *   publish for keeps refusing `no_factor` when nothing is near the row, so a
+ *   2014 desdobramento does not license a 2025 event, and the real grupamento
+ *   that derived 0,5 against a published 0,1 is still caught. Corroboration is
+ *   reached only where there is no published factor to be had at all.
+ */
+export function corroborationCandidate(input: {
+  readonly refusal: RatioRefusal;
+  /** The **unfiltered** list for the issuer — `factorsInWindow` is deliberately not consulted. */
+  readonly issuerFactors: readonly CorporateEventFactor[];
+  readonly derivedRatio: Quantity | null;
+}): Quantity | null {
+  if (input.refusal !== 'no_factor') return null;
+  if (input.issuerFactors.length > 0) return null;
+  return input.derivedRatio;
+}
+
+/**
+ * SPEC-005 BR-005-20b (#120) — the ratio a set of positions corroborates,
+ * given what each of them derived for the same asset, date and movement.
+ *
+ * Worked example (DV-17), the shape that prompted the amendment: an FII
+ * desdobro credits +112 shares to a position holding 16 and +343 to one
+ * holding 49, and B3 publishes nothing at all for the issuer.
+ * (16 + 112) ÷ 16 = 128 ÷ 16 = **8**; (49 + 343) ÷ 49 = 392 ÷ 49 = **8**.
+ * Two positions, one figure, exact at eight places → ratio 8 for both.
+ *
+ * The rules, each a refusal the caller shows:
+ *
+ * - **One position never confirms itself.** A single derivation is the row
+ *   restating its own arithmetic, which is not evidence — `no_factor` stands.
+ *   Two is structural, not a threshold to tune.
+ * - **Any disagreement refuses the whole set**, never a majority. 16 → 8 and
+ *   56 → 7 means one of the two bases is wrong and nothing says which, so
+ *   both refuse `disagrees` with their figures shown.
+ * - A ratio the ledger cannot hold exactly refuses `not_representable`, as a
+ *   published one does: positions deriving 100 ÷ 300 agree on 0,333…, and
+ *   stored at `NUMERIC(20,8)` that is 0,33333333 — a different number.
+ *
+ * Agreement is tested before representability because until the set agrees
+ * there is no single ratio whose storability could be asked about.
+ */
+export function corroborateRatio(derived: readonly Quantity[]): RatioCorroboration {
+  const [first, ...rest] = derived;
+  if (first === undefined || rest.length === 0) return { ok: false, refusal: 'no_factor' };
+  if (rest.some((other) => !other.equals(first))) return { ok: false, refusal: 'disagrees' };
+  if (!Quantity.fromString(asStored(first)).equals(first)) {
+    return { ok: false, refusal: 'not_representable' };
+  }
+  return { ok: true, ratio: first };
 }
 
 /**

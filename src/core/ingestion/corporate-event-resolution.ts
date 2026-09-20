@@ -1,6 +1,6 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { ConversionGroupId } from '@/core/shared/ids';
-import type { Money } from '@/core/shared/money';
+import type { Money, Quantity } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
 import { compareForReplay } from '@/core/positions/ordering';
 import { type PositionKey, positionKeyString, replayPosition } from '@/core/positions/replay';
@@ -25,10 +25,14 @@ import {
 } from '@/core/ingestion/fraction-auction';
 import {
   calendarDaysBetween,
+  corroborateRatio,
+  corroborationCandidate,
   evaluateShareRatio,
+  type RatioCorroboration,
   type RatioEvidence,
   type RatioMovement,
   type RatioRefusal,
+  type RatioVerdict,
   ratioTransaction,
 } from '@/core/ingestion/share-ratio';
 
@@ -43,6 +47,14 @@ import {
  * unclassified row's position, to show why the row is still unclassified and
  * every figure behind that — as `refusal.ts` does for `invalid` rows. No column
  * records a verdict that could go stale.
+ *
+ * **Why the cross-position view lives here (#120).** `share-ratio.ts` decides
+ * one row against one issuer's factors and has no sight of any other position.
+ * This file is what settles rows in replay order across every position in a
+ * call, so it is the only place that can see the same asset's `Desdobro` on
+ * two of them — which is what BR-005-20b's corroboration amendment needs.
+ * `evaluateShareRatio` is left refusing `no_factor` on its own evidence, and
+ * the corroborated ratio is applied here, on top of that refusal.
  *
  * **Why one walk and not two passes.** The two kinds feed each other. A
  * resolved ratio event is the origin a later fraction is measured against, and
@@ -193,6 +205,32 @@ export function resolveCorporateEvents(
     byPosition.set(id, [...(byPosition.get(id) ?? []), row]);
   }
 
+  /**
+   * SPEC-005 BR-005-20b (#120) — ratios several positions corroborated, by
+   * `corroborationGroupKey`. Empty on the first round: every position is
+   * walked on its own evidence exactly as before, and only then is what
+   * different positions derived compared.
+   *
+   * A further round exists for a **second generation**. A ratio event behind
+   * an unresolved one is `blocked`, never `no_factor`, so it cannot
+   * corroborate anything until the one before it settles — two splits of the
+   * same fund in one import need two rounds. The map only grows and a round
+   * that adds no group is the answer, so this ends.
+   */
+  let corroborated: ReadonlyMap<string, RatioCorroboration> = new Map();
+  for (;;) {
+    const outcomes = walkAllPositions(byPosition, input, corroborated);
+    const merged = mergeCorroborations(outcomes, input, corroborated);
+    if (merged.size === corroborated.size) return outcomes;
+    corroborated = merged;
+  }
+}
+
+function walkAllPositions(
+  byPosition: ReadonlyMap<string, readonly CorporateEventRow[]>,
+  input: CorporateEventResolutionInput,
+  corroborated: ReadonlyMap<string, RatioCorroboration>,
+): ReadonlyMap<string, CorporateEventOutcome> {
   const outcomes = new Map<string, CorporateEventOutcome>();
   for (const rows of byPosition.values()) {
     if (!rows.some((row) => row.open)) continue;
@@ -202,7 +240,7 @@ export function resolveCorporateEvents(
     // The forced set only grows, so this ends.
     let forced = new Set<string>();
     for (;;) {
-      const walk = walkPosition(rows, input, forced);
+      const walk = walkPosition(rows, input, forced, corroborated);
       if (walk.conflicts.every((id) => forced.has(id))) {
         for (const [id, outcome] of walk.outcomes) outcomes.set(id, outcome);
         break;
@@ -211,6 +249,116 @@ export function resolveCorporateEvents(
     }
   }
   return outcomes;
+}
+
+/** The issuer's **unfiltered** published factors — `null` issuer, or none stored, is none. */
+function issuerFactorsOf(
+  input: CorporateEventResolutionInput,
+  issuerCode: string | null,
+): readonly CorporateEventFactor[] {
+  return issuerCode === null ? [] : (input.factors.get(issuerCode) ?? []);
+}
+
+/**
+ * SPEC-005 BR-005-20b (#120) — one corroboration set: **the same asset, the
+ * same trade date and the same movement**, across positions.
+ *
+ * Institution is deliberately not in the key — spanning institutions is the
+ * whole point. Two rows of one set are therefore always on two different
+ * positions: a second ratio row on the same position and date is counted by
+ * `ratioEventsOn` below and refused `combined_same_day`, which is not
+ * `no_factor`, so it never reaches a set at all.
+ */
+function corroborationGroupKey(transaction: Transaction, movement: RatioMovement): string {
+  return `${transaction.assetId}|${transaction.tradeDate}|${movement}`;
+}
+
+/**
+ * SPEC-005 BR-005-20b (#120) — the corroborations this round's outcomes add to
+ * the ones already decided.
+ *
+ * Only rows `corroborationCandidate` accepts take part: refused exactly
+ * `no_factor`, for an issuer B3 publishes **no** factor of any kind for. A
+ * `no_factor` verdict is reached only after the structural refusals and
+ * `no_basis`, so each one brings a replayable, positive, trusted basis and the
+ * ratio derived from it.
+ *
+ * A group already decided keeps its decision: the merge puts `corroborated`
+ * last. Deciding it again from a later round's membership would let one
+ * position that unblocked after the fact redefine what the set agreed on,
+ * rather than being measured against it (`corroboratedVerdict`).
+ */
+function mergeCorroborations(
+  outcomes: ReadonlyMap<string, CorporateEventOutcome>,
+  input: CorporateEventResolutionInput,
+  corroborated: ReadonlyMap<string, RatioCorroboration>,
+): ReadonlyMap<string, RatioCorroboration> {
+  const rowsById = new Map(input.rows.map((row) => [row.id, row]));
+  const groups = new Map<string, Quantity[]>();
+  for (const [id, outcome] of outcomes) {
+    if (outcome.status !== 'refused') continue;
+    if (outcome.movement !== 'desdobro' && outcome.movement !== 'grupamento') continue;
+    const derived = corroborationCandidate({
+      refusal: outcome.refusal,
+      issuerFactors: issuerFactorsOf(input, outcome.evidence.issuerCode),
+      derivedRatio: outcome.evidence.derivedRatio,
+    });
+    if (derived === null) continue;
+    const row = rowsById.get(id) as CorporateEventRow;
+    const key = corroborationGroupKey(row.transaction, outcome.movement);
+    groups.set(key, [...(groups.get(key) ?? []), derived]);
+  }
+
+  const fresh = new Map<string, RatioCorroboration>();
+  for (const [key, derived] of groups) {
+    const decision = corroborateRatio(derived);
+    // A lone derivation is not a decision, it is the absence of one: a sibling
+    // position `blocked` this round may unblock in the next and corroborate it
+    // then. Recording `no_factor` here would freeze the set before it could.
+    if (!decision.ok && decision.refusal === 'no_factor') continue;
+    fresh.set(key, decision);
+  }
+  return new Map([...fresh, ...corroborated]);
+}
+
+/**
+ * SPEC-005 BR-005-20b (#120) — `verdict` with its set's corroborated ratio
+ * applied, where this row may be corroborated at all and a set was decided
+ * for it. Otherwise the verdict `evaluateShareRatio` reached on its own
+ * evidence stands, unchanged — including the `no_factor` a caller with
+ * nothing to corroborate against still gets.
+ *
+ * A published factor therefore always wins: an issuer with any factor at all
+ * is not a candidate, so an `ambiguous_factor`, a `disagrees` against B3's
+ * figure, or a resolution at B3's multiplier is never displaced by what other
+ * positions derived.
+ *
+ * The set's ratio is applied only to a position that **still derives it**. A
+ * position that unblocked after the set was decided joins it like any other
+ * member and is measured against it; carrying it along on the set's figure
+ * would be applying a ratio nothing on that position supports.
+ */
+function corroboratedVerdict(
+  verdict: RatioVerdict,
+  context: {
+    readonly issuerFactors: readonly CorporateEventFactor[];
+    readonly corroboration: RatioCorroboration | undefined;
+  },
+): RatioVerdict {
+  if (verdict.ok) return verdict;
+  const derived = corroborationCandidate({
+    refusal: verdict.refusal,
+    issuerFactors: context.issuerFactors,
+    derivedRatio: verdict.evidence.derivedRatio,
+  });
+  const { corroboration } = context;
+  if (derived === null || corroboration === undefined) return verdict;
+  if (!corroboration.ok) {
+    return { ok: false, refusal: corroboration.refusal, evidence: verdict.evidence };
+  }
+  return corroboration.ratio.equals(derived)
+    ? { ok: true, ratio: corroboration.ratio, evidence: verdict.evidence }
+    : { ok: false, refusal: 'disagrees', evidence: verdict.evidence };
 }
 
 const isRatioMovement = (movement: CorporateEventMovement): movement is RatioMovement =>
@@ -235,6 +383,7 @@ function walkPosition(
   rows: readonly CorporateEventRow[],
   input: CorporateEventResolutionInput,
   forced: ReadonlySet<string>,
+  corroborated: ReadonlyMap<string, RatioCorroboration>,
 ): Walk {
   const { windows } = input;
   const declined = input.declined ?? new Set<string>();
@@ -387,12 +536,13 @@ function walkPosition(
       );
       const before = blocked ? null : replayUpTo(shape, false);
       const issuerCode = issuerCodeOf(row.ticker);
-      const verdict = evaluateShareRatio({
+      const issuerFactors = issuerFactorsOf(input, issuerCode);
+      const own = evaluateShareRatio({
         movement,
         basis: before !== null && before.ok ? before.value.quantity : null,
         stated: row.transaction.quantity,
         issuerCode,
-        issuerFactors: issuerCode === null ? [] : (input.factors.get(issuerCode) ?? []),
+        issuerFactors,
         tradeDate: shape.tradeDate,
         factorDays: windows.factorDays,
         structural: combined
@@ -403,8 +553,15 @@ function walkPosition(
               ? 'conflicts_with_ledger'
               : null,
       });
+      // BR-005-20b (#120): what other positions derived, where B3 published
+      // nothing at all for this issuer and this row's own evidence refused.
+      const verdict = corroboratedVerdict(own, {
+        issuerFactors,
+        corroboration: corroborated.get(corroborationGroupKey(shape, movement)),
+      });
       if (verdict.ok) {
-        // BR-007-04a: B3's multiplier is the ratio applied.
+        // BR-007-04a: B3's multiplier is the ratio applied, or — where B3
+        // published none at all — the one the positions corroborated.
         const transaction = ratioTransaction(row.transaction, movement, verdict.ratio);
         resolved.push(transaction);
         outcomes.set(row.id, {
