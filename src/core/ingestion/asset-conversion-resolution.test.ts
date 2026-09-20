@@ -238,7 +238,7 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
     const first = expectResolved(resolve([oneToOne], rows, sources));
     const second = expectResolved(resolve([oneToOne], [...rows].reverse(), [...sources].reverse()));
     expect(second.groupKey).toBe(first.groupKey);
-    expect(first.groupKey.startsWith('conversion:v4:')).toBe(true);
+    expect(first.groupKey.startsWith('conversion:v5:')).toBe(true);
     expect(second.legs.map((leg) => leg.key).sort()).toEqual(
       first.legs.map((leg) => leg.key).sort(),
     );
@@ -263,6 +263,58 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
       result.legs.filter((leg) => leg.type === 'conversion_in').map((leg) => leg.assetCode),
     ).toEqual(['AXIA15G']);
     expect(result.legs.some((leg) => leg.assetCode === 'AXIA15')).toBe(false);
+  });
+
+  it('converts a whole source position on target-only evidence (bidi11-to-inbr32)', () => {
+    const definition = ASSET_CONVERSION_DEFINITIONS.find(
+      (candidate) => candidate.id === 'bidi11-to-inbr32',
+    );
+    expect(definition).toBeDefined();
+    if (definition === undefined) return;
+    // #120: B3 states only the target balance — BIDI11 simply stops, so the
+    // group carries no source evidence row and `remaining` is zero. All 150
+    // held leave, carrying 150 × 8,00 = 1.200,00 onto the 75 INBR32 the
+    // statement declares, and no gain is realised (BR-007-05b).
+    const result = expectResolved(
+      resolve(
+        [definition],
+        [evidence('inbr-target', 'INBR32', '0', '75')],
+        [source('BIDI11', '150', '8')],
+      ),
+    );
+    expect(result.sources.map((plan) => [plan.assetCode, plan.quantity.toString()])).toEqual([
+      ['BIDI11', '150'],
+    ]);
+    expect(
+      result.legs.map((leg) => [
+        leg.type,
+        leg.assetCode,
+        leg.quantity.toString(),
+        leg.costBasis?.toString(),
+      ]),
+    ).toEqual([
+      ['conversion_out', 'BIDI11', '150', '1200'],
+      ['conversion_in', 'INBR32', '75', '1200'],
+    ]);
+    expect(result.totalCost.toString()).toBe('1200');
+  });
+
+  it('leaves bidi11-to-inbr32 unresolved when the source position is empty', () => {
+    const definition = ASSET_CONVERSION_DEFINITIONS.find(
+      (candidate) => candidate.id === 'bidi11-to-inbr32',
+    );
+    expect(definition).toBeDefined();
+    if (definition === undefined) return;
+    // The owner's real blocker: BIDI11 replays to nothing until its
+    // pre-extract opening position and its 2021 Desdobro are in the ledger.
+    const result = resolve(
+      [definition],
+      [evidence('inbr-target', 'INBR32', '0', '75')],
+      [source('BIDI11', '0', '8')],
+    );
+    expect(result.status).toBe('unresolved');
+    if (result.status !== 'unresolved') return;
+    expect(result.reason).toBe('insufficient_quantity');
   });
 
   it('keeps missing-weight, incomplete and ambiguous groups unresolved', () => {
