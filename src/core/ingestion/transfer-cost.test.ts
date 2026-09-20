@@ -17,6 +17,7 @@ import {
 import type { ImportRow, NormalizedTransactionRecord } from '@/core/ingestion/ports';
 import {
   type CarryLeg,
+  debitsHeldBack,
   isCarryCandidate,
   pairTransfers,
   resolveCarriedCosts,
@@ -127,9 +128,25 @@ describe('#110 BR-005-20a — pairTransfers', () => {
     expect(pairs.size).toBe(0);
   });
 
+  /**
+   * #135 — B3 recorded the ENBR3 buyout as a price-less debit *and* credit at
+   * one broker. Requiring a different institution formed no pair, so the
+   * credit stayed unclassified while the debit applied and the position went
+   * to zero.
+   */
+  it('pairs a credit with a debit at its own institution', () => {
+    const pairs = pairTransfers([leg('in')], [leg('out')]);
+    expect([...pairs]).toEqual([['in', 'out']]);
+  });
+
+  it('#135: a same-institution debit competes, so a credit seeing both pairs with neither', () => {
+    expect(
+      pairTransfers([leg('in')], [leg('own'), leg('out', { institutionId: source })]).size,
+    ).toBe(0);
+  });
+
   it.each<[string, Partial<TransferLeg>]>([
     ['has no institution', { institutionId: null }],
-    ['is at the credit’s own institution', { institutionId: destination }],
     ['is of another asset', { institutionId: source, assetId: AssetId.generate() as AssetIdType }],
     ['is on another day', { institutionId: source, tradeDate: BusinessDate.of('2026-03-11') }],
     ['moves another quantity', { institutionId: source, quantity: Quantity.fromString('99') }],
@@ -272,6 +289,26 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     expect(costs.size).toBe(0);
   });
 
+  /**
+   * #135 — the ENBR3 shape, one broker: B3 debits and credits the same
+   * position. The source *is* the destination, so the carry is the position's
+   * own average immediately before the debit, and the pair nets to nothing.
+   */
+  it('#135: a same-institution pair carries the position’s own average — 3.000,00 ÷ 200 = 15,00', () => {
+    const history = [
+      aTransaction().buy().at('A').on('2026-01-05').quantity('100').price('10').build(),
+      aTransaction().buy().at('A').on('2026-02-05').quantity('100').price('20').build(),
+    ];
+    const leg = transfer('t', 'A', 'A', '2026-03-10', '200');
+    const costs = resolveCarriedCosts([leg], historyOf([...history, leg.debit as Transaction]));
+    expect(costs.get('t')?.toString()).toBe('15');
+  });
+
+  it('#135: a same-institution pair carries nothing when the position has no history to read', () => {
+    const leg = transfer('t', 'A', 'A', '2026-03-10', '200');
+    expect(resolveCarriedCosts([leg], historyOf([])).size).toBe(0);
+  });
+
   describe('#112 — a credit carried before keeps or recomputes its cost', () => {
     it('recomputes when the source history grew: stored 10,00 becomes (1.000,00 + 2.000,00) ÷ 200 = 15,00', () => {
       const history = [
@@ -317,5 +354,34 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     const carried = withCarriedCost(credit, money('5'));
     expect(carried.unitPrice.toString()).toBe('5');
     expect(carried.totalValue.toString()).toBe('501');
+  });
+
+  /**
+   * #135 — one leg of a same-position pair applied alone is not a partial
+   * import but a loss: the shares leave and nothing records their return.
+   */
+  describe('debitsHeldBack', () => {
+    const idsOf = (legs: readonly CarryLeg[], resolved: ReadonlyMap<string, Money>) => [
+      ...debitsHeldBack(legs, resolved),
+    ];
+
+    it('holds back a same-position debit whose credit took no cost', () => {
+      const leg = transfer('t', 'A', 'A', '2026-03-10');
+      expect(idsOf([leg], new Map())).toEqual([(leg.debit as Transaction).id]);
+    });
+
+    it('releases it as soon as the credit resolves', () => {
+      const leg = transfer('t', 'A', 'A', '2026-03-10');
+      expect(idsOf([leg], new Map([['t', money('15')]]))).toEqual([]);
+    });
+
+    it('never holds back a cross-institution debit: the shares genuinely left that broker', () => {
+      expect(idsOf([transfer('t', 'A', 'B', '2026-03-10')], new Map())).toEqual([]);
+    });
+
+    it('holds back nothing when the debit is not going to be written', () => {
+      const leg = { ...transfer('t', 'A', 'A', '2026-03-10'), debit: null };
+      expect(idsOf([leg], new Map())).toEqual([]);
+    });
   });
 });

@@ -1515,6 +1515,147 @@ describe('SPEC-005 — import pipeline (integration)', () => {
   });
 
   /**
+   * #135 — the ENBR3 buyout, end to end.
+   *
+   * B3 recorded the July 2023 Energias do Brasil settlement as a price-less
+   * `Transferência` **debit and credit at one broker**, and printed the
+   * disposal in Negociação under `ENBR3L`, its auction ticker. Two defects met
+   * there: BR-005-20a paired nothing, so the debit applied alone and took the
+   * shares out of *patrimônio*; and `ENBR3L` was an asset of its own, so the
+   * sale that disposed of them refused `INSUFFICIENT_QUANTITY` for good.
+   */
+  describe('#135 — a same-institution transfer pair, and B3’s auction ticker', () => {
+    const CLEAR = 'CLEAR CORRETORA - GRUPO XP';
+
+    const importMovimentacao = async (rows: Parameters<typeof buildMovimentacaoXlsx>[0]) => {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, await buildMovimentacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    };
+
+    const importNegociacao = async (rows: Parameters<typeof buildNegociacaoXlsx>[0]) => {
+      const batchId = await newPendingBatch('b3_negociacao');
+      await saveUploadedFile(uploadDir, batchId, await buildNegociacaoXlsx(rows));
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    };
+
+    const buy = {
+      entradaSaida: 'Credito',
+      data: '10/01/2023',
+      movimentacao: 'Compra',
+      produto: 'ENBR3 - EDP ENERGIAS DO BRASIL S.A.',
+      instituicao: CLEAR,
+      quantidade: '101',
+      precoUnitario: '20,00',
+    };
+    const pair = [
+      {
+        entradaSaida: 'Debito',
+        data: '10/07/2023',
+        movimentacao: 'Transferência',
+        produto: 'ENBR3 - EDP ENERGIAS DO BRASIL S.A.',
+        instituicao: CLEAR,
+        quantidade: '101',
+        precoUnitario: '-',
+      },
+      {
+        entradaSaida: 'Credito',
+        data: '10/07/2023',
+        movimentacao: 'Transferência',
+        produto: 'ENBR3 - EDP ENERGIAS DO BRASIL S.A.',
+        instituicao: CLEAR,
+        quantidade: '101',
+        precoUnitario: '-',
+      },
+    ];
+
+    const position = async () =>
+      (
+        await migratorPool.query(
+          `SELECT quantity::text AS quantity, average_cost::text AS average_cost,
+                  realized_gain::text AS realized_gain
+             FROM positions p JOIN assets a ON a.id = p.asset_id WHERE a.code = 'ENBR3'`,
+        )
+      ).rows[0];
+
+    it('BR-005-20a: the pair leaves quantity and cost exactly as they were', async () => {
+      await importMovimentacao([buy]);
+      await importMovimentacao(pair);
+
+      expect(await position()).toEqual({
+        quantity: '101.00000000',
+        average_cost: '20.00000000',
+        realized_gain: '0.00000000',
+      });
+      const { rows } = await migratorPool.query(
+        "SELECT status FROM transactions WHERE type = 'transfer_in'",
+      );
+      expect(rows.map((row) => row.status)).toEqual(['active']);
+    });
+
+    it('BR-005-14: the Negociação disposal under B3’s auction ticker sells the listed asset', async () => {
+      await importMovimentacao([buy]);
+      await importMovimentacao(pair);
+
+      await importNegociacao([
+        {
+          data: '11/07/2023',
+          tipo: 'Venda',
+          instituicao: CLEAR,
+          codigo: 'ENBR3L',
+          quantidade: '101',
+          preco: '23,73',
+        },
+      ]);
+
+      const { rows: assets } = await migratorPool.query('SELECT code FROM assets ORDER BY code');
+      expect(assets.map((row) => row.code)).toEqual(['ENBR3']);
+      // 101 × (23,73 − 20,00) = 376,73.
+      expect(await position()).toEqual({
+        quantity: '0.00000000',
+        average_cost: '0.00000000',
+        realized_gain: '376.73000000',
+      });
+      const { rows: refused } = await migratorPool.query(
+        "SELECT count(*)::int AS n FROM import_rows WHERE classification = 'invalid'",
+      );
+      expect(Number(refused[0]?.n)).toBe(0);
+    });
+
+    it('BR-005-17: re-importing both files adds nothing', async () => {
+      await importMovimentacao([buy]);
+      await importMovimentacao(pair);
+      const sale = [
+        {
+          data: '11/07/2023',
+          tipo: 'Venda',
+          instituicao: CLEAR,
+          codigo: 'ENBR3L',
+          quantidade: '101',
+          preco: '23,73',
+        },
+      ];
+      await importNegociacao(sale);
+      const { rows: before } = await migratorPool.query(
+        'SELECT count(*)::int AS n FROM transactions',
+      );
+
+      await importMovimentacao(pair);
+      await importNegociacao(sale);
+
+      const { rows: after } = await migratorPool.query(
+        'SELECT count(*)::int AS n FROM transactions',
+      );
+      expect(after[0]?.n).toBe(before[0]?.n);
+      expect(await position()).toMatchObject({ quantity: '0.00000000' });
+    });
+  });
+
+  /**
    * #108 — Movimentação and Negociação only *guess* an asset's class from its
    * ticker; Posição *states* it. `DrizzleAssetResolver` used to overwrite the
    * class on every resolve, so importing a Movimentação after a Posição turned

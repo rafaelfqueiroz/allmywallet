@@ -37,14 +37,30 @@ export interface TransferLeg {
  * BR-005-20a — which debit a credit came from.
  *
  * A debit matches a credit on the same asset, trade date and quantity, at a
- * **known** institution other than the credit's (a debit with no institution
- * names no source position to read). A pair is formed only where the relation
- * is one-to-one on **both** sides: two candidate debits for one credit, or two
- * credits for one debit, pair nothing. Computed over the whole relation, never
- * by walking the file, so file order cannot choose a source.
+ * **known** institution (a debit with no institution names no source position
+ * to read). A pair is formed only where the relation is one-to-one on **both**
+ * sides: two candidate debits for one credit, or two credits for one debit,
+ * pair nothing. Computed over the whole relation, never by walking the file,
+ * so file order cannot choose a source.
+ *
+ * **The institution may be the credit's own** (#135). B3 recorded the July
+ * 2023 Energias do Brasil buyout as a price-less `Transferência` debit *and*
+ * credit at one broker — 101 at Clear, 99 at Inter — and the earlier rule,
+ * which required a *different* institution, formed no pair. The credit took no
+ * cost and stayed `unclassified` while the debit, needing none, applied: the
+ * position went to zero and 200 shares left the ledger silently.
+ *
+ * Such a pair moves nothing. Read through `resolveCarriedCosts` below it is
+ * not a special case at all — the source position *is* the destination, so the
+ * credit carries the average the debit removed the shares at, and quantity,
+ * total cost and average all come back to what they were. Nothing is invented:
+ * the figure is the ledger's own.
  *
  * `credits` should be every `transfer_in` leg of the batch — priced or not —
  * so a debit that could equally have fed a priced credit is ambiguous too.
+ * Admitting same-institution debits can only ever *withdraw* a pair the
+ * earlier rule formed, never redirect one: a credit that now sees two
+ * candidate debits is ambiguous and pairs with neither.
  */
 export function pairTransfers(
   credits: readonly TransferLeg[],
@@ -57,7 +73,6 @@ export function pairTransfers(
       .filter(
         (debit) =>
           debit.institutionId !== null &&
-          debit.institutionId !== credit.institutionId &&
           debit.assetId === credit.assetId &&
           debit.tradeDate === credit.tradeDate &&
           debit.quantity.equals(credit.quantity),
@@ -186,4 +201,43 @@ export function resolveCarriedCosts(
     if (leg.fallback !== null) resolved.set(leg.id, leg.fallback);
   }
   return resolved;
+}
+
+/**
+ * SPEC-005 BR-005-20a (#135) — the debits a commit must **not** write.
+ *
+ * A `transfer_out` needs no price, so it applies on its own; its credit needs
+ * a carried cost and stays `unclassified` without one. Where the two legs are
+ * the same position — same asset, same institution — applying one alone is not
+ * a partial import but a **loss**: the shares leave the position and nothing
+ * records their return. That is what took 200 ENBR3 shares out of the owner's
+ * *patrimônio*, silently, with no screen in the product to say so.
+ *
+ * So a same-position pair is all or nothing. Where the carry resolves, both
+ * legs are written and net to zero; where it does not, the debit is refused
+ * (`unresolved_transfer_pair`) rather than applied, nothing is written for it,
+ * no occurrence is taken, and importing the file again applies it once the
+ * credit can take its cost (BR-005-17).
+ *
+ * A **cross-institution** pair is deliberately not held back: the debit is the
+ * whole record of shares genuinely leaving that broker, and BR-005-20a has
+ * always let its credit wait for history that has not been imported yet. The
+ * quantity is still visible at the destination as an `unclassified` row in
+ * Needs attention, which a same-position pair's credit is too — but there the
+ * debit erases the same position the credit would have restored.
+ */
+export function debitsHeldBack(
+  legs: readonly CarryLeg[],
+  resolved: ReadonlyMap<string, Money>,
+): ReadonlySet<string> {
+  return new Set(
+    legs.flatMap((leg) =>
+      leg.debit !== null &&
+      !resolved.has(leg.id) &&
+      leg.debit.assetId === leg.credit.assetId &&
+      leg.debit.institutionId === leg.credit.institutionId
+        ? [leg.debit.id]
+        : [],
+    ),
+  );
 }

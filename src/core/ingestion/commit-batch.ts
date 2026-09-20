@@ -49,6 +49,7 @@ import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import { keyFormsFor, summarizeRows } from '@/core/ingestion/stage-batch';
 import {
   type CarryLeg,
+  debitsHeldBack,
   isCarryCandidate,
   pairTransfers,
   resolveCarriedCosts,
@@ -255,6 +256,18 @@ interface Group {
    */
   readonly waitsForCarry: boolean;
   readonly state: PositionState | null;
+}
+
+/** One settling round: what it made of every position, and what it refuses to write. */
+interface Settlement {
+  readonly groups: readonly Group[];
+  /**
+   * SPEC-005 BR-005-20a (#135) — `transfer_out` transaction ids this round
+   * will not apply, because the credit of their same-position pair did not
+   * take a carried cost (`debitsHeldBack`). Applying one leg of such a pair is
+   * what emptied a position and took its shares out of *patrimônio*.
+   */
+  readonly heldBackDebits: ReadonlySet<string>;
 }
 
 /**
@@ -479,12 +492,37 @@ export async function commitBatch(
       corporate,
       corporateDeclined,
     );
+  /**
+   * SPEC-005 BR-005-20a (#135) — a same-position transfer pair is all or
+   * nothing. A round that resolved no cost for such a credit refuses its
+   * debit too: excluding it makes the row `invalid`, so nothing is written,
+   * no occurrence is taken, and importing the file again applies it once the
+   * credit can take its cost (BR-005-17). Excluding the debit sets the leg's
+   * `debit` to `null` next round, which settles the credit as unresolved and
+   * takes the pair out of `heldBackDebits` — so this runs at most once per
+   * pair and `excluded` still only grows.
+   */
+  const holdBackPairedDebits = (settlement: Settlement): boolean => {
+    let added = false;
+    for (const candidate of newCandidates) {
+      if (excluded.has(candidate.row.id)) continue;
+      if (!settlement.heldBackDebits.has(candidate.transaction.id)) continue;
+      excluded.add(candidate.row.id);
+      added = true;
+    }
+    return added;
+  };
+
   let settlement = settleRound();
   for (
-    let failed = settlement.filter((group) => group.state === null);
-    failed.length > 0;
-    failed = settlement.filter((group) => group.state === null)
+    let failed = settlement.groups.filter((group) => group.state === null);
+    failed.length > 0 || holdBackPairedDebits(settlement);
+    failed = settlement.groups.filter((group) => group.state === null)
   ) {
+    if (failed.length === 0) {
+      settlement = settleRound();
+      continue;
+    }
     const ready = failed.filter((group) => !group.waitsForCarry);
     for (const group of ready.length > 0 ? ready : failed) {
       // #110: an older import's row that no longer replays as its mapped type
@@ -556,7 +594,7 @@ export async function commitBatch(
   const conversionInPlace: ConversionWrite[] = [];
   const committedConversions: Transaction[] = [];
 
-  for (const group of settlement) {
+  for (const group of settlement.groups) {
     // Every group left in the final round replayed.
     if (group.state === null) continue;
     for (const c of group.candidates) {
@@ -1166,7 +1204,7 @@ function settledCorporateTransactions(
     conversionWrites,
     corporate,
     NO_EXCLUSIONS,
-  ).flatMap((group) => group.corporate.map((write) => write.transaction));
+  ).groups.flatMap((group) => group.corporate.map((write) => write.transaction));
 }
 
 /**
@@ -1527,7 +1565,7 @@ function settle(
   conversionWrites: readonly ConversionWrite[],
   corporate: CorporatePlan,
   corporateDeclined: ReadonlySet<string>,
-): Group[] {
+): Settlement {
   const convertedRowIds = new Set(
     conversionWrites.flatMap((write) => (write.row === null ? [] : [write.row.id])),
   );
@@ -1720,23 +1758,28 @@ function settle(
     replaced.add(outcome.transaction.id);
   }
 
-  return [...groups.values()].map((group) => {
-    const ledger = [
-      ...stored(group.key).filter((t) => !replaced.has(t.id)),
-      ...group.candidates.map((c) => c.transaction),
-      ...group.carried.map((c) => c.transaction),
-      ...group.reclassified.map((r) => r.updated),
-      ...group.conversions.map((write) => write.transaction),
-      ...group.corporate.map((c) => c.transaction),
-    ];
-    const replayed = replayPosition(ledger);
-    return {
-      ...group,
-      ledger,
-      waitsForCarry: waiting.has(positionKeyString(group.key)),
-      state: replayed.ok ? replayed.value : null,
-    };
-  });
+  return {
+    groups: [...groups.values()].map((group) => {
+      const ledger = [
+        ...stored(group.key).filter((t) => !replaced.has(t.id)),
+        ...group.candidates.map((c) => c.transaction),
+        ...group.carried.map((c) => c.transaction),
+        ...group.reclassified.map((r) => r.updated),
+        ...group.conversions.map((write) => write.transaction),
+        ...group.corporate.map((c) => c.transaction),
+      ];
+      const replayed = replayPosition(ledger);
+      return {
+        ...group,
+        ledger,
+        waitsForCarry: waiting.has(positionKeyString(group.key)),
+        state: replayed.ok ? replayed.value : null,
+      };
+    }),
+    // BR-005-20a (#135): read from this round's `costs`, so a credit that a
+    // later round resolves releases its debit rather than refusing it for good.
+    heldBackDebits: debitsHeldBack(legs, costs),
+  };
 }
 
 /**

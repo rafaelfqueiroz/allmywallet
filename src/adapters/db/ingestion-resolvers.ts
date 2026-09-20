@@ -2,6 +2,7 @@ import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { assets, institutions } from '@/db/schema/assets';
 import { AssetId, InstitutionId } from '@/core/shared/ids';
+import { canonicalAssetCode } from '@/core/ingestion/asset-identity';
 import {
   canonicalInstitutionName,
   institutionIdentityKey,
@@ -31,14 +32,27 @@ export class DrizzleAssetResolver implements AssetResolverPort {
    * #108: only a *stated* class or name overwrites the catalog's; a guess
    * leaves that column of an existing asset as it is. The conflict always
    * updates `updated_at`, so `RETURNING` yields the id either way.
+   *
+   * #135: `canonicalAssetCode` (`core/ingestion/asset-identity.ts`) decides
+   * what "one instrument" means; this is where that decision reaches the
+   * catalogue, exactly as `DrizzleInstitutionResolver` below is for an
+   * institution's spellings. The parsers are left alone deliberately — B3's
+   * export did not move, so SPEC-020 BR-020-25's guide stamp must not read as
+   * though it had — and the extract's own code survives in
+   * `import_rows.parsed_payload`, as B3's own institution spelling does.
+   *
+   * Negociação has no product name, so its ticker doubles as one
+   * (`negociacao.ts`); an aliased code must not then name the asset after a
+   * settlement ticker. Any name an extract actually states is left as it is.
    */
   async resolve(input: AssetResolveInput): Promise<AssetId> {
+    const code = canonicalAssetCode(input.code);
     const [row] = await this.db
       .insert(assets)
       .values({
         id: AssetId.generate(),
-        code: input.code,
-        name: input.name,
+        code,
+        name: input.name === input.code ? code : input.name,
         assetClass: input.assetClass,
       })
       .onConflictDoUpdate({

@@ -43,6 +43,12 @@ export type RowRefusal =
     }
   /** It fits, but a later stored row would then no longer replay. */
   | { readonly kind: 'conflicts_with_ledger'; readonly date: BusinessDate }
+  /**
+   * SPEC-005 BR-005-20a (#135) — a `transfer_out` whose same-position credit
+   * is still `unclassified` for want of a carried cost. Applying it alone
+   * empties the position; the two legs are written together or not at all.
+   */
+  | { readonly kind: 'unresolved_transfer_pair'; readonly date: BusinessDate }
   /** The ledger now accepts it: importing the file again applies it. */
   | { readonly kind: 'applicable' }
   /** The ledger already holds it, from another import. */
@@ -69,6 +75,14 @@ export function explainRefusal(
   const candidate = buildCandidate(row, row.batchId, userId, 'active', now, today);
   if (candidate === null) return { kind: 'malformed' };
 
+  // BR-005-20a (#135): asked before the replay, because this row replays
+  // perfectly well — that is exactly the problem. Derived like every other
+  // kind here, so once the credit takes its cost the same row reads as
+  // `applicable` and a re-import applies it.
+  if (candidate.type === 'transfer_out' && hasUnresolvedCounterpart(ledger, candidate)) {
+    return { kind: 'unresolved_transfer_pair', date: candidate.tradeDate };
+  }
+
   const failure = firstUnreplayable([...ledger, candidate]);
   if (failure === null) return { kind: 'applicable' };
   if (failure.transaction.id !== candidate.id) {
@@ -82,6 +96,22 @@ export function explainRefusal(
     date: candidate.tradeDate,
     likelyCause: likelyCauseOf(ledger),
   };
+}
+
+/**
+ * SPEC-005 BR-005-20a (#135) — the credit of this debit's same-position pair,
+ * still `unclassified`. `ledger` is already the row's own `(asset,
+ * institution)` position, so date and quantity are all that is left to match —
+ * the same relation `pairTransfers` forms, read one position at a time.
+ */
+function hasUnresolvedCounterpart(ledger: readonly Transaction[], debit: Transaction): boolean {
+  return ledger.some(
+    (t) =>
+      t.type === 'transfer_in' &&
+      t.status === 'unclassified' &&
+      t.tradeDate === debit.tradeDate &&
+      t.quantity.equals(debit.quantity),
+  );
 }
 
 /**
