@@ -439,6 +439,7 @@
     "refusal": {
       "insufficient_quantity": "Recusada: em {date} havia {held} deste ativo nesta instituição, e a linha retira {requested}. Importe o histórico anterior e depois este arquivo de novo.",
       "conflicts_with_ledger": "Recusada: com esta linha, uma operação de {date} já registrada ficaria sem saldo. Confira o histórico deste ativo.",
+      "unresolved_transfer_pair": "Recusada: em {date} a B3 registrou uma saída e uma entrada iguais nesta mesma instituição, e a entrada ainda está sem custo. As duas entram juntas ou nenhuma entra — sozinha, a saída zeraria a posição. Importe o histórico anterior a esta data e depois este arquivo de novo.",
       "malformed": "Recusada: os dados desta linha são inválidos ou contraditórios.",
       "applicable": "O histórico já comporta esta linha. Importe este arquivo de novo para aplicá-la.",
       "applied": "Esta linha já está no histórico, por outra importação.",

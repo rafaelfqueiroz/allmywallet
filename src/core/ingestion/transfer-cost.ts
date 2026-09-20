@@ -1,6 +1,6 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
-import type { Money, Quantity } from '@/core/shared/money';
+import { asStored, Money, type Quantity } from '@/core/shared/money';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { compareForReplay } from '@/core/positions/ordering';
 import { replayPosition } from '@/core/positions/replay';
@@ -37,14 +37,30 @@ export interface TransferLeg {
  * BR-005-20a — which debit a credit came from.
  *
  * A debit matches a credit on the same asset, trade date and quantity, at a
- * **known** institution other than the credit's (a debit with no institution
- * names no source position to read). A pair is formed only where the relation
- * is one-to-one on **both** sides: two candidate debits for one credit, or two
- * credits for one debit, pair nothing. Computed over the whole relation, never
- * by walking the file, so file order cannot choose a source.
+ * **known** institution (a debit with no institution names no source position
+ * to read). A pair is formed only where the relation is one-to-one on **both**
+ * sides: two candidate debits for one credit, or two credits for one debit,
+ * pair nothing. Computed over the whole relation, never by walking the file,
+ * so file order cannot choose a source.
+ *
+ * **The institution may be the credit's own** (#135). B3 recorded the July
+ * 2023 Energias do Brasil buyout as a price-less `Transferência` debit *and*
+ * credit at one broker — 101 at Clear, 99 at Inter — and the earlier rule,
+ * which required a *different* institution, formed no pair. The credit took no
+ * cost and stayed `unclassified` while the debit, needing none, applied: the
+ * position went to zero and 200 shares left the ledger silently.
+ *
+ * Such a pair moves nothing. Read through `resolveCarriedCosts` below it is
+ * not a special case at all — the source position *is* the destination, so the
+ * credit carries the average the debit removed the shares at: the quantity
+ * comes back exactly and the cost to the scale the ledger stores (see
+ * `withCarriedCost`). Nothing is invented: the figure is the ledger's own.
  *
  * `credits` should be every `transfer_in` leg of the batch — priced or not —
  * so a debit that could equally have fed a priced credit is ambiguous too.
+ * Admitting same-institution debits can only ever *withdraw* a pair the
+ * earlier rule formed, never redirect one: a credit that now sees two
+ * candidate debits is ambiguous and pairs with neither.
  */
 export function pairTransfers(
   credits: readonly TransferLeg[],
@@ -57,7 +73,6 @@ export function pairTransfers(
       .filter(
         (debit) =>
           debit.institutionId !== null &&
-          debit.institutionId !== credit.institutionId &&
           debit.assetId === credit.assetId &&
           debit.tradeDate === credit.tradeDate &&
           debit.quantity.equals(credit.quantity),
@@ -92,12 +107,27 @@ export interface CarryLeg {
   readonly fallback: Money | null;
 }
 
-/** The credit at the carried cost. */
+/**
+ * The credit at the carried cost, **at the scale the column holds** (#135).
+ *
+ * A carried cost is a division, so it repeats as often as not: the owner's
+ * ENBR3 is 2.074,64 ÷ 101. `NUMERIC(20,8)` keeps eight places, so writing the
+ * full-precision figure here makes the position this commit *caches* — folded
+ * from these in-memory rows — disagree with the position a **rebuild** folds
+ * from the same rows read back. `verifyPositions` reports that as drift, and
+ * DM-4 says the cache is a cache: it must equal its replay.
+ *
+ * Rounding once, here, is what keeps the two identical. It is the same reading
+ * `commit-batch.ts` already takes when deciding whether a re-carry changed
+ * anything (#112): a repeating average is compared at the column's scale,
+ * because that is the only figure that survives a round trip.
+ */
 export function withCarriedCost(credit: Transaction, cost: Money): Transaction {
+  const stored = Money.fromString(asStored(cost));
   return {
     ...credit,
-    unitPrice: cost,
-    totalValue: computeTotalValue(credit.type, credit.quantity, cost, credit.fees),
+    unitPrice: stored,
+    totalValue: computeTotalValue(credit.type, credit.quantity, stored, credit.fees),
   };
 }
 
@@ -186,4 +216,62 @@ export function resolveCarriedCosts(
     if (leg.fallback !== null) resolved.set(leg.id, leg.fallback);
   }
   return resolved;
+}
+
+/**
+ * SPEC-005 BR-005-20a (#135) — the debits a commit must **not** write.
+ *
+ * A `transfer_out` needs no price, so it applies on its own; its credit needs
+ * a carried cost and stays `unclassified` without one. Where the two legs are
+ * the same position — same asset, same institution, same date, same quantity —
+ * applying one alone is not a partial import but a **loss**: the shares leave
+ * the position and nothing records their return. That is what took 200 ENBR3
+ * shares out of the owner's *patrimônio*, silently, with no screen in the
+ * product to say so.
+ *
+ * So a same-position pair is all or nothing. Where the credit is settled, both
+ * legs are written and net to zero; where it is not, the debit is refused
+ * (`unresolved_transfer_pair`) rather than applied, nothing is written for it,
+ * no occurrence is taken, and importing the file again applies it once the
+ * credit can take its cost (BR-005-17).
+ *
+ * **Read off the relation, not off a formed pair** (review finding 1). An
+ * earlier version asked this of `pairTransfers`' one-to-one matches only, and
+ * so let through exactly the shapes where no pair forms: two same-position
+ * pairs of equal quantity on one date (each credit sees two debits, so neither
+ * pairs) and a same-institution debit competing with a cross-institution one.
+ * In both, every debit applied alone and the position went to zero — the
+ * ambiguity guard that protects the *cost* was removing the guard on the
+ * *quantity*. Whether a credit found a source is a different question from
+ * whether its position may be emptied without it.
+ *
+ * A **cross-institution** debit is deliberately not held back: the debit is
+ * the whole record of shares genuinely leaving that broker, and BR-005-20a has
+ * always let its credit wait for history that has not been imported yet. The
+ * quantity is still visible at the destination as an `unclassified` row in
+ * Needs attention, which a same-position pair's credit is too — but there the
+ * debit erases the same position the credit would have restored.
+ *
+ * `debits` are the `transfer_out` rows this commit would write; `unsettled`
+ * are the batch's price-less `transfer_in` legs that will *not* be active in
+ * the ledger once it is done. Both are keyed by whatever id the caller needs
+ * back.
+ */
+export function debitsHeldBack(
+  debits: readonly TransferLeg[],
+  unsettled: readonly TransferLeg[],
+): ReadonlySet<string> {
+  return new Set(
+    debits
+      .filter((debit) =>
+        unsettled.some(
+          (credit) =>
+            credit.assetId === debit.assetId &&
+            credit.institutionId === debit.institutionId &&
+            credit.tradeDate === debit.tradeDate &&
+            credit.quantity.equals(debit.quantity),
+        ),
+      )
+      .map((debit) => debit.id),
+  );
 }

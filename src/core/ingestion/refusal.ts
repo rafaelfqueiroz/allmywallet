@@ -43,6 +43,12 @@ export type RowRefusal =
     }
   /** It fits, but a later stored row would then no longer replay. */
   | { readonly kind: 'conflicts_with_ledger'; readonly date: BusinessDate }
+  /**
+   * SPEC-005 BR-005-20a (#135) — a `transfer_out` whose same-position credit
+   * is still `unclassified` for want of a carried cost. Applying it alone
+   * empties the position; the two legs are written together or not at all.
+   */
+  | { readonly kind: 'unresolved_transfer_pair'; readonly date: BusinessDate }
   /** The ledger now accepts it: importing the file again applies it. */
   | { readonly kind: 'applicable' }
   /** The ledger already holds it, from another import. */
@@ -70,7 +76,17 @@ export function explainRefusal(
   if (candidate === null) return { kind: 'malformed' };
 
   const failure = firstUnreplayable([...ledger, candidate]);
-  if (failure === null) return { kind: 'applicable' };
+  // BR-005-20a (#135): asked only of a row the ledger would otherwise accept,
+  // because that is what a held-back debit is — it replays perfectly well, and
+  // that is exactly the problem. A row refused for any other reason keeps the
+  // refusal that names its own figures (review finding 3). Derived like every
+  // other kind here, so once the credit takes its cost the same row reads as
+  // `applicable` and a re-import applies it.
+  if (failure === null) {
+    return candidate.type === 'transfer_out' && hasUnresolvedCounterpart(ledger, candidate)
+      ? { kind: 'unresolved_transfer_pair', date: candidate.tradeDate }
+      : { kind: 'applicable' };
+  }
   if (failure.transaction.id !== candidate.id) {
     return { kind: 'conflicts_with_ledger', date: failure.transaction.tradeDate };
   }
@@ -82,6 +98,22 @@ export function explainRefusal(
     date: candidate.tradeDate,
     likelyCause: likelyCauseOf(ledger),
   };
+}
+
+/**
+ * SPEC-005 BR-005-20a (#135) — the credit of this debit's same-position pair,
+ * still `unclassified`. `ledger` is already the row's own `(asset,
+ * institution)` position, so date and quantity are all that is left to match —
+ * the same relation `pairTransfers` forms, read one position at a time.
+ */
+function hasUnresolvedCounterpart(ledger: readonly Transaction[], debit: Transaction): boolean {
+  return ledger.some(
+    (t) =>
+      t.type === 'transfer_in' &&
+      t.status === 'unclassified' &&
+      t.tradeDate === debit.tradeDate &&
+      t.quantity.equals(debit.quantity),
+  );
 }
 
 /**

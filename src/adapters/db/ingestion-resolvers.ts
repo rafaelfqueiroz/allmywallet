@@ -2,6 +2,7 @@ import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { assets, institutions } from '@/db/schema/assets';
 import { AssetId, InstitutionId } from '@/core/shared/ids';
+import { canonicalAssetCode } from '@/core/ingestion/asset-identity';
 import {
   canonicalInstitutionName,
   institutionIdentityKey,
@@ -31,20 +32,33 @@ export class DrizzleAssetResolver implements AssetResolverPort {
    * #108: only a *stated* class or name overwrites the catalog's; a guess
    * leaves that column of an existing asset as it is. The conflict always
    * updates `updated_at`, so `RETURNING` yields the id either way.
+   *
+   * #135: `canonicalAssetCode` (`core/ingestion/asset-identity.ts`) decides
+   * what "one instrument" means; this is where that decision reaches the
+   * catalogue, exactly as `DrizzleInstitutionResolver` below is for an
+   * institution's spellings. The parsers are left alone deliberately — B3's
+   * export did not move, so SPEC-020 BR-020-25's guide stamp must not read as
+   * though it had — and the extract's own code survives in
+   * `import_rows.parsed_payload`, as B3's own institution spelling does.
+   *
+   * An extract with no product name lets its code double as one — Negociação
+   * always (`negociacao.ts`), and Movimentação whenever `Produto` carries no
+   * `" - "` (`splitProduct`). An aliased code must not then name the asset
+   * after a settlement ticker, on insert **or** on conflict: Movimentação
+   * states its name, so the conflict branch would otherwise rename an existing
+   * `ENBR3` to `ENBR3L` across every report (review finding 5). Any name an
+   * extract actually states is left exactly as it is.
    */
   async resolve(input: AssetResolveInput): Promise<AssetId> {
+    const code = canonicalAssetCode(input.code);
+    const name = input.name === input.code ? code : input.name;
     const [row] = await this.db
       .insert(assets)
-      .values({
-        id: AssetId.generate(),
-        code: input.code,
-        name: input.name,
-        assetClass: input.assetClass,
-      })
+      .values({ id: AssetId.generate(), code, name, assetClass: input.assetClass })
       .onConflictDoUpdate({
         target: assets.code,
         set: {
-          ...(input.nameStated ? { name: input.name } : {}),
+          ...(input.nameStated ? { name } : {}),
           ...(input.classStated ? { assetClass: input.assetClass } : {}),
           updatedAt: new Date(),
         },

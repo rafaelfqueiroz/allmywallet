@@ -2082,6 +2082,283 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
     });
   });
+
+  /**
+   * #135 — B3 recorded the July 2023 Energias do Brasil buyout as a price-less
+   * `Transferência` debit *and* credit at one broker. Requiring a different
+   * institution formed no pair: the credit stayed `unclassified` while the
+   * debit, needing no price, applied. The position went to zero and the shares
+   * left *patrimônio* with nothing recording their return.
+   */
+  describe('#135 — a same-institution pair moves nothing', () => {
+    const ownCredit = (overrides: Partial<NormalizedTransactionRecord> = {}) =>
+      credit({ institutionName: ORIGEM, ...overrides });
+
+    it('leaves quantity, average and total cost exactly as they were', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      const before = await positionAt(deps, ORIGEM);
+      expect(before).toEqual({ quantity: '100', averageCost: '10', totalCost: '1000' });
+
+      const { outcome } = await importFile(deps, [ownCredit(), debit()]);
+
+      expect(outcome.applied).toBe(2);
+      expect(transfersIn(deps)[0]).toMatchObject({ status: 'active' });
+      expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
+      expect(await positionAt(deps, ORIGEM)).toEqual(before);
+      expect(outcome.batch.rowCounts).toMatchObject({ needsAttention: 0 });
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    it('a later sale of the whole position applies against the restored shares', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [ownCredit(), debit()]);
+
+      const { outcome } = await importFile(deps, [
+        buy({
+          b3Type: 'Venda',
+          direction: null,
+          institutionName: ORIGEM,
+          tradeDate: BusinessDate.of('2026-03-11'),
+          unitPrice: Money.fromString('12'),
+          fees: Money.zero(),
+        }),
+      ]);
+
+      expect(outcome).toMatchObject({ applied: 1, invalid: 0 });
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '0',
+        averageCost: '0',
+        totalCost: '0',
+      });
+    });
+
+    it('BR-005-17: re-importing the pair adds nothing', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [ownCredit(), debit()]);
+      const inserts = deps.transactions.insertCount;
+
+      const again = await importFile(deps, [ownCredit(), debit()]);
+
+      expect(again.outcome).toMatchObject({ applied: 0, promoted: 0, skippedDuplicates: 2 });
+      expect(deps.transactions.insertCount).toBe(inserts);
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
+     * The owner's state: #110's rule left the debit active and the credit
+     * `unclassified` at its placeholder zero. Re-importing the same file
+     * promotes the credit in place and the position comes back.
+     */
+    it('promotes the credit an earlier import left unclassified, restoring the position', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await commitAsIssue108(deps, [ownCredit(), debit()]);
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '0',
+        averageCost: '0',
+        totalCost: '0',
+      });
+
+      const again = await importFile(deps, [ownCredit(), debit()]);
+
+      expect(again.outcome).toMatchObject({ applied: 0, promoted: 1 });
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '100',
+        averageCost: '10',
+        totalCost: '1000',
+      });
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
+     * BR-005-20a's guard, on a position the debit would replay against
+     * perfectly well: 100 shares held at no cost (BR-007-05), so the carry
+     * resolves nothing. Without the guard the debit applies alone and the 100
+     * shares are gone. Nothing is written for it, no occurrence is taken, and
+     * the file imports once the position has a cost to carry (BR-005-17).
+     */
+    it('refuses the debit rather than emptying the position when the carry cannot resolve', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [
+        buy({
+          b3Type: 'Bonificação em Ativos',
+          institutionName: ORIGEM,
+          tradeDate: BusinessDate.of('2026-01-05'),
+          priceStated: false,
+          unitPrice: Money.zero(),
+          fees: Money.zero(),
+        }),
+      ]);
+      const before = await positionAt(deps, ORIGEM);
+      expect(before).toEqual({ quantity: '100', averageCost: '0', totalCost: '0' });
+
+      const { batchId, outcome } = await importFile(deps, [ownCredit(), debit()]);
+
+      // The credit is stored `unclassified` as BR-005-19 requires; the debit
+      // is the one row this commit refuses.
+      expect(outcome).toMatchObject({ applied: 1, invalid: 1 });
+      expect(transfersIn(deps)[0]).toMatchObject({ status: 'unclassified' });
+      const rows = await deps.rows.listByBatch(batchId);
+      expect(rows.map((row) => [row.ledgerType, row.classification])).toEqual([
+        ['transfer_in', 'unclassified'],
+        ['transfer_out', 'invalid'],
+      ]);
+      expect(deps.transactions.rows.some((t) => t.type === 'transfer_out')).toBe(false);
+      expect(await positionAt(deps, ORIGEM)).toEqual(before);
+    });
+
+    it('applies both legs once the history behind them is imported', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [ownCredit(), debit()]);
+      await importFile(deps, [history()]);
+
+      const again = await importFile(deps, [ownCredit(), debit()]);
+
+      expect(again.outcome).toMatchObject({ applied: 1, promoted: 1, invalid: 0 });
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '100',
+        averageCost: '10',
+        totalCost: '1000',
+      });
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
+     * Review finding 1A. Two same-position pairs of one quantity on one date:
+     * each credit sees two candidate debits, so `pairTransfers` forms nothing
+     * and a guard asked of formed pairs alone let both debits through. The
+     * position went to zero with neither credit carrying anything.
+     */
+    it('holds back both debits where two same-position pairs of one quantity compete', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history({ quantity: Quantity.fromString('200') })]);
+      const before = await positionAt(deps, ORIGEM);
+      expect(before).toEqual({ quantity: '200', averageCost: '10', totalCost: '2000' });
+
+      const { outcome } = await importFile(deps, [ownCredit(), ownCredit(), debit(), debit()]);
+
+      expect(outcome).toMatchObject({ applied: 2, invalid: 2 });
+      expect(deps.transactions.rows.some((t) => t.type === 'transfer_out')).toBe(false);
+      expect(transfersIn(deps).map((t) => t.status)).toEqual(['unclassified', 'unclassified']);
+      expect(await positionAt(deps, ORIGEM)).toEqual(before);
+    });
+
+    /**
+     * Review finding 1B. A same-institution debit competing with a
+     * cross-institution one. The credit pairs with neither — two candidate
+     * sources is exactly what the ambiguity guard refuses to choose between —
+     * but the debit at the credit's own position must still be held back,
+     * while the one at the other broker applies as it always has.
+     */
+    it('holds back only the same-position debit when a cross-institution one competes', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [
+        history(),
+        history({ institutionName: DESTINO, unitPrice: Money.fromString('20') }),
+      ]);
+
+      const { outcome } = await importFile(deps, [
+        ownCredit(),
+        debit(),
+        debit({ institutionName: DESTINO }),
+      ]);
+
+      expect(outcome).toMatchObject({ applied: 2, invalid: 1 });
+      // ORIGEM keeps its 100: the debit that would have emptied it is refused.
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '100',
+        averageCost: '10',
+        totalCost: '1000',
+      });
+      // DESTINO's own debit is written, as a cross-broker debit always is.
+      expect(await positionAt(deps, DESTINO)).toEqual({
+        quantity: '0',
+        averageCost: '0',
+        totalCost: '0',
+      });
+      expect(transfersIn(deps).map((t) => t.status)).toEqual(['unclassified']);
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
+     * Review finding 2. The hold-back runs **before** the exclusion ladder: a
+     * round that gave up a sale because the position had been emptied by a
+     * debit this rule was going to hold back never reconsiders it — exclusions
+     * only grow — so the sale was refused on that import and every one after,
+     * while the batch page called it `applicable`.
+     */
+    it('does not cost another row on the same position its place in the ledger', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [
+        buy({
+          b3Type: 'Bonificação em Ativos',
+          institutionName: ORIGEM,
+          tradeDate: BusinessDate.of('2026-01-05'),
+          priceStated: false,
+          unitPrice: Money.zero(),
+          fees: Money.zero(),
+        }),
+      ]);
+
+      const { outcome } = await importFile(deps, [
+        ownCredit(),
+        debit(),
+        buy({
+          b3Type: 'Venda',
+          direction: null,
+          institutionName: ORIGEM,
+          tradeDate: BusinessDate.of('2026-03-11'),
+          unitPrice: Money.fromString('12'),
+          fees: Money.zero(),
+        }),
+      ]);
+
+      // The credit stored unclassified and the sale applied; only the debit is refused.
+      expect(outcome).toMatchObject({ applied: 2, invalid: 1 });
+      expect(deps.transactions.rows.some((t) => t.type === 'sell')).toBe(true);
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '0',
+        averageCost: '0',
+        totalCost: '0',
+      });
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
+     * A cross-institution debit is the whole record of shares genuinely
+     * leaving that broker, and BR-005-20a has always let its credit wait for
+     * history that has not been imported. Holding it back too would refuse
+     * every ordinary transfer imported ahead of its source.
+     */
+    it('still applies a cross-institution debit whose credit cannot be carried', async () => {
+      const deps = buildFakeIngestionDeps();
+      // The same zero-cost source: the carry resolves nothing here either.
+      await importFile(deps, [
+        buy({
+          b3Type: 'Bonificação em Ativos',
+          institutionName: ORIGEM,
+          tradeDate: BusinessDate.of('2026-01-05'),
+          priceStated: false,
+          unitPrice: Money.zero(),
+          fees: Money.zero(),
+        }),
+      ]);
+
+      const { outcome } = await importFile(deps, [credit(), debit()]);
+
+      expect(outcome).toMatchObject({ applied: 2, invalid: 0 });
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '0',
+        averageCost: '0',
+        totalCost: '0',
+      });
+      // BR-005-19: the shares are visible at the destination, waiting for a cost.
+      expect(transfersIn(deps)[0]).toMatchObject({ status: 'unclassified' });
+    });
+  });
 });
 
 describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassified are fixed on re-import', () => {

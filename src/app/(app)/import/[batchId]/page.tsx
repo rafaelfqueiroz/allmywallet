@@ -96,6 +96,9 @@ export default async function ImportBatchDetailPage({
         });
       case 'conflicts_with_ledger':
         return t('refusal.conflicts_with_ledger', { date: formatBusinessDate(refusal.date) });
+      // SPEC-005 BR-005-20a (#135): one leg of a same-position transfer pair.
+      case 'unresolved_transfer_pair':
+        return t('refusal.unresolved_transfer_pair', { date: formatBusinessDate(refusal.date) });
       default:
         return t(`refusal.${refusal.kind}`);
     }

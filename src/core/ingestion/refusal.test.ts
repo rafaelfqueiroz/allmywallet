@@ -192,6 +192,81 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
     });
   });
 
+  /**
+   * #135 — B3's same-institution `Transferência` pair. The debit replays
+   * perfectly well against the position it is about to empty, which is why
+   * this is asked before the replay rather than read off its failure.
+   */
+  describe('BR-005-20a — one leg of a same-position pair', () => {
+    const unresolvedCredit = () =>
+      aTransaction()
+        .transferIn()
+        .on('2026-02-01')
+        .quantity('10')
+        .price('0')
+        .status('unclassified')
+        .build();
+
+    it('names the pair rather than letting the debit through', () => {
+      expect(
+        explainRefusal(
+          row('transfer_out', '2026-02-01', '10'),
+          [held10(), unresolvedCredit()],
+          userId,
+          now,
+          today,
+        ),
+      ).toEqual({ kind: 'unresolved_transfer_pair', date: '2026-02-01' });
+    });
+
+    it('reads as applicable once the credit has taken its cost', () => {
+      const carried = { ...unresolvedCredit(), status: 'active' as const };
+      expect(
+        explainRefusal(
+          row('transfer_out', '2026-02-01', '10'),
+          [held10(), carried],
+          userId,
+          now,
+          today,
+        ),
+      ).toEqual({ kind: 'applicable' });
+    });
+
+    /**
+     * Review finding 3. A stored price-less credit whose own debit was never
+     * imported is an ordinary sight — DL-005-10 records 115 of them on the
+     * owner's first import — and a debit refused for a genuine shortfall must
+     * keep the figures that say so rather than be relabelled a pair.
+     */
+    it('leaves a genuine shortfall its own figures', () => {
+      const short = aTransaction().buy().on('2026-01-05').quantity('40').price('10').build();
+      const refusal = explainRefusal(
+        row('transfer_out', '2026-02-01', '100'),
+        [short, { ...unresolvedCredit(), quantity: Quantity.fromString('100') }],
+        userId,
+        now,
+        today,
+      );
+      expect(refusal.kind).toBe('insufficient_quantity');
+      if (refusal.kind !== 'insufficient_quantity') return;
+      expect(refusal.held.toString()).toBe('40');
+      expect(refusal.requested.toString()).toBe('100');
+    });
+
+    it('ignores an unclassified credit of another date or quantity', () => {
+      const elsewhere = { ...unresolvedCredit(), tradeDate: BusinessDate.of('2026-02-02') };
+      expect(
+        explainRefusal(
+          row('transfer_out', '2026-02-01', '10'),
+          [held10(), elsewhere],
+          userId,
+          now,
+          today,
+        ).kind,
+      ).toBe('applicable');
+    });
+  });
+
   it('a row dated after today is malformed', () => {
     expect(
       explainRefusal(row('transfer_out', '2026-12-01', '1'), [held10()], userId, now, today).kind,
