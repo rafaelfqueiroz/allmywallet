@@ -1270,3 +1270,348 @@ describe('#129 BR-005-20b — a fraction whose origin is one asset upstream', ()
     });
   });
 });
+
+/**
+ * SPEC-005 BR-005-20b (#120) — B3 publishes share-ratio factors only for
+ * **listed companies**, so a fund or a delisted issuer has no factor of any
+ * kind, ever, and every split or reverse split of theirs refused `no_factor`
+ * permanently. Only there may positions corroborate each other.
+ *
+ * `FNDX11`, `FNDY11` and `FNDZ11` are invented tickers (DV-24); their issuer
+ * codes `FNDX`/`FNDY`/`FNDZ` are simply absent from the factor map, which is
+ * what "B3 publishes nothing for this issuer" looks like here.
+ */
+describe('#120 BR-005-20b — a ratio corroborated across positions', () => {
+  const JULY = '2025-07-09';
+
+  /** The same open row at a named institution — corroboration spans positions, so a test needs several. */
+  function openAt(
+    institution: string,
+    movement: CorporateEventMovement,
+    ticker: string,
+    date: string,
+    quantity: string,
+  ): CorporateEventRow {
+    const transaction = aTransaction()
+      .rendimento()
+      .status('unclassified')
+      .of(ticker)
+      .at(institution)
+      .on(date)
+      .quantity(quantity)
+      .price('0')
+      .imported()
+      .build();
+    return { id: transaction.id, movement, ticker, transaction, open: true };
+  }
+
+  const buyAt = (
+    institution: string,
+    ticker: string,
+    date: string,
+    quantity: string,
+    price: string,
+  ) =>
+    aTransaction()
+      .buy()
+      .of(ticker)
+      .at(institution)
+      .on(date)
+      .quantity(quantity)
+      .price(price)
+      .build();
+
+  const sellAt = (
+    institution: string,
+    ticker: string,
+    date: string,
+    quantity: string,
+    price: string,
+  ) =>
+    aTransaction()
+      .sell()
+      .of(ticker)
+      .at(institution)
+      .on(date)
+      .quantity(quantity)
+      .price(price)
+      .build();
+
+  it('resolves a desdobro two positions derive the same ratio for, where B3 publishes no factor at all', () => {
+    // The fund shape. XP holds 16 bought at 100,00 → 1.600,00; BTG holds 49 at
+    // 100,00 → 4.900,00. The Desdobro credits Δ = 112 and Δ = 343 on one date.
+    //   (16 + 112) ÷ 16 = 128 ÷ 16 = 8
+    //   (49 + 343) ÷ 49 = 392 ÷ 49 = 8
+    // Two positions, one figure, exact at eight places → ratio 8 for both.
+    // BR-007-04: total cost is unchanged, so 1.600 ÷ 128 = 12,50 and
+    // 4.900 ÷ 392 = 12,50 — the same average, as one event on one asset must give.
+    const xpHistory = [buyAt('XP', 'FNDX11', '2025-01-02', '16', '100')];
+    const btgHistory = [buyAt('BTG', 'FNDX11', '2025-01-02', '49', '100')];
+    const atXp = openAt('XP', 'desdobro', 'FNDX11', JULY, '112');
+    const atBtg = openAt('BTG', 'desdobro', 'FNDX11', JULY, '343');
+
+    const outcomes = resolve([atXp, atBtg], [...xpHistory, ...btgHistory]);
+
+    const xp = outcomeOf(outcomes, atXp);
+    expect(xp).toMatchObject({ status: 'resolved', movement: 'desdobro' });
+    if (xp.status !== 'resolved' || xp.movement !== 'desdobro') return;
+    expect(str(xp.transaction.ratio)).toBe('8');
+    expect(str(xp.evidence.basis)).toBe('16');
+    expect(str(xp.evidence.derivedRatio)).toBe('8');
+    // Nothing published: the batch page has no factor to show beside it.
+    expect(xp.evidence.factors).toEqual([]);
+
+    const btg = outcomeOf(outcomes, atBtg);
+    expect(btg).toMatchObject({ status: 'resolved', movement: 'desdobro' });
+    if (btg.status !== 'resolved' || btg.movement !== 'desdobro') return;
+    expect(str(btg.transaction.ratio)).toBe('8');
+    expect(str(btg.evidence.basis)).toBe('49');
+
+    const xpAfter = replayed([...xpHistory, xp.transaction]);
+    expect(xpAfter.quantity.toString()).toBe('128');
+    expect(xpAfter.totalCost.toString()).toBe('1600');
+    expect(xpAfter.averageCost.toString()).toBe('12.5');
+    const btgAfter = replayed([...btgHistory, btg.transaction]);
+    expect(btgAfter.quantity.toString()).toBe('392');
+    expect(btgAfter.totalCost.toString()).toBe('4900');
+    expect(btgAfter.averageCost.toString()).toBe('12.5');
+  });
+
+  it('corroborates a grupamento the same way: 22 ÷ 220 and 50 ÷ 500 are both 0,1', () => {
+    // XP: 220 at 10,00 → 2.200,00; R = 22 → 22 ÷ 220 = 0,1.
+    // BTG: 500 at 10,00 → 5.000,00; R = 50 → 50 ÷ 500 = 0,1.
+    // After ×0,1: 22 shares at 2.200 ÷ 22 = 100,00 and 50 at 5.000 ÷ 50 = 100,00.
+    const xpHistory = [buyAt('XP', 'FNDY11', '2025-01-02', '220', '10')];
+    const btgHistory = [buyAt('BTG', 'FNDY11', '2025-01-02', '500', '10')];
+    const atXp = openAt('XP', 'grupamento', 'FNDY11', JULY, '22');
+    const atBtg = openAt('BTG', 'grupamento', 'FNDY11', JULY, '50');
+
+    const outcomes = resolve([atXp, atBtg], [...xpHistory, ...btgHistory]);
+    const xp = written(outcomes, atXp);
+    const btg = written(outcomes, atBtg);
+    expect([str(xp.ratio), str(btg.ratio)]).toEqual(['0.1', '0.1']);
+    expect(xp.type).toBe('grupamento');
+
+    const xpAfter = replayed([...xpHistory, xp]);
+    expect(xpAfter.quantity.toString()).toBe('22');
+    expect(xpAfter.averageCost.toString()).toBe('100');
+    const btgAfter = replayed([...btgHistory, btg]);
+    expect(btgAfter.quantity.toString()).toBe('50');
+    expect(btgAfter.averageCost.toString()).toBe('100');
+  });
+
+  it('refuses no_factor when only one position has a usable basis — one position never confirms itself', () => {
+    // XP bought 16 and sold all 16: P = 0, so it derives nothing and refuses
+    // `no_basis`. BTG derives (49 + 343) ÷ 49 = 8, alone, which is the row
+    // restating its own arithmetic — not evidence.
+    const xpHistory = [
+      buyAt('XP', 'FNDX11', '2025-01-02', '16', '100'),
+      sellAt('XP', 'FNDX11', '2025-02-03', '16', '110'),
+    ];
+    const btgHistory = [buyAt('BTG', 'FNDX11', '2025-01-02', '49', '100')];
+    const atXp = openAt('XP', 'desdobro', 'FNDX11', JULY, '112');
+    const atBtg = openAt('BTG', 'desdobro', 'FNDX11', JULY, '343');
+
+    const closed = resolve([atXp, atBtg], [...xpHistory, ...btgHistory]);
+    expect(outcomeOf(closed, atXp)).toMatchObject({ refusal: 'no_basis' });
+    const alone = outcomeOf(closed, atBtg);
+    expect(alone).toMatchObject({ refusal: 'no_factor' });
+    if (alone.movement === 'desdobro') expect(str(alone.evidence.derivedRatio)).toBe('8');
+
+    // The same with an unreplayable prefix: 16 bought, 20 sold.
+    const broken = resolve(
+      [atXp, atBtg],
+      [
+        buyAt('XP', 'FNDX11', '2025-01-02', '16', '100'),
+        sellAt('XP', 'FNDX11', '2025-02-03', '20', '110'),
+        ...btgHistory,
+      ],
+    );
+    expect(outcomeOf(broken, atXp)).toMatchObject({ refusal: 'no_basis' });
+    expect(outcomeOf(broken, atBtg)).toMatchObject({ refusal: 'no_factor' });
+
+    // And a single position on its own, with nothing to corroborate against.
+    const only = resolve([atBtg], btgHistory);
+    expect(outcomeOf(only, atBtg)).toMatchObject({ refusal: 'no_factor' });
+  });
+
+  it('refuses the whole set as disagrees when two positions derive different ratios', () => {
+    // XP: (16 + 112) ÷ 16 = 8. BTG: (56 + 336) ÷ 56 = 392 ÷ 56 = 7.
+    // One of the two bases is wrong and nothing says which, so neither applies
+    // and both show their own figure.
+    const history = [
+      buyAt('XP', 'FNDX11', '2025-01-02', '16', '100'),
+      buyAt('BTG', 'FNDX11', '2025-01-02', '56', '100'),
+    ];
+    const atXp = openAt('XP', 'desdobro', 'FNDX11', JULY, '112');
+    const atBtg = openAt('BTG', 'desdobro', 'FNDX11', JULY, '336');
+
+    const outcomes = resolve([atXp, atBtg], history);
+    const xp = outcomeOf(outcomes, atXp);
+    const btg = outcomeOf(outcomes, atBtg);
+    expect(xp).toMatchObject({ status: 'refused', refusal: 'disagrees' });
+    expect(btg).toMatchObject({ status: 'refused', refusal: 'disagrees' });
+    if (xp.movement === 'desdobro') expect(str(xp.evidence.derivedRatio)).toBe('8');
+    if (btg.movement === 'desdobro') expect(str(btg.evidence.derivedRatio)).toBe('7');
+  });
+
+  it('refuses a corroborated ratio the ledger cannot hold exactly as not_representable', () => {
+    // A 3:1 grupamento. XP: 100 ÷ 300; BTG: 200 ÷ 600. Both are the same
+    // repeating 0,333…, so the set agrees — but stored at NUMERIC(20,8) that
+    // is 0,33333333, a different number, and the ledger would hold a ratio
+    // nothing published or derived.
+    const history = [
+      buyAt('XP', 'FNDY11', '2025-01-02', '300', '10'),
+      buyAt('BTG', 'FNDY11', '2025-01-02', '600', '10'),
+    ];
+    const atXp = openAt('XP', 'grupamento', 'FNDY11', JULY, '100');
+    const atBtg = openAt('BTG', 'grupamento', 'FNDY11', JULY, '200');
+
+    const outcomes = resolve([atXp, atBtg], history);
+    const xp = outcomeOf(outcomes, atXp);
+    expect(xp).toMatchObject({ status: 'refused', refusal: 'not_representable' });
+    expect(outcomeOf(outcomes, atBtg)).toMatchObject({ refusal: 'not_representable' });
+    if (xp.movement === 'grupamento') {
+      expect(asStored(xp.evidence.derivedRatio as Quantity)).toBe('0.33333333');
+    }
+  });
+
+  it('keeps refusing no_factor for an issuer B3 publishes for, even with two positions corroborating', () => {
+    // **The regression that protects the guard.** FNDZ has a desdobramento
+    // published with última data com 2014-05-02 — far outside the 7-day
+    // window, so it confirms nothing. But B3 *does* publish for this issuer,
+    // so the absence of a factor near the row is real evidence that this event
+    // is not one B3 recorded: a 2014 desdobramento does not license a 2025
+    // one. Both positions derive 8 and neither applies.
+    const history = [
+      buyAt('XP', 'FNDZ11', '2025-01-02', '16', '100'),
+      buyAt('BTG', 'FNDZ11', '2025-01-02', '49', '100'),
+    ];
+    const atXp = openAt('XP', 'desdobro', 'FNDZ11', JULY, '112');
+    const atBtg = openAt('BTG', 'desdobro', 'FNDZ11', JULY, '343');
+
+    const outcomes = resolve([atXp, atBtg], history, [
+      factor('FNDZ', 'desdobramento', '700', '2014-05-02'),
+    ]);
+    const xp = outcomeOf(outcomes, atXp);
+    expect(xp).toMatchObject({ status: 'refused', refusal: 'no_factor' });
+    expect(outcomeOf(outcomes, atBtg)).toMatchObject({ refusal: 'no_factor' });
+    // Derived 8 on both, and no factor in the window to show beside it.
+    if (xp.movement === 'desdobro') {
+      expect(str(xp.evidence.derivedRatio)).toBe('8');
+      expect(xp.evidence.factors).toEqual([]);
+    }
+  });
+
+  it('lets a published factor in the window win over two corroborating positions: disagrees', () => {
+    // FNDZ published a desdobramento of 900 % — m = 1 + 900 ÷ 100 = 10 — two
+    // days before the row. XP: 16 × (10 − 1) = 144 ≠ 112. BTG: 49 × 9 = 441 ≠
+    // 343. Both derive 8, and agreeing with each other does not outrank B3.
+    const history = [
+      buyAt('XP', 'FNDZ11', '2025-01-02', '16', '100'),
+      buyAt('BTG', 'FNDZ11', '2025-01-02', '49', '100'),
+    ];
+    const atXp = openAt('XP', 'desdobro', 'FNDZ11', JULY, '112');
+    const atBtg = openAt('BTG', 'desdobro', 'FNDZ11', JULY, '343');
+
+    const published = factor('FNDZ', 'desdobramento', '900', '2025-07-07');
+    const outcomes = resolve([atXp, atBtg], history, [published]);
+    const xp = outcomeOf(outcomes, atXp);
+    expect(xp).toMatchObject({ status: 'refused', refusal: 'disagrees' });
+    expect(outcomeOf(outcomes, atBtg)).toMatchObject({ refusal: 'disagrees' });
+    if (xp.movement === 'desdobro') {
+      expect(str(xp.evidence.derivedRatio)).toBe('8');
+      expect(xp.evidence.factors).toEqual([published]);
+    }
+  });
+
+  it('never lets one position confirm itself through a same-day pair of its own', () => {
+    // Two Desdobro rows on the XP position on one date: which applies first is
+    // not stated, so both are `combined_same_day` before any ratio is derived
+    // and neither can join a corroboration set. BTG is then alone.
+    const history = [
+      buyAt('XP', 'FNDX11', '2025-01-02', '16', '100'),
+      buyAt('BTG', 'FNDX11', '2025-01-02', '49', '100'),
+    ];
+    const first = openAt('XP', 'desdobro', 'FNDX11', JULY, '112');
+    const second = openAt('XP', 'desdobro', 'FNDX11', JULY, '112');
+    const atBtg = openAt('BTG', 'desdobro', 'FNDX11', JULY, '343');
+
+    const outcomes = resolve([first, second, atBtg], history);
+    expect(outcomeOf(outcomes, first)).toMatchObject({ refusal: 'combined_same_day' });
+    expect(outcomeOf(outcomes, second)).toMatchObject({ refusal: 'combined_same_day' });
+    expect(outcomeOf(outcomes, atBtg)).toMatchObject({ refusal: 'no_factor' });
+  });
+
+  it('corroborates a second generation: the event behind a corroborated one resolves too', () => {
+    // A ratio event behind an unresolved one is `blocked`, never `no_factor`,
+    // so it cannot corroborate anything until the one before it settles.
+    //
+    // XP: 16 at 100,00 → 1.600,00.
+    //   03/03 Δ = 16 → (16 + 16) ÷ 16 = 2 → 32 shares, 1.600 ÷ 32 = 50,00.
+    //   09/07 Δ = 128 → (32 + 128) ÷ 32 = 160 ÷ 32 = 5 → 160 shares, 10,00.
+    // BTG: 25 at 64,00 → 1.600,00.
+    //   03/03 Δ = 25 → (25 + 25) ÷ 25 = 2 → 50 shares, 32,00.
+    //   09/07 Δ = 200 → (50 + 200) ÷ 50 = 250 ÷ 50 = 5 → 250 shares, 6,40.
+    const xpHistory = [buyAt('XP', 'FNDX11', '2025-01-02', '16', '100')];
+    const btgHistory = [buyAt('BTG', 'FNDX11', '2025-01-02', '25', '64')];
+    const xpMarch = openAt('XP', 'desdobro', 'FNDX11', '2025-03-03', '16');
+    const btgMarch = openAt('BTG', 'desdobro', 'FNDX11', '2025-03-03', '25');
+    const xpJuly = openAt('XP', 'desdobro', 'FNDX11', JULY, '128');
+    const btgJuly = openAt('BTG', 'desdobro', 'FNDX11', JULY, '200');
+
+    const outcomes = resolve([xpJuly, btgMarch, xpMarch, btgJuly], [...xpHistory, ...btgHistory]);
+    expect(str(written(outcomes, xpMarch).ratio)).toBe('2');
+    expect(str(written(outcomes, btgMarch).ratio)).toBe('2');
+    expect(str(written(outcomes, xpJuly).ratio)).toBe('5');
+    expect(str(written(outcomes, btgJuly).ratio)).toBe('5');
+
+    const xpAfter = replayed([...xpHistory, written(outcomes, xpMarch), written(outcomes, xpJuly)]);
+    expect(xpAfter.quantity.toString()).toBe('160');
+    expect(xpAfter.totalCost.toString()).toBe('1600');
+    expect(xpAfter.averageCost.toString()).toBe('10');
+    const btgAfter = replayed([
+      ...btgHistory,
+      written(outcomes, btgMarch),
+      written(outcomes, btgJuly),
+    ]);
+    expect(btgAfter.quantity.toString()).toBe('250');
+    expect(btgAfter.averageCost.toString()).toBe('6.4');
+  });
+
+  it('measures a position that unblocks after the set was decided against it, never carries it along', () => {
+    // XP and BTG settle the July set at 8 on the first round. NU is `blocked`
+    // there behind its own March Desdobro, which RICO corroborates at 2 in the
+    // same round — so NU only reaches July on the next one, by which time the
+    // set has a figure.
+    //
+    // NU: 10 at 100,00. 03/03 Δ = 10 → (10 + 10) ÷ 10 = 2 → 20 shares.
+    //     09/07 Δ = 100 → (20 + 100) ÷ 20 = 120 ÷ 20 = 6 ≠ 8.
+    // Applying the set's 8 to a position deriving 6 would put a ratio in the
+    // ledger that nothing on that position supports, so NU refuses `disagrees`.
+    const history = [
+      buyAt('XP', 'FNDX11', '2025-01-02', '16', '100'),
+      buyAt('BTG', 'FNDX11', '2025-01-02', '49', '100'),
+      buyAt('NU', 'FNDX11', '2025-01-02', '10', '100'),
+      buyAt('RICO', 'FNDX11', '2025-01-02', '25', '40'),
+    ];
+    const xpJuly = openAt('XP', 'desdobro', 'FNDX11', JULY, '112');
+    const btgJuly = openAt('BTG', 'desdobro', 'FNDX11', JULY, '343');
+    const nuMarch = openAt('NU', 'desdobro', 'FNDX11', '2025-03-03', '10');
+    const ricoMarch = openAt('RICO', 'desdobro', 'FNDX11', '2025-03-03', '25');
+    const nuJuly = openAt('NU', 'desdobro', 'FNDX11', JULY, '100');
+
+    const outcomes = resolve([xpJuly, btgJuly, nuMarch, ricoMarch, nuJuly], history);
+    expect(str(written(outcomes, xpJuly).ratio)).toBe('8');
+    expect(str(written(outcomes, btgJuly).ratio)).toBe('8');
+    expect(str(written(outcomes, nuMarch).ratio)).toBe('2');
+    expect(str(written(outcomes, ricoMarch).ratio)).toBe('2');
+
+    const late = outcomeOf(outcomes, nuJuly);
+    expect(late).toMatchObject({ status: 'refused', refusal: 'disagrees' });
+    if (late.movement === 'desdobro') {
+      expect(str(late.evidence.basis)).toBe('20');
+      expect(str(late.evidence.derivedRatio)).toBe('6');
+    }
+  });
+});

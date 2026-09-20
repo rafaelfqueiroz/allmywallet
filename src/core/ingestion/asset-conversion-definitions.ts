@@ -12,13 +12,15 @@ import { Quantity } from '@/core/shared/money';
  * **v4 (#129 D3)** — CPLE7 joined that definition as a **zero-cost** target,
  * so B3's priced redemption of it is recorded as the sale B3 says it is.
  *
+ * **v5 (#120)** — `bidi11-to-inbr32`, Banco Inter's 2022 migration to Nasdaq.
+ *
  * The version is part of every `groupKey` (`asset-conversion-resolution.ts`),
  * so a group already written under an older key keeps it: `commit-batch.ts`
  * never re-resolves evidence whose stored transaction is already an active
  * conversion leg, so a re-import is still a no-op rather than a second group
  * under a newer key.
  */
-export const ASSET_CONVERSION_DEFINITIONS_VERSION = 4;
+export const ASSET_CONVERSION_DEFINITIONS_VERSION = 5;
 
 export interface AssetConversionTargetDefinition {
   /** B3 Movimentação code; omitted when it equals the canonical ledger code. */
@@ -86,6 +88,27 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
   // so AXIA13 holds nothing on the AXIA15 statement date and a definition
   // sourcing it refused the complete group `insufficient_quantity`.
   oneTarget('axia7-to-axia15g', ['AXIA7'], 'AXIA15G', 'AXIA15'),
+  // #120: Banco Inter's 2022 migration to Nasdaq. B3's custody record walks
+  // three codes — BIDI11 stops, an `Incorporação` credits INHF12 on the same
+  // day an `Atualização` states INBR31, and a second `Atualização` states
+  // INBR32 ten weeks later — but **cost passes through none of the
+  // intermediates**: the same quantity stands at every step, so one leg pair
+  // from BIDI11 to INBR32 reproduces the end state exactly.
+  //
+  // Modelling the chain instead would need two definitions, and the second
+  // cannot resolve: its source evidence would be the INHF12 `Incorporação`,
+  // whose statement quantity `resolveAssetConversion` reads as what *remains*,
+  // leaving nothing removed. The 70 days from 21/06/2022 to 30/08/2022 also
+  // exceed `import.asset_conversion_window_days` (45), so the two rows can
+  // never share one group. Anchored on the INBR32 statement alone, this
+  // definition's evidence spans a single day and BIDI11 contributes its whole
+  // position, which is what B3's record says happened.
+  //
+  // INHF12 and INBR31 are deliberately left undefined: both state the same
+  // quantity on the same day and both end at INBR32, so either routing
+  // conserves cost identically, and their rows stay `unclassified` rather
+  // than inventing a cost step B3 never priced.
+  oneTarget('bidi11-to-inbr32', ['BIDI11'], 'INBR32'),
   {
     id: 'klbn11-to-klbn3-and-klbn4',
     sourceAssetCodes: ['KLBN11'],
