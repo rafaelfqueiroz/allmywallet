@@ -1478,6 +1478,28 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       expect(positions).toEqual([{ quantity: '10.00000000' }]);
     });
 
+    /**
+     * The state of a ledger that has not run `0024` yet, or one where an alias
+     * is added before its migration: the catalogue holds the abbreviation and
+     * an extract names the expansion. The row that exists is reused — a second
+     * one is exactly the split being fixed.
+     */
+    it('reuses the row an earlier spelling created, even when it is not the canonical one', async () => {
+      await migratorPool.query('INSERT INTO institutions (id, name) VALUES ($1, $2)', [
+        InstitutionId.generate(),
+        INTER_SHORT,
+      ]);
+
+      await importMovimentacao([buy('01/04/2021', INTER_FULL)]);
+
+      const { rows } = await migratorPool.query('SELECT name FROM institutions');
+      expect(rows.map((row) => row.name)).toEqual([INTER_SHORT]);
+      const { rows: transactions } = await migratorPool.query(
+        'SELECT institution_id FROM transactions',
+      );
+      expect(transactions).toHaveLength(1);
+    });
+
     it('keeps two brokers of one group apart — Clear is not XP', async () => {
       await importMovimentacao([
         buy('01/03/2021', 'CLEAR CORRETORA - GRUPO XP'),

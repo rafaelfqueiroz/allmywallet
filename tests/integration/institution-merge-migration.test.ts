@@ -28,6 +28,7 @@ describe('migration 0024 — institution spellings (integration)', () => {
   const INTER_SHORT = 'INTER DTVM LTDA';
   const XP_FULL = 'XP INVESTIMENTOS CORRETORA DE CAMBIO TITULOS E VALORES MOBILIARIOS S/A';
   const XP_CCTVM = 'XP INVESTIMENTOS CCTVM S/A';
+  const XP_TRUNCATED = 'XP INVESTIMENTOS CORRETORA DE CAMBIO, TITULOS E VALORES MOBI';
   const CLEAR = 'CLEAR CORRETORA - GRUPO XP';
   const BANCO_INTER = 'BANCO INTER S/A';
 
@@ -210,6 +211,49 @@ describe('migration 0024 — institution spellings (integration)', () => {
     ]);
   });
 
+  /**
+   * XP is spelled three ways here. A pairwise merge would settle two of them
+   * and then read the third as the only holder, leaving a cached row covering
+   * a third of the ledger — a plausible figure with nothing to say it is
+   * wrong, which is worse than the missing one a group-wide merge leaves.
+   */
+  it('deletes every cached position of a three-spelling group, and a rebuild restores the merged figure', async () => {
+    const canonical = await addInstitution(XP_FULL);
+    const cctvm = await addInstitution(XP_CCTVM);
+    const truncated = await addInstitution(XP_TRUNCATED);
+    await addBuy(canonical, '2021-03-01', '10', '30');
+    await addBuy(cctvm, '2021-04-01', '10', '40');
+    await addBuy(truncated, '2021-05-01', '10', '50');
+    await addPosition(canonical, '10', '30');
+    await addPosition(cctvm, '10', '40');
+    await addPosition(truncated, '10', '50');
+
+    await migration();
+
+    expect(await positionsNow()).toEqual([]);
+
+    await rebuildForTenant(userId, { dryRun: false }, appDb);
+    expect(await positionsNow()).toEqual([
+      { institution_id: canonical, quantity: '30.00000000', average_cost: '40.00000000' },
+    ]);
+  });
+
+  /**
+   * The cache is derived, so what it may keep is decided from the ledger. A
+   * row whose own spelling holds none of the asset's transactions describes a
+   * ledger that is not there, and re-pointing it would carry that forward.
+   */
+  it('deletes a cached position no transaction of its own spelling backs', async () => {
+    const canonical = await addInstitution(INTER_FULL);
+    const legacy = await addInstitution(INTER_SHORT);
+    await addBuy(canonical, '2021-03-01', '10', '30');
+    await addPosition(legacy, '10', '30');
+
+    await migration();
+
+    expect(await positionsNow()).toEqual([]);
+  });
+
   it('re-points staged rows and rewrites a stored reconciliation report', async () => {
     const canonical = await addInstitution(INTER_FULL);
     const legacy = await addInstitution(INTER_SHORT);
@@ -302,6 +346,30 @@ describe('migration 0024 — institution spellings (integration)', () => {
     expect((await institutionsNow()).map((row) => row.name)).toEqual([INTER_FULL, INTER_SHORT]);
   });
 
+  it('aborts on a clash between two legacy spellings, not only against the survivor', async () => {
+    await addInstitution(XP_FULL);
+    const cctvm = await addInstitution(XP_CCTVM);
+    const truncated = await addInstitution(XP_TRUNCATED);
+    await addBuy(cctvm, '2021-04-01', '10', '30');
+    await addBuy(truncated, '2021-04-01', '10', '30');
+    const before = (
+      await migratorPool.query(
+        'SELECT id, institution_id, natural_key FROM transactions ORDER BY id',
+      )
+    ).rows;
+
+    await expect(migration()).rejects.toThrow(/#136/);
+
+    expect(
+      (
+        await migratorPool.query(
+          'SELECT id, institution_id, natural_key FROM transactions ORDER BY id',
+        )
+      ).rows,
+    ).toEqual(before);
+    expect(await institutionsNow()).toHaveLength(3);
+  });
+
   it('keeps two brokers of one group apart, and an issuer apart from its custodian', async () => {
     await addInstitution(XP_FULL);
     await addInstitution(XP_CCTVM);
@@ -327,6 +395,45 @@ describe('migration 0024 — institution spellings (integration)', () => {
     expect(remaining.map((row) => row.name)).toEqual([INTER_FULL]);
     const { rows } = await migratorPool.query('SELECT institution_id FROM transactions');
     expect(rows).toEqual([{ institution_id: remaining[0]?.id }]);
+  });
+
+  /**
+   * `XP INVESTIMENTOS CCTVM S/A` sorts before the canonical spelling, so an
+   * alphabetical survivor would be the abbreviation. The row the alias table
+   * names wins, and only what has no such row falls back to the first by name.
+   */
+  it('keeps the row the alias table names, not the first by name', async () => {
+    const cctvm = await addInstitution(XP_CCTVM);
+    const canonical = await addInstitution(XP_FULL);
+    const moved = await addBuy(cctvm, '2021-04-01', '10', '30');
+
+    await migration();
+
+    expect(await institutionsNow()).toEqual([{ id: canonical, name: XP_FULL }]);
+    const { rows } = await migratorPool.query(
+      'SELECT institution_id, natural_key FROM transactions',
+    );
+    expect(rows).toEqual([
+      {
+        institution_id: canonical,
+        natural_key: moved.naturalKey.replace(cctvm, canonical),
+      },
+    ]);
+  });
+
+  /**
+   * The same normalisation as `institution-identity.ts`: NFD, then drop what
+   * is not printable ASCII. A hand-kept list of accented characters would be a
+   * second rule for the two sides to disagree over, and a disagreement here is
+   * a split that survives the migration silently.
+   */
+  it('merges a spelling accented the way B3 writes it', async () => {
+    await addInstitution('INTER DISTRIBUIDORA DE TÍTULOS E VALORES MOBILIÁRIOS LTDA');
+    await addInstitution(INTER_SHORT);
+
+    await migration();
+
+    expect((await institutionsNow()).map((row) => row.name)).toEqual([INTER_FULL]);
   });
 
   it('changes nothing on a second run', async () => {

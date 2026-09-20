@@ -895,4 +895,61 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
       cause: 'unclassified_rows_affecting_asset',
     });
   });
+  /**
+   * #136 — the defect this test is named for, in the shape it appeared in:
+   * B3 spelled Inter's DTVM one way on the extract carrying WEGE3's buys and
+   * another on the one carrying its `Desdobro`, so the event resolved against
+   * a position of zero and refused `no_basis`, and the sale behind it refused
+   * `insufficient_quantity` for ever after. One institution, one position, and
+   * BR-005-20b sees the whole history.
+   */
+  it('BR-005-20b/BR-007-08 (#136): a Desdobro spelled at one institution resolves against buys spelled at another', async () => {
+    const INTER_FULL = 'INTER DISTRIBUIDORA DE TITULOS E VALORES MOBILIARIOS LTDA';
+    const INTER_SHORT = 'INTER DTVM LTDA';
+    const batchId = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      batchId,
+      await buildMovimentacaoXlsx([
+        { ...compra('WEGE3 - WEG S.A.', '10/01/2021', '5', '30,00'), instituicao: INTER_FULL },
+        { ...compra('WEGE3 - WEG S.A.', '20/01/2021', '5', '32,00'), instituicao: INTER_FULL },
+        // 10 held, +10 credited → derived ratio exactly 2, which is what B3's
+        // published `desdobramento` factor of 100 (m = 1 + 100 ÷ 100) states.
+        { ...desdobro('WEGE3 - WEG S.A.', '29/04/2021', '10'), instituicao: INTER_SHORT },
+        {
+          data: '30/04/2021',
+          movimentacao: 'Venda',
+          entradaSaida: 'Debito',
+          produto: 'WEGE3 - WEG S.A.',
+          instituicao: INTER_SHORT,
+          quantidade: '20',
+          precoUnitario: '20,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId, userId }, handlerDeps(new FakeFactorSource()));
+
+    const source = new FakeFactorSource();
+    source.set('WEGE', {
+      outcome: 'ok',
+      factors: [factor('WEGE', 'desdobramento', '100', '2021-04-27')],
+    });
+    await handleImportCommit({ batchId, userId }, handlerDeps(source));
+
+    const { rows: institutions } = await migratorPool.query('SELECT name FROM institutions');
+    expect(institutions.map((row) => row.name)).toEqual([INTER_FULL]);
+
+    const rows = await transactionsFor('WEGE3');
+    const split = rows.find((r) => r.type === 'split');
+    expect(split).toMatchObject({ status: 'active', ratio: '2.00000000' });
+    expect(rows.find((r) => r.type === 'sell')).toMatchObject({ status: 'active' });
+
+    // 310,00 for 20 shares after the split; all 20 sold, so the position
+    // closes and BR-007-07 resets it.
+    expect(await positionFor('WEGE3')).toMatchObject({
+      quantity: '0.00000000',
+      total_cost: '0.00000000',
+      realized_gain: '90.00000000',
+    });
+  });
 });
