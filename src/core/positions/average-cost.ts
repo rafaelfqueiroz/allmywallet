@@ -1,7 +1,7 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { type Result, err, ok } from '@/core/shared/result';
-import type { Money, Quantity } from '@/core/shared/money';
+import { Money, type Quantity, STORED_SCALE } from '@/core/shared/money';
 import { makePosition, type PositionState } from '@/core/positions/position-state';
 import { insufficientQuantity } from '@/core/positions/errors';
 import { realizedGainOnSale } from '@/core/positions/realized-gain';
@@ -100,11 +100,23 @@ export function applyExactCostAcquisition(
   );
 }
 
+/** Half of one `NUMERIC(20,8)` unit: the most a value can move when it is stored. */
+const HALF_STORED_UNIT = Money.fromString(`0.${'0'.repeat(STORED_SCALE)}5`);
+
 /**
  * SPEC-007 BR-007-05b: removes the exact persisted cost carried by the
  * matching incoming legs. The planner rounds once to NUMERIC(20,8), then both
  * sides replay that same decimal so a partial conversion cannot create or
  * destroy a storage unit of cost at a repeating-average boundary.
+ *
+ * #138 — the held total is **full precision** and the leg is **stored**, so a
+ * leg removing the whole position can exceed what replay holds by less than
+ * half a storage unit. A moving average repeats after a sale: BIDI11's 150
+ * units replay at 2.412,999…998 (a residue at the 36th place), and the planner
+ * persists the removal as 2.413,00000000 — the same figure at the column's
+ * scale. Refusing that as more cost than is held left the group unresolvable
+ * on every import. A shortfall under half a unit is the rounding, not a cost,
+ * so the remaining cost is zero; anything larger is still refused.
  */
 export function applyExactCostWithdrawal(
   state: PositionState,
@@ -115,10 +127,13 @@ export function applyExactCostWithdrawal(
     return err(insufficientQuantity(state.quantity, input.quantity, input.date));
   }
   const remainingCost = state.totalCost.minus(input.costBasis);
-  if (remainingCost.isNegative()) {
+  if (!remainingCost.isNegative()) {
+    return ok(makePosition(remainingQuantity, remainingCost, state.realizedGain));
+  }
+  if (remainingCost.plus(HALF_STORED_UNIT).isNegative()) {
     return err(insufficientQuantity(state.quantity, input.quantity, input.date));
   }
-  return ok(makePosition(remainingQuantity, remainingCost, state.realizedGain));
+  return ok(makePosition(remainingQuantity, Money.zero(), state.realizedGain));
 }
 
 /**

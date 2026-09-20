@@ -132,7 +132,12 @@ function hasUnresolvedCounterpart(ledger: readonly Transaction[], debit: Transac
  * from any other unclassified row.
  */
 function likelyCauseOf(ledger: readonly Transaction[]): InsufficientQuantityCause {
-  const unclassified = ledger.filter((t) => t.status === 'unclassified');
+  // #138: an unclassified row that moves no quantity cannot be the shortfall.
+  // B3's `Cobrança de Taxa Semestral` on a Tesouro title is such a row —
+  // quantity 0, a custody fee — and naming it sent the owner to classify a
+  // fee when the sale actually needs an opening position (the fee itself is
+  // evidence the title was held before the extract began).
+  const unclassified = ledger.filter((t) => t.status === 'unclassified' && !t.quantity.isZero());
   if (unclassified.some((t) => corporateEventMovementOfKey(t.naturalKey) !== null)) {
     return 'uncaptured_corporate_event';
   }
