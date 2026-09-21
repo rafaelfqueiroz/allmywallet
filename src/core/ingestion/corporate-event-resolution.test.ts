@@ -1274,6 +1274,165 @@ describe('#129 BR-005-20b — a fraction whose origin is one asset upstream', ()
 });
 
 /**
+ * SPEC-005 BR-005-20b (#143) — **a fraction the conversion itself created.**
+ *
+ * Generated shape of the BPFF11/HGFF11 → RVBI11 incorporation (DV-24): SRCA11
+ * 90 whole and SRCB11 70 whole convert into 83,89 + 75,36 = **159,25** TGT11 on
+ * 2025-10-06 at 15.925,00 (average 100,00). B3 removes the 0,25 on 2025-10-20
+ * and auctions it on 2025-11-06 at 59,43. No share-base event anywhere left
+ * that 0,25; the group's own ratio did, so the group is the origin, read as a
+ * split's is (BR-007-04b): a `sell` of 0,25 at 59,43 on the fraction's date,
+ * the auction consumed. Replayed: proceeds 14,8575, cost out 0,25 × 100,00 =
+ * 25,00, **realised −10,1425**, 159 left at 15.900,00.
+ */
+describe('#143 BR-005-20b — a fraction whose origin is the conversion itself', () => {
+  const GROUP = '00000000-c0de-7000-8000-00000000f143';
+  const sources = [
+    buy('SRCA11', '2024-03-01', '90', '100'),
+    buy('SRCB11', '2024-03-01', '70', '97.5'),
+    aTransaction()
+      .conversionOut(GROUP, '9000')
+      .of('SRCA11')
+      .at(BROKER)
+      .on('2025-10-14')
+      .quantity('90')
+      .price('2.239')
+      .build(),
+    aTransaction()
+      .conversionOut(GROUP, '6825')
+      .of('SRCB11')
+      .at(BROKER)
+      .on('2025-10-14')
+      .quantity('70')
+      .price('1.983')
+      .build(),
+  ];
+  const into = (quantity: string, costBasis: string, date = '2025-10-06') =>
+    aTransaction()
+      .conversionIn(costBasis, GROUP)
+      .of('TGT11')
+      .at(BROKER)
+      .on(date)
+      .quantity(quantity)
+      .build();
+  // 9.000,00 + 6.825,00 − (201,51 + 138,81) = 15.484,68 — any split conserves;
+  // the test reads quantities, and the replay below reads its own figures.
+  const credits = [into('83.89', '8157.06'), into('75.36', '7327.62')];
+
+  function resolveGroup(
+    rows: readonly CorporateEventRow[],
+    ledger: readonly Transaction[],
+    groupLegs: readonly Transaction[],
+    originDays = 60,
+  ) {
+    return resolveCorporateEvents({
+      rows,
+      history: (key) => ledger.filter((t) => positionKeyString(t) === positionKeyString(key)),
+      factors: new Map(),
+      windows: { factorDays: 7, originDays, auctionDays: 180 },
+      conversionLegs: (groupId) => (groupId === GROUP ? groupLegs : []),
+    });
+  }
+
+  it('sells the fraction at the auction price and consumes the auction', () => {
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.25');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.25', '59.43');
+    const ledger = [...sources, ...credits];
+    const outcomes = resolveGroup([fraction, auction], ledger, [...sources.slice(2), ...credits]);
+
+    const sale = written(outcomes, fraction);
+    expect(sale).toMatchObject({ type: 'sell', status: 'active', tradeDate: '2025-10-20' });
+    expect(sale.unitPrice.toString()).toBe('59.43');
+    // 0,25 × 59,43 = 14,8575.
+    expect(sale.totalValue.toString()).toBe('14.8575');
+    expect(outcomeOf(outcomes, auction)).toMatchObject({
+      status: 'consumed',
+      transaction: { status: 'superseded' },
+    });
+    const outcome = outcomeOf(outcomes, fraction);
+    expect(outcome.movement === 'fracao_em_ativos' && outcome.evidence.origin).toMatchObject({
+      id: GROUP,
+      type: 'conversion',
+      tradeDate: '2025-10-06',
+      tracedFrom: null,
+    });
+
+    // With a 15.925,00 arrival (average 100,00), as in the chain's own figures:
+    const target = replayed([into('83.89', '8389'), into('75.36', '7536'), sale]);
+    expect(target.quantity.toString()).toBe('159');
+    expect(target.totalCost.toString()).toBe('15900');
+    expect(target.realizedGain.toString()).toBe('-10.1425');
+  });
+
+  it('measures the origin window from the conversion', () => {
+    // 2025-10-06 → 2025-10-20 is 14 days: a 13-day window misses it.
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.25');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.25', '59.43');
+    const outcomes = resolveGroup(
+      [fraction, auction],
+      [...sources, ...credits],
+      [...sources.slice(2), ...credits],
+      13,
+    );
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'no_origin',
+    });
+  });
+
+  it('refuses origin_unresolved while a ratio event on a source is pending', () => {
+    // The trail cannot be read, which outranks the conversion reading.
+    const grupamento = storedRow('SRCA11', '2025-10-01', '9');
+    const pending: CorporateEventRow = {
+      id: grupamento.id,
+      movement: 'grupamento',
+      ticker: 'SRCA11',
+      transaction: grupamento,
+      open: true,
+    };
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.25');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.25', '59.43');
+    const outcomes = resolveGroup(
+      [pending, fraction, auction],
+      [...sources, ...credits],
+      [...sources.slice(2), ...credits],
+    );
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({
+      status: 'refused',
+      refusal: 'origin_unresolved',
+    });
+  });
+
+  it('leaves a whole-quantity rename out, so a target bonificação keeps its one origin', () => {
+    // 180 SRCA11 → 180 TGT11 (no fraction created), then TGT11's own
+    // bonificação of 2,4 → 182,4 leaves the 0,4 B3 auctions: a bonificação
+    // fraction, not `ambiguous_origin`.
+    const rename = [
+      buy('SRCA11', '2024-03-01', '180', '10'),
+      aTransaction()
+        .conversionOut(GROUP, '1800')
+        .of('SRCA11')
+        .at(BROKER)
+        .on('2025-10-06')
+        .quantity('180')
+        .build(),
+    ];
+    const arrival = into('180', '1800');
+    const own = bonus('TGT11', '2025-10-10', '2.4');
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.4');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.4', '12.5');
+    const outcomes = resolveGroup(
+      [fraction, auction],
+      [...rename, arrival, own],
+      [rename[1]!, arrival],
+    );
+    expect(written(outcomes, fraction)).toMatchObject({ type: 'fracao_bonificacao' });
+    // 0,4 × 12,50 = 5,00, a provento.
+    expect(written(outcomes, auction).totalValue.toString()).toBe('5');
+  });
+});
+
+/**
  * SPEC-005 BR-005-20b (#120) — B3 publishes share-ratio factors only for
  * **listed companies**, so a fund or a delisted issuer has no factor of any
  * kind, ever, and every split or reverse split of theirs refused `no_factor`

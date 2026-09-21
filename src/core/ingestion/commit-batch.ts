@@ -2,7 +2,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { ConversionGroupId, TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
-import { Money, Quantity, asStored } from '@/core/shared/money';
+import { type Money, Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
 import { validateAssetConversionGroup } from '@/core/ledger/manage-asset-conversion';
