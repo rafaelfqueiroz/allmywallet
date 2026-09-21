@@ -88,6 +88,13 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-09-19'),
     parserFingerprint: 'c87f78b6c34213630d033613f19dadef337903c162970bd43aac166edb5eb00d',
   },
+  {
+    // #144: movement map v6 stages subscription-rights paperwork `ignored`.
+    // Only the meaning of rows already exported changed; the Movimentação
+    // columns and the verified guide path are the same.
+    asOf: BusinessDate.of('2026-09-21'),
+    parserFingerprint: '1628d2f394f6560c5059f69aa5d02a8f5f5b76452db1bdebbc719a18a1a2e3cd',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {
