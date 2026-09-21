@@ -322,7 +322,7 @@ function escapeLike(term: string): string {
   return term.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 }
 
-type TransactionRow = typeof transactions.$inferSelect;
+export type TransactionRow = typeof transactions.$inferSelect;
 
 function toRow(transaction: Transaction, userId: UserId): typeof transactions.$inferInsert {
   return {
@@ -356,7 +356,7 @@ function toRow(transaction: Transaction, userId: UserId): typeof transactions.$i
   };
 }
 
-function toDomain(row: TransactionRow): Transaction {
+export function toDomain(row: TransactionRow): Transaction {
   return {
     id: TransactionId.of(row.id),
     userId: UserId.of(row.userId),

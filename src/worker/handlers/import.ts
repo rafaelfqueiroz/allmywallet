@@ -32,7 +32,9 @@ import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import {
   DrizzleAssetResolver,
   DrizzleInstitutionResolver,
+  DrizzleSubscriptionEvidenceReader,
 } from '@/adapters/db/ingestion-resolvers';
+import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleFixedIncomeContractRepository } from '@/adapters/db/fixed-income-contract-repository';
 import {
@@ -110,6 +112,13 @@ export function buildIngestionDeps(tx: Tx, userId: UserId, clock: Clock): Ingest
     fixedIncomeContracts: new DrizzleFixedIncomeContractRepository(tx, userId),
     // AR-15: shared market data, read through the tenant's handle like `assets`.
     corporateEventFactors: new DrizzleCorporateEventFactorRepository(tx),
+    // SPEC-005 BR-005-20d: `price_quotes` is shared reference data (AR-15,
+    // no tenant column) — read through the tenant's handle like `assets`,
+    // but with no RLS behind it either way.
+    closePrices: new DrizzleQuoteRepository(tx),
+    // SPEC-005 BR-005-20d: `transactions` is tenant-scoped (AR-11), so this
+    // one runs on the same `Tx` as the rest of the commit.
+    subscriptionEvidence: new DrizzleSubscriptionEvidenceReader(tx),
     clock,
   };
 }

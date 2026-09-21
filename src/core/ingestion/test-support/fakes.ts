@@ -1,5 +1,9 @@
 import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
 import type { ImportRowId, TransactionId } from '@/core/shared/ids';
+import type { BusinessDate } from '@/core/shared/clock';
+import type { Money } from '@/core/shared/money';
+import type { Transaction } from '@/core/ledger/transaction';
+import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import type {
   CorporateEventFactor,
   CorporateEventFactorReader,
@@ -8,6 +12,7 @@ import type { AssetResolveInput } from '@/core/ingestion/ports';
 import type { AssetDescriptor } from '@/core/ledger/test-support/fake-repositories';
 import type {
   AssetResolverPort,
+  ClosePriceReader,
   FixedIncomeContractWriterPort,
   ImportBatch,
   ImportBatchRepository,
@@ -15,6 +20,8 @@ import type {
   ImportRowAttentionCount,
   ImportRowRepository,
   InstitutionResolverPort,
+  SubscriptionEvidenceReader,
+  SubscriptionEvidenceRow,
 } from '@/core/ingestion/ports';
 
 /**
@@ -202,5 +209,57 @@ export class FakeCorporateEventFactorReader implements CorporateEventFactorReade
       byIssuer.set(factor.issuerCode, [...(byIssuer.get(factor.issuerCode) ?? []), factor]);
     }
     return byIssuer;
+  }
+}
+
+/**
+ * SPEC-005 BR-005-20d — the shared `price_quotes` table, in memory. Empty by
+ * default: a commit that finds no stored close for the credit date leaves the
+ * pair `unclassified` (D1's "no invented price").
+ */
+export class FakeClosePriceReader implements ClosePriceReader {
+  #closes: { assetId: AssetId; date: BusinessDate; close: Money }[] = [];
+  readonly calls: { assetId: AssetId; date: BusinessDate }[] = [];
+
+  seed(assetId: AssetId, date: BusinessDate, close: Money): void {
+    this.#closes.push({ assetId, date, close });
+  }
+
+  async closeOnOrBefore(
+    assetId: AssetId,
+    date: BusinessDate,
+  ): Promise<{ readonly date: BusinessDate; readonly close: Money } | null> {
+    this.calls.push({ assetId, date });
+    const candidates = this.#closes
+      .filter((row) => row.assetId === assetId && row.date <= date)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    const [nearest] = candidates;
+    return nearest === undefined ? null : { date: nearest.date, close: nearest.close };
+  }
+}
+
+/**
+ * SPEC-005 BR-005-20d — stored transactions across one issuer's assets, in
+ * memory. Seeded with the whole ledger a test wants visible to the resolver;
+ * `issuerCodeOf` filters exactly as the Drizzle adapter's SQL LIKE plus
+ * application filter does, so a fixture using a real B3 ticker shape behaves
+ * the same against either implementation.
+ */
+export class FakeSubscriptionEvidenceReader implements SubscriptionEvidenceReader {
+  #rows: { transaction: Transaction; assetCode: string }[] = [];
+
+  seed(assetCode: string, transaction: Transaction): void {
+    this.#rows.push({ transaction, assetCode });
+  }
+
+  async evidenceForIssuer(
+    issuerRoot: string,
+    institutionId: InstitutionId | null,
+  ): Promise<readonly SubscriptionEvidenceRow[]> {
+    return this.#rows.filter(
+      (row) =>
+        issuerCodeOf(row.assetCode) === issuerRoot &&
+        row.transaction.institutionId === institutionId,
+    );
   }
 }
