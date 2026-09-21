@@ -11,9 +11,11 @@ import { resetLedger, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
 
 /**
- * Migrations `0023_asset_conversions.sql` (#121) and
+ * Migrations `0023_asset_conversions.sql` (#121),
  * `0026_conversion_cash_component.sql` (#143, SPEC-007 BR-007-05b /
- * SPEC-005 BR-005-20c).
+ * SPEC-005 BR-005-20c), and `0027_conversion_cash_component_contract.sql`
+ * (#143 D12/D13), which contracts 0026's cash-component relaxation back to
+ * the exact-cost invariant.
  *
  * TESTING §1: PostgreSQL CHECK semantics, NUMERIC(20,8) precision, index
  * presence, and the widened type constraints are verified against real
@@ -250,6 +252,16 @@ describe('migration 0023 — asset conversions (integration)', () => {
       totalValue: '-0.00000001',
     },
     {
+      // #143 D12/D13: 0026 let conversion_out carry non-negative cash as a
+      // return-of-capital reading of B3's priced Resgate; 0027 removed that
+      // capability, so any non-zero total_value on either leg is rejected.
+      label: 'conversion_out carrying a positive cash value',
+      type: 'conversion_out',
+      groupId: randomUUID(),
+      costBasis: '10',
+      totalValue: '0.00000001',
+    },
+    {
       label: 'non-conversion row carrying conversion metadata',
       type: 'buy',
       groupId: randomUUID(),
@@ -309,52 +321,39 @@ describe('migration 0023 — asset conversions (integration)', () => {
   });
 
   /**
-   * Migration `0026_conversion_cash_component.sql` (#143): a `conversion_out`
-   * leg may carry B3's priced `Resgate` cash component — e.g. the BPFF11 ->
-   * RVBI11 incorporation, where each BPFF11 share became 0,9321 RVBI11 plus
-   * R$ 2,24 cash the owner treats as a return of capital — so the group's
-   * `conversion_in` legs receive removed cost minus cash rather than the
-   * whole removed cost.
+   * Migration `0027_conversion_cash_component_contract.sql` (#143 D12/D13):
+   * 0026 (#149) briefly let a `conversion_out` leg carry B3's priced
+   * `Resgate` cash component as a return-of-capital reading of the BPFF11 ->
+   * RVBI11 incorporation. The owner decided that case was actually a taxable
+   * liquidation (D10) and no code writes a cash-bearing conversion leg any
+   * more, so 0027 removed the capability: a non-zero `total_value` on
+   * either leg is rejected by the row CHECK regardless of cost balance.
    */
-  it('accepts a conversion group whose outgoing leg carries a cash component', async () => {
+  it('rejects a conversion_out leg carrying a non-zero total_value even when the group balances', async () => {
     const conversionGroupId = randomUUID();
 
-    await withTenant(
-      userId,
-      async (tx) => {
-        await tx.execute(sql`
-          INSERT INTO transactions
-            (id, user_id, asset_id, type, trade_date, quantity, unit_price, fees,
-             total_value, conversion_group_id, cost_basis, natural_key, occurrence)
-          VALUES
-            (${randomUUID()}, ${userId}, ${outgoingAssetId}, 'conversion_out', '2026-09-18', '1',
-             '10', '0', '10', ${conversionGroupId}, '100', ${`conversion-${randomUUID()}`}, 1),
-            (${randomUUID()}, ${userId}, ${incomingAssetId}, 'conversion_in', '2026-09-18', '1',
-             '0', '0', '0', ${conversionGroupId}, '90', ${`conversion-${randomUUID()}`}, 1)
-        `);
-      },
-      appDb,
+    await expectConstraintFailure(
+      withTenant(
+        userId,
+        async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO transactions
+              (id, user_id, asset_id, type, trade_date, quantity, unit_price, fees,
+               total_value, conversion_group_id, cost_basis, natural_key, occurrence)
+            VALUES
+              (${randomUUID()}, ${userId}, ${outgoingAssetId}, 'conversion_out', '2026-09-18', '1',
+               '10', '0', '10', ${conversionGroupId}, '100', ${`conversion-${randomUUID()}`}, 1),
+              (${randomUUID()}, ${userId}, ${incomingAssetId}, 'conversion_in', '2026-09-18', '1',
+               '0', '0', '0', ${conversionGroupId}, '100', ${`conversion-${randomUUID()}`}, 1)
+          `);
+        },
+        appDb,
+      ),
+      'transactions_conversion_pairing_check',
     );
-
-    const result = await migratorPool.query<{
-      type: string;
-      cost_basis: string;
-      total_value: string;
-    }>(
-      `SELECT type, cost_basis, total_value
-         FROM transactions
-        WHERE user_id = $1 AND conversion_group_id = $2
-        ORDER BY type`,
-      [userId, conversionGroupId],
-    );
-
-    expect(result.rows).toEqual([
-      { type: 'conversion_in', cost_basis: '90.00000000', total_value: '0.00000000' },
-      { type: 'conversion_out', cost_basis: '100.00000000', total_value: '10.00000000' },
-    ]);
   });
 
-  it('rejects a group whose incoming cost does not equal outgoing cost minus outgoing cash', async () => {
+  it('rejects a group with out cost 100 and in cost 90 by the trigger, with no cash term to explain the gap', async () => {
     const groupId = randomUUID();
     await expectConstraintFailure(
       withTenant(
@@ -366,9 +365,9 @@ describe('migration 0023 — asset conversions (integration)', () => {
                total_value, conversion_group_id, cost_basis, natural_key, occurrence)
             VALUES
               (${randomUUID()}, ${userId}, ${outgoingAssetId}, 'conversion_out', '2026-09-18', '1',
-               '10', '0', '10', ${groupId}, '100', ${`conversion-${randomUUID()}`}, 1),
+               '0', '0', '0', ${groupId}, '100', ${`conversion-${randomUUID()}`}, 1),
               (${randomUUID()}, ${userId}, ${incomingAssetId}, 'conversion_in', '2026-09-18', '1',
-               '0', '0', '0', ${groupId}, '100', ${`conversion-${randomUUID()}`}, 1)
+               '0', '0', '0', ${groupId}, '90', ${`conversion-${randomUUID()}`}, 1)
           `);
         },
         appDb,

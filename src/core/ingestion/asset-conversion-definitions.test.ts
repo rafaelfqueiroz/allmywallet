@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { Money } from '@/core/shared/money';
 import {
   ASSET_CONVERSION_DEFINITIONS,
   ASSET_CONVERSION_DEFINITIONS_VERSION,
+  ASSET_LIQUIDATION_DEFINITIONS,
 } from '@/core/ingestion/asset-conversion-definitions';
 
 describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
@@ -13,8 +15,10 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
     // `bidi11-to-inbr32`, purely additive — no existing definition changed.
     // #143: v6 added four one-to-one ticker renames, likewise additive; v7 the
     // BPFF11/HGFF11 → RVBI11 cash-bearing incorporation and RVBI11 → PSEC11,
-    // additive too, in that order (the rename measures RVBI11 after its arrival).
-    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(7);
+    // additive too. #143 D10: v8 removed the incorporation — it is a
+    // liquidation, in its own table below — and kept the rename. Removing the
+    // cash-bearing fields it alone used changed no definition, so no bump.
+    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(8);
     expect(
       ASSET_CONVERSION_DEFINITIONS.map((definition) => ({
         id: definition.id,
@@ -74,11 +78,6 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
         targets: [{ evidence: 'PMLL11', ledger: 'PMLL11' }],
       },
       {
-        id: 'bpff11-and-hgff11-to-rvbi11',
-        sources: ['BPFF11', 'HGFF11'],
-        targets: [{ evidence: 'RVBI15', ledger: 'RVBI11' }],
-      },
-      {
         id: 'rvbi11-to-psec11',
         sources: ['RVBI11'],
         targets: [{ evidence: 'PSEC11', ledger: 'PSEC11' }],
@@ -94,29 +93,56 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
     ]);
   });
 
-  it('#143 — names priced redemptions and repeated target credits on one definition only', () => {
-    const flagged = ASSET_CONVERSION_DEFINITIONS.filter(
-      (definition) =>
-        definition.pricedRedemptionSourceCodes !== undefined ||
-        definition.repeatedTargetCredits !== undefined,
-    );
+  it('#143 — only the rename to PSEC11 reads a source restatement', () => {
+    // A conversion carries no cash (BR-007-05b): #149's cash-bearing fields are
+    // gone with the one definition that used them, and the opt-in that
+    // remains belongs to `rvbi11-to-psec11` alone.
     expect(
-      flagged.map((definition) => ({
+      ASSET_CONVERSION_DEFINITIONS.filter(
+        (definition) => definition.sourceBalanceRestatements !== undefined,
+      ).map((definition) => definition.id),
+    ).toEqual(['rvbi11-to-psec11']);
+  });
+
+  it("#143 D10 — the liquidation table carries only the administrator's public per-share figures", () => {
+    expect(
+      ASSET_LIQUIDATION_DEFINITIONS.map((definition) => ({
         id: definition.id,
-        priced: definition.pricedRedemptionSourceCodes,
-        repeated: definition.repeatedTargetCredits,
+        sources: definition.sources.map((source) => [
+          source.assetCode,
+          source.liquidationValue.toString(),
+        ]),
+        target: [
+          definition.target.evidenceAssetCode,
+          definition.target.assetCode,
+          definition.target.unitCost.toString(),
+        ],
       })),
     ).toEqual([
       {
-        id: 'bpff11-and-hgff11-to-rvbi11',
-        priced: ['BPFF11', 'HGFF11'],
-        repeated: true,
+        id: 'bpff11-and-hgff11-liquidated-into-rvbi11',
+        // Fatos relevantes of 02/10/2025: 59,79675590 in RVBI + 2,23862655 in
+        // cash = 62,03538245; 69,06381092 + 1,98289016 = 71,04670108.
+        sources: [
+          ['BPFF11', '62.03538245'],
+          ['HGFF11', '71.04670108'],
+        ],
+        target: ['RVBI15', 'RVBI11', '64.15'],
       },
     ]);
-    // The rename is read after the incorporation that creates its source.
-    const ids = ASSET_CONVERSION_DEFINITIONS.map((definition) => definition.id);
-    expect(ids.indexOf('bpff11-and-hgff11-to-rvbi11')).toBeLessThan(
-      ids.indexOf('rvbi11-to-psec11'),
-    );
+    // Each published total is exactly its in-kind part plus its cash part, by
+    // hand: 59,79675590 + 2,23862655 = 62,03538245; 69,06381092 + 1,98289016
+    // = 71,04670108.
+    const parts: Record<string, readonly [string, string]> = {
+      BPFF11: ['59.79675590', '2.23862655'],
+      HGFF11: ['69.06381092', '1.98289016'],
+    };
+    for (const source of ASSET_LIQUIDATION_DEFINITIONS[0]?.sources ?? []) {
+      const [inKind, cash] = parts[source.assetCode] as readonly [string, string];
+      expect(
+        Money.fromString(inKind).plus(Money.fromString(cash)).equals(source.liquidationValue),
+        source.assetCode,
+      ).toBe(true);
+    }
   });
 });

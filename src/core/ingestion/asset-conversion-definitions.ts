@@ -1,4 +1,5 @@
-import { Quantity } from '@/core/shared/money';
+import { BusinessDate } from '@/core/shared/clock';
+import { Money, Quantity } from '@/core/shared/money';
 
 /**
  * SPEC-005 BR-005-20c: the explicit, reviewable conversion-definition table.
@@ -19,15 +20,29 @@ import { Quantity } from '@/core/shared/money';
  * `odpv3-to-saud3` and `mall11-to-pmll11`. Purely additive.
  *
  * **v7 (#143)** — the BPFF11/HGFF11 → RVBI11 → PSEC11 chain, as two
- * definitions. `bpff11-and-hgff11-to-rvbi11` is the first definition with a
- * **cash component**: B3 records each source's cash as a priced FII
- * `Resgate`, which the definition names explicitly
- * (`pricedRedemptionSourceCodes`) — never a change to the movement map, where
- * every other priced `Resgate` stays v3's sell — and its target receives two
- * same-day `Atualização` credits on the receipt code RVBI15
- * (`repeatedTargetCredits`). `rvbi11-to-psec11` is the rename that follows.
- * Purely additive: no earlier definition gains a field, so no stored group's
- * evidence can complete a wider group than it was written under.
+ * definitions: `bpff11-and-hgff11-to-rvbi11` (superseded by v8) and
+ * `rvbi11-to-psec11`, the rename that follows. Purely additive.
+ *
+ * **v8 (#143 D10)** — `bpff11-and-hgff11-to-rvbi11` is **removed** and
+ * replaced by `bpff11-and-hgff11-liquidated-into-rvbi11` in
+ * `ASSET_LIQUIDATION_DEFINITIONS` below. The administrator's fatos relevantes
+ * of 02/10/2025 describe a **liquidation**, not a return of capital: each
+ * source share was redeemed at a published Valor de Liquidação, realising a
+ * gain or loss (Art. 18 Lei 8.668/1993), and the RVBI11 received was acquired
+ * at R$ 64,15 each. A conversion never realises a gain (SPEC-007 BR-007-05b),
+ * so the event is a different kind with its own table, versioned here with the
+ * conversions because v8 is one reviewable edit of both. No v7 group was ever
+ * written to a real ledger (the owner had not re-imported since #149), so the
+ * removal strands nothing.
+ *
+ * **Cash removed (#143, no version change)** — #149 gave v7's incorporation a
+ * cash-bearing `conversion_out` (`pricedRedemptionSourceCodes`,
+ * `repeatedTargetCredits`). With that definition gone no definition used
+ * either field, and both are removed with the capability: a conversion carries
+ * cost and **never cash** (SPEC-007 BR-007-05b, migration 0027). The version
+ * stays 8 because the observable set of definitions — and so every group a
+ * given extract resolves to — is unchanged; a bump would only re-key new
+ * groups for no difference in what they contain.
  *
  * The version is part of every `groupKey` (`asset-conversion-resolution.ts`),
  * so a group already written under an older key keeps it: `commit-batch.ts`
@@ -35,7 +50,7 @@ import { Quantity } from '@/core/shared/money';
  * conversion leg, so a re-import is still a no-op rather than a second group
  * under a newer key.
  */
-export const ASSET_CONVERSION_DEFINITIONS_VERSION = 7;
+export const ASSET_CONVERSION_DEFINITIONS_VERSION = 8;
 
 export interface AssetConversionTargetDefinition {
   /** B3 Movimentação code; omitted when it equals the canonical ledger code. */
@@ -49,26 +64,6 @@ export interface AssetConversionDefinition {
   readonly id: string;
   readonly sourceAssetCodes: readonly string[];
   readonly targets: readonly AssetConversionTargetDefinition[];
-  /**
-   * #143 — source codes whose **priced** `Resgate` is this conversion's
-   * outgoing evidence, carrying the cash B3 paid alongside it. The cash is a
-   * return of capital (SPEC-007 BR-007-05b): the row becomes the source's
-   * `conversion_out` in place, keeps its price, fees and total, and the
-   * targets receive the removed cost less that cash.
-   *
-   * Explicit and per definition because the movement map reads every other
-   * priced FII `Resgate` as a sale (BR-005-18 v3), and must go on doing so: a
-   * global rule would turn an ordinary fund redemption into a conversion.
-   */
-  readonly pricedRedemptionSourceCodes?: readonly string[] | undefined;
-  /**
-   * #143 — the target's same-day `Atualização` rows are **separate credits**,
-   * each measured against the balance before that day and summed, rather than
-   * two restatements of one balance (which is ambiguous and refuses). B3
-   * credits a receipt code once per incorporated fund, on one date, with
-   * nothing in either row to say which fund it came from.
-   */
-  readonly repeatedTargetCredits?: boolean | undefined;
   /**
    * #143 — a source `Atualização` restating exactly the balance the replay
    * already holds is **corroboration**, set aside rather than read as what
@@ -168,38 +163,11 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
   oneTarget('trpl4-to-isae4', ['TRPL4'], 'ISAE4'),
   oneTarget('odpv3-to-saud3', ['ODPV3'], 'SAUD3'),
   oneTarget('mall11-to-pmll11', ['MALL11'], 'PMLL11'),
-  // #143 (v7): the incorporation of BPFF11 and HGFF11 into RVBI11, 2025-10.
-  // B3 records it at one institution as:
-  //
-  // - each source's balance restated unchanged by an `Atualização` on
-  //   2025-10-06 — corroboration, not conversion evidence (see
-  //   `commit-batch.ts`), since nothing has left yet;
-  // - a **priced** `Resgate` of the whole source a week later (90 @ 2,239 and
-  //   70 @ 1,983 on the owner's extract) — the cash half of the exchange,
-  //   which BR-005-18 v3 alone would read as a sale realising a loss on the
-  //   whole cost;
-  // - two same-day `Atualização` credits on the receipt code RVBI15
-  //   (90 × 0,9321 = 83,89 and 70 × 1,0766 = 75,36, the ratios of the
-  //   incorporation's fato relevante), with nothing in either row naming its
-  //   fund. So the definition has **both** sources and **one** target, and
-  //   the two credits share the one target allocation by quantity.
-  //
-  // The owner's reading: the cash is a **return of capital** — the sources
-  // close with no gain or loss, and RVBI11 takes the removed cost less the
-  // cash. Its receipt code RVBI15 is B3's evidence code only; the ledger
-  // position is RVBI11 from the start, as AXIA15 → AXIA15G.
-  {
-    id: 'bpff11-and-hgff11-to-rvbi11',
-    sourceAssetCodes: ['BPFF11', 'HGFF11'],
-    targets: [{ assetCode: 'RVBI11', evidenceAssetCode: 'RVBI15', allocationWeight: null }],
-    pricedRedemptionSourceCodes: ['BPFF11', 'HGFF11'],
-    repeatedTargetCredits: true,
-    sourceBalanceRestatements: true,
-  },
   // #143 (v7): RVBI11 → PSEC11, the ticker change of 2025-10-27, 1:1 and
-  // target-only like the v6 renames. It must follow the definition above: the
-  // planner walks this table in order, so RVBI11's incoming legs are already
-  // in its replay when this group measures it. RVBI11's own `Atualização` of
+  // target-only like the v6 renames. #143 D10 (v8): RVBI11 now arrives by the
+  // liquidation below, which commit plans **before** every conversion, so
+  // RVBI11's two subscriptions are already in its replay when this group
+  // measures it. RVBI11's own `Atualização` of
   // 2025-10-17 restates 159,25 unchanged and is dropped as corroboration;
   // measured after its 0,25 `Fração em Ativos` settles (#128 D2), RVBI11
   // holds 159, all of which converts.
@@ -213,5 +181,100 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
       { assetCode: 'KLBN3', allocationWeight: Quantity.fromString('1') },
       { assetCode: 'KLBN4', allocationWeight: Quantity.fromString('4') },
     ],
+  },
+];
+
+/**
+ * SPEC-005 BR-005-20c (#143 D10) — one source of a liquidation: the fund whose
+ * every share was redeemed, and the **Valor de Liquidação** per share its
+ * administrator published. Public, stated by the administrator, never a
+ * holder's figure (DV-24).
+ */
+export interface AssetLiquidationSourceDefinition {
+  readonly assetCode: string;
+  readonly liquidationValue: Money;
+  /**
+   * #143 D10 review F1 — the first date on which B3 blocked trading in the
+   * source's shares ahead of the liquidation, as the administrator published
+   * it. From that date no ordinary sale of the position can exist, so a stored
+   * active `sell` of the **whole** position dated on or after it — and on or
+   * after the target credits, within the window — can only be B3's `Resgate`,
+   * even under the mapped key that does not name its B3 type.
+   */
+  readonly tradingBlockedFrom: BusinessDate;
+}
+
+/**
+ * The asset the liquidation paid in kind, and the acquisition cost per share
+ * the administrator stated for it — the cost for IR and for any later gain.
+ */
+export interface AssetLiquidationTargetDefinition {
+  readonly assetCode: string;
+  /** B3 Movimentação code of the credits; omitted when it equals `assetCode`. */
+  readonly evidenceAssetCode?: string | undefined;
+  readonly unitCost: Money;
+}
+
+/**
+ * SPEC-005 BR-005-20c (#143 D10) — a **liquidation paid partly in another
+ * asset**: a kind separate from a conversion because it realises a result.
+ *
+ * - Each source's priced `Resgate` is a **sale of its stated quantity at the
+ *   liquidation value**, fees 0, realising `quantity × value − cost` through
+ *   the ordinary sell path (SPEC-007 BR-007-03, DL-007-02).
+ * - Each target credit is a **subscription** of B3's stated quantity at
+ *   `unitCost` (SPEC-007 BR-007-06), dated at B3's date.
+ *
+ * The liquidation value is the whole per-share consideration — the part paid
+ * in target shares and the part paid in cash — so the sale's proceeds are not
+ * B3's cash figure, and the difference is the target's acquisition.
+ */
+export interface AssetLiquidationDefinition {
+  readonly id: string;
+  readonly sources: readonly AssetLiquidationSourceDefinition[];
+  readonly target: AssetLiquidationTargetDefinition;
+}
+
+export const ASSET_LIQUIDATION_DEFINITIONS: readonly AssetLiquidationDefinition[] = [
+  // #143 D10 (v8): BPFF11 and HGFF11 liquidated into RVBI11, fatos relevantes
+  // of 02/10/2025 (fnet 1005408 and 1005407). Per share:
+  //
+  // - BPFF11 R$ 62,03538245 = 59,79675590 in RVBI (factor 0,93213961 at
+  //   R$ 64,15) + 2,23862655 in cash;
+  // - HGFF11 R$ 71,04670108 = 69,06381092 in RVBI (factor 1,07659877) +
+  //   1,98289016 in cash;
+  // - every RVBI11 share received cost R$ 64,15.
+  //
+  // B3 records it at one institution as a priced `Resgate` of each whole
+  // source on 2025-10-14 (the cash, truncated: 90 @ 2,239 and 70 @ 1,983 on
+  // the owner's extract) and two same-day `Atualização` credits on the receipt
+  // code RVBI15 on 2025-10-06 (90 × 0,93213961 → 83,89 and 70 × 1,07659877 →
+  // 75,36), with nothing in either credit naming its fund — which is why the
+  // two sources share one definition. Each source's own `Atualização` of
+  // 2025-10-06 restates its balance and stays `unclassified`.
+  //
+  // `tradingBlockedFrom`: the administrator blocked trading in both funds'
+  // shares on B3 from the close of 2025-08-18 until the liquidation (BPFF11
+  // fato relevante of 12/08/2025, fnet 966690). It is what lets a stored sale
+  // under the mapped key be read as the `Resgate` (#143 D10 review F1).
+  {
+    id: 'bpff11-and-hgff11-liquidated-into-rvbi11',
+    sources: [
+      {
+        assetCode: 'BPFF11',
+        liquidationValue: Money.fromString('62.03538245'),
+        tradingBlockedFrom: BusinessDate.of('2025-08-18'),
+      },
+      {
+        assetCode: 'HGFF11',
+        liquidationValue: Money.fromString('71.04670108'),
+        tradingBlockedFrom: BusinessDate.of('2025-08-18'),
+      },
+    ],
+    target: {
+      assetCode: 'RVBI11',
+      evidenceAssetCode: 'RVBI15',
+      unitCost: Money.fromString('64.15'),
+    },
   },
 ];

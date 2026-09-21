@@ -225,18 +225,10 @@ export function computeTotalValue(
   unitPrice: Money,
   fees: Money,
 ): Money {
-  if (type === 'fracao_bonificacao' || type === 'conversion_in') {
+  if (type === 'fracao_bonificacao' || type === 'conversion_out' || type === 'conversion_in') {
     return Money.zero();
   }
   const gross = unitPrice.times(quantity);
-  // SPEC-007 BR-007-05b (#143): a `conversion_out` yields cash exactly as a
-  // disposal does — the cash component B3 states on the outgoing leg (a priced
-  // FII `Resgate` retyped in place). Every leg without one carries price 0 and
-  // fees 0, so its total is still **zero**. Worked example: BPFF11-shaped
-  // 90 @ 2,239 with no fees is 201,51 returned to the investor; a plain
-  // ticker-change leg of 180 @ 0 is 0.
-  if (type === 'sell' || type === 'transfer_out' || type === 'conversion_out') {
-    return gross.minus(fees);
-  }
+  if (type === 'sell' || type === 'transfer_out') return gross.minus(fees);
   return gross.plus(fees);
 }

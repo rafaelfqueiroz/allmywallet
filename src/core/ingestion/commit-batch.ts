@@ -2,7 +2,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { ConversionGroupId, TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
-import { type Money, Quantity, asStored } from '@/core/shared/money';
+import { Money, Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
 import { validateAssetConversionGroup } from '@/core/ledger/manage-asset-conversion';
@@ -35,8 +35,15 @@ import {
 } from '@/core/ingestion/movement-map';
 import {
   ASSET_CONVERSION_DEFINITIONS,
-  type AssetConversionDefinition,
+  ASSET_LIQUIDATION_DEFINITIONS,
+  type AssetLiquidationDefinition,
 } from '@/core/ingestion/asset-conversion-definitions';
+import {
+  isRedemptionInTradingBlock,
+  type LiquidationEvidence,
+  liquidationGroupKey,
+  resolveLiquidation,
+} from '@/core/ingestion/asset-liquidation-resolution';
 import {
   type AssetConversionEvidence,
   corroboratesSourceBalance,
@@ -143,6 +150,12 @@ export interface CommitBatchOutcome {
   readonly resolvedAssetConversions: number;
   /** BR-005-20c: active conversion legs inserted or activated in place. */
   readonly committedConversionLegs: number;
+  /**
+   * BR-005-20c (#143 D10): liquidations this commit wrote at least one row of —
+   * a source `Resgate` sold at its liquidation value, or a target credit
+   * subscribed at its unit cost.
+   */
+  readonly resolvedLiquidations: number;
   /** BR-005-19 (amended, #113): Leilão de Fração rows consumed by a split or grupamento fraction sale, now `superseded`. */
   readonly consumedAuctions: number;
   /**
@@ -222,6 +235,13 @@ interface CorporatePlan {
    * here so the settling rounds never query again.
    */
   readonly conversionGroups: ReadonlyMap<string, readonly Transaction[]>;
+  /**
+   * BR-005-20b (#143 D10) — stored subscriptions a liquidation acquired on a
+   * position that carries a corporate-event row, by transaction id, each with
+   * its `liquidationGroupKey`. A fraction imported after its liquidation took
+   * effect reaches its origin through these.
+   */
+  readonly liquidationAcquisitions: ReadonlyMap<string, string>;
 }
 
 /** A resolved corporate-event row in a settling round, and what it writes. */
@@ -237,15 +257,29 @@ interface ConversionWrite {
   readonly mode: 'insert' | 'in_place' | 'companion';
   readonly origin: ImportBatchId | null;
   /**
-   * #143 — an `in_place` leg whose stored copy was already an **active sell**
-   * of the same quantity (a priced `Resgate` an earlier import applied under
-   * BR-005-18 v3). Its quantity already left the position and every wallet
-   * allocation, and its cash already left net contributions; retyping it
-   * changes only where its cost goes. It is therefore not reported in
-   * `committed`, whose wallet side would otherwise reduce the allocations a
-   * second time (SPEC-010 BR-010-17).
+   * #143 D10 — a liquidation's `in_place` source row whose stored copy was
+   * already an **active sell** of the same quantity (a priced `Resgate` an
+   * earlier import applied under BR-005-18 v3). Its quantity already left the
+   * position and every wallet allocation, and its cash already left net
+   * contributions; repricing it changes only the realised result. It is
+   * therefore not reported in `committed`, whose wallet side would otherwise
+   * reduce the allocations a second time (SPEC-010 BR-010-17). Never set on a
+   * conversion leg: a conversion carries no cash and takes no sell.
    */
   readonly retypedActive?: boolean | undefined;
+  /**
+   * #143 D10 — the `liquidationGroupKey` of a liquidation's row (a source's
+   * `sell`, a target's `subscription`); absent on a conversion leg. A
+   * liquidation writes through the same path as a conversion — in place or
+   * inserted, replacing the row's ordinary candidate, declined as one group —
+   * but its rows are ordinary trades, so they carry no `conversionGroupId`.
+   */
+  readonly liquidation?: string | undefined;
+}
+
+/** The group a write is declined with: its conversion group, or its liquidation. */
+function declineKeyOf(write: ConversionWrite): string | null {
+  return write.transaction.conversionGroupId ?? write.liquidation ?? null;
 }
 
 interface ConversionPlan {
@@ -345,6 +379,7 @@ export async function commitBatch(
       resolvedCorporateEvents: 0,
       resolvedAssetConversions: 0,
       committedConversionLegs: 0,
+      resolvedLiquidations: 0,
       consumedAuctions: 0,
       committed: [],
     });
@@ -395,7 +430,29 @@ export async function commitBatch(
   const stored = await loadLedgers(deps, rows);
   const carryLegs = planCarries(rows, newCandidates, stored, batch.id, userId, now, today);
   const context = { batchId: batch.id, userId, now, today };
-  const reclassifications = planReclassifications(rows, stored, carryLegs, today);
+  const plannedReclassifications = planReclassifications(rows, stored, carryLegs, today);
+  /**
+   * SPEC-005 BR-005-20c (#143 D10) — liquidations are planned **first**: they
+   * depend on no conversion and no corporate event of this commit, while a
+   * later conversion (`rvbi11-to-psec11`) measures a position the liquidation
+   * filled, and a fraction on it takes the liquidation as its origin.
+   */
+  const liquidationWrites = input.assetConversionsEnabled
+    ? await planLiquidations(
+        deps,
+        rows,
+        newCandidates,
+        carryLegs,
+        plannedReclassifications,
+        stored,
+        context,
+        input.assetConversionWindowDays,
+      )
+    : [];
+  // A row the liquidation writes is not also activated as the older map's
+  // `sell` (#110): the liquidation is what that row now means.
+  const liquidated = new Set<string>(liquidationWrites.map((write) => write.transaction.id));
+  const reclassifications = plannedReclassifications.filter((r) => !liquidated.has(r.updated.id));
   const corporate = await planCorporateEvents(
     deps,
     rows,
@@ -434,19 +491,27 @@ export async function commitBatch(
    * semantics. Passes 1 and 2 read the same inputs and write nothing, so the
    * plan is deterministic: the same file always produces the same groups.
    */
-  const planConversions = (settledCorporate: readonly Transaction[]) =>
+  const planConversions = async (settledCorporate: readonly Transaction[]) =>
     input.assetConversionsEnabled
-      ? planAssetConversions(
-          deps,
-          rows,
-          newCandidates,
-          carryLegs,
-          stored,
-          context,
-          input.assetConversionWindowDays,
-          settledCorporate,
-        )
-      : Promise.resolve<ConversionPlan>({ writes: [] });
+      ? {
+          writes: [
+            ...liquidationWrites,
+            ...(
+              await planAssetConversions(
+                deps,
+                rows,
+                newCandidates,
+                carryLegs,
+                stored,
+                context,
+                input.assetConversionWindowDays,
+                settledCorporate,
+                liquidationWrites,
+              )
+            ).writes,
+          ],
+        }
+      : { writes: [] };
   const firstPass = await planConversions([]);
   const settledCorporate =
     input.assetConversionsEnabled && corporate.rows.length > 0
@@ -497,11 +562,10 @@ export async function commitBatch(
       excluded,
       vetoed,
       declined,
-      conversionPlan.writes.filter(
-        (write) =>
-          write.transaction.conversionGroupId === null ||
-          !conversionDeclined.has(write.transaction.conversionGroupId),
-      ),
+      conversionPlan.writes.filter((write) => {
+        const key = declineKeyOf(write);
+        return key === null || !conversionDeclined.has(key);
+      }),
       corporate,
       corporateDeclined,
     );
@@ -604,10 +668,12 @@ export async function commitBatch(
       // BR-005-20c: one failed position declines the complete conversion
       // group. The next round removes every leg, including those whose own
       // position replayed, and the evidence rows fall back to unclassified.
+      // #143 D10: a liquidation is declined the same way, whole — its rows
+      // fall back to what they were (a new row to its ordinary candidate).
       if (group.conversions.length > 0) {
         for (const write of group.conversions) {
-          const id = write.transaction.conversionGroupId;
-          if (id !== null) conversionDeclined.add(id);
+          const key = declineKeyOf(write);
+          if (key !== null) conversionDeclined.add(key);
         }
         continue;
       }
@@ -820,7 +886,14 @@ export async function commitBatch(
         transaction.conversionGroupId === null ? [] : [transaction.conversionGroupId],
       ),
     ).size,
-    committedConversionLegs: committedConversions.length,
+    committedConversionLegs: committedConversions.filter(
+      (transaction) => transaction.conversionGroupId !== null,
+    ).length,
+    resolvedLiquidations: new Set(
+      liquidationWrites
+        .filter((write) => committedConversions.includes(write.transaction))
+        .map((write) => write.liquidation),
+    ).size,
     consumedAuctions: supersededInserts.length + superseded.filter(isCorporate).length,
     // Superseded rows are left out: they enter no calculation (BR-006-03).
     committed: [
@@ -879,8 +952,9 @@ function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undef
  * placeholder key (`…|rendimento|…|resgate`) and a later import then activated
  * in place as a `sell` keeps that `unmapped` key, while a re-import stages the
  * same row under its `mapped` key (`…|sell|…`). `storedCopyOf` misses it, so
- * the incorporation's outgoing evidence was never found on the owner's ledger.
- * Same rebuild `planReclassifications` uses: `keyFormsFor`, same occurrence.
+ * the BPFF11/HGFF11 `Resgate`s were never found on the owner's ledger — the
+ * evidence a liquidation (#143 D10) now reprices in place. Same rebuild
+ * `planReclassifications` uses: `keyFormsFor`, same occurrence.
  */
 function storedCopyAcrossKeyForms(stored: StoredLedger, row: ImportRow): Transaction | undefined {
   const exact = storedCopyOf(stored, row);
@@ -1120,14 +1194,464 @@ function planCarries(
   return planned;
 }
 
+/**
+ * BR-005-20a — the carried credits as planning sees them: each leg at the cost
+ * its source's history gives it, before any settling round.
+ */
+function carriedTransactionsOf(
+  candidates: readonly Candidate[],
+  carryLegs: readonly PlannedCarry[],
+  stored: StoredLedger,
+): readonly Transaction[] {
+  const candidateTransactions = candidates.map((candidate) => candidate.transaction);
+  const carriedCosts = resolveCarriedCosts(carryLegs, (assetId, institutionId) => [
+    ...stored({ assetId, institutionId }).filter(
+      (transaction) => !carryLegs.some((leg) => leg.credit.id === transaction.id),
+    ),
+    ...candidateTransactions.filter(
+      (transaction) =>
+        transaction.assetId === assetId && transaction.institutionId === institutionId,
+    ),
+  ]);
+  return carryLegs.flatMap((leg) => {
+    const cost = carriedCosts.get(leg.id);
+    return cost === undefined ? [] : [withCarriedCost(leg.credit, cost)];
+  });
+}
+
+/**
+ * The B3 type an **unmapped** key names (`…|resgate`, `…|atualizacao`), or
+ * `null` for a mapped key, whose last part is the unit price.
+ */
+function storedB3TypeOf(naturalKey: string): string | null {
+  const parts = naturalKey.split('|');
+  return parts.length === 7 ? (parts[6] as string) : null;
+}
+
+/** A row B3 states as a **priced** `Resgate` — v3's sell, and a liquidation's source evidence. */
+function isPricedRedemptionRow(row: ImportRow): boolean {
+  return (
+    row.record.kind === 'transaction' &&
+    row.record.priceStated &&
+    normalizeMovementType(row.record.b3Type) === 'resgate'
+  );
+}
+
+/** A row B3 states as a price-less `Atualização` — a liquidation's target credit. */
+function isAtualizacaoRow(row: ImportRow): boolean {
+  return (
+    row.record.kind === 'transaction' &&
+    conversionEvidenceMovementOf(row.record.b3Type, {
+      assetClass: row.record.assetClass,
+      priceStated: row.record.priceStated,
+    }) === 'atualizacao'
+  );
+}
+
+const imported = (t: Transaction) => !t.isUserModified && !t.isManual && t.importBatchId !== null;
+
+/** #143 D10 — see `CorporatePlan.liquidationAcquisitions`. */
+function isStoredLiquidationAcquisition(
+  t: Transaction,
+  definition: AssetLiquidationDefinition,
+): boolean {
+  return (
+    t.status === 'active' &&
+    t.type === 'subscription' &&
+    t.unitPrice.equals(definition.target.unitCost) &&
+    t.fees.isZero() &&
+    storedB3TypeOf(t.naturalKey) === 'atualizacao'
+  );
+}
+
+/**
+ * A source row is already the liquidation's sale when it is an active `sell`
+ * at the liquidation value with no fees — whoever wrote it.
+ */
+function isLiquidationSale(t: Transaction, liquidationValue: Money): boolean {
+  return (
+    t.status === 'active' &&
+    t.type === 'sell' &&
+    t.unitPrice.equals(liquidationValue) &&
+    t.fees.isZero()
+  );
+}
+
+interface LiquidationRef {
+  readonly evidence: LiquidationEvidence;
+  readonly transaction: Transaction;
+  readonly row: ImportRow | null;
+  readonly mode: 'insert' | 'in_place';
+  readonly origin: ImportBatchId | null;
+  readonly retypedActive: boolean;
+}
+
+/**
+ * SPEC-005 BR-005-20c (#143 D10) — the liquidations this commit completes, as
+ * writes through the conversion path (`ConversionWrite.liquidation`).
+ *
+ * Per definition and institution, every row of the group is gathered from the
+ * batch and the ledger, given its state (`LiquidationEvidenceState`), and
+ * handed to `resolveLiquidation`, which decides all or nothing:
+ *
+ * - a source's priced `Resgate`: this batch's `new` sell candidate (replaced,
+ *   same id), or its stored copy under either key form — an `unclassified`
+ *   one, or an active `sell` an earlier import applied at B3's cash price,
+ *   which is **repriced in place** to the liquidation value (key kept, not a
+ *   user edit, BR-005-20). A stored sell under the mapped key is recognisable
+ *   only through its row: that key does not say `Resgate`, so it could be an
+ *   ordinary sale;
+ * - a target credit: this batch's `unclassified` `Atualização`, or its stored
+ *   copy on the receipt code, **moved in place** to the ledger code as a
+ *   `subscription` at the unit cost — the same retyping a conversion leg gets.
+ *   One already moved is found on the ledger code, as `applied`.
+ *
+ * The sources' own `Atualização` restatements are no evidence of anything
+ * here and stay `unclassified`.
+ */
+async function planLiquidations(
+  deps: IngestionDependencies,
+  rows: readonly ImportRow[],
+  candidates: readonly Candidate[],
+  carryLegs: readonly PlannedCarry[],
+  reclassifications: readonly Reclassification[],
+  stored: StoredLedger,
+  context: { batchId: ImportBatchId; userId: UserId; now: Date; today: BusinessDate },
+  windowDays: number,
+): Promise<readonly ConversionWrite[]> {
+  const writes: ConversionWrite[] = [];
+  const candidateByRow = new Map(candidates.map((c) => [c.row.id as string, c.transaction]));
+  const carried = carriedTransactionsOf(candidates, carryLegs, stored);
+  const activations = reclassifications.filter((r) => r.kind === 'activate').map((r) => r.updated);
+
+  for (const definition of ASSET_LIQUIDATION_DEFINITIONS) {
+    const sourceCodes = definition.sources.map((source) => source.assetCode);
+    const evidenceCode = definition.target.evidenceAssetCode ?? definition.target.assetCode;
+    const triggering = rows.filter(
+      (row) =>
+        row.record.kind === 'transaction' &&
+        ((sourceCodes.includes(row.record.assetCode) && isPricedRedemptionRow(row)) ||
+          (row.record.assetCode === evidenceCode && isAtualizacaoRow(row))),
+    );
+    for (const institutionId of new Set(triggering.map((row) => row.institutionId))) {
+      const atInstitution = triggering.filter((row) => row.institutionId === institutionId);
+      const [first] = atInstitution;
+      const assetClass = first?.record.kind === 'transaction' ? first.record.assetClass : 'stock';
+      const codeToAsset = new Map<string, ImportRow['assetId']>();
+      const ledgerOf = new Map<string, readonly Transaction[]>();
+      for (const code of [...sourceCodes, evidenceCode, definition.target.assetCode]) {
+        if (codeToAsset.has(code)) continue;
+        const staged = rows.find(
+          (row) =>
+            row.institutionId === institutionId &&
+            row.record.kind === 'transaction' &&
+            row.record.assetCode === code,
+        );
+        const assetId =
+          staged?.assetId ??
+          (await deps.assets.resolve({
+            code,
+            name: code,
+            // A guess only ever fills a new catalogue entry (#108): the class
+            // of the rows that named this liquidation.
+            assetClass,
+            classStated: false,
+            nameStated: false,
+          }));
+        codeToAsset.set(code, assetId);
+        const ledger = await deps.transactions.listForPosition(assetId, institutionId);
+        ledgerOf.set(code, ledger);
+        // The target may be touched by no row of this batch, and settlement
+        // replays it: its stored history must be there (as for a conversion).
+        stored.prime({ assetId, institutionId }, ledger);
+      }
+      const historyOf = (code: string, date: BusinessDate): readonly Transaction[] => {
+        const assetId = codeToAsset.get(code);
+        const onPosition = (t: Transaction) =>
+          t.assetId === assetId && t.institutionId === institutionId;
+        return [
+          ...(ledgerOf.get(code) ?? []).filter(
+            (t) => !carryLegs.some((leg) => leg.credit.id === t.id),
+          ),
+          ...candidates.map((c) => c.transaction).filter(onPosition),
+          ...carried.filter(onPosition),
+          ...activations.filter(onPosition),
+        ].filter((t) => isBeforeConversion(t, date));
+      };
+
+      const refs: LiquidationRef[] = [];
+      const represented = new Set<string>();
+      const add = (
+        ref: Omit<LiquidationRef, 'evidence'>,
+        evidence: Omit<LiquidationEvidence, 'id'>,
+      ) => {
+        represented.add(ref.transaction.id);
+        refs.push({ ...ref, evidence: { ...evidence, id: ref.transaction.id } });
+      };
+
+      for (const source of definition.sources) {
+        const heldBefore = (date: BusinessDate) => {
+          const replayed = replayPosition(historyOf(source.assetCode, date));
+          return replayed.ok ? replayed.value.quantity : null;
+        };
+        const stateOf = (copy: Transaction) =>
+          isLiquidationSale(copy, source.liquidationValue)
+            ? ('applied' as const)
+            : imported(copy) &&
+                (copy.status === 'unclassified' ||
+                  (copy.status === 'active' && copy.type === 'sell'))
+              ? ('open' as const)
+              : ('locked' as const);
+        for (const row of atInstitution) {
+          if (row.record.kind !== 'transaction' || row.record.assetCode !== source.assetCode) {
+            continue;
+          }
+          // A priced `Resgate` always stages as v3's `sell` (BR-005-18): this
+          // batch's `new` candidate, or a `duplicate` of a stored copy. An
+          // `invalid` row has neither and is no evidence.
+          let transaction: Transaction | undefined;
+          let mode: LiquidationRef['mode'] = 'insert';
+          let origin: ImportBatchId | null = null;
+          let state: LiquidationEvidence['state'] = 'open';
+          if (row.classification === 'new') {
+            transaction = candidateByRow.get(row.id);
+          } else if (row.classification === 'duplicate') {
+            transaction = storedCopyAcrossKeyForms(stored, row);
+            if (transaction !== undefined) {
+              mode = 'in_place';
+              origin = transaction.importBatchId;
+              state = stateOf(transaction);
+            }
+          }
+          if (transaction === undefined) continue;
+          add(
+            {
+              transaction,
+              row,
+              mode,
+              origin,
+              retypedActive:
+                mode === 'in_place' &&
+                transaction.status === 'active' &&
+                transaction.type === 'sell',
+            },
+            {
+              role: 'source_redemption',
+              assetCode: source.assetCode,
+              tradeDate: row.record.tradeDate,
+              quantity: row.record.quantity,
+              state,
+              heldBefore: heldBefore(row.record.tradeDate),
+            },
+          );
+        }
+        // Stored without its row in this batch: under the unmapped `…|resgate`
+        // key, as the liquidation's sale already, or (#143 D10 review F1) as
+        // a v3 `sell` under the **mapped** key an earlier file applied — which
+        // does not name its B3 type, so it is taken only where no ordinary
+        // sale can be: an untouched import of the **whole** position, dated on
+        // or after the source's `tradingBlockedFrom` (the administrator's
+        // published trading block). The resolver adds the rest: on or after
+        // the credits, within the window. BR-005-17: the result must not
+        // depend on which file came first.
+        for (const t of ledgerOf.get(source.assetCode) ?? []) {
+          if (represented.has(t.id)) continue;
+          const named = storedB3TypeOf(t.naturalKey) === 'resgate';
+          const blockedSale = isRedemptionInTradingBlock(t, source, heldBefore(t.tradeDate));
+          if (!named && !blockedSale && !isLiquidationSale(t, source.liquidationValue)) continue;
+          if (named && t.status === 'superseded') continue;
+          add(
+            {
+              transaction: t,
+              row: null,
+              mode: 'in_place',
+              origin: t.importBatchId,
+              retypedActive: t.status === 'active' && t.type === 'sell',
+            },
+            {
+              role: 'source_redemption',
+              assetCode: source.assetCode,
+              tradeDate: t.tradeDate,
+              quantity: t.quantity,
+              state: stateOf(t),
+              heldBefore: heldBefore(t.tradeDate),
+            },
+          );
+        }
+      }
+
+      // Target credits: on the receipt code until the liquidation moves them.
+      const receiptBalanceBefore = (date: BusinessDate) => {
+        const replayed = replayPosition(historyOf(evidenceCode, date));
+        return replayed.ok ? replayed.value.quantity : null;
+      };
+      const addedBy = (statement: Quantity, date: BusinessDate) => {
+        const before = receiptBalanceBefore(date);
+        return before === null ? Quantity.zero() : statement.minus(before);
+      };
+      const targetLedger = ledgerOf.get(definition.target.assetCode) ?? [];
+      const creditStateOf = (copy: Transaction) =>
+        isStoredLiquidationAcquisition(copy, definition)
+          ? ('applied' as const)
+          : imported(copy) && copy.status === 'unclassified'
+            ? ('open' as const)
+            : ('locked' as const);
+      for (const row of atInstitution) {
+        if (row.record.kind !== 'transaction' || row.record.assetCode !== evidenceCode) continue;
+        let transaction: Transaction | null | undefined;
+        let mode: LiquidationRef['mode'] = 'insert';
+        let origin: ImportBatchId | null = null;
+        let state: LiquidationEvidence['state'] = 'open';
+        if (row.classification === 'unclassified') {
+          transaction = buildCandidate(
+            row,
+            context.batchId,
+            context.userId,
+            'unclassified',
+            context.now,
+            context.today,
+          );
+        } else if (row.classification === 'duplicate') {
+          // On the receipt code while unapplied; on the ledger code once the
+          // liquidation moved it — same key, same occurrence.
+          transaction =
+            storedCopyOf(stored, row) ??
+            targetLedger.find(
+              (t) => t.naturalKey === row.naturalKey && t.occurrence === row.occurrence,
+            );
+          if (transaction !== undefined) {
+            mode = 'in_place';
+            origin = transaction.importBatchId;
+            state = creditStateOf(transaction);
+          }
+        }
+        if (transaction === null || transaction === undefined) continue;
+        add(
+          { transaction, row, mode, origin, retypedActive: false },
+          {
+            role: 'target_credit',
+            assetCode: evidenceCode,
+            tradeDate: row.record.tradeDate,
+            quantity:
+              state === 'applied'
+                ? transaction.quantity
+                : addedBy(row.record.quantity, row.record.tradeDate),
+            state,
+          },
+        );
+      }
+      for (const t of ledgerOf.get(evidenceCode) ?? []) {
+        if (
+          represented.has(t.id) ||
+          t.status !== 'unclassified' ||
+          storedB3TypeOf(t.naturalKey) !== 'atualizacao'
+        ) {
+          continue;
+        }
+        add(
+          {
+            transaction: t,
+            row: null,
+            mode: 'in_place',
+            origin: t.importBatchId,
+            retypedActive: false,
+          },
+          {
+            role: 'target_credit',
+            assetCode: evidenceCode,
+            tradeDate: t.tradeDate,
+            quantity: addedBy(t.quantity, t.tradeDate),
+            state: creditStateOf(t),
+          },
+        );
+      }
+      for (const t of targetLedger) {
+        if (represented.has(t.id) || !isStoredLiquidationAcquisition(t, definition)) continue;
+        add(
+          {
+            transaction: t,
+            row: null,
+            mode: 'in_place',
+            origin: t.importBatchId,
+            retypedActive: false,
+          },
+          {
+            role: 'target_credit',
+            assetCode: evidenceCode,
+            tradeDate: t.tradeDate,
+            quantity: t.quantity,
+            state: 'applied',
+          },
+        );
+      }
+
+      const resolution = resolveLiquidation({
+        definition,
+        evidence: refs.map((ref) => ref.evidence),
+        windowDays,
+      });
+      if (resolution.status !== 'resolved') continue;
+
+      const key = liquidationGroupKey(definition.id, institutionId, resolution.anchorDate);
+      const refById = new Map(refs.map((ref) => [ref.evidence.id, ref]));
+      const planned: ConversionWrite[] = [];
+      for (const plan of resolution.writes) {
+        const ref = refById.get(plan.evidenceId) as LiquidationRef;
+        const assetId = codeToAsset.get(plan.assetCode) as ImportRow['assetId'];
+        const transaction: Transaction = {
+          ...ref.transaction,
+          assetId,
+          institutionId,
+          type: plan.type,
+          status: 'active',
+          tradeDate: plan.tradeDate,
+          quantity: plan.quantity,
+          unitPrice: plan.unitPrice,
+          // #143 D10: the liquidation value is the whole consideration; B3's
+          // row states no fee against it.
+          fees: Money.zero(),
+          totalValue: computeTotalValue(plan.type, plan.quantity, plan.unitPrice, Money.zero()),
+          ratio: null,
+          conversionGroupId: null,
+          costBasis: null,
+          isUserModified: false,
+          updatedAt: context.now,
+        };
+        planned.push({
+          transaction,
+          row: ref.row,
+          mode: ref.mode,
+          origin: ref.origin,
+          retypedActive: ref.retypedActive,
+          liquidation: key,
+        });
+      }
+      const valid = planned.every(
+        ({ transaction: t }) =>
+          validateTransactionDraft(
+            {
+              type: t.type,
+              tradeDate: t.tradeDate,
+              quantity: t.quantity,
+              unitPrice: t.unitPrice,
+              fees: t.fees,
+              ratio: t.ratio,
+            },
+            context.today,
+          ).ok,
+      );
+      if (valid) writes.push(...planned);
+    }
+  }
+  return writes;
+}
+
 interface ConversionEvidenceRef {
   readonly evidence: AssetConversionEvidence;
   readonly transaction: Transaction;
   readonly row: ImportRow | null;
   readonly mode: 'insert' | 'in_place';
   readonly origin: ImportBatchId | null;
-  /** #143: see `ConversionWrite.retypedActive`. */
-  readonly retypedActive?: boolean | undefined;
 }
 
 function dateDistance(a: BusinessDate, b: BusinessDate): number {
@@ -1142,34 +1666,8 @@ function movementFromStoredKey(naturalKey: string) {
   });
 }
 
-/**
- * #143 — a **priced** `Resgate` is conversion evidence only for a definition
- * that names its asset code in `pricedRedemptionSourceCodes`. The movement map
- * is not changed: everywhere else such a row is BR-005-18 v3's sell.
- */
-function isPricedRedemptionOf(row: ImportRow, definition: AssetConversionDefinition): boolean {
-  return (
-    row.record.kind === 'transaction' &&
-    row.record.priceStated &&
-    normalizeMovementType(row.record.b3Type) === 'resgate' &&
-    (definition.pricedRedemptionSourceCodes ?? []).includes(row.record.assetCode)
-  );
-}
-
-/** Evidence for any definition — the batch-wide pre-filter. */
-function isConversionEvidenceRow(row: ImportRow): boolean {
-  return (
-    conversionEvidenceForRow(row) !== null ||
-    ASSET_CONVERSION_DEFINITIONS.some((definition) => isPricedRedemptionOf(row, definition))
-  );
-}
-
-function conversionEvidenceForRow(
-  row: ImportRow,
-  definition?: AssetConversionDefinition,
-): AssetConversionEvidence['movement'] | null {
+function conversionEvidenceForRow(row: ImportRow): AssetConversionEvidence['movement'] | null {
   if (row.record.kind !== 'transaction') return null;
-  if (definition !== undefined && isPricedRedemptionOf(row, definition)) return 'resgate';
   const named = conversionEvidenceMovementOf(row.record.b3Type, {
     assetClass: row.record.assetClass,
     priceStated: row.record.priceStated,
@@ -1328,24 +1826,13 @@ async function planAssetConversions(
   context: { batchId: ImportBatchId; userId: UserId; now: Date; today: BusinessDate },
   conversionWindowDays: number,
   settledCorporate: readonly Transaction[],
+  liquidationWrites: readonly ConversionWrite[],
 ): Promise<ConversionPlan> {
-  const currentEvidence = rows.filter(isConversionEvidenceRow);
+  const currentEvidence = rows.filter((row) => conversionEvidenceForRow(row) !== null);
   if (currentEvidence.length === 0) return { writes: [] };
 
   const candidateTransactions = candidates.map((candidate) => candidate.transaction);
-  const carriedCosts = resolveCarriedCosts(carryLegs, (assetId, institutionId) => [
-    ...stored({ assetId, institutionId }).filter(
-      (transaction) => !carryLegs.some((leg) => leg.credit.id === transaction.id),
-    ),
-    ...candidateTransactions.filter(
-      (transaction) =>
-        transaction.assetId === assetId && transaction.institutionId === institutionId,
-    ),
-  ]);
-  const carriedTransactions = carryLegs.flatMap((leg) => {
-    const cost = carriedCosts.get(leg.id);
-    return cost === undefined ? [] : [withCarriedCost(leg.credit, cost)];
-  });
+  const carriedTransactions = carriedTransactionsOf(candidates, carryLegs, stored);
 
   const writes: ConversionWrite[] = [];
   const usedEvidence = new Set<string>();
@@ -1412,10 +1899,8 @@ async function planAssetConversions(
       const represented = new Set<string>();
       for (const row of triggering) {
         if (row.record.kind !== 'transaction') continue;
-        const movement = conversionEvidenceForRow(row, definition);
+        const movement = conversionEvidenceForRow(row);
         if (movement === null) continue;
-        const priced = isPricedRedemptionOf(row, definition);
-        let retypedActive = false;
         let transaction: Transaction | undefined;
         let mode: ConversionEvidenceRef['mode'] = 'insert';
         let origin: ImportBatchId | null = null;
@@ -1430,17 +1915,10 @@ async function planAssetConversions(
               context.today,
             ) ?? undefined;
         } else if (row.classification === 'duplicate') {
-          const copy = priced ? storedCopyAcrossKeyForms(stored, row) : storedCopyOf(stored, row);
-          // #143: a priced Resgate an earlier import applied as v3's `sell` is
-          // re-read as this definition's outgoing evidence and retyped in
-          // place. Only through the row: a stored sell's mapped key does not
-          // say it was a `Resgate`, so the stored-ledger scan below never
-          // takes one — it could be an ordinary sale.
-          const activeSell = priced && copy?.status === 'active' && copy.type === 'sell';
+          const copy = storedCopyOf(stored, row);
           if (
             copy !== undefined &&
             (copy.status === 'unclassified' ||
-              activeSell ||
               (copy.status === 'active' &&
                 (copy.type === 'transfer_in' || copy.type === 'transfer_out'))) &&
             !copy.isUserModified &&
@@ -1450,7 +1928,6 @@ async function planAssetConversions(
             transaction = copy;
             mode = 'in_place';
             origin = copy.importBatchId;
-            retypedActive = activeSell;
           }
         }
         if (transaction === undefined) continue;
@@ -1463,16 +1940,11 @@ async function planAssetConversions(
             tradeDate: row.record.tradeDate,
             beforeQuantity: Quantity.zero(),
             statementQuantity: row.record.quantity,
-            // #143 SPEC-007 BR-007-05b: B3's own price and fees — the cash half
-            // of the exchange. Read from the transaction, which for an
-            // in-place copy is what the ledger already holds.
-            ...(priced ? { unitPrice: transaction.unitPrice, fees: transaction.fees } : {}),
           },
           transaction,
           row,
           mode,
           origin,
-          retypedActive,
         });
       }
 
@@ -1518,12 +1990,19 @@ async function planAssetConversions(
         const assetId = codeToAsset.get(code);
         if (assetId === undefined) return [];
         const storedRows = ledgerByCode.get(code) ?? [];
-        const replacedCarries = new Set(carryLegs.map((leg) => leg.credit.id));
+        // A carried credit and a liquidated row each stand in for their stored
+        // or candidate self (#143 D10: a liquidation reuses both ids).
+        const replaced = new Set([
+          ...carryLegs.map((leg) => leg.credit.id),
+          ...liquidationWrites.map((write) => write.transaction.id),
+        ]);
         return [
-          ...storedRows.filter((transaction) => !replacedCarries.has(transaction.id)),
+          ...storedRows.filter((transaction) => !replaced.has(transaction.id)),
           ...candidateTransactions.filter(
             (transaction) =>
-              transaction.assetId === assetId && transaction.institutionId === institutionId,
+              transaction.assetId === assetId &&
+              transaction.institutionId === institutionId &&
+              !replaced.has(transaction.id),
           ),
           ...carriedTransactions.filter(
             (transaction) =>
@@ -1537,7 +2016,9 @@ async function planAssetConversions(
             (transaction) =>
               transaction.assetId === assetId && transaction.institutionId === institutionId,
           ),
-          ...writes
+          // #143 D10: a liquidation's rows — RVBI11's subscriptions are the
+          // position `rvbi11-to-psec11` measures.
+          ...[...liquidationWrites, ...writes]
             .map((write) => write.transaction)
             .filter(
               (transaction) =>
@@ -1548,11 +2029,11 @@ async function planAssetConversions(
       /**
        * SPEC-005 BR-005-20c (#143) — a source `Atualização` restating the
        * balance the replay already holds is corroboration, not evidence
-       * (`corroboratesSourceBalance`). Set aside **before** grouping: B3
-       * restated BPFF11's 90 on the incorporation's own date, and as a
-       * same-date candidate it displaced the later priced `Resgate` that
-       * actually removed the units. It stays `unclassified` — see the
-       * definition table's v7 note.
+       * (`corroboratesSourceBalance`). Set aside **before** grouping: as a
+       * same-date candidate it would displace the later evidence that
+       * actually removed the units — RVBI11's 159,25 of 2025-10-17, before its
+       * rename to PSEC11. It stays `unclassified` — see the definition
+       * table's v7 note.
        */
       const evidenceRefs = refs.filter((ref) => {
         if (
@@ -1667,11 +2148,10 @@ async function planAssetConversions(
             status: 'active',
             tradeDate: leg.tradeDate,
             quantity: leg.quantity,
-            // #143 SPEC-007 BR-007-05b: a cash-bearing out leg keeps B3's price
-            // and fees and carries the cash as its total; every other leg is 0.
-            unitPrice: leg.unitPrice,
-            fees: leg.fees,
-            totalValue: leg.totalValue,
+            // SPEC-007 BR-007-05b: a conversion carries cost, never cash.
+            unitPrice: Money.zero(),
+            fees: Money.zero(),
+            totalValue: Money.zero(),
             ratio: null,
             conversionGroupId: groupId,
             costBasis: leg.costBasis,
@@ -1684,7 +2164,6 @@ async function planAssetConversions(
             row: ref?.row ?? null,
             mode: ref === undefined ? 'companion' : ref.mode,
             origin: ref?.origin ?? null,
-            retypedActive: ref?.retypedActive === true && leg.type === 'conversion_out',
           });
         }
         if (!validateAssetConversionGroup(groupWrites.map((write) => write.transaction)).ok) {
@@ -1756,6 +2235,22 @@ function settle(
    * on a re-import it is already in the ledger. Deduplicated by id, the
    * planned copy winning — a row-backed leg promoted in place is both.
    */
+  /**
+   * BR-005-20b (#143 D10) — the liquidation a transaction is an acquisition
+   * of: planned by this commit, or recognised in the stored ledger
+   * (`CorporatePlan.liquidationAcquisitions`).
+   */
+  const plannedAcquisitions = new Map<string, string>(
+    conversionWrites.flatMap((write) =>
+      write.liquidation !== undefined && write.transaction.type === 'subscription'
+        ? [[write.transaction.id, write.liquidation] as const]
+        : [],
+    ),
+  );
+  const liquidationGroupOf = (transaction: Transaction): string | null =>
+    plannedAcquisitions.get(transaction.id) ??
+    corporate.liquidationAcquisitions.get(transaction.id) ??
+    null;
   const legsOfConversionGroup = (groupId: ConversionGroupId): readonly Transaction[] => {
     const byId = new Map<string, Transaction>(
       (corporate.conversionGroups.get(groupId) ?? []).map((leg) => [leg.id, leg]),
@@ -1767,12 +2262,24 @@ function settle(
     return [...byId.values()];
   };
 
+  /**
+   * #143 D10 — a stored row a liquidation rewrites in place (a `Resgate` sell
+   * repriced to its liquidation value) leaves the history its rewrite enters,
+   * so the position never sells twice.
+   */
+  const liquidatedInPlace = new Set<string>(
+    conversionWrites
+      .filter((write) => write.liquidation !== undefined && write.mode === 'in_place')
+      .map((write) => write.transaction.id),
+  );
   const historyFor = (
     key: PositionKey,
     carried: readonly Transaction[],
     corporateTransactions: readonly Transaction[],
   ): readonly Transaction[] => [
-    ...stored(key).filter((transaction) => !legCredits.has(transaction.id)),
+    ...stored(key).filter(
+      (transaction) => !legCredits.has(transaction.id) && !liquidatedInPlace.has(transaction.id),
+    ),
     ...live
       .filter(
         (candidate) =>
@@ -1828,6 +2335,7 @@ function settle(
               windows: corporate.windows,
               declined: corporateDeclined,
               conversionLegs: legsOfConversionGroup,
+              liquidationGroupOf,
             }),
           );
 
@@ -2066,12 +2574,35 @@ async function planCorporateEvents(
     }
   }
 
+  /**
+   * #143 D10 — a stored liquidation acquisition: an active `subscription` on a
+   * liquidation's target, at its stated unit cost, whose key is an
+   * `Atualização` credit's. Only the liquidation writes that shape (a B3
+   * subscription row's key names no `Atualização`), so no guess is involved.
+   */
+  const liquidationAcquisitions = new Map<string, string>();
+  for (const [id, key] of positions) {
+    const ticker = tickers.get(id) as string;
+    for (const definition of ASSET_LIQUIDATION_DEFINITIONS) {
+      if (definition.target.assetCode !== ticker) continue;
+      for (const t of stored(key)) {
+        if (isStoredLiquidationAcquisition(t, definition)) {
+          liquidationAcquisitions.set(
+            t.id,
+            liquidationGroupKey(definition.id, t.institutionId, t.tradeDate),
+          );
+        }
+      }
+    }
+  }
+
   return {
     rows: planned,
     byId: new Map(planned.map((p) => [p.event.id, p])),
     factors,
     windows,
     conversionGroups,
+    liquidationAcquisitions,
   };
 }
 
