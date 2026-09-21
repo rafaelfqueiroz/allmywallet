@@ -238,7 +238,7 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
     const first = expectResolved(resolve([oneToOne], rows, sources));
     const second = expectResolved(resolve([oneToOne], [...rows].reverse(), [...sources].reverse()));
     expect(second.groupKey).toBe(first.groupKey);
-    expect(first.groupKey.startsWith('conversion:v5:')).toBe(true);
+    expect(first.groupKey.startsWith('conversion:v6:')).toBe(true);
     expect(second.legs.map((leg) => leg.key).sort()).toEqual(
       first.legs.map((leg) => leg.key).sort(),
     );
@@ -315,6 +315,44 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
     expect(result.status).toBe('unresolved');
     if (result.status !== 'unresolved') return;
     expect(result.reason).toBe('insufficient_quantity');
+  });
+
+  it.each([
+    ['wizs3-to-wizc3', 'WIZS3', 'WIZC3'],
+    ['trpl4-to-isae4', 'TRPL4', 'ISAE4'],
+    ['odpv3-to-saud3', 'ODPV3', 'SAUD3'],
+    ['mall11-to-pmll11', 'MALL11', 'PMLL11'],
+  ])('converts a ticker rename one-to-one on target-only evidence (%s)', (id, from, to) => {
+    const definition = ASSET_CONVERSION_DEFINITIONS.find((candidate) => candidate.id === id);
+    expect(definition).toBeDefined();
+    if (definition === undefined) return;
+    // #143: B3 credits the new code and never debits the old one. The whole
+    // 180 held leave at 180 × 9,11 = 1.639,80 and arrive as the 180 the
+    // statement adds; the target's own later purchases are not evidence.
+    const result = expectResolved(
+      resolve([definition], [evidence('rename', to, '0', '180')], [source(from, '180', '9.11')]),
+    );
+    expect(
+      result.legs.map((leg) => [
+        leg.type,
+        leg.assetCode,
+        leg.quantity.toString(),
+        leg.costBasis?.toString(),
+      ]),
+    ).toEqual([
+      ['conversion_out', from, '180', '1639.8'],
+      ['conversion_in', to, '180', '1639.8'],
+    ]);
+  });
+
+  it('does not match a rename to the wrong source code (#143)', () => {
+    // WIZC3 evidence against a TRPL4 holding: no definition names that pair.
+    const result = resolve(
+      ASSET_CONVERSION_DEFINITIONS,
+      [evidence('rename', 'WIZC3', '0', '180')],
+      [source('TRPL4', '180', '9.11')],
+    );
+    expect(result).toEqual({ status: 'unresolved', reason: 'incomplete' });
   });
 
   it('keeps missing-weight, incomplete and ambiguous groups unresolved', () => {

@@ -14,13 +14,17 @@ import { Quantity } from '@/core/shared/money';
  *
  * **v5 (#120)** — `bidi11-to-inbr32`, Banco Inter's 2022 migration to Nasdaq.
  *
+ * **v6 (#143)** — four plain ticker renames B3 records only as an
+ * `Atualização` on the new code: `wizs3-to-wizc3`, `trpl4-to-isae4`,
+ * `odpv3-to-saud3` and `mall11-to-pmll11`. Purely additive.
+ *
  * The version is part of every `groupKey` (`asset-conversion-resolution.ts`),
  * so a group already written under an older key keeps it: `commit-batch.ts`
  * never re-resolves evidence whose stored transaction is already an active
  * conversion leg, so a re-import is still a no-op rather than a second group
  * under a newer key.
  */
-export const ASSET_CONVERSION_DEFINITIONS_VERSION = 5;
+export const ASSET_CONVERSION_DEFINITIONS_VERSION = 6;
 
 export interface AssetConversionTargetDefinition {
   /** B3 Movimentação code; omitted when it equals the canonical ledger code. */
@@ -109,6 +113,21 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
   // conserves cost identically, and their rows stay `unclassified` rather
   // than inventing a cost step B3 never priced.
   oneTarget('bidi11-to-inbr32', ['BIDI11'], 'INBR32'),
+  // #143: ticker renames, each one-to-one. B3 states a price-less `Atualização`
+  // credit on the new code and never debits the old one, so the old position
+  // stays open and the new one reads short by exactly that credit. Each is the
+  // `bidi11-to-inbr32` shape: target-only evidence, the whole source position
+  // converts. Dates are B3's first trading day under the new code.
+  //
+  // - WIZS3 → WIZC3, Wiz Co, 2023-02-09.
+  // - TRPL4 → ISAE4, ISA Energia Brasil (ex-ISA CTEEP), 2024-11-18. TRPL3 →
+  //   ISAE3 is the same event and is left out until a position needs it.
+  // - ODPV3 → SAUD3, Bradsaúde (ex-Odontoprev), 2026-05-05.
+  // - MALL11 → PMLL11, Pátria Malls (ex-Genial Malls), 2025-07-22.
+  oneTarget('wizs3-to-wizc3', ['WIZS3'], 'WIZC3'),
+  oneTarget('trpl4-to-isae4', ['TRPL4'], 'ISAE4'),
+  oneTarget('odpv3-to-saud3', ['ODPV3'], 'SAUD3'),
+  oneTarget('mall11-to-pmll11', ['MALL11'], 'PMLL11'),
   {
     id: 'klbn11-to-klbn3-and-klbn4',
     sourceAssetCodes: ['KLBN11'],

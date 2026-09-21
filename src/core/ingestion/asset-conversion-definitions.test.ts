@@ -11,7 +11,8 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
     // sourced from CPLE6 — the only CPLE code that ever holds a position.
     // #129 D3: v4 added CPLE7 to it as a zero-cost target. #120: v5 added
     // `bidi11-to-inbr32`, purely additive — no existing definition changed.
-    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(5);
+    // #143: v6 added four one-to-one ticker renames, likewise additive.
+    expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(6);
     expect(
       ASSET_CONVERSION_DEFINITIONS.map((definition) => ({
         id: definition.id,
@@ -49,6 +50,26 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
         id: 'bidi11-to-inbr32',
         sources: ['BIDI11'],
         targets: [{ evidence: 'INBR32', ledger: 'INBR32' }],
+      },
+      {
+        id: 'wizs3-to-wizc3',
+        sources: ['WIZS3'],
+        targets: [{ evidence: 'WIZC3', ledger: 'WIZC3' }],
+      },
+      {
+        id: 'trpl4-to-isae4',
+        sources: ['TRPL4'],
+        targets: [{ evidence: 'ISAE4', ledger: 'ISAE4' }],
+      },
+      {
+        id: 'odpv3-to-saud3',
+        sources: ['ODPV3'],
+        targets: [{ evidence: 'SAUD3', ledger: 'SAUD3' }],
+      },
+      {
+        id: 'mall11-to-pmll11',
+        sources: ['MALL11'],
+        targets: [{ evidence: 'PMLL11', ledger: 'PMLL11' }],
       },
       {
         id: 'klbn11-to-klbn3-and-klbn4',

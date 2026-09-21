@@ -3634,6 +3634,84 @@ describe('#138 — the four Movimentação rows that refused on every import', (
     return replayed.value;
   }
 
+  describe('#143 — a ticker rename B3 states only as an Atualização on the new code', () => {
+    const wiz = (code: string, overrides: Partial<NormalizedTransactionRecord>) =>
+      buy({
+        assetCode: code,
+        assetName: 'WIZ SOLUCOES E CORRETAGEM DE SEGUROS S.A.',
+        institutionName: INTER,
+        fees: Money.zero(),
+        ...overrides,
+      });
+    /**
+     * Generated (DV-24): 100 WIZS3 at 10,00 and 80 at 8,00 — 1.640,00 for 180.
+     * B3 credits 180 WIZC3 on the rename and never debits WIZS3; 220 WIZC3
+     * are bought later at 6,00. B3's custody reads 400 WIZC3 and no WIZS3.
+     */
+    const file = () => [
+      wiz('WIZS3', {
+        tradeDate: BusinessDate.of('2021-04-27'),
+        quantity: Quantity.fromString('100'),
+        unitPrice: Money.fromString('10'),
+      }),
+      wiz('WIZS3', {
+        tradeDate: BusinessDate.of('2022-03-18'),
+        quantity: Quantity.fromString('80'),
+        unitPrice: Money.fromString('8'),
+      }),
+      wiz('WIZC3', {
+        b3Type: 'Atualização',
+        tradeDate: BusinessDate.of('2023-02-10'),
+        quantity: Quantity.fromString('180'),
+        unitPrice: Money.zero(),
+        priceStated: false,
+      }),
+      wiz('WIZC3', {
+        tradeDate: BusinessDate.of('2024-04-17'),
+        quantity: Quantity.fromString('220'),
+        unitPrice: Money.fromString('6'),
+      }),
+    ];
+
+    it('resolves the group a pre-v6 commit left unclassified: the old code closes, cost carries, no gain', async () => {
+      const deps = buildFakeIngestionDeps();
+      // The owner's state: the Atualização stored unclassified, WIZS3 still
+      // open at 180 and WIZC3 short by exactly that.
+      const before = await importFile(deps, file(), false);
+      expect(before.outcome).toMatchObject({ resolvedAssetConversions: 0 });
+      expect((await positionOf(deps, 'WIZS3', INTER)).quantity.toString()).toBe('180');
+      expect((await positionOf(deps, 'WIZC3', INTER)).quantity.toString()).toBe('220');
+
+      const again = await importFile(deps, file());
+
+      expect(again.outcome).toMatchObject({
+        invalid: 0,
+        resolvedAssetConversions: 1,
+        committedConversionLegs: 2,
+      });
+      const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+      expect(legs.map((row) => [row.type, row.costBasis?.toString()])).toEqual(
+        expect.arrayContaining([
+          ['conversion_out', '1640'],
+          ['conversion_in', '1640'],
+        ]),
+      );
+      // SPEC-007 BR-007-05b: the source closes at zero cost, nothing realised.
+      const source = await positionOf(deps, 'WIZS3', INTER);
+      expect(source.quantity.toString()).toBe('0');
+      expect(source.totalCost.toString()).toBe('0');
+      // 1.640,00 carried + 220 × 6,00 = 2.960,00 for 400.
+      const target = await positionOf(deps, 'WIZC3', INTER);
+      expect(target.quantity.toString()).toBe('400');
+      expect(target.totalCost.toString()).toBe('2960');
+
+      const count = deps.transactions.rows.length;
+      const third = await importFile(deps, file());
+      expect(third.outcome).toMatchObject({ applied: 0, invalid: 0, resolvedAssetConversions: 0 });
+      expect(deps.transactions.rows).toHaveLength(count);
+    });
+  });
+
   describe('BIDI11 → INBR32 (SPEC-005 BR-005-20c, SPEC-007 BR-007-05b)', () => {
     const inbr32 = (
       b3Type: string,
