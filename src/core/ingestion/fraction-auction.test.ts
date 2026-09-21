@@ -8,6 +8,7 @@ import {
 } from '@/core/ledger/test-support/transaction-builder';
 import {
   auctionTransaction,
+  conversionCreatedFraction,
   type FractionLeg,
   fractionTransaction,
   isShareBaseType,
@@ -118,6 +119,30 @@ describe('#129 BR-005-20b — tracedConversionOrigin', () => {
     // One bonificação and one grupamento: exempt income or a realised
     // disposal, and nothing says which. Undecidable, not absent.
     expect(tracedConversionOrigin(legs('grupamento'))).toEqual({ ok: false, unresolved: true });
+  });
+});
+
+describe('#143 BR-005-20b — conversionCreatedFraction', () => {
+  it('is the conversion when whole sources arrive as a fractional target', () => {
+    // 90 and 70 whole out; 83,89 + 75,36 = 159,25 in, fractional part 0,25.
+    expect(conversionCreatedFraction([q('90'), q('70')], [q('83.89'), q('75.36')])).toBe(true);
+  });
+
+  it('is not the conversion when the target receives a whole quantity', () => {
+    // A rename: 180 out, 180 in. And two fractional credits summing whole:
+    // 0,6 + 0,4 = 1.
+    expect(conversionCreatedFraction([q('180')], [q('180')])).toBe(false);
+    expect(conversionCreatedFraction([q('1')], [q('0.6'), q('0.4')])).toBe(false);
+  });
+
+  it('is not the conversion when a source brought a fraction across', () => {
+    // KLBN11's 0,6 out → 0,6 in: the fraction pre-dates the group.
+    expect(conversionCreatedFraction([q('0.6')], [q('0.6')])).toBe(false);
+    expect(conversionCreatedFraction([q('90'), q('0.5')], [q('90.5')])).toBe(false);
+  });
+
+  it('is never the conversion without an outgoing leg to read', () => {
+    expect(conversionCreatedFraction([], [q('159.25')])).toBe(false);
   });
 });
 
@@ -299,7 +324,8 @@ describe('#113 BR-007-04b / BR-007-05a — what the pair becomes', () => {
   });
 
   it('after a split or grupamento: a sell at the auction price on the fraction’s date, the auction consumed', () => {
-    for (const origin of ['split', 'grupamento'] as const) {
+    // #143: a conversion that created the fraction reads the same way.
+    for (const origin of ['split', 'grupamento', 'conversion'] as const) {
       const sale = fractionTransaction(fraction, origin, auction);
       expect(sale).toMatchObject({ type: 'sell', status: 'active', ratio: null });
       expect(sale.tradeDate).toBe('2025-12-15');
@@ -335,6 +361,10 @@ describe('#113 BR-007-04b / BR-007-05a — what the pair becomes', () => {
     expect(partnerAgrees(as('dividend'), 'auction', 'bonificacao')).toBe(false);
     expect(partnerAgrees(as('leilao_fracoes', 'superseded'), 'auction', 'split')).toBe(true);
     expect(partnerAgrees(as('leilao_fracoes'), 'auction', 'split')).toBe(false);
+    // #143: a conversion origin agrees with what a split does.
+    expect(partnerAgrees(as('sell'), 'fraction', 'conversion')).toBe(true);
+    expect(partnerAgrees(as('leilao_fracoes', 'superseded'), 'auction', 'conversion')).toBe(true);
+    expect(partnerAgrees(as('leilao_fracoes'), 'auction', 'conversion')).toBe(false);
   });
 });
 

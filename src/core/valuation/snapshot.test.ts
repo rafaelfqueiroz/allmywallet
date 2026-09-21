@@ -171,6 +171,28 @@ describe('externalFlow — what TWR will have to neutralise, and nothing else', 
     expect(to8(externalFlow(edited))).toBe('4822.50000000');
   });
 
+  it('BR-007-05b (#143) — the cash component of a conversion_out leaves like a sale; its cost does not', () => {
+    // 90 × 2,239 − 0,51 of fees = 201,00 returned to the investor: −201,00.
+    const cashLeg = aTransaction()
+      .conversionOut('00000000-c0de-7000-8000-000000000041', '9000')
+      .quantity('90')
+      .price('2.239')
+      .fees('0.51')
+      .build();
+    expect(to8(externalFlow(cashLeg))).toBe('-201.00000000');
+    // Recomputed, never read from the stored total: a stale 0 still flows −201,00.
+    expect(to8(externalFlow({ ...cashLeg, totalValue: Money.zero() }))).toBe('-201.00000000');
+    // Retyping B3's priced Resgate from `sell` to `conversion_out` in place
+    // leaves net contributions exactly where the sell had them.
+    const asSell = aTransaction().sell().quantity('90').price('2.239').fees('0.51').build();
+    expect(externalFlow(cashLeg).equals(externalFlow(asSell))).toBe(true);
+    // A price-less leg (every conversion before #143) and every incoming leg move no money.
+    const plain = aTransaction().conversionOut().quantity('100').build();
+    expect(externalFlow(plain).isZero()).toBe(true);
+    const incoming = aTransaction().conversionIn('9000').quantity('83.89').build();
+    expect(externalFlow(incoming).isZero()).toBe(true);
+  });
+
   it('earnings and corporate events are NOT external flows', () => {
     // The distinction SPEC-012's TWR is built on: a dividend is not money the
     // user put in, and a split moves no money at all. Counting either as a

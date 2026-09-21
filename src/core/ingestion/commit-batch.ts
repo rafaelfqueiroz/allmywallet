@@ -2,7 +2,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { ConversionGroupId, TransactionId } from '@/core/shared/ids';
 import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
-import { Money, Quantity, asStored } from '@/core/shared/money';
+import { type Money, Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
 import { validateAssetConversionGroup } from '@/core/ledger/manage-asset-conversion';
@@ -33,9 +33,13 @@ import {
   isIgnoredMovement,
   normalizeMovementType,
 } from '@/core/ingestion/movement-map';
-import { ASSET_CONVERSION_DEFINITIONS } from '@/core/ingestion/asset-conversion-definitions';
+import {
+  ASSET_CONVERSION_DEFINITIONS,
+  type AssetConversionDefinition,
+} from '@/core/ingestion/asset-conversion-definitions';
 import {
   type AssetConversionEvidence,
+  corroboratesSourceBalance,
   resolveAssetConversion,
 } from '@/core/ingestion/asset-conversion-resolution';
 import {
@@ -232,6 +236,16 @@ interface ConversionWrite {
   readonly row: ImportRow | null;
   readonly mode: 'insert' | 'in_place' | 'companion';
   readonly origin: ImportBatchId | null;
+  /**
+   * #143 — an `in_place` leg whose stored copy was already an **active sell**
+   * of the same quantity (a priced `Resgate` an earlier import applied under
+   * BR-005-18 v3). Its quantity already left the position and every wallet
+   * allocation, and its cash already left net contributions; retyping it
+   * changes only where its cost goes. It is therefore not reported in
+   * `committed`, whose wallet side would otherwise reduce the allocations a
+   * second time (SPEC-010 BR-010-17).
+   */
+  readonly retypedActive?: boolean | undefined;
 }
 
 interface ConversionPlan {
@@ -811,7 +825,9 @@ export async function commitBatch(
     // Superseded rows are left out: they enter no calculation (BR-006-03).
     committed: [
       ...toInsert,
-      ...conversionInPlace.map((write) => write.transaction),
+      ...conversionInPlace
+        .filter((write) => write.retypedActive !== true)
+        .map((write) => write.transaction),
       ...promoted,
       ...recarried,
       ...activated,
@@ -856,6 +872,33 @@ function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undef
   return stored(row).find(
     (t) => t.naturalKey === row.naturalKey && t.occurrence === row.occurrence,
   );
+}
+
+/**
+ * #143 — a priced `Resgate` an earlier map stored `unclassified` under the
+ * placeholder key (`…|rendimento|…|resgate`) and a later import then activated
+ * in place as a `sell` keeps that `unmapped` key, while a re-import stages the
+ * same row under its `mapped` key (`…|sell|…`). `storedCopyOf` misses it, so
+ * the incorporation's outgoing evidence was never found on the owner's ledger.
+ * Same rebuild `planReclassifications` uses: `keyFormsFor`, same occurrence.
+ */
+function storedCopyAcrossKeyForms(stored: StoredLedger, row: ImportRow): Transaction | undefined {
+  const exact = storedCopyOf(stored, row);
+  if (exact !== undefined || row.record.kind !== 'transaction' || row.ledgerType === null) {
+    return exact;
+  }
+  const { unmapped } = keyFormsFor(
+    {
+      assetId: row.assetId,
+      institutionId: row.institutionId,
+      tradeDate: row.record.tradeDate,
+      quantity: row.record.quantity,
+      unitPrice: row.record.unitPrice,
+    },
+    row.ledgerType,
+    row.record.b3Type,
+  );
+  return stored(row).find((t) => t.naturalKey === unmapped && t.occurrence === row.occurrence);
 }
 
 /**
@@ -1083,6 +1126,8 @@ interface ConversionEvidenceRef {
   readonly row: ImportRow | null;
   readonly mode: 'insert' | 'in_place';
   readonly origin: ImportBatchId | null;
+  /** #143: see `ConversionWrite.retypedActive`. */
+  readonly retypedActive?: boolean | undefined;
 }
 
 function dateDistance(a: BusinessDate, b: BusinessDate): number {
@@ -1097,8 +1142,34 @@ function movementFromStoredKey(naturalKey: string) {
   });
 }
 
-function conversionEvidenceForRow(row: ImportRow): AssetConversionEvidence['movement'] | null {
+/**
+ * #143 — a **priced** `Resgate` is conversion evidence only for a definition
+ * that names its asset code in `pricedRedemptionSourceCodes`. The movement map
+ * is not changed: everywhere else such a row is BR-005-18 v3's sell.
+ */
+function isPricedRedemptionOf(row: ImportRow, definition: AssetConversionDefinition): boolean {
+  return (
+    row.record.kind === 'transaction' &&
+    row.record.priceStated &&
+    normalizeMovementType(row.record.b3Type) === 'resgate' &&
+    (definition.pricedRedemptionSourceCodes ?? []).includes(row.record.assetCode)
+  );
+}
+
+/** Evidence for any definition — the batch-wide pre-filter. */
+function isConversionEvidenceRow(row: ImportRow): boolean {
+  return (
+    conversionEvidenceForRow(row) !== null ||
+    ASSET_CONVERSION_DEFINITIONS.some((definition) => isPricedRedemptionOf(row, definition))
+  );
+}
+
+function conversionEvidenceForRow(
+  row: ImportRow,
+  definition?: AssetConversionDefinition,
+): AssetConversionEvidence['movement'] | null {
   if (row.record.kind !== 'transaction') return null;
+  if (definition !== undefined && isPricedRedemptionOf(row, definition)) return 'resgate';
   const named = conversionEvidenceMovementOf(row.record.b3Type, {
     assetClass: row.record.assetClass,
     priceStated: row.record.priceStated,
@@ -1258,7 +1329,7 @@ async function planAssetConversions(
   conversionWindowDays: number,
   settledCorporate: readonly Transaction[],
 ): Promise<ConversionPlan> {
-  const currentEvidence = rows.filter((row) => conversionEvidenceForRow(row) !== null);
+  const currentEvidence = rows.filter(isConversionEvidenceRow);
   if (currentEvidence.length === 0) return { writes: [] };
 
   const candidateTransactions = candidates.map((candidate) => candidate.transaction);
@@ -1341,8 +1412,10 @@ async function planAssetConversions(
       const represented = new Set<string>();
       for (const row of triggering) {
         if (row.record.kind !== 'transaction') continue;
-        const movement = conversionEvidenceForRow(row);
+        const movement = conversionEvidenceForRow(row, definition);
         if (movement === null) continue;
+        const priced = isPricedRedemptionOf(row, definition);
+        let retypedActive = false;
         let transaction: Transaction | undefined;
         let mode: ConversionEvidenceRef['mode'] = 'insert';
         let origin: ImportBatchId | null = null;
@@ -1357,10 +1430,17 @@ async function planAssetConversions(
               context.today,
             ) ?? undefined;
         } else if (row.classification === 'duplicate') {
-          const copy = storedCopyOf(stored, row);
+          const copy = priced ? storedCopyAcrossKeyForms(stored, row) : storedCopyOf(stored, row);
+          // #143: a priced Resgate an earlier import applied as v3's `sell` is
+          // re-read as this definition's outgoing evidence and retyped in
+          // place. Only through the row: a stored sell's mapped key does not
+          // say it was a `Resgate`, so the stored-ledger scan below never
+          // takes one — it could be an ordinary sale.
+          const activeSell = priced && copy?.status === 'active' && copy.type === 'sell';
           if (
             copy !== undefined &&
             (copy.status === 'unclassified' ||
+              activeSell ||
               (copy.status === 'active' &&
                 (copy.type === 'transfer_in' || copy.type === 'transfer_out'))) &&
             !copy.isUserModified &&
@@ -1370,6 +1450,7 @@ async function planAssetConversions(
             transaction = copy;
             mode = 'in_place';
             origin = copy.importBatchId;
+            retypedActive = activeSell;
           }
         }
         if (transaction === undefined) continue;
@@ -1382,11 +1463,16 @@ async function planAssetConversions(
             tradeDate: row.record.tradeDate,
             beforeQuantity: Quantity.zero(),
             statementQuantity: row.record.quantity,
+            // #143 SPEC-007 BR-007-05b: B3's own price and fees — the cash half
+            // of the exchange. Read from the transaction, which for an
+            // in-place copy is what the ledger already holds.
+            ...(priced ? { unitPrice: transaction.unitPrice, fees: transaction.fees } : {}),
           },
           transaction,
           row,
           mode,
           origin,
+          retypedActive,
         });
       }
 
@@ -1459,15 +1545,52 @@ async function planAssetConversions(
             ),
         ];
       };
+      /**
+       * SPEC-005 BR-005-20c (#143) — a source `Atualização` restating the
+       * balance the replay already holds is corroboration, not evidence
+       * (`corroboratesSourceBalance`). Set aside **before** grouping: B3
+       * restated BPFF11's 90 on the incorporation's own date, and as a
+       * same-date candidate it displaced the later priced `Resgate` that
+       * actually removed the units. It stays `unclassified` — see the
+       * definition table's v7 note.
+       */
+      const evidenceRefs = refs.filter((ref) => {
+        if (
+          ref.evidence.movement !== 'atualizacao' ||
+          !definition.sourceAssetCodes.includes(ref.evidence.assetCode)
+        ) {
+          return true;
+        }
+        const before = replayPosition(
+          historyForCode(ref.evidence.assetCode).filter((transaction) =>
+            isBeforeConversion(transaction, ref.evidence.tradeDate),
+          ),
+        );
+        return !(
+          before.ok &&
+          corroboratesSourceBalance(
+            {
+              ...ref.evidence,
+              beforeQuantity: before.value.quantity,
+              statementQuantity: ref.transaction.quantity,
+            },
+            [definition],
+          )
+        );
+      });
       const groups = chronologicalEvidenceGroups(
         definition,
-        refs,
+        evidenceRefs,
         conversionWindowDays,
         usedEvidence,
         allTargetAnchorDates,
       );
       for (const nearby of groups) {
         if (nearby.length === 0 || nearby.every((ref) => ref.row === null)) continue;
+        // #143: two same-day target credits are two anchors of one group, so
+        // the same evidence can be grouped twice. A group whose evidence an
+        // earlier group of this pass already consumed is that group again.
+        if (nearby.some((ref) => usedEvidence.has(ref.evidence.id))) continue;
         const enriched: ConversionEvidenceRef[] = [];
         for (const ref of nearby) {
           const before = replayPosition(
@@ -1544,9 +1667,11 @@ async function planAssetConversions(
             status: 'active',
             tradeDate: leg.tradeDate,
             quantity: leg.quantity,
-            unitPrice: Money.zero(),
-            fees: Money.zero(),
-            totalValue: Money.zero(),
+            // #143 SPEC-007 BR-007-05b: a cash-bearing out leg keeps B3's price
+            // and fees and carries the cash as its total; every other leg is 0.
+            unitPrice: leg.unitPrice,
+            fees: leg.fees,
+            totalValue: leg.totalValue,
             ratio: null,
             conversionGroupId: groupId,
             costBasis: leg.costBasis,
@@ -1559,6 +1684,7 @@ async function planAssetConversions(
             row: ref?.row ?? null,
             mode: ref === undefined ? 'companion' : ref.mode,
             origin: ref?.origin ?? null,
+            retypedActive: ref?.retypedActive === true && leg.type === 'conversion_out',
           });
         }
         if (!validateAssetConversionGroup(groupWrites.map((write) => write.transaction)).ok) {

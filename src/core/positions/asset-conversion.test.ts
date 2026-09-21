@@ -364,4 +364,147 @@ describe('SPEC-007 BR-007-05b — grouped asset conversions', () => {
     expect(result.value.averageCost.toString()).toBe('0');
     expect(result.value.realizedGain.toString()).toBe('0');
   });
+
+  describe('#143 — a cash-bearing conversion, its fraction and a rename, in sequence (TS-06)', () => {
+    /**
+     * Generated shape of B3's BPFF11/HGFF11 → RVBI11 → PSEC11 chain (DV-24):
+     * round numbers, hand-computed.
+     *
+     *   SRCA11 buy 90 @ 100,00               → 90 / 9.000,00
+     *   SRCB11 buy 70 @ 103,79 + 0,02 fees   → 70 / 7.265,32 (70 × 103,79 = 7.265,30)
+     *   2025-10-06 in  83,89 + 75,36 TGT11   → 159,25 / 15.925,00, avg 100,00
+     *     in cost = 16.265,32 − cash 340,32 = 15.925,00; 15.925 × 83,89 ÷ 159,25
+     *     = 8.389,00, the rest 7.536,00
+     *   2025-10-14 out SRCA11 90 @ 2,239, cost 9.000,00 → 0 / 0, realised 0
+     *   2025-10-14 out SRCB11 70 @ 1,983, cost 7.265,32 → 0 / 0, realised 0
+     *   2025-10-20 sell 0,25 TGT11 @ 59,43   → proceeds 14,8575, cost out
+     *     0,25 × 100,00 = 25,00, realised −10,1425; 159 / 15.900,00, avg 100,00
+     *   2025-10-27 out TGT11 159, cost 15.900,00 → 0 / 0
+     *   2025-10-27 in  NEWT11 159 at 15.900,00   → 159 / 15.900,00, avg 100,00
+     */
+    const cashGroup = '00000000-c0de-7000-8000-000000000051';
+    const renameGroup = '00000000-c0de-7000-8000-000000000052';
+    function chain(): Transaction[] {
+      return [
+        aTransaction().buy().of('SRCA11').on('2024-03-01').quantity('90').price('100').build(),
+        aTransaction()
+          .buy()
+          .of('SRCB11')
+          .on('2024-03-01')
+          .quantity('70')
+          .price('103.79')
+          .fees('0.02')
+          .build(),
+        aTransaction()
+          .conversionIn('8389', cashGroup)
+          .of('TGT11')
+          .on('2025-10-06')
+          .quantity('83.89')
+          .build(),
+        aTransaction()
+          .conversionIn('7536', cashGroup)
+          .of('TGT11')
+          .on('2025-10-06')
+          .quantity('75.36')
+          .build(),
+        aTransaction()
+          .conversionOut(cashGroup, '9000')
+          .of('SRCA11')
+          .on('2025-10-14')
+          .quantity('90')
+          .price('2.239')
+          .build(),
+        aTransaction()
+          .conversionOut(cashGroup, '7265.32')
+          .of('SRCB11')
+          .on('2025-10-14')
+          .quantity('70')
+          .price('1.983')
+          .build(),
+        aTransaction().sell().of('TGT11').on('2025-10-20').quantity('0.25').price('59.43').build(),
+        aTransaction()
+          .conversionOut(renameGroup, '15900')
+          .of('TGT11')
+          .on('2025-10-27')
+          .quantity('159')
+          .build(),
+        aTransaction()
+          .conversionIn('15900', renameGroup)
+          .of('NEWT11')
+          .on('2025-10-27')
+          .quantity('159')
+          .build(),
+      ];
+    }
+
+    it('closes both sources at zero cost with no realised gain, the cash never reaching a gain', () => {
+      const result = replayPositions(chain());
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      for (const code of ['SRCA11', 'SRCB11']) {
+        const state = stateFor(result.value, code);
+        expect(state?.quantity.toString(), code).toBe('0');
+        expect(state?.totalCost.toString(), code).toBe('0');
+        // The old `sell` reading realised 201,51 − 9.000,00 = −8.798,49 here.
+        expect(state?.realizedGain.toString(), code).toBe('0');
+      }
+    });
+
+    it('asserts the target at every step: arrival, fraction sale, rename', () => {
+      const ledger = chain();
+      const target = (upTo: string) =>
+        replayPosition(
+          ledger.filter((t) => t.assetId === assetIdFor('TGT11') && t.tradeDate <= upTo),
+        );
+
+      const arrived = target('2025-10-06');
+      expect(arrived.ok && arrived.value.quantity.toString()).toBe('159.25');
+      expect(arrived.ok && arrived.value.totalCost.toString()).toBe('15925');
+      expect(arrived.ok && arrived.value.averageCost.toString()).toBe('100');
+
+      const sold = target('2025-10-20');
+      expect(sold.ok && sold.value.quantity.toString()).toBe('159');
+      expect(sold.ok && sold.value.totalCost.toString()).toBe('15900');
+      expect(sold.ok && sold.value.averageCost.toString()).toBe('100');
+      // 0,25 × 59,43 = 14,8575 − 0,25 × 100,00 = −10,1425.
+      expect(sold.ok && sold.value.realizedGain.toString()).toBe('-10.1425');
+
+      const renamed = target('2025-10-27');
+      expect(renamed.ok && renamed.value.quantity.toString()).toBe('0');
+      expect(renamed.ok && renamed.value.totalCost.toString()).toBe('0');
+      // The rename realises nothing further.
+      expect(renamed.ok && renamed.value.realizedGain.toString()).toBe('-10.1425');
+
+      const all = replayPositions(ledger);
+      expect(all.ok).toBe(true);
+      if (!all.ok) return;
+      const next = stateFor(all.value, 'NEWT11');
+      expect(next?.quantity.toString()).toBe('159');
+      expect(next?.totalCost.toString()).toBe('15900');
+      expect(next?.averageCost.toString()).toBe('100');
+      expect(next?.realizedGain.toString()).toBe('0');
+    });
+
+    it('removes exactly cost_basis on a cash-bearing out leg, whatever its price says', () => {
+      // 90 @ 100,00 = 9.000,00; out 40 carrying 4.000,00 at a stated 999,00:
+      // 50 / 5.000,00 / 100,00 left, realised 0 — price and fees are never read.
+      const result = replayPosition([
+        aTransaction().buy().of('SRCA11').quantity('90').price('100').build(),
+        aTransaction()
+          .conversionOut(cashGroup, '4000')
+          .of('SRCA11')
+          .on('2026-02-01')
+          .quantity('40')
+          .price('999')
+          .fees('3')
+          .build(),
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('50');
+      expect(result.value.totalCost.toString()).toBe('5000');
+      expect(result.value.averageCost.toString()).toBe('100');
+      expect(result.value.realizedGain.toString()).toBe('0');
+    });
+  });
 });

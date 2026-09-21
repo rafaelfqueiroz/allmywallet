@@ -19,10 +19,12 @@ import { calendarDaysBetween } from '@/core/ingestion/share-ratio';
  *
  * - after a **bonificação**, the fraction is a `fracao_bonificacao` (total cost
  *   unchanged, no realised gain) and the auction a `leilao_fracoes` provento;
- * - after a **split or grupamento**, the fraction is a `sell` dated at the
- *   Fração em Ativos date and priced at the auction's unit price, and the
- *   auction is **consumed** — its stored copy `superseded`, its row `ignored`
- *   (BR-005-19 amended) — because its cash is the sale's proceeds.
+ * - after a **split or grupamento** — or, #143, a **conversion** whose ratio
+ *   created the fraction (`conversionCreatedFraction`) — the fraction is a
+ *   `sell` dated at the Fração em Ativos date and priced at the auction's unit
+ *   price, and the auction is **consumed** — its stored copy `superseded`, its
+ *   row `ignored` (BR-005-19 amended) — because its cash is the sale's
+ *   proceeds.
  *
  * Pure (AR-01): which rows exist and what the position held come from
  * `corporate-event-resolution.ts`.
@@ -59,10 +61,53 @@ export type FractionRefusal =
   | 'scale_not_representable';
 
 /** The share-base types a fraction can come from (SPEC-007 BR-007-04/05). */
-export type OriginType = 'bonificacao' | 'split' | 'grupamento';
+export type ShareBaseType = 'bonificacao' | 'split' | 'grupamento';
 
-export function isShareBaseType(type: TransactionType): type is OriginType {
+/**
+ * What left a fraction: a share-base event, or — #143 — a BR-005-20c
+ * conversion whose own ratio created it (`conversionCreatedFraction`). A
+ * conversion origin reads as a split's does (BR-007-04b): the fraction carries
+ * cost, so it is sold at the auction's price and the auction is consumed.
+ */
+export type OriginType = ShareBaseType | 'conversion';
+
+export function isShareBaseType(type: TransactionType): type is ShareBaseType {
   return type === 'bonificacao' || type === 'split' || type === 'grupamento';
+}
+
+/**
+ * SPEC-005 BR-005-20b (#143) — **a conversion is itself the origin of a
+ * fraction its own ratio created.**
+ *
+ * B3 incorporated 90 BPFF11 and 70 HGFF11 into RVBI11 at 0,9321 and 1,0766:
+ * 83,89 + 75,36 = 159,25, and auctioned the 0,25 off RVBI11 two weeks later.
+ * Neither source held a fraction, so the #129 D1 trail through the outgoing
+ * legs finds nothing (`no_origin`) — correctly, because no share-base event
+ * left it. The conversion did.
+ *
+ * The test is exact, not inferred: **every outgoing quantity is whole** — the
+ * sources brought no fraction across, so none can have come from an event
+ * upstream — and **the incoming quantity is not**, so the group put a
+ * fraction on the target that was not there before it. Anything else stays as
+ * it was: a whole-quantity rename adds no fraction and is no candidate (a
+ * target's own bonificação fraction keeps its one origin), and a fractional
+ * outgoing leg with no trail — the KLBN11 whole-position shape — still
+ * refuses `no_origin`, because there the fraction pre-dates the conversion.
+ *
+ * Worked example (DV-17): outgoing 90 and 70, whole; incoming 83,89 + 75,36 =
+ * 159,25, whose fractional part is 0,25 — a conversion origin. Outgoing 180,
+ * incoming 180: no. Outgoing 0,6, incoming 0,6: no.
+ */
+export function conversionCreatedFraction(
+  outgoing: readonly Quantity[],
+  incoming: readonly Quantity[],
+): boolean {
+  const received = incoming.reduce((sum, quantity) => sum.plus(quantity), Quantity.zero());
+  return (
+    outgoing.length > 0 &&
+    outgoing.every((quantity) => quantity.fractionalPart().isZero()) &&
+    !received.fractionalPart().isZero()
+  );
 }
 
 /** A share-base event in a fraction's window, with the fraction it left. */
@@ -305,8 +350,8 @@ export function pairingRefusalOf(
  *
  * - Bonificação origin → `fracao_bonificacao`, price as stated (B3 gives none)
  *   and a zero `total_value` (`computeTotalValue`, #113 Decision log row 17).
- * - Split or grupamento origin → `sell` of the fraction at the auction's unit
- *   price, on the fraction's own date (Decision log row 8).
+ * - Split, grupamento or conversion (#143) origin → `sell` of the fraction at
+ *   the auction's unit price, on the fraction's own date (Decision log row 8).
  *
  * Worked example (DV-17), BR-007-04b: 105 shares at 10,00 (cost 1.050,00);
  * grupamento ×0,1 → 10,5 shares, cost 1.050,00, average 100,00; Fração em

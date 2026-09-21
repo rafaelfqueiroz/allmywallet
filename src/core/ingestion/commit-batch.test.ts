@@ -24,7 +24,7 @@ import type {
   ParsedRecord,
 } from '@/core/ingestion/ports';
 import { explainRefusal } from '@/core/ingestion/refusal';
-import { stageBatch } from '@/core/ingestion/stage-batch';
+import { keyFormsFor, stageBatch } from '@/core/ingestion/stage-batch';
 import { commitBatch } from '@/core/ingestion/test-support/commit';
 import {
   buildFakeIngestionDeps,
@@ -3634,6 +3634,84 @@ describe('#138 — the four Movimentação rows that refused on every import', (
     return replayed.value;
   }
 
+  describe('#143 — a ticker rename B3 states only as an Atualização on the new code', () => {
+    const wiz = (code: string, overrides: Partial<NormalizedTransactionRecord>) =>
+      buy({
+        assetCode: code,
+        assetName: 'WIZ SOLUCOES E CORRETAGEM DE SEGUROS S.A.',
+        institutionName: INTER,
+        fees: Money.zero(),
+        ...overrides,
+      });
+    /**
+     * Generated (DV-24): 100 WIZS3 at 10,00 and 80 at 8,00 — 1.640,00 for 180.
+     * B3 credits 180 WIZC3 on the rename and never debits WIZS3; 220 WIZC3
+     * are bought later at 6,00. B3's custody reads 400 WIZC3 and no WIZS3.
+     */
+    const file = () => [
+      wiz('WIZS3', {
+        tradeDate: BusinessDate.of('2021-04-27'),
+        quantity: Quantity.fromString('100'),
+        unitPrice: Money.fromString('10'),
+      }),
+      wiz('WIZS3', {
+        tradeDate: BusinessDate.of('2022-03-18'),
+        quantity: Quantity.fromString('80'),
+        unitPrice: Money.fromString('8'),
+      }),
+      wiz('WIZC3', {
+        b3Type: 'Atualização',
+        tradeDate: BusinessDate.of('2023-02-10'),
+        quantity: Quantity.fromString('180'),
+        unitPrice: Money.zero(),
+        priceStated: false,
+      }),
+      wiz('WIZC3', {
+        tradeDate: BusinessDate.of('2024-04-17'),
+        quantity: Quantity.fromString('220'),
+        unitPrice: Money.fromString('6'),
+      }),
+    ];
+
+    it('resolves the group a pre-v6 commit left unclassified: the old code closes, cost carries, no gain', async () => {
+      const deps = buildFakeIngestionDeps();
+      // The owner's state: the Atualização stored unclassified, WIZS3 still
+      // open at 180 and WIZC3 short by exactly that.
+      const before = await importFile(deps, file(), false);
+      expect(before.outcome).toMatchObject({ resolvedAssetConversions: 0 });
+      expect((await positionOf(deps, 'WIZS3', INTER)).quantity.toString()).toBe('180');
+      expect((await positionOf(deps, 'WIZC3', INTER)).quantity.toString()).toBe('220');
+
+      const again = await importFile(deps, file());
+
+      expect(again.outcome).toMatchObject({
+        invalid: 0,
+        resolvedAssetConversions: 1,
+        committedConversionLegs: 2,
+      });
+      const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+      expect(legs.map((row) => [row.type, row.costBasis?.toString()])).toEqual(
+        expect.arrayContaining([
+          ['conversion_out', '1640'],
+          ['conversion_in', '1640'],
+        ]),
+      );
+      // SPEC-007 BR-007-05b: the source closes at zero cost, nothing realised.
+      const source = await positionOf(deps, 'WIZS3', INTER);
+      expect(source.quantity.toString()).toBe('0');
+      expect(source.totalCost.toString()).toBe('0');
+      // 1.640,00 carried + 220 × 6,00 = 2.960,00 for 400.
+      const target = await positionOf(deps, 'WIZC3', INTER);
+      expect(target.quantity.toString()).toBe('400');
+      expect(target.totalCost.toString()).toBe('2960');
+
+      const count = deps.transactions.rows.length;
+      const third = await importFile(deps, file());
+      expect(third.outcome).toMatchObject({ applied: 0, invalid: 0, resolvedAssetConversions: 0 });
+      expect(deps.transactions.rows).toHaveLength(count);
+    });
+  });
+
   describe('BIDI11 → INBR32 (SPEC-005 BR-005-20c, SPEC-007 BR-007-05b)', () => {
     const inbr32 = (
       b3Type: string,
@@ -3745,6 +3823,280 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       expect(outcome).toMatchObject({ invalid: 2, resolvedAssetConversions: 0 });
       expect(deps.transactions.rows.some((row) => row.conversionGroupId !== null)).toBe(false);
       expect((await positionOf(deps, 'INBR32', INTER)).quantity.toString()).toBe('0');
+    });
+  });
+
+  describe('#143 — BPFF11 + HGFF11 → RVBI11 → PSEC11: a cash-bearing incorporation, its fraction and a rename', () => {
+    const fund = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      assetCode: string,
+      date: string,
+      quantity: string,
+      unitPrice = '0',
+      fees = '0',
+    ) =>
+      buy({
+        b3Type,
+        direction,
+        assetCode,
+        assetName: assetCode,
+        assetClass: 'fii',
+        institutionName: INTER,
+        tradeDate: BusinessDate.of(date),
+        quantity: Quantity.fromString(quantity),
+        unitPrice: Money.fromString(unitPrice),
+        fees: Money.fromString(fees),
+        priceStated: unitPrice !== '0',
+      });
+    /**
+     * Generated (DV-24): the shape of B3's record, round numbers, hand-computed.
+     *
+     * | date | row | effect after #143 |
+     * |---|---|---|
+     * | 2024-03-01 | BPFF11 buy 90 @ 100,00 | 90 / 9.000,00 |
+     * | 2024-03-01 | HGFF11 buy 70 @ 103,79 + 0,02 | 70 / 7.265,32 (70 × 103,79 = 7.265,30) |
+     * | 2025-10-06 | BPFF11 / HGFF11 Atualização 90 / 70 | unchanged balance: corroboration, stays `unclassified` |
+     * | 2025-10-06 | RVBI15 Atualização 83,89 and 75,36 | `conversion_in` on RVBI11: 159,25 |
+     * | 2025-10-14 | BPFF11 Resgate 90 @ 2,239 | `conversion_out`, cost 9.000,00, cash 201,51 |
+     * | 2025-10-14 | HGFF11 Resgate 70 @ 1,983 | `conversion_out`, cost 7.265,32, cash 138,81 |
+     * | 2025-10-17 | RVBI11 Atualização 159,25 | unchanged balance: stays `unclassified` |
+     * | 2025-10-20 | RVBI11 Fração em Ativos 0,25 | `sell` 0,25 @ 59,43 |
+     * | 2025-10-27 | PSEC11 Atualização 159 | rename: RVBI11 159 → PSEC11 159 |
+     * | 2025-11-06 | RVBI11 Leilão de Fração 0,25 @ 59,43 | consumed: `superseded` |
+     *
+     * RVBI11 receives 16.265,32 − 340,32 of cash = **15.925,00** for 159,25:
+     * average 100,00, split 100 × 83,89 = 8.389,00 and 7.536,00. The fraction
+     * realises 0,25 × 59,43 − 0,25 × 100,00 = 14,8575 − 25,00 = **−10,1425**,
+     * leaving 159 / 15.900,00, which converts whole to PSEC11.
+     */
+    const file = () => [
+      fund('Compra', 'credit', 'BPFF11', '2024-03-01', '90', '100'),
+      fund('Compra', 'credit', 'HGFF11', '2024-03-01', '70', '103.79', '0.02'),
+      fund('Atualização', 'credit', 'BPFF11', '2025-10-06', '90'),
+      fund('Atualização', 'credit', 'HGFF11', '2025-10-06', '70'),
+      fund('Atualização', 'credit', 'RVBI15', '2025-10-06', '83.89'),
+      fund('Atualização', 'credit', 'RVBI15', '2025-10-06', '75.36'),
+      fund('Resgate', 'debit', 'BPFF11', '2025-10-14', '90', '2.239'),
+      fund('Resgate', 'debit', 'HGFF11', '2025-10-14', '70', '1.983'),
+      fund('Atualização', 'credit', 'RVBI11', '2025-10-17', '159.25'),
+      fund('Fração em Ativos', 'debit', 'RVBI11', '2025-10-20', '0.25'),
+      fund('Atualização', 'credit', 'PSEC11', '2025-10-27', '159'),
+      fund('Leilão de Fração', 'credit', 'RVBI11', '2025-11-06', '0.25', '59.43'),
+    ];
+
+    async function assetIdOf(deps: FakeIngestionDeps, code: string) {
+      return deps.assets.resolve({
+        code,
+        name: code,
+        assetClass: 'fii',
+        classStated: false,
+        nameStated: false,
+      });
+    }
+
+    async function expectEndState(deps: FakeIngestionDeps) {
+      for (const code of ['BPFF11', 'HGFF11']) {
+        const source = await positionOf(deps, code, INTER);
+        expect(source.quantity.toString(), code).toBe('0');
+        expect(source.totalCost.toString(), code).toBe('0');
+        // SPEC-007 BR-007-05b: the cash is a return of capital, not a loss.
+        expect(source.realizedGain.toString(), code).toBe('0');
+      }
+      const rvbi11 = await positionOf(deps, 'RVBI11', INTER);
+      expect(rvbi11.quantity.toString()).toBe('0');
+      expect(rvbi11.totalCost.toString()).toBe('0');
+      // Only the fraction realises anything: 14,8575 − 25,00.
+      expect(rvbi11.realizedGain.toString()).toBe('-10.1425');
+      const psec11 = await positionOf(deps, 'PSEC11', INTER);
+      expect(psec11.quantity.toString()).toBe('159');
+      expect(psec11.totalCost.toString()).toBe('15900');
+      expect(psec11.averageCost.toString()).toBe('100');
+      expect(psec11.realizedGain.toString()).toBe('0');
+
+      const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+      const assetCodeOf = new Map<string, string>();
+      for (const code of ['BPFF11', 'HGFF11', 'RVBI11', 'PSEC11']) {
+        assetCodeOf.set(await assetIdOf(deps, code), code);
+      }
+      expect(
+        legs
+          .map((leg) => [
+            leg.type,
+            assetCodeOf.get(leg.assetId),
+            leg.tradeDate,
+            leg.quantity.toString(),
+            leg.costBasis?.toString(),
+            leg.unitPrice.toString(),
+            leg.totalValue.toString(),
+          ])
+          .sort((a, b) => `${a[2]}${a[1]}${a[3]}`.localeCompare(`${b[2]}${b[1]}${b[3]}`)),
+      ).toEqual([
+        ['conversion_in', 'RVBI11', '2025-10-06', '75.36', '7536', '0', '0'],
+        ['conversion_in', 'RVBI11', '2025-10-06', '83.89', '8389', '0', '0'],
+        ['conversion_out', 'BPFF11', '2025-10-14', '90', '9000', '2.239', '201.51'],
+        ['conversion_out', 'HGFF11', '2025-10-14', '70', '7265.32', '1.983', '138.81'],
+        ['conversion_in', 'PSEC11', '2025-10-27', '159', '15900', '0', '0'],
+        ['conversion_out', 'RVBI11', '2025-10-27', '159', '15900', '0', '0'],
+      ]);
+      expect(new Set(legs.map((leg) => leg.conversionGroupId)).size).toBe(2);
+
+      const rvbi11Id = await assetIdOf(deps, 'RVBI11');
+      const fraction = deps.transactions.rows.find(
+        (row) => row.assetId === rvbi11Id && row.type === 'sell',
+      );
+      expect(fraction).toMatchObject({ status: 'active', tradeDate: '2025-10-20' });
+      expect(fraction?.quantity.toString()).toBe('0.25');
+      expect(fraction?.unitPrice.toString()).toBe('59.43');
+      const auction = deps.transactions.rows.find(
+        (row) => row.assetId === rvbi11Id && row.tradeDate === '2025-11-06',
+      );
+      expect(auction?.status).toBe('superseded');
+      // DM-4 / TS-08: every cached position equals a replay of its ledger —
+      // including the sources, whose cache the v3 sells wrote first.
+      const cached = await deps.positions.list();
+      expect(cached.length).toBeGreaterThanOrEqual(4);
+      for (const snapshot of cached) {
+        const replayed = replayPosition(
+          await deps.transactions.listForPosition(snapshot.assetId, snapshot.institutionId),
+        );
+        if (!replayed.ok) throw new Error('ledger does not replay');
+        for (const field of ['quantity', 'totalCost', 'averageCost', 'realizedGain'] as const) {
+          expect(snapshot.state[field].toString(), field).toBe(replayed.value[field].toString());
+        }
+      }
+      // The three restated balances are corroboration: left `unclassified`.
+      expect(
+        deps.transactions.rows
+          .filter((row) => row.status === 'unclassified')
+          .map((row) => [assetCodeOf.get(row.assetId), row.tradeDate, row.quantity.toString()])
+          .sort(),
+      ).toEqual([
+        ['BPFF11', '2025-10-06', '90'],
+        ['HGFF11', '2025-10-06', '70'],
+        ['RVBI11', '2025-10-17', '159.25'],
+      ]);
+    }
+
+    it('resolves the chain a pre-v7 commit left as two false losses, then re-imports as a no-op', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      // Today's state: each priced Resgate applied as v3's sell, realising the
+      // whole cost as a loss — 201,51 − 9.000,00 = −8.798,49 and
+      // 138,81 − 7.265,32 = −7.126,51 — and every other row unclassified.
+      const before = await importFile(deps, file(), false);
+      expect(before.outcome).toMatchObject({ resolvedAssetConversions: 0, invalid: 0 });
+      expect((await positionOf(deps, 'BPFF11', INTER)).realizedGain.toString()).toBe('-8798.49');
+      // HGFF11's average repeats (7.265,32 ÷ 70), so v3's full sale realises
+      // −7.126,51 only to the column's scale — a pre-existing property of
+      // `applySale`, compared here as stored.
+      expect(asStored((await positionOf(deps, 'HGFF11', INTER)).realizedGain)).toBe(
+        '-7126.51000000',
+      );
+      expect((await positionOf(deps, 'PSEC11', INTER)).quantity.toString()).toBe('0');
+
+      const again = await importFile(deps, file());
+
+      expect(again.outcome).toMatchObject({
+        // The rename's generated RVBI11 `conversion_out` is the one insert;
+        // every other write activates or retypes a stored row in place.
+        applied: 1,
+        invalid: 0,
+        resolvedAssetConversions: 2,
+        committedConversionLegs: 6,
+        resolvedCorporateEvents: 1,
+        consumedAuctions: 1,
+      });
+      await expectEndState(deps);
+      // The retyped Resgates already left every allocation as sells; the
+      // wallet side must not be handed them a second time.
+      expect(
+        again.outcome.committed
+          .filter((row) => row.type === 'conversion_out')
+          .map((row) => row.quantity.toString()),
+      ).toEqual(['159']);
+
+      const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
+      const third = await importFile(deps, file());
+      expect(third.outcome).toMatchObject({
+        applied: 0,
+        invalid: 0,
+        resolvedAssetConversions: 0,
+        committedConversionLegs: 0,
+        resolvedCorporateEvents: 0,
+        consumedAuctions: 0,
+        committed: [],
+      });
+      expect(deps.transactions.rows).toEqual(snapshot);
+    });
+
+    it('reaches the same end state when the file is split between the receipts and the cash (review F1)', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      const rows = file();
+      const cut = (row: (typeof rows)[number]) =>
+        row.record.kind === 'transaction' && row.record.tradeDate <= '2025-10-10';
+
+      // The first file ends before the Resgates: the receipts alone must not
+      // convert at cash zero (BR-005-17).
+      const early = await importFile(deps, rows.filter(cut));
+      expect(early.outcome).toMatchObject({ resolvedAssetConversions: 0, invalid: 0 });
+      expect((await positionOf(deps, 'BPFF11', INTER)).quantity.toString()).toBe('90');
+
+      const late = await importFile(
+        deps,
+        rows.filter((row) => !cut(row)),
+      );
+      expect(late.outcome).toMatchObject({ invalid: 0, resolvedAssetConversions: 2 });
+      await expectEndState(deps);
+    });
+
+    it('finds a Resgate sell stored under the placeholder key an older map gave it', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      await importFile(deps, file(), false);
+      // The owner's history: a map that did not know `Resgate` stored each row
+      // `unclassified` under the placeholder key, and a later import activated
+      // it in place as a sell — keeping that key. A re-import stages the row
+      // under its `mapped` key, so an exact-key lookup never finds the sell.
+      const sells = deps.transactions.rows.filter((row) => row.type === 'sell');
+      expect(sells).toHaveLength(2);
+      for (const sell of sells) {
+        const { unmapped } = keyFormsFor(
+          {
+            assetId: sell.assetId,
+            institutionId: sell.institutionId,
+            tradeDate: sell.tradeDate,
+            quantity: sell.quantity,
+            unitPrice: sell.unitPrice,
+          },
+          'sell',
+          'Resgate',
+        );
+        await deps.transactions.update({ ...sell, naturalKey: unmapped });
+      }
+
+      const again = await importFile(deps, file());
+
+      expect(again.outcome).toMatchObject({ invalid: 0, resolvedAssetConversions: 2 });
+      await expectEndState(deps);
+    });
+
+    it('reaches the same end state when the file is first imported with conversions enabled', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+
+      const first = await importFile(deps, file());
+
+      expect(first.outcome).toMatchObject({
+        invalid: 0,
+        resolvedAssetConversions: 2,
+        committedConversionLegs: 6,
+        resolvedCorporateEvents: 1,
+        consumedAuctions: 1,
+      });
+      await expectEndState(deps);
+
+      const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
+      const again = await importFile(deps, file());
+      expect(again.outcome).toMatchObject({ applied: 0, invalid: 0, committed: [] });
+      expect(deps.transactions.rows).toEqual(snapshot);
     });
   });
 
