@@ -390,6 +390,109 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     });
   });
 
+  describe('SPEC-007 BR-007-06 — the estimate marker travels with the carry', () => {
+    const subscription = (at: string, on: string) =>
+      aTransaction()
+        .subscription()
+        .at(at)
+        .on(on)
+        .quantity('20')
+        .price('114.90')
+        .costEstimate(on)
+        .build();
+
+    it('carries an estimated source average as an estimate: (1.000,00 + 2.298,00) ÷ 120 = 27,48333…', () => {
+      const history = [
+        aTransaction().buy().at('A').on('2026-01-05').quantity('100').price('10').build(),
+        subscription('A', '2026-02-10'),
+      ];
+      const costs = resolveCarriedCosts(
+        [transfer('t', 'A', 'B', '2026-03-10', '120')],
+        historyOf(history),
+      );
+      expect(asStored(costs.get('t')?.cost as Money)).toBe('27.48333333');
+      expect(costs.get('t')?.estimated).toBe(true);
+    });
+
+    it('carries an exact average when the estimate lands after the debit', () => {
+      const history = [
+        aTransaction().buy().at('A').on('2026-01-05').quantity('100').price('10').build(),
+        subscription('A', '2026-03-11'),
+      ];
+      const costs = resolveCarriedCosts(
+        [transfer('t', 'A', 'B', '2026-03-10')],
+        historyOf(history),
+      );
+      expect(costs.get('t')?.cost.toString()).toBe('10');
+      expect(costs.get('t')?.estimated).toBe(false);
+    });
+
+    it('carries an exact average when the estimated lot closed before a new one opened (BR-007-07)', () => {
+      const history = [
+        subscription('A', '2026-01-05'),
+        aTransaction().sell().at('A').on('2026-02-01').quantity('20').price('120').build(),
+        aTransaction().buy().at('A').on('2026-02-10').quantity('100').price('10').build(),
+      ];
+      const costs = resolveCarriedCosts(
+        [transfer('t', 'A', 'B', '2026-03-10')],
+        historyOf(history),
+      );
+      expect(costs.get('t')?.cost.toString()).toBe('10');
+      expect(costs.get('t')?.estimated).toBe(false);
+    });
+
+    it('carries the marker down a chain X→A→B', () => {
+      // X: 20 @ 114,90, estimated → carried to A at 114,90, estimated.
+      // A: its own 100 @ 10,00 + 20 carried @ 114,90 = 3.298,00 ÷ 120 —
+      //    estimated because the carried credit is.
+      const history = [
+        subscription('X', '2026-01-05'),
+        aTransaction().buy().at('A').on('2026-01-05').quantity('100').price('10').build(),
+      ];
+      const xToA = transfer('x-to-a', 'X', 'A', '2026-03-01', '20');
+      const aToB = transfer('a-to-b', 'A', 'B', '2026-03-10', '120');
+      const costs = resolveCarriedCosts([aToB, xToA], historyOf(history));
+      expect(costs.get('x-to-a')?.cost.toString()).toBe('114.9');
+      expect(costs.get('x-to-a')?.estimated).toBe(true);
+      expect(asStored(costs.get('a-to-b')?.cost as Money)).toBe('27.48333333');
+      expect(costs.get('a-to-b')?.estimated).toBe(true);
+    });
+
+    it('a kept fallback keeps the marker its stored credit carries', () => {
+      const stored = {
+        ...transfer('t', 'A', 'B', '2026-03-10'),
+        debit: null,
+        fallback: money('27.48333333'),
+      };
+      const marked = {
+        ...stored,
+        credit: { ...stored.credit, costIsEstimate: true },
+      };
+      expect(resolveCarriedCosts([marked], historyOf([])).get('t')?.estimated).toBe(true);
+      expect(resolveCarriedCosts([stored], historyOf([])).get('t')?.estimated).toBe(false);
+    });
+
+    it('withCarriedCost marks an estimated carry, with no close date', () => {
+      const credit = aTransaction().transferIn().quantity('120').price('0').build();
+      const carried = withCarriedCost(credit, { cost: money('27.48333333'), estimated: true });
+      expect(carried.costIsEstimate).toBe(true);
+      // A carried average was read from no close (SPEC-005 BR-005-20d).
+      expect(carried.estimateCloseDate).toBeNull();
+    });
+
+    it('withCarriedCost clears a mark an earlier carry wrote when the source is now exact', () => {
+      const credit = aTransaction()
+        .transferIn()
+        .quantity('120')
+        .price('27.48333333')
+        .costEstimate('2026-03-10')
+        .build();
+      const carried = withCarriedCost(credit, { cost: money('10'), estimated: false });
+      expect(carried.costIsEstimate).toBe(false);
+      expect(carried.estimateCloseDate).toBeNull();
+    });
+  });
+
   it('withCarriedCost restates the total: 100 × 5,00 + 1,00 = 501,00', () => {
     const credit = aTransaction().transferIn().quantity('100').price('0').fees('1').build();
     const carried = withCarriedCost(credit, { cost: money('5'), estimated: false });
