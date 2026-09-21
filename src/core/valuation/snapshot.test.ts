@@ -182,6 +182,10 @@ describe('externalFlow — what TWR will have to neutralise, and nothing else', 
     expect(to8(externalFlow(cashLeg))).toBe('-201.00000000');
     // Recomputed, never read from the stored total: a stale 0 still flows −201,00.
     expect(to8(externalFlow({ ...cashLeg, totalValue: Money.zero() }))).toBe('-201.00000000');
+    // Retyping B3's priced Resgate from `sell` to `conversion_out` in place
+    // leaves net contributions exactly where the sell had them.
+    const asSell = aTransaction().sell().quantity('90').price('2.239').fees('0.51').build();
+    expect(externalFlow(cashLeg).equals(externalFlow(asSell))).toBe(true);
     // A price-less leg (every conversion before #143) and every incoming leg move no money.
     const plain = aTransaction().conversionOut().quantity('100').build();
     expect(externalFlow(plain).isZero()).toBe(true);

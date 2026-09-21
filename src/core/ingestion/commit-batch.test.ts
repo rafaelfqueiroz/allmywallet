@@ -3952,6 +3952,19 @@ describe('#138 — the four Movimentação rows that refused on every import', (
         (row) => row.assetId === rvbi11Id && row.tradeDate === '2025-11-06',
       );
       expect(auction?.status).toBe('superseded');
+      // DM-4 / TS-08: every cached position equals a replay of its ledger —
+      // including the sources, whose cache the v3 sells wrote first.
+      const cached = await deps.positions.list();
+      expect(cached.length).toBeGreaterThanOrEqual(4);
+      for (const snapshot of cached) {
+        const replayed = replayPosition(
+          await deps.transactions.listForPosition(snapshot.assetId, snapshot.institutionId),
+        );
+        if (!replayed.ok) throw new Error('ledger does not replay');
+        for (const field of ['quantity', 'totalCost', 'averageCost', 'realizedGain'] as const) {
+          expect(snapshot.state[field].toString(), field).toBe(replayed.value[field].toString());
+        }
+      }
       // The three restated balances are corroboration: left `unclassified`.
       expect(
         deps.transactions.rows

@@ -644,6 +644,10 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
     it('never reads a price on a source its definition does not name', () => {
       // The same priced evidence under a definition without the field is not a
       // conversion with cash: it refuses rather than keep or drop the figure.
+      const absent = { ...incorporation, pricedRedemptionSourceCodes: undefined };
+      expect(
+        resolve([absent], [...credits, ...redemptions], positions('9000', '7265.32'), 45),
+      ).toEqual({ status: 'unresolved', reason: 'incomplete' });
       const unnamed = { ...incorporation, pricedRedemptionSourceCodes: ['HGFF11'] };
       expect(
         resolve([unnamed], [...credits, ...redemptions], positions('9000', '7265.32'), 45),
@@ -664,6 +668,17 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
       expect(
         resolve([incorporation], [...apart, ...redemptions], positions('9000', '7265.32'), 45),
       ).toEqual({ status: 'unresolved', reason: 'ambiguous' });
+      // A target named by its ledger code sums its credits the same way:
+      // 4 + 6 = 10 NEW3 carrying the whole 100,00 as 40,00 and 60,00.
+      const plain: AssetConversionDefinition = { ...oneToOne, repeatedTargetCredits: true };
+      const summed = expectResolved(
+        resolve(
+          [plain],
+          [evidence('n1', 'NEW3', '0', '4'), evidence('n2', 'NEW3', '0', '6')],
+          [source('OLD3', '10', '10')],
+        ),
+      );
+      expect(summed.legs.map((leg) => leg.costBasis?.toString())).toEqual(['100', '40', '60']);
       // And a repeated Incorporação is not an Atualização credit.
       const incorporations = credits.map((row) => ({ ...row, movement: 'incorporacao' as const }));
       expect(
