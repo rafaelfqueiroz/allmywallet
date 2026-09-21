@@ -76,6 +76,9 @@ export default async function EditTransactionPage({ params }: PageProps) {
             tradeDate: leg.tradeDate,
             quantity: leg.quantity.toString(),
             costBasis: leg.costBasis?.toString() ?? '',
+            ...(leg.type === 'conversion_out' && !leg.totalValue.isZero()
+              ? { cash: leg.totalValue.toString() }
+              : {}),
           }))}
         />
       </PageShell>

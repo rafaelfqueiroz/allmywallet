@@ -11,7 +11,7 @@ import {
   TransactionId,
   WalletId,
 } from '@/core/shared/ids';
-import { Money, Quantity } from '@/core/shared/money';
+import { Money, Quantity, asStored } from '@/core/shared/money';
 import type { Result } from '@/core/shared/result';
 import type { DomainError } from '@/core/shared/domain-error';
 import { ASSET_CLASSES } from '@/db/schema/assets';
@@ -24,7 +24,11 @@ import {
   deleteAssetConversionGroup,
   replaceAssetConversionGroup,
 } from '@/core/ledger/manage-asset-conversion';
-import { USER_EDITABLE_TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
+import {
+  USER_EDITABLE_TRANSACTION_TYPES,
+  computeTotalValue,
+  type Transaction,
+} from '@/core/ledger/transaction';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { assignTransactionsToWallet } from '@/core/wallets/assign-transactions';
 import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
@@ -323,10 +327,19 @@ export async function editAssetConversionGroupAction(
       const quantity = normalizeDecimalInput(quantities[index] ?? '');
       const costBasis = normalizeDecimalInput(costs[index] ?? '');
       if (!isConversion(original) || quantity === null || costBasis === null) return INVALID_INPUT;
+      const legQuantity = Quantity.fromString(quantity);
       replacements.push({
         ...original,
-        quantity: Quantity.fromString(quantity),
+        quantity: legQuantity,
         costBasis: Money.fromString(costBasis),
+        // #143 SPEC-007 BR-007-05b: an outgoing leg's cash is B3's price ×
+        // quantity − fees; it follows the edited quantity rather than keep a
+        // total the validator would find inconsistent. Zero on every other leg.
+        totalValue: Money.fromString(
+          asStored(
+            computeTotalValue(original.type, legQuantity, original.unitPrice, original.fees),
+          ),
+        ),
         isUserModified: true,
         updatedAt: deps.ledger.clock.now(),
       });
