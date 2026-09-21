@@ -267,6 +267,10 @@ export const ASSET_LIQUIDATION_DEFINITIONS: readonly AssetLiquidationDefinition[
       { assetCode: 'BPFF11', liquidationValue: Money.fromString('62.03538245') },
       { assetCode: 'HGFF11', liquidationValue: Money.fromString('71.04670108') },
     ],
-    target: { assetCode: 'RVBI11', evidenceAssetCode: 'RVBI15', unitCost: Money.fromString('64.15') },
+    target: {
+      assetCode: 'RVBI11',
+      evidenceAssetCode: 'RVBI15',
+      unitCost: Money.fromString('64.15'),
+    },
   },
 ];

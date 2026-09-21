@@ -109,7 +109,8 @@ export interface UnresolvedLiquidation {
   readonly reason: LiquidationUnresolvedReason;
 }
 
-export type LiquidationResolution = ResolvedLiquidation | AppliedLiquidation | UnresolvedLiquidation;
+export type LiquidationResolution =
+  ResolvedLiquidation | AppliedLiquidation | UnresolvedLiquidation;
 
 export interface ResolveLiquidationInput {
   readonly definition: AssetLiquidationDefinition;

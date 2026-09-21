@@ -115,7 +115,14 @@ describe('SPEC-005 BR-005-20c (#143 D10) — a liquidation paid partly in anothe
     // realised 5.583,1844205 − 9.000,00 = −3.416,8155795; average unchanged
     // until the position closes (BR-007-03).
     const bpff = replayPosition([
-      aTransaction().buy().of('BPFF11').on('2024-03-01').quantity('90').price('100').fees('0').build(),
+      aTransaction()
+        .buy()
+        .of('BPFF11')
+        .on('2024-03-01')
+        .quantity('90')
+        .price('100')
+        .fees('0')
+        .build(),
       sale('BPFF11'),
     ]);
     if (!bpff.ok) throw new Error('BPFF11 does not replay');
@@ -175,9 +182,10 @@ describe('SPEC-005 BR-005-20c (#143 D10) — a liquidation paid partly in anothe
   });
 
   it('refuses ambiguity: two Resgates of one source, or credits on two dates', () => {
-    expect(
-      resolve([...complete(), redemption('bpff-second', 'BPFF11', '90')]),
-    ).toEqual({ status: 'unresolved', reason: 'ambiguous' });
+    expect(resolve([...complete(), redemption('bpff-second', 'BPFF11', '90')])).toEqual({
+      status: 'unresolved',
+      reason: 'ambiguous',
+    });
     expect(
       resolve([
         credit('rvbi15-a', '83.89'),
@@ -249,10 +257,7 @@ describe('SPEC-005 BR-005-20c (#143 D10) — a liquidation paid partly in anothe
     // 3 SRC11 at 10,00 = 30,00 of proceeds; 7,5 TGT11 at 4,00 = 30,00 acquired.
     const resolution = resolveLiquidation({
       definition: plain,
-      evidence: [
-        credit('tgt', '7.5', { assetCode: 'TGT11' }),
-        redemption('src', 'SRC11', '3'),
-      ],
+      evidence: [credit('tgt', '7.5', { assetCode: 'TGT11' }), redemption('src', 'SRC11', '3')],
       windowDays: 45,
     }) as ResolvedLiquidation;
     expect(resolution.proceeds.toString()).toBe('30');

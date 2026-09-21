@@ -1497,9 +1497,9 @@ describe('#143 D10 BR-005-20b — a fraction whose origin is a liquidation', () 
       tradeDate: '2025-10-06',
       tracedFrom: null,
     });
-    expect(str(outcome.movement === 'fracao_em_ativos' ? outcome.evidence.origin?.quantityAfter : null)).toBe(
-      '159.25',
-    );
+    expect(
+      str(outcome.movement === 'fracao_em_ativos' ? outcome.evidence.origin?.quantityAfter : null),
+    ).toBe('159.25');
 
     const target = replayed([...acquisitions, sale]);
     expect(target.quantity.toString()).toBe('159');
@@ -1513,7 +1513,9 @@ describe('#143 D10 BR-005-20b — a fraction whose origin is a liquidation', () 
     const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.25');
     const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.25', '59.43');
     for (const groupOf of [undefined, () => null]) {
-      expect(outcomeOf(resolveWith([fraction, auction], acquisitions, groupOf), fraction)).toMatchObject({
+      expect(
+        outcomeOf(resolveWith([fraction, auction], acquisitions, groupOf), fraction),
+      ).toMatchObject({
         status: 'refused',
         refusal: 'no_origin',
       });

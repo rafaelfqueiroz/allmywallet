@@ -106,7 +106,7 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
     ).toEqual(['rvbi11-to-psec11']);
   });
 
-  it('#143 D10 — the liquidation table carries only the administrator\'s public per-share figures', () => {
+  it("#143 D10 — the liquidation table carries only the administrator's public per-share figures", () => {
     expect(
       ASSET_LIQUIDATION_DEFINITIONS.map((definition) => ({
         id: definition.id,

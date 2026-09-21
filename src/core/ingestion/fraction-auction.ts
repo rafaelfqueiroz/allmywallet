@@ -83,11 +83,13 @@ export function isShareBaseType(type: TransactionType): type is ShareBaseType {
  * SPEC-005 BR-005-20b (#143) — **a conversion is itself the origin of a
  * fraction its own ratio created.**
  *
- * B3 incorporated 90 BPFF11 and 70 HGFF11 into RVBI11 at 0,9321 and 1,0766:
- * 83,89 + 75,36 = 159,25, and auctioned the 0,25 off RVBI11 two weeks later.
- * Neither source held a fraction, so the #129 D1 trail through the outgoing
- * legs finds nothing (`no_origin`) — correctly, because no share-base event
- * left it. The conversion did.
+ * Written for BPFF11/HGFF11 → RVBI11 while definitions v7 read that event as
+ * a conversion: 90 and 70 whole units became 83,89 + 75,36 = 159,25, and B3
+ * auctioned the 0,25 two weeks later. Neither source held a fraction, so the
+ * #129 D1 trail through the outgoing legs finds nothing (`no_origin`) —
+ * correctly, because no share-base event left it. The conversion did. Since
+ * #143 D10 that event is a liquidation (`acquisitionCreatedFraction`); the
+ * rule stays for any conversion whose own ratio leaves a fraction.
  *
  * The test is exact, not inferred: **every outgoing quantity is whole** — the
  * sources brought no fraction across, so none can have come from an event

@@ -951,8 +951,9 @@ function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undef
  * placeholder key (`…|rendimento|…|resgate`) and a later import then activated
  * in place as a `sell` keeps that `unmapped` key, while a re-import stages the
  * same row under its `mapped` key (`…|sell|…`). `storedCopyOf` misses it, so
- * the incorporation's outgoing evidence was never found on the owner's ledger.
- * Same rebuild `planReclassifications` uses: `keyFormsFor`, same occurrence.
+ * the BPFF11/HGFF11 `Resgate`s were never found on the owner's ledger — the
+ * evidence a liquidation (#143 D10) now reprices in place. Same rebuild
+ * `planReclassifications` uses: `keyFormsFor`, same occurrence.
  */
 function storedCopyAcrossKeyForms(stored: StoredLedger, row: ImportRow): Transaction | undefined {
   const exact = storedCopyOf(stored, row);
@@ -1320,9 +1321,7 @@ async function planLiquidations(
   const writes: ConversionWrite[] = [];
   const candidateByRow = new Map(candidates.map((c) => [c.row.id as string, c.transaction]));
   const carried = carriedTransactionsOf(candidates, carryLegs, stored);
-  const activations = reclassifications
-    .filter((r) => r.kind === 'activate')
-    .map((r) => r.updated);
+  const activations = reclassifications.filter((r) => r.kind === 'activate').map((r) => r.updated);
 
   for (const definition of ASSET_LIQUIDATION_DEFINITIONS) {
     const sourceCodes = definition.sources.map((source) => source.assetCode);
@@ -1406,21 +1405,15 @@ async function planLiquidations(
           if (row.record.kind !== 'transaction' || row.record.assetCode !== source.assetCode) {
             continue;
           }
-          let transaction: Transaction | null | undefined;
+          // A priced `Resgate` always stages as v3's `sell` (BR-005-18): this
+          // batch's `new` candidate, or a `duplicate` of a stored copy. An
+          // `invalid` row has neither and is no evidence.
+          let transaction: Transaction | undefined;
           let mode: LiquidationRef['mode'] = 'insert';
           let origin: ImportBatchId | null = null;
           let state: LiquidationEvidence['state'] = 'open';
           if (row.classification === 'new') {
             transaction = candidateByRow.get(row.id);
-          } else if (row.classification === 'unclassified') {
-            transaction = buildCandidate(
-              row,
-              context.batchId,
-              context.userId,
-              'unclassified',
-              context.now,
-              context.today,
-            );
           } else if (row.classification === 'duplicate') {
             transaction = storedCopyAcrossKeyForms(stored, row);
             if (transaction !== undefined) {
@@ -1429,7 +1422,7 @@ async function planLiquidations(
               state = stateOf(transaction);
             }
           }
-          if (transaction === null || transaction === undefined) continue;
+          if (transaction === undefined) continue;
           add(
             {
               transaction,
@@ -1547,7 +1540,13 @@ async function planLiquidations(
           continue;
         }
         add(
-          { transaction: t, row: null, mode: 'in_place', origin: t.importBatchId, retypedActive: false },
+          {
+            transaction: t,
+            row: null,
+            mode: 'in_place',
+            origin: t.importBatchId,
+            retypedActive: false,
+          },
           {
             role: 'target_credit',
             assetCode: evidenceCode,
@@ -1560,7 +1559,13 @@ async function planLiquidations(
       for (const t of targetLedger) {
         if (represented.has(t.id) || !isStoredLiquidationAcquisition(t, definition)) continue;
         add(
-          { transaction: t, row: null, mode: 'in_place', origin: t.importBatchId, retypedActive: false },
+          {
+            transaction: t,
+            row: null,
+            mode: 'in_place',
+            origin: t.importBatchId,
+            retypedActive: false,
+          },
           {
             role: 'target_credit',
             assetCode: evidenceCode,
@@ -2058,11 +2063,11 @@ async function planAssetConversions(
       /**
        * SPEC-005 BR-005-20c (#143) — a source `Atualização` restating the
        * balance the replay already holds is corroboration, not evidence
-       * (`corroboratesSourceBalance`). Set aside **before** grouping: B3
-       * restated BPFF11's 90 on the incorporation's own date, and as a
-       * same-date candidate it displaced the later priced `Resgate` that
-       * actually removed the units. It stays `unclassified` — see the
-       * definition table's v7 note.
+       * (`corroboratesSourceBalance`). Set aside **before** grouping: as a
+       * same-date candidate it would displace the later evidence that
+       * actually removed the units — RVBI11's 159,25 of 2025-10-17, before its
+       * rename to PSEC11. It stays `unclassified` — see the definition
+       * table's v7 note.
        */
       const evidenceRefs = refs.filter((ref) => {
         if (

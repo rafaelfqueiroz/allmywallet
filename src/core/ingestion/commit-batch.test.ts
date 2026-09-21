@@ -4195,6 +4195,83 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       await expectNoOpReimport(deps);
     });
 
+    it('completes from Resgates an older map stored unclassified, when this file does not carry them', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      await importFile(deps, file(), false);
+      // Generated history: a map that did not know `Resgate` stored each row
+      // `unclassified` under the placeholder key, and nothing activated it.
+      for (const sell of deps.transactions.rows.filter((row) => row.type === 'sell')) {
+        const { unmapped } = keyFormsFor(
+          {
+            assetId: sell.assetId,
+            institutionId: sell.institutionId,
+            tradeDate: sell.tradeDate,
+            quantity: sell.quantity,
+            unitPrice: sell.unitPrice,
+          },
+          'sell',
+          'Resgate',
+        );
+        await deps.transactions.update({
+          ...sell,
+          type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+          status: 'unclassified',
+          naturalKey: unmapped,
+        });
+      }
+
+      // The ledger alone completes the group: found under the `…|resgate` key.
+      const again = await importFile(
+        deps,
+        file().filter(
+          (row) => row.record.kind === 'transaction' && row.record.b3Type !== 'Resgate',
+        ),
+      );
+
+      expect(again.outcome).toMatchObject({ invalid: 0, resolvedLiquidations: 1 });
+      await expectEndState(deps);
+      await expectNoOpReimport(deps);
+    });
+
+    it('changes nothing when a later file carries only part of an applied liquidation', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      await importFile(deps, file());
+      const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
+
+      // Each half finds the other already applied in the ledger — the sales by
+      // their liquidation value, the subscriptions on the ledger code.
+      for (const part of [
+        (code: string) => code === 'BPFF11' || code === 'HGFF11',
+        (code: string) => code === 'RVBI15',
+      ]) {
+        const { outcome } = await importFile(
+          deps,
+          file().filter((row) => row.record.kind === 'transaction' && part(row.record.assetCode)),
+        );
+        expect(outcome).toMatchObject({ applied: 0, invalid: 0, resolvedLiquidations: 0 });
+        expect(deps.transactions.rows).toEqual(snapshot);
+      }
+    });
+
+    it('never touches a receipt credit a user classified by hand: the whole liquidation waits', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      await importFile(deps, file(), false);
+      const receipt = await assetIdOf(deps, 'RVBI15');
+      const touched = deps.transactions.rows.find(
+        (row) => row.assetId === receipt && row.quantity.toString() === '83.89',
+      ) as Transaction;
+      await deps.transactions.update({ ...touched, isUserModified: true });
+      const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
+
+      const again = await importFile(deps, file());
+
+      expect(again.outcome).toMatchObject({ invalid: 0, resolvedLiquidations: 0 });
+      for (const row of snapshot.filter((r) => r.type === 'sell' || r.tradeDate === '2025-10-06')) {
+        expect(deps.transactions.rows.find((r) => r.id === row.id)).toEqual(row);
+      }
+      expect(deps.transactions.rows.every((row) => row.type !== 'subscription')).toBe(true);
+    });
+
     it('never touches a Resgate a user edited: the whole liquidation waits', async () => {
       const deps = buildFakeIngestionDeps('2026-09-21');
       await importFile(deps, file(), false);

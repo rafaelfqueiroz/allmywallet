@@ -258,9 +258,10 @@ function targetAllocations(
  * SPEC-005 BR-005-20c (#143) — a **source** `Atualização` that restates the
  * balance the replay already holds is corroboration, not conversion evidence.
  *
- * B3 restated BPFF11's 90 on 2025-10-06, a week before the `Resgate` that
- * actually removed them; RVBI11's 159,25 on 2025-10-17 likewise, before the
- * rename. Read as *what remains after the conversion*, the statement leaves
+ * B3 restated RVBI11's 159,25 on 2025-10-17, ten days before the rename that
+ * actually moved them (and, under definitions v7, BPFF11's 90 a week before
+ * its `Resgate`; since v8, #143 D10, that is a liquidation, not a
+ * conversion). Read as *what remains after the conversion*, the statement leaves
  * nothing removed and the whole group refuses `insufficient_quantity` — so the
  * statement is set aside, and the source contributes what the rest of the
  * group says it did (its priced `Resgate`, or its whole position where the

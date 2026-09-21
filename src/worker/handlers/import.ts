@@ -385,6 +385,7 @@ export async function handleImportCommit(
       invalid: result.value.invalid,
       resolvedAssetConversions: result.value.resolvedAssetConversions,
       committedConversionLegs: result.value.committedConversionLegs,
+      resolvedLiquidations: result.value.resolvedLiquidations,
       reconciliationStatus: result.value.batch.reconciliation?.status ?? null,
       rebuildFrom,
     },
