@@ -239,7 +239,7 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
     const first = expectResolved(resolve([oneToOne], rows, sources));
     const second = expectResolved(resolve([oneToOne], [...rows].reverse(), [...sources].reverse()));
     expect(second.groupKey).toBe(first.groupKey);
-    expect(first.groupKey.startsWith('conversion:v7:')).toBe(true);
+    expect(first.groupKey.startsWith('conversion:v8:')).toBe(true);
     expect(second.legs.map((leg) => leg.key).sort()).toEqual(
       first.legs.map((leg) => leg.key).sort(),
     );
@@ -503,9 +503,20 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
    * (DV-24): the shape of B3's record, never the owner's costs.
    */
   describe('#143 BR-005-20c — a cash-bearing incorporation and the rename after it', () => {
-    const incorporation = ASSET_CONVERSION_DEFINITIONS.find(
-      (candidate) => candidate.id === 'bpff11-and-hgff11-to-rvbi11',
-    ) as AssetConversionDefinition;
+    /**
+     * #143 D10 (definitions v8) replaced this definition with a liquidation, so
+     * no shipped definition names a priced redemption any more. The cash-bearing
+     * `conversion_out` capability stays (migration 0026 is forward-only), and so
+     * do these tests of it, against the v7 shape kept here as a fixture.
+     */
+    const incorporation: AssetConversionDefinition = {
+      id: 'bpff11-and-hgff11-to-rvbi11',
+      sourceAssetCodes: ['BPFF11', 'HGFF11'],
+      targets: [{ assetCode: 'RVBI11', evidenceAssetCode: 'RVBI15', allocationWeight: null }],
+      pricedRedemptionSourceCodes: ['BPFF11', 'HGFF11'],
+      repeatedTargetCredits: true,
+      sourceBalanceRestatements: true,
+    };
     const rename = ASSET_CONVERSION_DEFINITIONS.find(
       (candidate) => candidate.id === 'rvbi11-to-psec11',
     ) as AssetConversionDefinition;
