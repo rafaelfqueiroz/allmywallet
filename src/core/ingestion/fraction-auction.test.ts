@@ -16,6 +16,7 @@ import {
   pairFractionAuctions,
   pairingRefusalOf,
   partnerAgrees,
+  scaledFractionSale,
   tracedConversionOrigin,
 } from '@/core/ingestion/fraction-auction';
 
@@ -334,5 +335,50 @@ describe('#113 BR-007-04b / BR-007-05a — what the pair becomes', () => {
     expect(partnerAgrees(as('dividend'), 'auction', 'bonificacao')).toBe(false);
     expect(partnerAgrees(as('leilao_fracoes', 'superseded'), 'auction', 'split')).toBe(true);
     expect(partnerAgrees(as('leilao_fracoes'), 'auction', 'split')).toBe(false);
+  });
+});
+
+describe('#139 BR-007-04b — scaledFractionSale', () => {
+  const fraction = aTransaction()
+    .rendimento()
+    .status('unclassified')
+    .of('VIVT3')
+    .on('2025-04-16')
+    .quantity('0.75')
+    .price('0')
+    .imported()
+    .build();
+  const auction = aTransaction()
+    .rendimento()
+    .status('unclassified')
+    .of('VIVT3')
+    .on('2025-05-28')
+    .quantity('0.75')
+    .price('2131.357')
+    .imported()
+    .build();
+
+  it('sells 0,75 at ×80 as 60 @ 26,6419625 — proceeds 1.598,51775 either way — key and date kept', () => {
+    const sale = scaledFractionSale(fraction, auction, Quantity.fromString('80'));
+    expect(sale).toMatchObject({
+      id: fraction.id,
+      naturalKey: fraction.naturalKey,
+      type: 'sell',
+      status: 'active',
+      ratio: null,
+    });
+    expect(sale?.tradeDate).toBe('2025-04-16');
+    expect(sale?.quantity.toString()).toBe('60');
+    expect(sale?.unitPrice.toString()).toBe('26.6419625');
+    expect(sale?.totalValue.toString()).toBe('1598.51775');
+  });
+
+  it('is null where the scaled price is not exact at eight places: 2.131,357 ÷ 3', () => {
+    expect(scaledFractionSale(fraction, auction, Quantity.fromString('3'))).toBeNull();
+  });
+
+  it('is null where the scaled quantity is not exact at eight places', () => {
+    // 0,75 × 0,000000001 = 0,00000000075 — past the column's scale.
+    expect(scaledFractionSale(fraction, auction, Quantity.fromString('0.000000001'))).toBeNull();
   });
 });

@@ -243,8 +243,10 @@ describe('#113 BR-005-20b / BR-007-04a — Desdobro and Grupamento in the positi
     expect(outcome).toMatchObject({ status: 'refused', refusal: 'not_representable' });
   });
 
-  it('refuses a desdobro and a grupamento on one position and date — both combined_same_day', () => {
-    // VIVT3 on 2025-04-16: which applies first is not stated. P = 100 for both.
+  it('refuses a desdobro and a grupamento on one position and date that fit no order — both disagrees', () => {
+    // #139: P = 100, m = 3,37 and 0,01. Desdobro first: 100 × 2,37 = 237 = Δ,
+    // then 337 × 0,01 = 3,37 ≠ 3,75. Grupamento first: 100 × 0,01 = 1 ≠ 3,75.
+    // No sequence; the pair refuses whole, P shown on both.
     const history = [buy('VIVT3', '2025-01-02', '100', '50')];
     const desdobro = open('desdobro', 'VIVT3', '2025-04-16', '237');
     const grupamento = open('grupamento', 'VIVT3', '2025-04-16', '3.75');
@@ -254,7 +256,7 @@ describe('#113 BR-005-20b / BR-007-04a — Desdobro and Grupamento in the positi
     ]);
     for (const row of [desdobro, grupamento]) {
       const outcome = outcomeOf(outcomes, row);
-      expect(outcome).toMatchObject({ status: 'refused', refusal: 'combined_same_day' });
+      expect(outcome).toMatchObject({ status: 'refused', refusal: 'disagrees' });
       if (outcome.movement === 'desdobro' || outcome.movement === 'grupamento') {
         expect(str(outcome.evidence.basis)).toBe('100');
       }
@@ -1613,5 +1615,260 @@ describe('#120 BR-005-20b — a ratio corroborated across positions', () => {
       expect(str(late.evidence.basis)).toBe('20');
       expect(str(late.evidence.derivedRatio)).toBe('6');
     }
+  });
+});
+
+describe('#139 BR-005-20b / BR-007-04a / BR-007-04b — a same-date Desdobro and Grupamento pair', () => {
+  /**
+   * The VIVT3 re-denomination shape, generated (DV-24). Buy 150 @ 50,00 →
+   * 7.500,00. On 2025-04-16 B3 states a `Desdobro` of Δ = 237 and a
+   * `Grupamento` of R = 3,75, then removes a 0,75 fraction; the auction sells
+   * it on 2025-05-28 @ 2.131,357. Factors: desdobramento `7900` (percent
+   * added, m = 80) and grupamento `0.025`, both *última data com* 2025-04-14.
+   *
+   * Grupamento first: 150 × 0,025 = 3,75 = R; 0,75 removed; desdobro on 3:
+   * 3 × 79 = 237 = Δ → 240. (Desdobro first: 150 × 79 = 11.850 ≠ 237.)
+   */
+  function scenario(desdobroDelta = '237') {
+    const history = [buy('VIVT3', '2025-01-02', '150', '50')];
+    const desdobro = open('desdobro', 'VIVT3', '2025-04-16', desdobroDelta);
+    const grupamento = open('grupamento', 'VIVT3', '2025-04-16', '3.75');
+    const fraction = open('fracao_em_ativos', 'VIVT3', '2025-04-16', '0.75');
+    const auction = open('leilao_de_fracao', 'VIVT3', '2025-05-28', '0.75', '2131.357');
+    const factors = [
+      factor('VIVT', 'desdobramento', '7900', '2025-04-14'),
+      factor('VIVT', 'grupamento', '0.025', '2025-04-14'),
+    ];
+    return { history, desdobro, grupamento, fraction, auction, factors };
+  }
+
+  it('resolves the pair in the order the quantities prove, each at its own factor, with its own basis', () => {
+    const { history, desdobro, grupamento, fraction, auction, factors } = scenario();
+    const outcomes = resolve([desdobro, grupamento, fraction, auction], history, factors);
+    const grouped = outcomeOf(outcomes, grupamento);
+    const split = outcomeOf(outcomes, desdobro);
+    expect(grouped).toMatchObject({ status: 'resolved' });
+    expect(split).toMatchObject({ status: 'resolved' });
+    if (grouped.status !== 'resolved' || grouped.movement !== 'grupamento') return;
+    if (split.status !== 'resolved' || split.movement !== 'desdobro') return;
+    expect(grouped.transaction).toMatchObject({ type: 'grupamento', status: 'active' });
+    expect(str(grouped.transaction.ratio)).toBe('0.025');
+    expect(split.transaction).toMatchObject({ type: 'split', status: 'active' });
+    expect(str(split.transaction.ratio)).toBe('80');
+    // The grupamento met P = 150 (3,75 ÷ 150 = 0,025); the desdobro met 3
+    // ((3 + 237) ÷ 3 = 80).
+    expect(str(grouped.evidence.basis)).toBe('150');
+    expect(str(grouped.evidence.derivedRatio)).toBe('0.025');
+    expect(str(split.evidence.basis)).toBe('3');
+    expect(str(split.evidence.derivedRatio)).toBe('80');
+  });
+
+  it('sells the fraction removed between the two at the desdobro scale, and the position lands on 240', () => {
+    const { history, desdobro, grupamento, fraction, auction, factors } = scenario();
+    const outcomes = resolve([auction, fraction, grupamento, desdobro], history, factors);
+    const sale = outcomeOf(outcomes, fraction);
+    expect(sale).toMatchObject({ status: 'resolved' });
+    if (sale.status !== 'resolved' || sale.movement !== 'fracao_em_ativos') return;
+    // Origin: the grupamento, which left 3,75 and a 0,75 fraction.
+    expect(sale.evidence.origin).toMatchObject({
+      id: grupamento.transaction.id,
+      type: 'grupamento',
+    });
+    expect(str(sale.evidence.origin?.quantityAfter)).toBe('3.75');
+    expect(str(sale.evidence.origin?.fractionalPart)).toBe('0.75');
+    // 0,75 × 80 = 60 shares at 2.131,357 ÷ 80 = 26,6419625.
+    expect(sale.transaction).toMatchObject({ type: 'sell', status: 'active' });
+    expect(sale.transaction.tradeDate).toBe('2025-04-16');
+    expect(str(sale.transaction.quantity)).toBe('60');
+    expect(sale.transaction.unitPrice.toString()).toBe('26.6419625');
+    // Proceeds unchanged: 60 × 26,6419625 = 1.598,51775 = 0,75 × 2.131,357.
+    expect(sale.transaction.totalValue.toString()).toBe('1598.51775');
+    expect(outcomeOf(outcomes, auction)).toMatchObject({ status: 'consumed' });
+
+    // Replay: 150 → (×0,025, ×80) 300, cost 7.500,00, average 25,00; sell 60:
+    // cost out 60 × 25,00 = 1.500,00 (20 % — as 0,75 of 3,75); realised
+    // 1.598,51775 − 1.500,00 = 98,51775. 240 shares, 6.000,00, average 25,00.
+    const position = replayed([
+      ...history,
+      written(outcomes, grupamento),
+      written(outcomes, desdobro),
+      sale.transaction,
+    ]);
+    expect(position.quantity.toString()).toBe('240');
+    expect(position.totalCost.toString()).toBe('6000');
+    expect(position.averageCost.toString()).toBe('25');
+    expect(position.realizedGain.toString()).toBe('98.51775');
+  });
+
+  it('is independent of input order: every permutation of the four rows gives the same outcomes', () => {
+    const { history, desdobro, grupamento, fraction, auction, factors } = scenario();
+    const rows = [desdobro, grupamento, fraction, auction];
+    const signature = (order: readonly CorporateEventRow[]) =>
+      rows
+        .map((row) => {
+          const outcome = outcomeOf(resolve(order, history, factors), row);
+          return outcome.status === 'refused'
+            ? `${row.id}:${outcome.refusal}`
+            : `${row.id}:${outcome.status}:${outcome.transaction.type}:${str(outcome.transaction.quantity)}:${str(outcome.transaction.ratio)}`;
+        })
+        .join('|');
+    const expected = signature(rows);
+    const permutations = (list: readonly CorporateEventRow[]): CorporateEventRow[][] =>
+      list.length <= 1
+        ? [[...list]]
+        : list.flatMap((head, i) =>
+            permutations([...list.slice(0, i), ...list.slice(i + 1)]).map((tail) => [
+              head,
+              ...tail,
+            ]),
+          );
+    for (const order of permutations(rows)) expect(signature(order)).toBe(expected);
+  });
+
+  it('resolves the fraction against a pair an earlier import settled (incremental = from scratch)', () => {
+    const { history, desdobro, grupamento, fraction, auction, factors } = scenario();
+    const first = resolve([desdobro, grupamento], history, factors);
+    const storedPair = [written(first, grupamento), written(first, desdobro)];
+    const outcomes = resolve(
+      [
+        settled('grupamento', 'VIVT3', storedPair[0] as Transaction),
+        settled('desdobro', 'VIVT3', storedPair[1] as Transaction),
+        fraction,
+        auction,
+      ],
+      [...history, ...storedPair],
+      factors,
+    );
+    const sale = written(outcomes, fraction);
+    expect(str(sale.quantity)).toBe('60');
+    expect(sale.unitPrice.toString()).toBe('26.6419625');
+    expect(outcomeOf(outcomes, auction)).toMatchObject({ status: 'consumed' });
+  });
+
+  it('refuses the whole pair when one quantity disagrees — never one of the two — and the fraction waits', () => {
+    // Δ = 236: grupamento first leaves 3 → 3 × 79 = 237 ≠ 236; on 3,75 → 296,25.
+    const { history, desdobro, grupamento, fraction, auction, factors } = scenario('236');
+    const outcomes = resolve([desdobro, grupamento, fraction, auction], history, factors);
+    expect(outcomeOf(outcomes, desdobro)).toMatchObject({ refusal: 'disagrees' });
+    expect(outcomeOf(outcomes, grupamento)).toMatchObject({ refusal: 'disagrees' });
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({ refusal: 'origin_unresolved' });
+    expect(outcomeOf(outcomes, auction)).toMatchObject({ refusal: 'origin_unresolved' });
+  });
+
+  it('refuses combined_same_day where the two factors do not identify the order', () => {
+    // A 0 % desdobramento (m = 1, Δ = 0) and a grupamento ×0,5 (100 → 50):
+    // desdobro first, 100 × 0 = 0 = Δ then 100 × 0,5 = 50 = R; grupamento
+    // first, 50 = R then 50 × 0 = 0 = Δ. Two sequences — neither applies.
+    const history = [buy('ABCD3', '2025-01-02', '100', '10')];
+    const desdobro = open('desdobro', 'ABCD3', '2025-04-16', '0');
+    const grupamento = open('grupamento', 'ABCD3', '2025-04-16', '50');
+    const outcomes = resolve([desdobro, grupamento], history, [
+      factor('ABCD', 'desdobramento', '0', '2025-04-14'),
+      factor('ABCD', 'grupamento', '0.5', '2025-04-14'),
+    ]);
+    expect(outcomeOf(outcomes, desdobro)).toMatchObject({ refusal: 'combined_same_day' });
+    expect(outcomeOf(outcomes, grupamento)).toMatchObject({ refusal: 'combined_same_day' });
+  });
+
+  it('refuses the pair as not_representable when either factor cannot be stored exactly', () => {
+    const { history, desdobro, grupamento } = scenario();
+    const outcomes = resolve([desdobro, grupamento], history, [
+      factor('VIVT', 'desdobramento', '7900', '2025-04-14'),
+      factor('VIVT', 'grupamento', '0.333333333333', '2025-04-14'),
+    ]);
+    expect(outcomeOf(outcomes, desdobro)).toMatchObject({ refusal: 'not_representable' });
+    expect(outcomeOf(outcomes, grupamento)).toMatchObject({ refusal: 'not_representable' });
+  });
+
+  it('refuses the pair as no_factor when only one of the two is published', () => {
+    const { history, desdobro, grupamento } = scenario();
+    const outcomes = resolve([desdobro, grupamento], history, [
+      factor('VIVT', 'grupamento', '0.025', '2025-04-14'),
+    ]);
+    expect(outcomeOf(outcomes, desdobro)).toMatchObject({ refusal: 'no_factor' });
+    expect(outcomeOf(outcomes, grupamento)).toMatchObject({ refusal: 'no_factor' });
+  });
+
+  it('refuses both as conflicts_with_ledger when commit gives up either one', () => {
+    const { history, desdobro, grupamento, factors } = scenario();
+    const outcomes = resolve([desdobro, grupamento], history, factors, new Set([desdobro.id]));
+    expect(outcomeOf(outcomes, desdobro)).toMatchObject({ refusal: 'conflicts_with_ledger' });
+    expect(outcomeOf(outcomes, grupamento)).toMatchObject({ refusal: 'conflicts_with_ledger' });
+  });
+
+  it('refuses the scaled sale as scale_not_representable, leaving the pair resolved', () => {
+    // m = 3 (factor 200): 150 → 3,75 → 3 → 3 × 2 = 6 = Δ → 9. The sale would be
+    // 0,75 × 3 = 2,25 @ 2.131,357 ÷ 3 = 710,4523333… — not exact at 8 places.
+    const history = [buy('VIVT3', '2025-01-02', '150', '50')];
+    const desdobro = open('desdobro', 'VIVT3', '2025-04-16', '6');
+    const grupamento = open('grupamento', 'VIVT3', '2025-04-16', '3.75');
+    const fraction = open('fracao_em_ativos', 'VIVT3', '2025-04-16', '0.75');
+    const auction = open('leilao_de_fracao', 'VIVT3', '2025-05-28', '0.75', '2131.357');
+    const outcomes = resolve([desdobro, grupamento, fraction, auction], history, [
+      factor('VIVT', 'desdobramento', '200', '2025-04-14'),
+      factor('VIVT', 'grupamento', '0.025', '2025-04-14'),
+    ]);
+    expect(outcomeOf(outcomes, desdobro)).toMatchObject({ status: 'resolved' });
+    expect(outcomeOf(outcomes, grupamento)).toMatchObject({ status: 'resolved' });
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({ refusal: 'scale_not_representable' });
+    expect(outcomeOf(outcomes, auction)).toMatchObject({ refusal: 'scale_not_representable' });
+  });
+
+  it('sells a fraction the second event left at its own scale: desdobro ×2, then grupamento ×0,0125', () => {
+    // P = 100: desdobro first, 100 × 1 = 100 = Δ → 200; 200 × 0,0125 = 2,5 = R.
+    // (Grupamento first: 100 × 0,0125 = 1,25 ≠ 2,5.) The fraction 0,5 is the
+    // grupamento's own, removed after both: a sale of 0,5 @ 40,00, unscaled.
+    const history = [buy('ABCD3', '2025-01-02', '100', '10')];
+    const desdobro = open('desdobro', 'ABCD3', '2025-04-16', '100');
+    const grupamento = open('grupamento', 'ABCD3', '2025-04-16', '2.5');
+    const fraction = open('fracao_em_ativos', 'ABCD3', '2025-04-16', '0.5');
+    const auction = open('leilao_de_fracao', 'ABCD3', '2025-05-28', '0.5', '40');
+    const outcomes = resolve([desdobro, grupamento, fraction, auction], history, [
+      factor('ABCD', 'desdobramento', '100', '2025-04-14'),
+      factor('ABCD', 'grupamento', '0.0125', '2025-04-14'),
+    ]);
+    const sale = outcomeOf(outcomes, fraction);
+    expect(sale).toMatchObject({ status: 'resolved' });
+    if (sale.status !== 'resolved' || sale.movement !== 'fracao_em_ativos') return;
+    expect(sale.evidence.origin).toMatchObject({ id: grupamento.transaction.id });
+    expect(str(sale.transaction.quantity)).toBe('0.5');
+    expect(sale.transaction.unitPrice.toString()).toBe('40');
+    // 100 × 2 × 0,0125 = 2,5 − 0,5 = 2 shares, cost 1.000,00 × 0,8 = 800,00.
+    const position = replayed([
+      ...history,
+      written(outcomes, desdobro),
+      written(outcomes, grupamento),
+      sale.transaction,
+    ]);
+    expect(position.quantity.toString()).toBe('2');
+    expect(position.totalCost.toString()).toBe('800');
+  });
+
+  it('reads no origin figures for a date with a hand-classified pair its quantities do not fit', () => {
+    // Stored split ×2 and grupamento ×0,5 with stated quantities of 1 each fit
+    // no sequence, so a fraction on that date cannot be decided.
+    const history = [
+      buy('ABCD3', '2025-01-02', '100', '10'),
+      aTransaction()
+        .split()
+        .of('ABCD3')
+        .at(BROKER)
+        .on('2025-04-16')
+        .quantity('1')
+        .ratio('2')
+        .build(),
+      aTransaction()
+        .grupamento()
+        .of('ABCD3')
+        .at(BROKER)
+        .on('2025-04-16')
+        .quantity('1')
+        .ratio('0.5')
+        .build(),
+    ];
+    const fraction = open('fracao_em_ativos', 'ABCD3', '2025-04-16', '0.5');
+    const auction = open('leilao_de_fracao', 'ABCD3', '2025-05-28', '0.5', '40');
+    const outcomes = resolve([fraction, auction], history);
+    expect(outcomeOf(outcomes, fraction)).toMatchObject({ refusal: 'origin_unresolved' });
   });
 });

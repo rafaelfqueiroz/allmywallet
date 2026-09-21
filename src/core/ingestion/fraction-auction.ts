@@ -1,6 +1,6 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
-import type { Money, Quantity } from '@/core/shared/money';
+import { asStored, Money, Quantity } from '@/core/shared/money';
 import {
   computeTotalValue,
   type Transaction,
@@ -49,7 +49,14 @@ export type FractionRefusal =
   /** Applied, the fraction leaves a later row of the position unreplayable (BR-006-15): commit gave it up. */
   | 'conflicts_with_ledger'
   /** The position before the fraction cannot give it up. */
-  | 'no_basis';
+  | 'no_basis'
+  /**
+   * #139 — the fraction was removed between a same-date grupamento and
+   * desdobramento, so its sale is written at the later event's scale
+   * (`scaledFractionSale`), and that quantity or price is not exact at eight
+   * places.
+   */
+  | 'scale_not_representable';
 
 /** The share-base types a fraction can come from (SPEC-007 BR-007-04/05). */
 export type OriginType = 'bonificacao' | 'split' | 'grupamento';
@@ -73,6 +80,14 @@ export interface OriginCandidate {
    * for an ordinary share-base event on the position, which is its own origin.
    */
   readonly tracedFrom?: TracedOrigin | null | undefined;
+  /**
+   * #139 — the multiplier of a **second** ratio event on the same date, where
+   * this candidate is the first of a same-date pair and B3 removed the fraction
+   * between the two. Replay applies both ratio events before any sale that
+   * day (`ordering.ts`), so the sale is written at the second event's scale
+   * (`scaledFractionSale`). Absent or `null` for every other candidate.
+   */
+  readonly saleScale?: Quantity | null | undefined;
 }
 
 /**
@@ -325,6 +340,50 @@ export function fractionTransaction(
     unitPrice,
     ratio: null,
     totalValue: computeTotalValue('sell', fraction.quantity, unitPrice, fraction.fees),
+  };
+}
+
+/**
+ * SPEC-005 BR-005-20b / SPEC-007 BR-007-04b (#139) — the sale of a fraction B3
+ * removed **between** a same-date grupamento and desdobramento, written at the
+ * second event's scale: quantity × `scale`, unit price ÷ `scale`. `null` when
+ * either is not exact at `NUMERIC(20,8)` or the proceeds would move — the
+ * caller refuses `scale_not_representable`.
+ *
+ * Why the scale and not B3's own figures: replay has dates, not times, and
+ * ranks every ratio event of a date before its sales (`ordering.ts`,
+ * BR-007-15). So the day's sale meets the position **after both** events. At
+ * that scale the fraction is `f × m₂` shares, and every figure the engine
+ * derives from it is the one the real sequence gives: the proceeds are
+ * unchanged, and the cost removed is the same share of the position's cost
+ * (f ÷ Q₁ = f·m₂ ÷ Q₁·m₂), so the realised gain is too.
+ *
+ * Worked example (DV-17), VIVT3: 150 shares, grupamento × 0,025 → 3,75;
+ * Fração em Ativos 0,75 removed; desdobro × 80 → 240. Replayed, the day is
+ * 150 → 3,75 → 300 and then the sale: 0,75 × 80 = **60** shares at
+ * 2.131,357 ÷ 80 = **26,6419625**, proceeds 60 × 26,6419625 = 1.598,51775 =
+ * 0,75 × 2.131,357; 300 − 60 = **240**, B3's count. The cost removed is
+ * 60 ÷ 300 = 0,75 ÷ 3,75 = 20 % of it, as in the real sequence.
+ */
+export function scaledFractionSale(
+  fraction: Transaction,
+  auction: Transaction,
+  scale: Quantity,
+): Transaction | null {
+  const quantity = fraction.quantity.times(scale);
+  const unitPrice = auction.unitPrice.dividedBy(scale);
+  if (!Quantity.fromString(asStored(quantity)).equals(quantity)) return null;
+  if (!Money.fromString(asStored(unitPrice)).equals(unitPrice)) return null;
+  const proceeds = auction.unitPrice.times(fraction.quantity);
+  if (!unitPrice.times(quantity).equals(proceeds)) return null;
+  return {
+    ...fraction,
+    type: 'sell',
+    status: 'active',
+    quantity,
+    unitPrice,
+    ratio: null,
+    totalValue: computeTotalValue('sell', quantity, unitPrice, fraction.fees),
   };
 }
 

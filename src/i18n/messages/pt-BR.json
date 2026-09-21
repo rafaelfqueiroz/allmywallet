@@ -475,7 +475,8 @@
         "ambiguous_pair": "Não foi possível resolver: há mais de uma fração ou leilão correspondente.",
         "no_price": "Não foi possível resolver: o leilão correspondente não informa um preço positivo.",
         "partner_conflict": "Não foi possível resolver: a classificação já aplicada à linha correspondente contradiz a origem da fração.",
-        "partner_unresolved": "Não foi possível resolver: a linha correspondente está pendente em outra importação. Importe novamente o arquivo que contém as duas linhas."
+        "partner_unresolved": "Não foi possível resolver: a linha correspondente está pendente em outra importação. Importe novamente o arquivo que contém as duas linhas.",
+        "scale_not_representable": "Não foi possível resolver: esta fração foi retirada entre um grupamento e um desdobramento do mesmo dia, e a venda convertida para a escala do desdobramento não pode ser armazenada exatamente com oito casas decimais."
       }
     },
     "reconciliationTitle": "Reconciliação com a posição da B3",

@@ -2110,6 +2110,10 @@ async function updateInPlace(
         // #113 BR-007-04b: a split fraction's sale takes its auction's price
         // (`applyEdit` recomputes the total). Every other activation keeps its own.
         unitPrice: updated.unitPrice,
+        // #139 BR-007-04b: a fraction removed between a same-date pair sells at
+        // the second event's scale — its quantity changes with its price.
+        // Every other activation keeps its own.
+        quantity: updated.quantity,
         preserveNaturalKey: true,
         flagUserModified: false,
       },
