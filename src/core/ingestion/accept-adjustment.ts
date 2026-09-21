@@ -59,14 +59,22 @@ export interface AcceptAdjustmentOutcome {
  *   the whole ledger, not the ledger at the reconciliation date. Comparing at
  *   the date made every position traded after it permanently "stale", and
  *   re-importing Posição, which the hint asks for, computed the same figure.
+ *
+ * - `absent_from_snapshot` (#145): B3's snapshot does not list the position
+ *   at all. That is the trace a ticker change, merger or delisting leaves on
+ *   the old asset — and also of a Posição row the parser could not read.
+ *   Accepting zero would post the whole holding away at its average cost, and
+ *   the rename that later carries that cost to the new asset would find none.
+ *   Keyed on the cause, which only a position absent from the file carries.
  */
-export type AdjustmentBlocker = 'no_history' | 'stale';
+export type AdjustmentBlocker = 'no_history' | 'stale' | 'absent_from_snapshot';
 
 export function adjustmentBlocker(
   discrepancy: Discrepancy,
   ledger: readonly Transaction[],
   asOf: BusinessDate,
 ): AdjustmentBlocker | null {
+  if (discrepancy.cause === 'absent_from_b3_snapshot') return 'absent_from_snapshot';
   if (selectForReplay(ledger, { asOf }).length === 0) return 'no_history';
   const replayed = replayPosition(ledger);
   // A ledger that no longer replays has no quantity to compare: not the one reported.
@@ -75,6 +83,12 @@ export function adjustmentBlocker(
     ? null
     : 'stale';
 }
+
+const BLOCKER_ERROR: Readonly<Record<AdjustmentBlocker, IngestionUseCaseErrorCode>> = {
+  no_history: IngestionUseCaseErrorCode.ADJUSTMENT_NO_HISTORY,
+  stale: IngestionUseCaseErrorCode.ADJUSTMENT_STALE,
+  absent_from_snapshot: IngestionUseCaseErrorCode.ADJUSTMENT_ABSENT_FROM_SNAPSHOT,
+};
 
 export async function acceptReconciliationAdjustment(
   deps: IngestionDependencies,
@@ -108,12 +122,7 @@ export async function acceptReconciliationAdjustment(
   const blocker = adjustmentBlocker(discrepancy, existing, batch.reconciliation.asOf);
   if (blocker !== null) {
     return err(
-      ingestionError(
-        blocker === 'no_history'
-          ? IngestionUseCaseErrorCode.ADJUSTMENT_NO_HISTORY
-          : IngestionUseCaseErrorCode.ADJUSTMENT_STALE,
-        { batchId: input.batchId, assetId: input.assetId },
-      ),
+      ingestionError(BLOCKER_ERROR[blocker], { batchId: input.batchId, assetId: input.assetId }),
     );
   }
 

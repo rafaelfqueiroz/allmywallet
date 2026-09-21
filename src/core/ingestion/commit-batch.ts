@@ -2279,23 +2279,66 @@ async function buildReconciliation(
   // institution can arrive as several rows, one per account. B3's figure for
   // the position is their sum. Compared row by row, every account would read
   // as a discrepancy against the whole ledger.
-  const snapshots = new Map<string, { row: ImportRow; assetCode: string; b3Quantity: Quantity }>();
+  const snapshots = new Map<string, PositionToReconcile>();
+  const coveredClasses = new Set<string>();
+  const coveredInstitutions = new Set<string>();
   for (const row of positionRows) {
     if (row.record.kind !== 'position') continue;
+    coveredClasses.add(row.record.assetClass);
+    coveredInstitutions.add(row.institutionId ?? '');
     const key = `${row.assetId}|${row.institutionId ?? ''}`;
     const seen = snapshots.get(key);
     snapshots.set(key, {
-      row: seen?.row ?? row,
+      assetId: row.assetId,
+      institutionId: row.institutionId,
       assetCode: seen?.assetCode ?? row.record.assetCode,
       b3Quantity:
         seen === undefined ? row.record.quantity : seen.b3Quantity.plus(row.record.quantity),
+      inB3Snapshot: true,
     });
+  }
+
+  // SPEC-005 BR-005-22 (amended, #145): the comparison is the *union* of the
+  // snapshot and every open ledger position the snapshot is authoritative
+  // for — otherwise a holding B3 no longer lists is never compared, and a
+  // phantom position reads as reconciled. The file is authoritative for an
+  // asset class it carries at least one row of (a tab B3 exported, or a user
+  // filtered away, says nothing) and for an institution it names at all (one
+  // it never names may be custody the extract does not cover). Classes are the
+  // catalog's, which a Posição row's stated class has already overwritten at
+  // resolve (#108), so a row and a ledger position of one asset agree.
+  if (coveredClasses.size > 0) {
+    const ledger = await deps.transactions.export({
+      assetClasses: [...coveredClasses],
+      statuses: ['active'],
+    });
+    for (const item of ledger) {
+      const { assetId, institutionId } = item.transaction;
+      if (item.transaction.status !== 'active') continue;
+      if (!coveredClasses.has(item.assetClass)) continue;
+      if (!coveredInstitutions.has(institutionId ?? '')) continue;
+      const key = `${assetId}|${institutionId ?? ''}`;
+      if (snapshots.has(key)) continue;
+      snapshots.set(key, {
+        assetId,
+        institutionId,
+        assetCode: item.assetCode,
+        b3Quantity: Quantity.zero(),
+        inB3Snapshot: false,
+      });
+    }
   }
 
   const inputs: ReconciliationInput[] = [];
 
-  for (const { row, assetCode, b3Quantity } of snapshots.values()) {
-    const existing = await deps.transactions.listForPosition(row.assetId, row.institutionId);
+  for (const {
+    assetId,
+    institutionId,
+    assetCode,
+    b3Quantity,
+    inB3Snapshot,
+  } of snapshots.values()) {
+    const existing = await deps.transactions.listForPosition(assetId, institutionId);
     const active = existing.filter((t) => t.status === 'active');
     const replayed = replayPosition(existing);
     // A ledger this reconciliation cannot replay is a defect upstream of it
@@ -2307,11 +2350,19 @@ async function buildReconciliation(
       (min, t) => (min === null || t.tradeDate < min ? t.tradeDate : min),
       null,
     );
+    // #145: a ledger-only position first traded after the reference date is
+    // one B3's snapshot could not have listed yet — not an absence.
+    if (
+      !inB3Snapshot &&
+      (firstComputedTradeDate === null || BusinessDate.isAfter(firstComputedTradeDate, asOf))
+    ) {
+      continue;
+    }
 
     inputs.push({
-      assetId: row.assetId,
+      assetId,
       assetCode,
-      institutionId: row.institutionId,
+      institutionId,
       computedQuantity,
       b3Quantity,
       firstComputedTradeDate,
@@ -2320,8 +2371,18 @@ async function buildReconciliation(
       // rows, so reading its rows could never give this cause — a Desdobro
       // still unclassified read as missing history.
       hasUnclassifiedRowsAffectingAsset: existing.some((t) => t.status === 'unclassified'),
+      inB3Snapshot,
     });
   }
 
   return reconcilePositions(asOf, inputs);
+}
+
+interface PositionToReconcile {
+  readonly assetId: ImportRow['assetId'];
+  readonly institutionId: ImportRow['institutionId'];
+  readonly assetCode: string;
+  readonly b3Quantity: Quantity;
+  /** #145: false for an open ledger position B3's snapshot does not list — B3 = 0. */
+  readonly inB3Snapshot: boolean;
 }

@@ -332,6 +332,143 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
       expect(result.value.batch.reconciliation?.discrepancies).toHaveLength(0);
     });
 
+    describe('BR-005-22 (amended, #145) — the union of the snapshot and the ledger it covers', () => {
+      const fundPosition = {
+        raw: { Produto: 'HGLG11 - CSHG LOGISTICA' },
+        record: {
+          kind: 'position' as const,
+          assetCode: 'HGLG11',
+          assetName: 'CSHG LOGISTICA',
+          assetClass: 'fii' as const,
+          institutionName: 'Corretora Teste',
+          quantity: Quantity.fromString('10'),
+          fixedIncome: null,
+        },
+      };
+
+      async function ledgerOf(deps: FakeIngestionDeps, records: ParsedRecord[]) {
+        const history = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+        const committed = await commitBatch(deps, userId, { batchId: history });
+        if (!committed.ok) throw new Error('history commit failed in test setup');
+      }
+
+      async function reconcile(deps: FakeIngestionDeps, records: ParsedRecord[]) {
+        const batchId = await stagedBatch(deps, { extractType: 'b3_posicao', records });
+        const result = await commitBatch(deps, userId, {
+          batchId,
+          asOf: BusinessDate.of('2026-03-01'),
+        });
+        if (!result.ok) throw new Error('Posição commit failed');
+        return result.value.batch.reconciliation;
+      }
+
+      it('reports an open ledger position B3 does not list, at B3 = 0', async () => {
+        const deps = buildFakeIngestionDeps();
+        await ledgerOf(deps, [
+          buy(),
+          buy({ assetCode: 'WIZS3', assetName: 'WIZ', quantity: Quantity.fromString('180') }),
+        ]);
+
+        const report = await reconcile(deps, [position]);
+
+        expect(report?.status).toBe('discrepancies_found');
+        expect(report?.discrepancies).toEqual([
+          expect.objectContaining({
+            assetCode: 'WIZS3',
+            computedQuantity: '180',
+            b3Quantity: '0',
+            difference: '-180',
+            cause: 'absent_from_b3_snapshot',
+          }),
+        ]);
+      });
+
+      it('never reports a class the file carries no row of', async () => {
+        const deps = buildFakeIngestionDeps();
+        await ledgerOf(deps, [
+          buy(),
+          buy({
+            assetCode: 'HGLG11',
+            assetName: 'CSHG LOGISTICA',
+            assetClass: 'fii',
+            quantity: Quantity.fromString('10'),
+          }),
+        ]);
+        // The catalog class is the one a Posição stated; the guessed `fii`
+        // above stands until one does.
+        const report = await reconcile(deps, [position]);
+
+        expect(report?.status).toBe('reconciled');
+        expect(report?.discrepancies).toHaveLength(0);
+      });
+
+      it('reports a covered class once the file carries it', async () => {
+        const deps = buildFakeIngestionDeps();
+        await ledgerOf(deps, [
+          buy(),
+          buy({
+            assetCode: 'MALL11',
+            assetName: 'MALLS BRASIL',
+            assetClass: 'fii',
+            quantity: Quantity.fromString('100'),
+          }),
+        ]);
+
+        const report = await reconcile(deps, [position, fundPosition]);
+
+        // HGLG11 is B3-only (missing history); MALL11 is ledger-only.
+        expect(
+          report?.discrepancies.map((d) => [d.assetCode, d.b3Quantity, d.cause]).sort(),
+        ).toEqual([
+          ['HGLG11', '10', 'missing_history_before_import_range'],
+          ['MALL11', '0', 'absent_from_b3_snapshot'],
+        ]);
+      });
+
+      it('never reports an institution the file does not name', async () => {
+        const deps = buildFakeIngestionDeps();
+        await ledgerOf(deps, [
+          buy(),
+          buy({ assetCode: 'WIZS3', assetName: 'WIZ', institutionName: 'Outro Banco' }),
+        ]);
+
+        const report = await reconcile(deps, [position]);
+
+        expect(report?.status).toBe('reconciled');
+      });
+
+      it('leaves out a position first traded after the reference date', async () => {
+        const deps = buildFakeIngestionDeps();
+        await ledgerOf(deps, [
+          buy(),
+          buy({ assetCode: 'WIZS3', assetName: 'WIZ', tradeDate: BusinessDate.of('2026-03-10') }),
+        ]);
+
+        const report = await reconcile(deps, [position]);
+
+        expect(report?.status).toBe('reconciled');
+      });
+
+      it('leaves a position the ledger has closed out of the report', async () => {
+        const deps = buildFakeIngestionDeps();
+        await ledgerOf(deps, [
+          buy(),
+          buy({ assetCode: 'WIZS3', assetName: 'WIZ' }),
+          buy({
+            assetCode: 'WIZS3',
+            assetName: 'WIZ',
+            b3Type: 'Venda',
+            direction: null,
+            tradeDate: BusinessDate.of('2026-02-10'),
+          }),
+        ]);
+
+        const report = await reconcile(deps, [position]);
+
+        expect(report?.status).toBe('reconciled');
+      });
+    });
+
     it('needs no reference date for a Movimentação batch', async () => {
       const deps = buildFakeIngestionDeps();
       const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records: [buy()] });

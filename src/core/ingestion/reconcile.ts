@@ -26,6 +26,13 @@ export const DISCREPANCY_CAUSES = [
    * or subscription the ledger never recorded tends to leave.
    */
   'uncaptured_corporate_event',
+  /**
+   * #145: the ledger holds an open position B3's snapshot does not list at
+   * all, in a class and at an institution the file covers. Positively
+   * detectable, unlike the surplus above — and the shape a ticker change,
+   * merger or delisting the ledger never recorded leaves on the old asset.
+   */
+  'absent_from_b3_snapshot',
   /** Neither signal applies and the ledger does not hold a surplus — logged honestly rather than guessed. */
   'undetermined',
 ] as const;
@@ -41,6 +48,11 @@ export interface ReconciliationInput {
   readonly firstComputedTradeDate: BusinessDate | null;
   /** BR-005-24: at least one `unclassified` row in this batch touches this asset. */
   readonly hasUnclassifiedRowsAffectingAsset: boolean;
+  /**
+   * #145 (BR-005-22 as amended): false for an open ledger position the
+   * snapshot does not list, compared at `b3Quantity` 0.
+   */
+  readonly inB3Snapshot: boolean;
 }
 
 /** AR-10: quantities are serialised — this report crosses into `import_batches.reconciliation` jsonb. */
@@ -68,6 +80,7 @@ export interface ReconciliationReport {
 
 function attributeCause(input: ReconciliationInput): DiscrepancyCause {
   if (input.hasUnclassifiedRowsAffectingAsset) return 'unclassified_rows_affecting_asset';
+  if (!input.inB3Snapshot) return 'absent_from_b3_snapshot';
 
   // BR-005-24: the ledger holds *less* than B3 does — either no history for
   // this asset at all, or history that starts too late to have picked up

@@ -1091,6 +1091,94 @@ describe('SPEC-005 — import pipeline (integration)', () => {
   });
 
   /**
+   * SPEC-005 BR-005-22/24/25 (amended, #145) — a holding B3's snapshot no
+   * longer lists is compared at zero, but only in a class the file carries
+   * rows of, and accepting its zero is refused.
+   */
+  it('BR-005-22/24/25 (#145): reports a ledger-only position in a covered class and refuses to zero it', async () => {
+    const history = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      history,
+      await buildMovimentacaoXlsx([
+        {
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '32,15',
+        },
+        {
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'WIZS3 - Wiz Soluções',
+          quantidade: '180',
+          precoUnitario: '8,00',
+        },
+        {
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'MALL11 - Malls Brasil',
+          quantidade: '100',
+          precoUnitario: '100,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: history, userId }, handlerDeps());
+    await handleImportCommit({ batchId: history, userId }, handlerDeps());
+
+    // Only the Acoes tab: MALL11's class is one the file says nothing about.
+    const posicao = await newPendingBatch('b3_posicao');
+    await saveUploadedFile(
+      uploadDir,
+      posicao,
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'PETR4 - PETROBRAS', codigo: 'PETR4', quantidade: '100' }],
+      }),
+    );
+    await handleImportStage({ batchId: posicao, userId }, handlerDeps());
+    await handleImportCommit({ batchId: posicao, userId, asOf: '2026-01-20' }, handlerDeps());
+
+    const report = (await batchRow(posicao))?.reconciliation as {
+      status: string;
+      discrepancies: {
+        assetId: string;
+        assetCode: string;
+        institutionId: string | null;
+        b3Quantity: string;
+        difference: string;
+        cause: string;
+      }[];
+    };
+    expect(report.status).toBe('discrepancies_found');
+    expect(report.discrepancies).toHaveLength(1);
+    const [absent] = report.discrepancies;
+    expect(absent).toMatchObject({
+      assetCode: 'WIZS3',
+      b3Quantity: '0',
+      difference: '-180',
+      cause: 'absent_from_b3_snapshot',
+    });
+
+    const institutionId = absent?.institutionId ?? null;
+    const accepted = await withTenant(
+      userId,
+      async (tx) =>
+        acceptReconciliationAdjustment(buildIngestionDeps(tx, userId, clock), userId, {
+          batchId: posicao,
+          assetId: AssetId.of(absent?.assetId as string),
+          institutionId: institutionId === null ? null : InstitutionId.of(institutionId),
+        }),
+      appDb,
+    );
+    expect(accepted.ok || accepted.error.code).toBe('IMPORT_ADJUSTMENT_ABSENT_FROM_SNAPSHOT');
+    const { rows } = await migratorPool.query(
+      "SELECT count(*)::int AS n FROM transactions WHERE type = 'adjustment'",
+    );
+    expect(Number(rows[0]?.n)).toBe(0);
+  });
+
+  /**
    * SPEC-005 BR-005-25 (#110) — the owner's morning: a Posição committed into
    * an empty ledger, its figures accepted, and every position doubled when the
    * history arrived. Accepting is refused with no history, and refused again

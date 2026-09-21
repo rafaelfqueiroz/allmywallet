@@ -493,12 +493,14 @@
       "missing_history_before_import_range": "Histórico anterior ao período importado está faltando",
       "unclassified_rows_affecting_asset": "Há linhas não classificadas afetando este ativo",
       "uncaptured_corporate_event": "Possível evento societário não registrado",
+      "absent_from_b3_snapshot": "A B3 não lista este ativo na posição — provável troca de código, incorporação ou deslistagem não registrada",
       "undetermined": "Não foi possível determinar a causa"
     },
     "acceptAdjustment": "Aceitar valor da B3",
     "acceptAdjustmentBlocked": {
       "no_history": "Importe a Negociação e a Movimentação antes de aceitar o valor da B3",
-      "stale": "O histórico mudou desde esta conciliação. Importe a Posição de novo para conferir"
+      "stale": "O histórico mudou desde esta conciliação. Importe a Posição de novo para conferir",
+      "absent_from_snapshot": "Zerar apagaria o custo que uma troca de código ou incorporação precisa levar ao novo ativo. Confira o histórico deste ativo; se ele foi vendido, registre a venda"
     },
     "resolved": "Ajustado",
     "rowsCount": "{count} linha(s) nesta importação",

@@ -37,6 +37,12 @@ export const IngestionUseCaseErrorCode = {
    * stored difference is no longer the correction.
    */
   ADJUSTMENT_STALE: 'IMPORT_ADJUSTMENT_STALE',
+  /**
+   * BR-005-25 (amended, #145): B3's snapshot does not list the position at
+   * all. Accepting zero would erase the cost a ticker change or merger still
+   * has to carry to the new asset — the history is the correction.
+   */
+  ADJUSTMENT_ABSENT_FROM_SNAPSHOT: 'IMPORT_ADJUSTMENT_ABSENT_FROM_SNAPSHOT',
 } as const;
 export type IngestionUseCaseErrorCode =
   (typeof IngestionUseCaseErrorCode)[keyof typeof IngestionUseCaseErrorCode];

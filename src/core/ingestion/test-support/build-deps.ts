@@ -27,12 +27,13 @@ export interface FakeIngestionDeps extends IngestionDependencies {
 
 /** TS-02/TS-22: a builder with sensible defaults, so a test states only what it cares about. */
 export function buildFakeIngestionDeps(today = '2026-03-15'): FakeIngestionDeps {
+  const transactions = new FakeTransactionRepository();
   return {
     batches: new FakeImportBatchRepository(),
     rows: new FakeImportRowRepository(),
-    transactions: new FakeTransactionRepository(),
+    transactions,
     positions: new FakePositionRepository(),
-    assets: new FakeAssetResolver(),
+    assets: new FakeAssetResolver((id, descriptor) => transactions.describeAsset(id, descriptor)),
     institutions: new FakeInstitutionResolver(),
     fixedIncomeContracts: new FakeFixedIncomeContractWriter(),
     clock: new FakeClock(`${today}T12:00:00-03:00`),

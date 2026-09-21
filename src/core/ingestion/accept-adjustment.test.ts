@@ -244,6 +244,15 @@ describe('#110 BR-005-25 — adjustmentBlocker', () => {
     expect(adjustmentBlocker(discrepancy('0'), [buy], AS_OF)).toBe('stale');
   });
 
+  it('#145: is absent_from_snapshot for a position B3 does not list, whatever the ledger holds', () => {
+    const buy = aTransaction().buy().on('2026-02-01').quantity('180').build();
+    const absent = {
+      computedQuantity: '180',
+      cause: 'absent_from_b3_snapshot',
+    } as unknown as Discrepancy;
+    expect(adjustmentBlocker(absent, [buy], AS_OF)).toBe('absent_from_snapshot');
+  });
+
   it('is stale when the ledger no longer replays', () => {
     const oversold = aTransaction().sell().on('2026-02-01').quantity('10').build();
     expect(adjustmentBlocker(discrepancy('0'), [oversold], AS_OF)).toBe('stale');
