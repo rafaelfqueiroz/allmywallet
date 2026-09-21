@@ -2365,22 +2365,87 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     });
 
     /**
-     * Review finding 1A. Two same-position pairs of one quantity on one date:
-     * each credit sees two candidate debits, so `pairTransfers` forms nothing
-     * and a guard asked of formed pairs alone let both debits through. The
-     * position went to zero with neither credit carrying anything.
+     * #145 follow-up (BR-005-20a amended). B3 wrote two price-less debits and
+     * two credits of one quantity, on one date, at one broker — a round trip
+     * inside Inter on BBAS3, BRSR6, EGIE3 and KLBN11. Every pairing of those
+     * legs is the same no-op, so all four are written and the position is
+     * exactly what it was. More than half the holding moves (150 of 200), which
+     * is why the sibling debit must not count against the source.
      */
-    it('holds back both debits where two same-position pairs of one quantity compete', async () => {
+    it('writes a same-position round trip of two pairs as a no-op', async () => {
       const deps = buildFakeIngestionDeps();
       await importFile(deps, [history({ quantity: Quantity.fromString('200') })]);
       const before = await positionAt(deps, ORIGEM);
       expect(before).toEqual({ quantity: '200', averageCost: '10', totalCost: '2000' });
 
-      const { outcome } = await importFile(deps, [ownCredit(), ownCredit(), debit(), debit()]);
+      const leg = { quantity: Quantity.fromString('150') };
+      const { outcome } = await importFile(deps, [
+        ownCredit(leg),
+        ownCredit(leg),
+        debit(leg),
+        debit(leg),
+      ]);
 
-      expect(outcome).toMatchObject({ applied: 2, invalid: 2 });
+      expect(outcome).toMatchObject({ applied: 4, invalid: 0 });
+      expect(transfersIn(deps).map((t) => [t.status, t.unitPrice.toString()])).toEqual([
+        ['active', '10'],
+        ['active', '10'],
+      ]);
+      expect(await positionAt(deps, ORIGEM)).toEqual(before);
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    /**
+     * The owner's state: the round trip imported under the earlier rule left
+     * both credits `unclassified` and both debits refused. The same shape
+     * arises today where the source has no history yet — then both debits are
+     * still held back, and re-importing the file once it does applies all four.
+     */
+    it('holds a round trip back until the source has history, then applies it on re-import', async () => {
+      const deps = buildFakeIngestionDeps();
+      const trip = [ownCredit(), ownCredit(), debit(), debit()];
+
+      const first = await importFile(deps, trip);
+      // `applied` counts the two credits, written `unclassified`.
+      expect(first.outcome).toMatchObject({ applied: 2, invalid: 2 });
       expect(deps.transactions.rows.some((t) => t.type === 'transfer_out')).toBe(false);
       expect(transfersIn(deps).map((t) => t.status)).toEqual(['unclassified', 'unclassified']);
+
+      await importFile(deps, [history({ quantity: Quantity.fromString('200') })]);
+      const again = await importFile(deps, trip);
+
+      expect(again.outcome).toMatchObject({ applied: 2, promoted: 2, invalid: 0 });
+      expect(transfersIn(deps).map((t) => [t.status, t.unitPrice.toString()])).toEqual([
+        ['active', '10'],
+        ['active', '10'],
+      ]);
+      expect(await positionAt(deps, ORIGEM)).toEqual({
+        quantity: '200',
+        averageCost: '10',
+        totalCost: '2000',
+      });
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    it('still holds back an unequal round trip: three credits cannot pair with two debits', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history({ quantity: Quantity.fromString('200') })]);
+      const before = await positionAt(deps, ORIGEM);
+
+      const { outcome } = await importFile(deps, [
+        ownCredit(),
+        ownCredit(),
+        ownCredit(),
+        debit(),
+        debit(),
+      ]);
+
+      expect(outcome).toMatchObject({ applied: 3, invalid: 2 });
+      expect(transfersIn(deps).map((t) => t.status)).toEqual([
+        'unclassified',
+        'unclassified',
+        'unclassified',
+      ]);
       expect(await positionAt(deps, ORIGEM)).toEqual(before);
     });
 
