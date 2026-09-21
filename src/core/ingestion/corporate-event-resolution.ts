@@ -12,6 +12,7 @@ import {
 } from '@/core/ingestion/movement-map';
 import {
   auctionTransaction,
+  conversionCreatedFraction,
   type ConversionOutTrace,
   type FractionRefusal,
   fractionTransaction,
@@ -802,10 +803,36 @@ function walkPosition(
     const tracedOrigins: OriginCandidate[] = [...incomingByGroup]
       .map(([groupId, legs]) => ({ groupId, legs: [...legs].sort(compareForReplay) }))
       .sort((a, b) => compareForReplay(a.legs[0] as Transaction, b.legs[0] as Transaction))
-      .flatMap(({ groupId, legs }) => {
+      .flatMap(({ groupId, legs }): OriginCandidate[] => {
         const last = legs[legs.length - 1] as Transaction;
-        const verdict = tracedConversionOrigin(outgoingTraces(last, inOriginWindow));
+        const traces = outgoingTraces(last, inOriginWindow);
+        const verdict = tracedConversionOrigin(traces);
         if (!verdict.ok) {
+          /**
+           * #143 — no trail upstream, but the group's own ratio made the
+           * fraction (`conversionCreatedFraction`): the conversion is the
+           * origin, dated at its last incoming leg and bound by the same
+           * origin window. A trail that cannot be read still refuses first.
+           */
+          if (
+            !verdict.unresolved &&
+            inOriginWindow(last) &&
+            conversionCreatedFraction(
+              traces.map((trace) => trace.quantity),
+              legs.map((leg) => leg.quantity),
+            )
+          ) {
+            const after = replayUpTo(last, true);
+            const created: OriginCandidate = {
+              id: groupId,
+              type: 'conversion',
+              tradeDate: last.tradeDate,
+              quantityAfter: after.ok ? after.value.quantity : null,
+              fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
+              tracedFrom: null,
+            };
+            return [created];
+          }
           tracedUnresolved = tracedUnresolved || verdict.unresolved;
           return [];
         }
