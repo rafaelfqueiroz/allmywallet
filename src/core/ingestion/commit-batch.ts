@@ -36,7 +36,6 @@ import {
 import {
   ASSET_CONVERSION_DEFINITIONS,
   ASSET_LIQUIDATION_DEFINITIONS,
-  type AssetConversionDefinition,
   type AssetLiquidationDefinition,
 } from '@/core/ingestion/asset-conversion-definitions';
 import {
@@ -258,13 +257,14 @@ interface ConversionWrite {
   readonly mode: 'insert' | 'in_place' | 'companion';
   readonly origin: ImportBatchId | null;
   /**
-   * #143 — an `in_place` leg whose stored copy was already an **active sell**
-   * of the same quantity (a priced `Resgate` an earlier import applied under
-   * BR-005-18 v3). Its quantity already left the position and every wallet
-   * allocation, and its cash already left net contributions; retyping it
-   * changes only where its cost goes. It is therefore not reported in
-   * `committed`, whose wallet side would otherwise reduce the allocations a
-   * second time (SPEC-010 BR-010-17).
+   * #143 D10 — a liquidation's `in_place` source row whose stored copy was
+   * already an **active sell** of the same quantity (a priced `Resgate` an
+   * earlier import applied under BR-005-18 v3). Its quantity already left the
+   * position and every wallet allocation, and its cash already left net
+   * contributions; repricing it changes only the realised result. It is
+   * therefore not reported in `committed`, whose wallet side would otherwise
+   * reduce the allocations a second time (SPEC-010 BR-010-17). Never set on a
+   * conversion leg: a conversion carries no cash and takes no sell.
    */
   readonly retypedActive?: boolean | undefined;
   /**
@@ -1652,8 +1652,6 @@ interface ConversionEvidenceRef {
   readonly row: ImportRow | null;
   readonly mode: 'insert' | 'in_place';
   readonly origin: ImportBatchId | null;
-  /** #143: see `ConversionWrite.retypedActive`. */
-  readonly retypedActive?: boolean | undefined;
 }
 
 function dateDistance(a: BusinessDate, b: BusinessDate): number {
@@ -1668,34 +1666,8 @@ function movementFromStoredKey(naturalKey: string) {
   });
 }
 
-/**
- * #143 — a **priced** `Resgate` is conversion evidence only for a definition
- * that names its asset code in `pricedRedemptionSourceCodes`. The movement map
- * is not changed: everywhere else such a row is BR-005-18 v3's sell.
- */
-function isPricedRedemptionOf(row: ImportRow, definition: AssetConversionDefinition): boolean {
-  return (
-    row.record.kind === 'transaction' &&
-    row.record.priceStated &&
-    normalizeMovementType(row.record.b3Type) === 'resgate' &&
-    (definition.pricedRedemptionSourceCodes ?? []).includes(row.record.assetCode)
-  );
-}
-
-/** Evidence for any definition — the batch-wide pre-filter. */
-function isConversionEvidenceRow(row: ImportRow): boolean {
-  return (
-    conversionEvidenceForRow(row) !== null ||
-    ASSET_CONVERSION_DEFINITIONS.some((definition) => isPricedRedemptionOf(row, definition))
-  );
-}
-
-function conversionEvidenceForRow(
-  row: ImportRow,
-  definition?: AssetConversionDefinition,
-): AssetConversionEvidence['movement'] | null {
+function conversionEvidenceForRow(row: ImportRow): AssetConversionEvidence['movement'] | null {
   if (row.record.kind !== 'transaction') return null;
-  if (definition !== undefined && isPricedRedemptionOf(row, definition)) return 'resgate';
   const named = conversionEvidenceMovementOf(row.record.b3Type, {
     assetClass: row.record.assetClass,
     priceStated: row.record.priceStated,
@@ -1856,7 +1828,7 @@ async function planAssetConversions(
   settledCorporate: readonly Transaction[],
   liquidationWrites: readonly ConversionWrite[],
 ): Promise<ConversionPlan> {
-  const currentEvidence = rows.filter(isConversionEvidenceRow);
+  const currentEvidence = rows.filter((row) => conversionEvidenceForRow(row) !== null);
   if (currentEvidence.length === 0) return { writes: [] };
 
   const candidateTransactions = candidates.map((candidate) => candidate.transaction);
@@ -1927,10 +1899,8 @@ async function planAssetConversions(
       const represented = new Set<string>();
       for (const row of triggering) {
         if (row.record.kind !== 'transaction') continue;
-        const movement = conversionEvidenceForRow(row, definition);
+        const movement = conversionEvidenceForRow(row);
         if (movement === null) continue;
-        const priced = isPricedRedemptionOf(row, definition);
-        let retypedActive = false;
         let transaction: Transaction | undefined;
         let mode: ConversionEvidenceRef['mode'] = 'insert';
         let origin: ImportBatchId | null = null;
@@ -1945,17 +1915,10 @@ async function planAssetConversions(
               context.today,
             ) ?? undefined;
         } else if (row.classification === 'duplicate') {
-          const copy = priced ? storedCopyAcrossKeyForms(stored, row) : storedCopyOf(stored, row);
-          // #143: a priced Resgate an earlier import applied as v3's `sell` is
-          // re-read as this definition's outgoing evidence and retyped in
-          // place. Only through the row: a stored sell's mapped key does not
-          // say it was a `Resgate`, so the stored-ledger scan below never
-          // takes one — it could be an ordinary sale.
-          const activeSell = priced && copy?.status === 'active' && copy.type === 'sell';
+          const copy = storedCopyOf(stored, row);
           if (
             copy !== undefined &&
             (copy.status === 'unclassified' ||
-              activeSell ||
               (copy.status === 'active' &&
                 (copy.type === 'transfer_in' || copy.type === 'transfer_out'))) &&
             !copy.isUserModified &&
@@ -1965,7 +1928,6 @@ async function planAssetConversions(
             transaction = copy;
             mode = 'in_place';
             origin = copy.importBatchId;
-            retypedActive = activeSell;
           }
         }
         if (transaction === undefined) continue;
@@ -1978,16 +1940,11 @@ async function planAssetConversions(
             tradeDate: row.record.tradeDate,
             beforeQuantity: Quantity.zero(),
             statementQuantity: row.record.quantity,
-            // #143 SPEC-007 BR-007-05b: B3's own price and fees — the cash half
-            // of the exchange. Read from the transaction, which for an
-            // in-place copy is what the ledger already holds.
-            ...(priced ? { unitPrice: transaction.unitPrice, fees: transaction.fees } : {}),
           },
           transaction,
           row,
           mode,
           origin,
-          retypedActive,
         });
       }
 
@@ -2191,11 +2148,10 @@ async function planAssetConversions(
             status: 'active',
             tradeDate: leg.tradeDate,
             quantity: leg.quantity,
-            // #143 SPEC-007 BR-007-05b: a cash-bearing out leg keeps B3's price
-            // and fees and carries the cash as its total; every other leg is 0.
-            unitPrice: leg.unitPrice,
-            fees: leg.fees,
-            totalValue: leg.totalValue,
+            // SPEC-007 BR-007-05b: a conversion carries cost, never cash.
+            unitPrice: Money.zero(),
+            fees: Money.zero(),
+            totalValue: Money.zero(),
             ratio: null,
             conversionGroupId: groupId,
             costBasis: leg.costBasis,
@@ -2208,7 +2164,6 @@ async function planAssetConversions(
             row: ref?.row ?? null,
             mode: ref === undefined ? 'companion' : ref.mode,
             origin: ref?.origin ?? null,
-            retypedActive: ref?.retypedActive === true && leg.type === 'conversion_out',
           });
         }
         if (!validateAssetConversionGroup(groupWrites.map((write) => write.transaction)).ok) {

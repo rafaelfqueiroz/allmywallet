@@ -190,6 +190,27 @@ describe('externalFlow — what TWR will have to neutralise, and nothing else', 
       expect(externalFlow(transaction).isZero(), transaction.type).toBe(true);
     }
   });
+
+  it('BR-007-05b (#143) — a conversion leg is never an external flow, even carrying a price', () => {
+    // A conversion carries cost and never cash, so neither leg moves money in
+    // or out of the portfolio. A stray price on an out leg — 90 × 2,239 − 0,51
+    // would be 201,00 as a sale — still flows 0,00: the price is not cash.
+    const pricedOut = aTransaction()
+      .conversionOut('00000000-c0de-7000-8000-000000000041', '9000')
+      .quantity('90')
+      .price('2.239')
+      .fees('0.51')
+      .build();
+    expect(to8(externalFlow(pricedOut))).toBe('0.00000000');
+    // Nor a stored total: a hand-set 201,00 is not read (recomputed, not trusted).
+    expect(to8(externalFlow({ ...pricedOut, totalValue: Money.fromString('201') }))).toBe(
+      '0.00000000',
+    );
+    const plainOut = aTransaction().conversionOut().quantity('100').build();
+    expect(to8(externalFlow(plainOut))).toBe('0.00000000');
+    const incoming = aTransaction().conversionIn('9000').quantity('83.89').build();
+    expect(to8(externalFlow(incoming))).toBe('0.00000000');
+  });
 });
 
 // ---------------------------------------------------------------------------

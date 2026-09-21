@@ -60,6 +60,32 @@ describe('SPEC-006 BR-006-05 — atomic conversion group management', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('INVALID_CONVERSION_GROUP');
+    // Out 400,00 against in 400,00000001: the two costs, and no cash figure.
+    expect(result.error.context).toEqual({
+      outgoingCost: '400',
+      incomingCost: '400.00000001',
+    });
+  });
+
+  it('BR-007-05b (#143) — refuses a leg carrying cash, even with the costs balanced', () => {
+    // A conversion carries cost and never cash: out 400,00 = in 400,00 holds,
+    // yet a total of 0,01 on either leg makes the group invalid. Asserting the
+    // context pins the pre-#149 error: no cash figure is ever reported.
+    const group = '00000000-c0de-7000-8000-000000000023';
+    const [out, incoming] = groupLegs(group);
+    expect(validateAssetConversionGroup([out, incoming]).ok).toBe(true);
+    const cash = Money.fromString('0.01');
+    for (const legs of [
+      [{ ...out, totalValue: cash }, incoming],
+      [out, { ...incoming, totalValue: cash }],
+      [{ ...out, totalValue: cash.negated() }, incoming],
+    ]) {
+      const result = validateAssetConversionGroup(legs);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('INVALID_CONVERSION_GROUP');
+      expect(result.error.context).toEqual({});
+    }
   });
 
   it('creates, replaces and deletes every leg as one complete group', async () => {

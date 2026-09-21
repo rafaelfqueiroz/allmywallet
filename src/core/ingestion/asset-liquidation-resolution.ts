@@ -52,7 +52,10 @@ export interface LiquidationEvidence {
   /**
    * The quantity the row moved: a `Resgate`'s own quantity, or what a target
    * credit **added** (B3's statement less the receipt code's balance before
-   * that day — `repeatedTargetCredits`' reading, #143).
+   * that day). Every liquidation reads its target credits this way, so
+   * same-day credits are separate deltas that sum, never two restatements of
+   * one balance: B3 credits the receipt code once per liquidated fund, on one
+   * date, with nothing in either row naming its fund (#143 D10).
    */
   readonly quantity: Quantity;
   readonly state: LiquidationEvidenceState;

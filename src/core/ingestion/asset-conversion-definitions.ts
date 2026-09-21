@@ -20,15 +20,8 @@ import { Money, Quantity } from '@/core/shared/money';
  * `odpv3-to-saud3` and `mall11-to-pmll11`. Purely additive.
  *
  * **v7 (#143)** — the BPFF11/HGFF11 → RVBI11 → PSEC11 chain, as two
- * definitions. `bpff11-and-hgff11-to-rvbi11` is the first definition with a
- * **cash component**: B3 records each source's cash as a priced FII
- * `Resgate`, which the definition names explicitly
- * (`pricedRedemptionSourceCodes`) — never a change to the movement map, where
- * every other priced `Resgate` stays v3's sell — and its target receives two
- * same-day `Atualização` credits on the receipt code RVBI15
- * (`repeatedTargetCredits`). `rvbi11-to-psec11` is the rename that follows.
- * Purely additive: no earlier definition gains a field, so no stored group's
- * evidence can complete a wider group than it was written under.
+ * definitions: `bpff11-and-hgff11-to-rvbi11` (superseded by v8) and
+ * `rvbi11-to-psec11`, the rename that follows. Purely additive.
  *
  * **v8 (#143 D10)** — `bpff11-and-hgff11-to-rvbi11` is **removed** and
  * replaced by `bpff11-and-hgff11-liquidated-into-rvbi11` in
@@ -40,8 +33,16 @@ import { Money, Quantity } from '@/core/shared/money';
  * so the event is a different kind with its own table, versioned here with the
  * conversions because v8 is one reviewable edit of both. No v7 group was ever
  * written to a real ledger (the owner had not re-imported since #149), so the
- * removal strands nothing; the cash-bearing `conversion_out` capability stays
- * (migration 0026 is forward-only) with no definition using it.
+ * removal strands nothing.
+ *
+ * **Cash removed (#143, no version change)** — #149 gave v7's incorporation a
+ * cash-bearing `conversion_out` (`pricedRedemptionSourceCodes`,
+ * `repeatedTargetCredits`). With that definition gone no definition used
+ * either field, and both are removed with the capability: a conversion carries
+ * cost and **never cash** (SPEC-007 BR-007-05b, migration 0027). The version
+ * stays 8 because the observable set of definitions — and so every group a
+ * given extract resolves to — is unchanged; a bump would only re-key new
+ * groups for no difference in what they contain.
  *
  * The version is part of every `groupKey` (`asset-conversion-resolution.ts`),
  * so a group already written under an older key keeps it: `commit-batch.ts`
@@ -63,26 +64,6 @@ export interface AssetConversionDefinition {
   readonly id: string;
   readonly sourceAssetCodes: readonly string[];
   readonly targets: readonly AssetConversionTargetDefinition[];
-  /**
-   * #143 — source codes whose **priced** `Resgate` is this conversion's
-   * outgoing evidence, carrying the cash B3 paid alongside it. The cash is a
-   * return of capital (SPEC-007 BR-007-05b): the row becomes the source's
-   * `conversion_out` in place, keeps its price, fees and total, and the
-   * targets receive the removed cost less that cash.
-   *
-   * Explicit and per definition because the movement map reads every other
-   * priced FII `Resgate` as a sale (BR-005-18 v3), and must go on doing so: a
-   * global rule would turn an ordinary fund redemption into a conversion.
-   */
-  readonly pricedRedemptionSourceCodes?: readonly string[] | undefined;
-  /**
-   * #143 — the target's same-day `Atualização` rows are **separate credits**,
-   * each measured against the balance before that day and summed, rather than
-   * two restatements of one balance (which is ambiguous and refuses). B3
-   * credits a receipt code once per incorporated fund, on one date, with
-   * nothing in either row to say which fund it came from.
-   */
-  readonly repeatedTargetCredits?: boolean | undefined;
   /**
    * #143 — a source `Atualização` restating exactly the balance the replay
    * already holds is **corroboration**, set aside rather than read as what
