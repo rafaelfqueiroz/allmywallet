@@ -210,10 +210,13 @@ export const transactions = pgTable(
     ),
     check('transactions_fees_non_negative_check', sql`${table.fees} >= 0`),
     check('transactions_unit_price_non_negative_check', sql`${table.unitPrice} >= 0`),
-    // SPEC-007 BR-007-05b: conversion legs are grouped, only incoming legs
-    // carry allocated cost. An outgoing leg may carry a non-negative cash
-    // `total_value` — B3's priced `Resgate` cash component of a conversion,
-    // e.g. BPFF11 -> RVBI11 — while an incoming leg never produces a cash flow.
+    // SPEC-007 BR-007-05b / #143 D12/D13: conversion legs are grouped, and
+    // both directions carry zero cash `total_value`. Migration 0026 (#143)
+    // briefly let a `conversion_out` leg carry a non-negative cash component
+    // for a return-of-capital reading of a priced B3 `Resgate`; the owner
+    // decided the one real case (BPFF11 -> RVBI11) was actually a taxable
+    // liquidation (D10), no code writes a cash-bearing conversion leg, and
+    // 0027_conversion_cash_component_contract.sql tightened this back.
     check(
       'transactions_conversion_pairing_check',
       sql`(${table.type} = 'conversion_in'
@@ -225,7 +228,7 @@ export const transactions = pgTable(
             AND ${table.conversionGroupId} IS NOT NULL
             AND ${table.costBasis} IS NOT NULL
             AND ${table.costBasis} >= 0
-            AND ${table.totalValue} >= 0)
+            AND ${table.totalValue} = 0)
           OR (${table.type} NOT IN ('conversion_in', 'conversion_out')
             AND ${table.conversionGroupId} IS NULL
             AND ${table.costBasis} IS NULL)`,
