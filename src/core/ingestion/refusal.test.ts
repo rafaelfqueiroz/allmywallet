@@ -127,6 +127,25 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
       );
     });
 
+    it('#138: an unclassified row that moves no quantity does not explain a shortfall', () => {
+      // B3's semiannual custody fee on a Tesouro title: quantity 0, a charge,
+      // no shares. The sale needs an opening position, not a classification.
+      const fee = {
+        ...aTransaction()
+          .transferIn()
+          .on('2026-01-01')
+          .quantity('0')
+          .price('0')
+          .status('unclassified')
+          .build(),
+        naturalKey: '2026-01-01|PETR4|rendimento|0|0|cobranca de taxa semestral',
+      };
+      const refusal = explainRefusal(row('sell', '2026-02-01', '5'), [fee], userId, now, today);
+      expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
+        'missing_history',
+      );
+    });
+
     it('a shortfall on a position holding only active rows traces to missing history', () => {
       const refusal = explainRefusal(
         row('transfer_out', '2026-02-01', '30'),

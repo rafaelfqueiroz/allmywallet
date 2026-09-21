@@ -23,6 +23,7 @@ import type {
   ParsedExtract,
   ParsedRecord,
 } from '@/core/ingestion/ports';
+import { explainRefusal } from '@/core/ingestion/refusal';
 import { stageBatch } from '@/core/ingestion/stage-batch';
 import { commitBatch } from '@/core/ingestion/test-support/commit';
 import {
@@ -3396,5 +3397,233 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event rows resolve at commit'
     const [discrepancy] = result.value.batch.reconciliation?.discrepancies ?? [];
     expect(discrepancy).toMatchObject({ cause: 'unclassified_rows_affecting_asset' });
     expect(discrepancy?.computedQuantity.toString()).toBe('70');
+  });
+});
+
+describe('#138 — the four Movimentação rows that refused on every import', () => {
+  const CLEAR = 'Clear';
+  const XP = 'XP';
+  const INTER = 'Inter';
+
+  async function importFile(
+    deps: FakeIngestionDeps,
+    records: readonly ParsedRecord[],
+    assetConversionsEnabled = true,
+  ) {
+    const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+    const result = await commitBatch(deps, userId, { batchId, assetConversionsEnabled });
+    if (!result.ok) throw new Error(`commit failed: ${result.error.code}`);
+    return { batchId, outcome: result.value };
+  }
+
+  async function positionOf(deps: FakeIngestionDeps, code: string, institution: string) {
+    const assetId = await deps.assets.resolve({
+      code,
+      name: code,
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: false,
+    });
+    const institutionId = await deps.institutions.resolve(institution);
+    const replayed = replayPosition(
+      await deps.transactions.listForPosition(assetId, institutionId),
+    );
+    if (!replayed.ok) throw new Error(`${code} at ${institution} does not replay`);
+    return replayed.value;
+  }
+
+  describe('BIDI11 → INBR32 (SPEC-005 BR-005-20c, SPEC-007 BR-007-05b)', () => {
+    const inbr32 = (
+      b3Type: string,
+      direction: 'credit' | 'debit',
+      institutionName: string,
+      date: string,
+    ) =>
+      buy({
+        b3Type,
+        direction,
+        assetCode: 'INBR32',
+        assetName: 'INTER CO INC',
+        assetClass: 'bdr',
+        institutionName,
+        tradeDate: BusinessDate.of(date),
+        quantity: Quantity.fromString('1'),
+        unitPrice: Money.zero(),
+        fees: Money.zero(),
+        priceStated: false,
+      });
+    /**
+     * 3 BIDI11 for 10,00 at Clear, 1 sold: 2 units at 10 ÷ 3 each, a total
+     * that repeats past the column's scale — 6,666…667 in replay, 6,66666667
+     * stored. B3 converts two units into one INBR32 (the 2022 migration's
+     * 2 : 1), then walks it Clear → XP → Inter by custody transfer.
+     */
+    const bidi11History = () => [
+      buy({
+        assetCode: 'BIDI11',
+        assetName: 'BANCO INTER',
+        institutionName: CLEAR,
+        tradeDate: BusinessDate.of('2022-01-10'),
+        quantity: Quantity.fromString('3'),
+        unitPrice: Money.fromString('3.33333333'),
+        fees: Money.fromString('0.00000001'),
+      }),
+      buy({
+        b3Type: 'Venda',
+        assetCode: 'BIDI11',
+        assetName: 'BANCO INTER',
+        institutionName: CLEAR,
+        tradeDate: BusinessDate.of('2022-02-10'),
+        quantity: Quantity.fromString('1'),
+        unitPrice: Money.fromString('4'),
+        fees: Money.zero(),
+      }),
+    ];
+    const migration = () => [
+      inbr32('Atualização', 'credit', CLEAR, '2022-08-30'),
+      inbr32('Transferência', 'debit', CLEAR, '2023-11-14'),
+      inbr32('Transferência', 'credit', XP, '2023-11-14'),
+      inbr32('Transferência', 'debit', XP, '2024-02-02'),
+      inbr32('Transferência', 'credit', INTER, '2024-02-02'),
+      buy({
+        b3Type: 'Dividendo',
+        direction: 'credit',
+        assetCode: 'INBR32',
+        assetName: 'INTER CO INC',
+        assetClass: 'bdr',
+        institutionName: INTER,
+        tradeDate: BusinessDate.of('2024-05-06'),
+        quantity: Quantity.fromString('1'),
+        unitPrice: Money.fromString('0.153'),
+        fees: Money.zero(),
+      }),
+    ];
+
+    it('resolves the group a pre-v5 commit left unclassified, and both custody transfers carry its cost', async () => {
+      const deps = buildFakeIngestionDeps();
+      const file = [...bidi11History(), ...migration()];
+      // The owner's state: committed before the definition could resolve, so
+      // the Atualização and both credits are unclassified and both debits
+      // were refused for want of a position.
+      const before = await importFile(deps, file, false);
+      expect(before.outcome).toMatchObject({ invalid: 2, resolvedAssetConversions: 0 });
+
+      const again = await importFile(deps, file);
+
+      expect(again.outcome).toMatchObject({
+        invalid: 0,
+        resolvedAssetConversions: 1,
+        committedConversionLegs: 2,
+        promoted: 2,
+      });
+      const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+      // The persisted leg is the replayed total at the column's scale.
+      expect(legs.map((row) => row.costBasis?.toString())).toEqual(['6.66666667', '6.66666667']);
+      const source = await positionOf(deps, 'BIDI11', CLEAR);
+      expect(source.quantity.toString()).toBe('0');
+      expect(source.totalCost.toString()).toBe('0');
+      for (const institution of [CLEAR, XP]) {
+        expect((await positionOf(deps, 'INBR32', institution)).quantity.toString()).toBe('0');
+      }
+      const held = await positionOf(deps, 'INBR32', INTER);
+      expect(held.quantity.toString()).toBe('1');
+      expect(held.totalCost.toString()).toBe('6.66666667');
+
+      const count = deps.transactions.rows.length;
+      const third = await importFile(deps, file);
+      expect(third.outcome).toMatchObject({ applied: 0, invalid: 0, resolvedAssetConversions: 0 });
+      expect(deps.transactions.rows).toHaveLength(count);
+    });
+
+    it('with no BIDI11 behind it, the Atualização stays unclassified and both debits are refused', async () => {
+      const deps = buildFakeIngestionDeps();
+
+      const { outcome } = await importFile(deps, migration());
+
+      expect(outcome).toMatchObject({ invalid: 2, resolvedAssetConversions: 0 });
+      expect(deps.transactions.rows.some((row) => row.conversionGroupId !== null)).toBe(false);
+      expect((await positionOf(deps, 'INBR32', INTER)).quantity.toString()).toBe('0');
+    });
+  });
+
+  describe('a Tesouro sale whose purchase predates the extract (SPEC-005 BR-005-19/24)', () => {
+    const selic = (overrides: Partial<NormalizedTransactionRecord>) =>
+      buy({
+        assetCode: 'Tesouro Selic 2025',
+        assetName: 'Tesouro Selic 2025',
+        assetClass: 'tesouro_direto',
+        institutionName: CLEAR,
+        fees: Money.zero(),
+        ...overrides,
+      });
+    // B3's semiannual custody fee: quantity 0, a charge, no price. It is the
+    // only trace of a title bought before the extract's first date.
+    const fee = selic({
+      b3Type: 'Cobrança de Taxa Semestral',
+      direction: 'debit',
+      tradeDate: BusinessDate.of('2020-01-01'),
+      quantity: Quantity.zero(),
+      unitPrice: Money.zero(),
+      priceStated: false,
+    });
+    const sale = selic({
+      b3Type: 'Venda',
+      direction: 'debit',
+      tradeDate: BusinessDate.of('2020-03-18'),
+      quantity: Quantity.fromString('1.05'),
+      unitPrice: Money.fromString('10541.8'),
+    });
+
+    it('refuses the sale for missing history — never invents the purchase — and applies it once an opening position exists', async () => {
+      const deps = buildFakeIngestionDeps();
+      const first = await importFile(deps, [fee, sale]);
+
+      expect(first.outcome).toMatchObject({ invalid: 1 });
+      const rows = await deps.rows.listByBatch(first.batchId);
+      const refused = rows.find((row) => row.classification === 'invalid');
+      if (refused === undefined) throw new Error('the sale was not refused');
+      const ledger = await deps.transactions.listForPosition(
+        refused.assetId,
+        refused.institutionId,
+      );
+      // The fee is unclassified but moves nothing, so the cause is the
+      // history before the extract, not the fee.
+      expect(
+        explainRefusal(refused, ledger, userId, new Date(), BusinessDate.of('2026-03-15')),
+      ).toMatchObject({ kind: 'insufficient_quantity', likelyCause: 'missing_history' });
+
+      // The owner enters the opening position by hand (an Ajuste).
+      await deps.transactions.insert({
+        id: TransactionId.generate(),
+        userId,
+        assetId: refused.assetId,
+        institutionId: refused.institutionId,
+        type: 'adjustment',
+        status: 'active',
+        tradeDate: BusinessDate.of('2019-11-05'),
+        quantity: Quantity.fromString('1.05'),
+        unitPrice: Money.fromString('10000'),
+        fees: Money.zero(),
+        totalValue: Money.fromString('10500'),
+        ratio: null,
+        conversionGroupId: null,
+        costBasis: null,
+        naturalKey: 'manual|opening|selic-2025',
+        occurrence: 1,
+        importBatchId: null,
+        isManual: true,
+        isUserModified: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const again = await importFile(deps, [fee, sale]);
+
+      expect(again.outcome).toMatchObject({ applied: 1, invalid: 0 });
+      const position = await positionOf(deps, 'Tesouro Selic 2025', CLEAR);
+      expect(position.quantity.toString()).toBe('0');
+      // 1,05 × 10.541,80 = 11.068,89; − 10.500,00 opening cost = 568,89.
+      expect(position.realizedGain.toString()).toBe('568.89');
+    });
   });
 });

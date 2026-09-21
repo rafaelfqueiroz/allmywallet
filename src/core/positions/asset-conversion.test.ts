@@ -167,6 +167,126 @@ describe('SPEC-007 BR-007-05b — grouped asset conversions', () => {
     expect(source!.totalCost.plus(target!.totalCost).toString()).toBe('1.00000001');
   });
 
+  describe('#138 — a closing leg persisted at the column scale', () => {
+    // 3 shares for 10,00 (3 × 3,33333333 + 0,00000001 fee): average 10 ÷ 3,
+    // cut at Money's 40 significant digits. Selling 1 at 3,33333333…3 leaves
+    //   2 shares / 6,666666666666666666666666666666666666667
+    // which the column holds as 6,66666667 — 3,3 × 10⁻⁹ *more* than replay.
+    // The planner persists a whole-position removal at that stored figure
+    // (`resolveAssetConversion`), exactly as BIDI11's 2.412,999…998 became
+    // 2.413,00000000 on the owner's ledger.
+    const group = '00000000-c0de-7000-8000-000000000017';
+    const history = () => [
+      aTransaction()
+        .buy()
+        .of('SRC')
+        .on('2026-01-01')
+        .quantity('3')
+        .price('3.33333333')
+        .fees('0.00000001')
+        .build(),
+      aTransaction().sell().of('SRC').on('2026-01-02').quantity('1').price('4').build(),
+    ];
+    const closing = (costBasis: string) =>
+      aTransaction()
+        .conversionOut(group, costBasis)
+        .of('SRC')
+        .on('2026-02-01')
+        .quantity('2')
+        .build();
+
+    it('closes the source when the leg exceeds the held cost by less than half a unit', () => {
+      const before = replayPosition(history());
+      expect(before.ok && before.value.totalCost.toString()).toBe(
+        '6.666666666666666666666666666666666666667',
+      );
+      const result = replayPositions([
+        ...history(),
+        closing('6.66666667'),
+        aTransaction()
+          .conversionIn('6.66666667', group)
+          .of('DST')
+          .on('2026-02-01')
+          .quantity('1')
+          .build(),
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok || !before.ok) return;
+      const source = stateFor(result.value, 'SRC');
+      const target = stateFor(result.value, 'DST');
+      expect(source?.quantity.toString()).toBe('0');
+      expect(source?.totalCost.toString()).toBe('0');
+      // The conversion realises nothing: the gain is the sale's alone.
+      expect(source?.realizedGain.toString()).toBe(before.value.realizedGain.toString());
+      expect(target?.totalCost.toString()).toBe('6.66666667');
+    });
+
+    it('accepts a leg exceeding the held cost by exactly half a unit', () => {
+      // 2 shares for 10,00000001; 1 sold leaves 1 share / 5,000000005. The
+      // planner stores the whole-position removal half-up: 5,00000001, which
+      // is 0,5 × 10⁻⁸ over — the widest gap its own rounding can produce.
+      const half = '00000000-c0de-7000-8000-000000000018';
+      const result = replayPosition([
+        aTransaction()
+          .buy()
+          .of('SRC')
+          .on('2026-01-01')
+          .quantity('2')
+          .price('5')
+          .fees('0.00000001')
+          .build(),
+        aTransaction().sell().of('SRC').on('2026-01-02').quantity('1').price('6').build(),
+        aTransaction()
+          .conversionOut(half, '5.00000001')
+          .of('SRC')
+          .on('2026-02-01')
+          .quantity('1')
+          .build(),
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('0');
+      expect(result.value.totalCost.toString()).toBe('0');
+    });
+
+    it('leaves shares still held at zero cost, never a negative preço médio', () => {
+      // 4 shares for 0,00000001; 2 sold leave 2 / 0,000000005. A leg taking
+      // 1 share at 0,00000001 is 0,5 × 10⁻⁸ over what is held: the share that
+      // remains keeps quantity 1 and cost 0 — not −0,000000005.
+      const partial = '00000000-c0de-7000-8000-000000000019';
+      const result = replayPosition([
+        aTransaction()
+          .buy()
+          .of('SRC')
+          .on('2026-01-01')
+          .quantity('4')
+          .price('0')
+          .fees('0.00000001')
+          .build(),
+        aTransaction().sell().of('SRC').on('2026-01-02').quantity('2').price('1').build(),
+        aTransaction()
+          .conversionOut(partial, '0.00000001')
+          .of('SRC')
+          .on('2026-02-01')
+          .quantity('1')
+          .build(),
+      ]);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('1');
+      expect(result.value.totalCost.toString()).toBe('0');
+      expect(result.value.averageCost.toString()).toBe('0');
+    });
+
+    it('refuses a leg exceeding the held cost by half a unit or more', () => {
+      // 6,66666668 − 6,666…667 = 1,33 × 10⁻⁸: a storage unit, not a rounding.
+      const result = replayPosition([...history(), closing('6.66666668')]);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('INSUFFICIENT_QUANTITY');
+    });
+  });
+
   it('applies a backdated same-day conversion before a split and trade', () => {
     // Existing target before the event: 10 @ 20,00 = 200,00.
     // Same day canonical order, regardless of insertion/arrival:
