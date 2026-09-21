@@ -18,13 +18,24 @@ import { Quantity } from '@/core/shared/money';
  * `Atualização` on the new code: `wizs3-to-wizc3`, `trpl4-to-isae4`,
  * `odpv3-to-saud3` and `mall11-to-pmll11`. Purely additive.
  *
+ * **v7 (#143)** — the BPFF11/HGFF11 → RVBI11 → PSEC11 chain, as two
+ * definitions. `bpff11-and-hgff11-to-rvbi11` is the first definition with a
+ * **cash component**: B3 records each source's cash as a priced FII
+ * `Resgate`, which the definition names explicitly
+ * (`pricedRedemptionSourceCodes`) — never a change to the movement map, where
+ * every other priced `Resgate` stays v3's sell — and its target receives two
+ * same-day `Atualização` credits on the receipt code RVBI15
+ * (`repeatedTargetCredits`). `rvbi11-to-psec11` is the rename that follows.
+ * Purely additive: no earlier definition gains a field, so no stored group's
+ * evidence can complete a wider group than it was written under.
+ *
  * The version is part of every `groupKey` (`asset-conversion-resolution.ts`),
  * so a group already written under an older key keeps it: `commit-batch.ts`
  * never re-resolves evidence whose stored transaction is already an active
  * conversion leg, so a re-import is still a no-op rather than a second group
  * under a newer key.
  */
-export const ASSET_CONVERSION_DEFINITIONS_VERSION = 6;
+export const ASSET_CONVERSION_DEFINITIONS_VERSION = 7;
 
 export interface AssetConversionTargetDefinition {
   /** B3 Movimentação code; omitted when it equals the canonical ledger code. */
@@ -38,6 +49,26 @@ export interface AssetConversionDefinition {
   readonly id: string;
   readonly sourceAssetCodes: readonly string[];
   readonly targets: readonly AssetConversionTargetDefinition[];
+  /**
+   * #143 — source codes whose **priced** `Resgate` is this conversion's
+   * outgoing evidence, carrying the cash B3 paid alongside it. The cash is a
+   * return of capital (SPEC-007 BR-007-05b): the row becomes the source's
+   * `conversion_out` in place, keeps its price, fees and total, and the
+   * targets receive the removed cost less that cash.
+   *
+   * Explicit and per definition because the movement map reads every other
+   * priced FII `Resgate` as a sale (BR-005-18 v3), and must go on doing so: a
+   * global rule would turn an ordinary fund redemption into a conversion.
+   */
+  readonly pricedRedemptionSourceCodes?: readonly string[] | undefined;
+  /**
+   * #143 — the target's same-day `Atualização` rows are **separate credits**,
+   * each measured against the balance before that day and summed, rather than
+   * two restatements of one balance (which is ambiguous and refuses). B3
+   * credits a receipt code once per incorporated fund, on one date, with
+   * nothing in either row to say which fund it came from.
+   */
+  readonly repeatedTargetCredits?: boolean | undefined;
 }
 
 function oneTarget(
@@ -128,6 +159,41 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
   oneTarget('trpl4-to-isae4', ['TRPL4'], 'ISAE4'),
   oneTarget('odpv3-to-saud3', ['ODPV3'], 'SAUD3'),
   oneTarget('mall11-to-pmll11', ['MALL11'], 'PMLL11'),
+  // #143 (v7): the incorporation of BPFF11 and HGFF11 into RVBI11, 2025-10.
+  // B3 records it at one institution as:
+  //
+  // - each source's balance restated unchanged by an `Atualização` on
+  //   2025-10-06 — corroboration, not conversion evidence (see
+  //   `commit-batch.ts`), since nothing has left yet;
+  // - a **priced** `Resgate` of the whole source a week later (90 @ 2,239 and
+  //   70 @ 1,983 on the owner's extract) — the cash half of the exchange,
+  //   which BR-005-18 v3 alone would read as a sale realising a loss on the
+  //   whole cost;
+  // - two same-day `Atualização` credits on the receipt code RVBI15
+  //   (90 × 0,9321 = 83,89 and 70 × 1,0766 = 75,36, the ratios of the
+  //   incorporation's fato relevante), with nothing in either row naming its
+  //   fund. So the definition has **both** sources and **one** target, and
+  //   the two credits share the one target allocation by quantity.
+  //
+  // The owner's reading: the cash is a **return of capital** — the sources
+  // close with no gain or loss, and RVBI11 takes the removed cost less the
+  // cash. Its receipt code RVBI15 is B3's evidence code only; the ledger
+  // position is RVBI11 from the start, as AXIA15 → AXIA15G.
+  {
+    id: 'bpff11-and-hgff11-to-rvbi11',
+    sourceAssetCodes: ['BPFF11', 'HGFF11'],
+    targets: [{ assetCode: 'RVBI11', evidenceAssetCode: 'RVBI15', allocationWeight: null }],
+    pricedRedemptionSourceCodes: ['BPFF11', 'HGFF11'],
+    repeatedTargetCredits: true,
+  },
+  // #143 (v7): RVBI11 → PSEC11, the ticker change of 2025-10-27, 1:1 and
+  // target-only like the v6 renames. It must follow the definition above: the
+  // planner walks this table in order, so RVBI11's incoming legs are already
+  // in its replay when this group measures it. RVBI11's own `Atualização` of
+  // 2025-10-17 restates 159,25 unchanged and is dropped as corroboration;
+  // measured after its 0,25 `Fração em Ativos` settles (#128 D2), RVBI11
+  // holds 159, all of which converts.
+  oneTarget('rvbi11-to-psec11', ['RVBI11'], 'PSEC11'),
   {
     id: 'klbn11-to-klbn3-and-klbn4',
     sourceAssetCodes: ['KLBN11'],
