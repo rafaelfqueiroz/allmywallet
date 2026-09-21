@@ -11,7 +11,9 @@ import { resetLedger, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
 
 /**
- * Migration `0023_asset_conversions.sql` (#121).
+ * Migrations `0023_asset_conversions.sql` (#121) and
+ * `0026_conversion_cash_component.sql` (#143, SPEC-007 BR-007-05b /
+ * SPEC-005 BR-005-20c).
  *
  * TESTING §1: PostgreSQL CHECK semantics, NUMERIC(20,8) precision, index
  * presence, and the widened type constraints are verified against real
@@ -234,11 +236,18 @@ describe('migration 0023 — asset conversions (integration)', () => {
       totalValue: '0',
     },
     {
-      label: 'conversion leg carrying cash value',
+      label: 'conversion_in carrying cash value',
       type: 'conversion_in',
       groupId: randomUUID(),
       costBasis: '10',
       totalValue: '0.01',
+    },
+    {
+      label: 'conversion_out with a negative cash total_value',
+      type: 'conversion_out',
+      groupId: randomUUID(),
+      costBasis: '10',
+      totalValue: '-0.00000001',
     },
     {
       label: 'non-conversion row carrying conversion metadata',
@@ -292,6 +301,75 @@ describe('migration 0023 — asset conversions (integration)', () => {
                  '0', '0', '0', ${groupId}, ${costBasis}, ${`conversion-${randomUUID()}`}, 1)
             `);
           }
+        },
+        appDb,
+      ),
+      'transactions_conversion_group_atomic_check',
+    );
+  });
+
+  /**
+   * Migration `0026_conversion_cash_component.sql` (#143): a `conversion_out`
+   * leg may carry B3's priced `Resgate` cash component — e.g. the BPFF11 ->
+   * RVBI11 incorporation, where each BPFF11 share became 0,9321 RVBI11 plus
+   * R$ 2,24 cash the owner treats as a return of capital — so the group's
+   * `conversion_in` legs receive removed cost minus cash rather than the
+   * whole removed cost.
+   */
+  it('accepts a conversion group whose outgoing leg carries a cash component', async () => {
+    const conversionGroupId = randomUUID();
+
+    await withTenant(
+      userId,
+      async (tx) => {
+        await tx.execute(sql`
+          INSERT INTO transactions
+            (id, user_id, asset_id, type, trade_date, quantity, unit_price, fees,
+             total_value, conversion_group_id, cost_basis, natural_key, occurrence)
+          VALUES
+            (${randomUUID()}, ${userId}, ${outgoingAssetId}, 'conversion_out', '2026-09-18', '1',
+             '10', '0', '10', ${conversionGroupId}, '100', ${`conversion-${randomUUID()}`}, 1),
+            (${randomUUID()}, ${userId}, ${incomingAssetId}, 'conversion_in', '2026-09-18', '1',
+             '0', '0', '0', ${conversionGroupId}, '90', ${`conversion-${randomUUID()}`}, 1)
+        `);
+      },
+      appDb,
+    );
+
+    const result = await migratorPool.query<{
+      type: string;
+      cost_basis: string;
+      total_value: string;
+    }>(
+      `SELECT type, cost_basis, total_value
+         FROM transactions
+        WHERE user_id = $1 AND conversion_group_id = $2
+        ORDER BY type`,
+      [userId, conversionGroupId],
+    );
+
+    expect(result.rows).toEqual([
+      { type: 'conversion_in', cost_basis: '90.00000000', total_value: '0.00000000' },
+      { type: 'conversion_out', cost_basis: '100.00000000', total_value: '10.00000000' },
+    ]);
+  });
+
+  it('rejects a group whose incoming cost does not equal outgoing cost minus outgoing cash', async () => {
+    const groupId = randomUUID();
+    await expectConstraintFailure(
+      withTenant(
+        userId,
+        async (tx) => {
+          await tx.execute(sql`
+            INSERT INTO transactions
+              (id, user_id, asset_id, type, trade_date, quantity, unit_price, fees,
+               total_value, conversion_group_id, cost_basis, natural_key, occurrence)
+            VALUES
+              (${randomUUID()}, ${userId}, ${outgoingAssetId}, 'conversion_out', '2026-09-18', '1',
+               '10', '0', '10', ${groupId}, '100', ${`conversion-${randomUUID()}`}, 1),
+              (${randomUUID()}, ${userId}, ${incomingAssetId}, 'conversion_in', '2026-09-18', '1',
+               '0', '0', '0', ${groupId}, '100', ${`conversion-${randomUUID()}`}, 1)
+          `);
         },
         appDb,
       ),

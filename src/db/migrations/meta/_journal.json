@@ -183,6 +183,13 @@
       "when": 1790000000000,
       "tag": "0025_merge_asset_code_aliases",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790000000001,
+      "tag": "0026_conversion_cash_component",
+      "breakpoints": true
     }
   ]
 }
