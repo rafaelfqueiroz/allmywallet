@@ -68,6 +68,17 @@ export interface EditTransactionInput {
    * flagging.
    */
   readonly flagUserModified?: boolean | undefined;
+  /**
+   * SPEC-007 BR-007-06 / SPEC-005 BR-005-20d — sets the cost-estimate marker
+   * explicitly: an object marks the row an estimate (with the close date its
+   * price was read from, or null when it was read from none), `null` marks it
+   * exact. For import's own in-place writes, which recompute the marker with
+   * the figure (a re-carried transfer, BR-005-20a).
+   *
+   * Omitted, the marker is kept — except that a user edit changing the price
+   * clears it (see `estimateAfterEdit`).
+   */
+  readonly costEstimate?: { readonly closeDate: BusinessDate | null } | null | undefined;
 }
 
 export interface EditTransactionResult {
@@ -246,8 +257,40 @@ function applyEdit(original: Transaction, input: EditTransactionInput, now: Date
      * this value, but only on rows we happened to import".
      */
     isUserModified: input.flagUserModified === false ? original.isUserModified : true,
+    ...estimateAfterEdit(original, input, unitPrice),
     updatedAt: now,
   };
+}
+
+/**
+ * SPEC-007 BR-007-06 / SPEC-005 BR-005-20d: "a user edit of the price clears
+ * it". The price is the only thing the marker is about, so:
+ *
+ *   - an explicit `costEstimate` wins (import's own in-place writes);
+ *   - a **user** edit (`flagUserModified` not `false`) that **changes** the
+ *     price is the user stating it — the row becomes exact and its close date
+ *     goes with the marker (the database CHECK pairs them);
+ *   - anything else keeps the row's marker. The edit form submits every
+ *     field, so a fees-only or date-only correction resubmits the estimated
+ *     price unchanged; clearing on that would let an estimate the user never
+ *     looked at read as exact — the failure DL-007-12 names. Nor does an
+ *     import's own edit (a classification, a promotion) clear it: no one
+ *     stated a price.
+ */
+function estimateAfterEdit(
+  original: Transaction,
+  input: EditTransactionInput,
+  unitPrice: Money,
+): Pick<Transaction, 'costIsEstimate' | 'estimateCloseDate'> {
+  if (input.costEstimate !== undefined) {
+    return input.costEstimate === null
+      ? { costIsEstimate: false, estimateCloseDate: null }
+      : { costIsEstimate: true, estimateCloseDate: input.costEstimate.closeDate };
+  }
+  if (input.flagUserModified !== false && !unitPrice.equals(original.unitPrice)) {
+    return { costIsEstimate: false, estimateCloseDate: null };
+  }
+  return { costIsEstimate: original.costIsEstimate, estimateCloseDate: original.estimateCloseDate };
 }
 
 /**

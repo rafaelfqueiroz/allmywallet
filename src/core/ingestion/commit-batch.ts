@@ -60,6 +60,7 @@ import {
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import { keyFormsFor, summarizeRows } from '@/core/ingestion/stage-batch';
 import {
+  type CarriedCost,
   type CarryLeg,
   debitsHeldBack,
   isCarryCandidate,
@@ -2107,18 +2108,22 @@ async function planAssetConversions(
 
         const fallbackDate = enriched[0]?.evidence.tradeDate;
         if (fallbackDate === undefined) continue;
+        // SPEC-007 BR-007-06: whether any source's lot was an estimate at the
+        // cut its cost is removed at — read from the same replay as that cost.
+        let sourceEstimated = false;
         const sourcePositions = definition.sourceAssetCodes.map((assetCode) => {
           const sourceEvidence = enriched.find((ref) => ref.evidence.assetCode === assetCode);
           const asAt = sourceEvidence?.evidence.tradeDate ?? fallbackDate;
-          const replayed = replayPosition(
+          const replayed = replayPositionWithEstimate(
             historyForCode(assetCode).filter((transaction) =>
               isBeforeConversion(transaction, asAt),
             ),
           );
+          if (replayed.ok && replayed.value.costEstimated) sourceEstimated = true;
           return {
             assetCode,
-            quantity: replayed.ok ? replayed.value.quantity : Quantity.zero(),
-            totalCost: replayed.ok ? replayed.value.totalCost : null,
+            quantity: replayed.ok ? replayed.value.state.quantity : Quantity.zero(),
+            totalCost: replayed.ok ? replayed.value.state.totalCost : null,
           };
         });
         const resolution = resolveAssetConversion({
@@ -2149,10 +2154,6 @@ async function planAssetConversions(
               importBatchId: context.batchId,
               isManual: false,
               isUserModified: false,
-              // SPEC-007 BR-007-06: a conversion leg's cost is exact, per
-              // BR-007-05b — never an estimate.
-              costIsEstimate: false,
-              estimateCloseDate: null,
               createdAt: context.now,
             }),
             assetId,
@@ -2168,6 +2169,17 @@ async function planAssetConversions(
             ratio: null,
             conversionGroupId: groupId,
             costBasis: leg.costBasis,
+            /**
+             * SPEC-007 BR-007-06 / DL-007-12: an incoming leg's allocated
+             * cost is carried from the sources' lots (BR-007-05b), so an
+             * estimate in any of them travels to every target. Set on every
+             * leg, stored copy or not, so a re-resolution never keeps a
+             * stale mark. An outgoing leg removes cost at the average and
+             * cannot mark a position, so it is never marked. No close date:
+             * a carried cost was read from no close (see `withCarriedCost`).
+             */
+            costIsEstimate: leg.type === 'conversion_in' && sourceEstimated,
+            estimateCloseDate: null,
             importBatchId: base?.importBatchId ?? context.batchId,
             isUserModified: false,
             updatedAt: context.now,
@@ -2320,7 +2332,7 @@ function settle(
     ),
   ];
 
-  let costs = new Map<string, Money>();
+  let costs = new Map<string, CarriedCost>();
   let outcomes = new Map<string, CorporateEventOutcome>();
   let previousSignature: string | null = null;
   const maximumPasses = legs.length + corporate.rows.length + 2;
@@ -2353,7 +2365,9 @@ function settle(
           );
 
     const signature = [
-      ...[...costs].map(([id, cost]) => `carry:${id}:${asStored(cost)}`),
+      ...[...costs].map(
+        ([id, carried]) => `carry:${id}:${asStored(carried.cost)}:${carried.estimated}`,
+      ),
       ...[...outcomes].map(([id, outcome]) =>
         outcome.status === 'refused'
           ? `corporate:${id}:refused:${outcome.refusal}`
@@ -2400,14 +2414,22 @@ function settle(
   };
   for (const c of live) groupOf(c.transaction).candidates.push(c);
   for (const leg of legs) {
-    const cost = costs.get(leg.id);
-    if (cost === undefined) continue;
+    const carried = costs.get(leg.id);
+    if (carried === undefined) continue;
     // #112: a re-carry that lands on the figure already stored writes nothing.
     // Compared at the column's scale (`asStored`): a repeating average is kept
     // to 8 places, so the full-precision figure would never equal it and every
     // re-import of the same file would rewrite the transfer and rebuild history.
-    if (leg.mode === 'recarry' && asStored(cost) === asStored(leg.credit.unitPrice)) continue;
-    groupOf(leg.credit).carried.push({ leg, transaction: withCarriedCost(leg.credit, cost) });
+    // SPEC-007 BR-007-06: the marker is part of what is stored — a source
+    // estimate corrected (or newly made) since the last carry re-carries.
+    if (
+      leg.mode === 'recarry' &&
+      asStored(carried.cost) === asStored(leg.credit.unitPrice) &&
+      carried.estimated === leg.credit.costIsEstimate
+    ) {
+      continue;
+    }
+    groupOf(leg.credit).carried.push({ leg, transaction: withCarriedCost(leg.credit, carried) });
   }
   // Only an activation enters a replay; a superseded row was never in one.
   for (const r of liveReclassified) {
@@ -2773,6 +2795,11 @@ async function updateInPlace(
         status: 'active' as const,
         preserveNaturalKey: true,
         flagUserModified: false,
+        // SPEC-007 BR-007-06: the marker the carry computed with the price
+        // (`withCarriedCost`), set or cleared with it.
+        costEstimate: transaction.costIsEstimate
+          ? { closeDate: transaction.estimateCloseDate }
+          : null,
       },
     })),
     ...reclassified.map(({ updated }) => ({

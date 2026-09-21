@@ -8,7 +8,12 @@ import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
 import { guardReplayable, without } from '@/core/ledger/guard-replayable';
 import { recalculatePositionFrom } from '@/core/ledger/recalculate-from';
 import type { Transaction } from '@/core/ledger/transaction';
-import { positionKeyString, type PositionKey } from '@/core/positions/replay';
+import { compareForReplay } from '@/core/positions/ordering';
+import {
+  positionKeyString,
+  type PositionKey,
+  replayPositionWithEstimate,
+} from '@/core/positions/replay';
 
 /** SPEC-006 BR-006-05 / SPEC-007 BR-007-05b: validate the whole event, never one leg. */
 export function validateAssetConversionGroup(
@@ -57,8 +62,9 @@ export async function createAssetConversionGroup(
   if (!valid.ok) return valid;
   const guarded = await guardReplacement(deps, [], legs);
   if (!guarded.ok) return guarded;
-  await deps.transactions.insertMany(legs);
-  const recalculated = await recalculateTouched(deps, [], legs);
+  const marked = await withSourceEstimate(deps, [], legs);
+  await deps.transactions.insertMany(marked);
+  const recalculated = await recalculateTouched(deps, [], marked);
   if (!recalculated.ok) return recalculated;
   return ok({ groupId: valid.value });
 }
@@ -79,9 +85,10 @@ export async function replaceAssetConversionGroup(
   }
   const guarded = await guardReplacement(deps, existing, replacements);
   if (!guarded.ok) return guarded;
+  const marked = await withSourceEstimate(deps, existing, replacements);
   await deps.transactions.deleteByIds(existing.map((leg) => leg.id));
-  await deps.transactions.insertMany(replacements);
-  const recalculated = await recalculateTouched(deps, existing, replacements);
+  await deps.transactions.insertMany(marked);
+  const recalculated = await recalculateTouched(deps, existing, marked);
   if (!recalculated.ok) return recalculated;
   return ok({ groupId });
 }
@@ -102,6 +109,49 @@ export async function deleteAssetConversionGroup(
   const recalculated = await recalculateTouched(deps, existing, []);
   if (!recalculated.ok) return recalculated;
   return ok({ deletedCount });
+}
+
+/**
+ * SPEC-007 BR-007-06 / DL-007-12 — the cost-estimate marker travels through a
+ * conversion. Each `conversion_in` leg's cost is allocated from what the
+ * `conversion_out` legs removed (BR-007-05b), so when any source's open lot
+ * was an estimate immediately before its outgoing leg — in replay order, on
+ * the ledger as it will be once the group is written — every incoming leg is
+ * marked. Decided here from the ledger rather than taken from the caller, so a
+ * form submission can neither drop the marker nor invent one; recomputed on
+ * every replacement, so editing a group's allocation never makes an estimated
+ * source's cost look exact.
+ *
+ * Outgoing legs are never marked: they remove cost at the average and cannot
+ * mark a position (`core/positions/cost-estimate.ts`). No close date on a
+ * marked leg — its cost was read from no close (see `withCarriedCost`).
+ *
+ * Worked example: A holds 100 @ 10,00 plus an estimated subscription of 20 @
+ * 114,90 (120 shares, 3.298,00, estimated). A conversion removes all 120 at
+ * 3.298,00 and adds 60 B at that cost: B's 60 @ 54,9666… is an estimate too.
+ */
+async function withSourceEstimate(
+  deps: LedgerDependencies,
+  existing: readonly Transaction[],
+  legs: readonly Transaction[],
+): Promise<readonly Transaction[]> {
+  const removed = new Set<string>(existing.map((leg) => leg.id));
+  let estimated = false;
+  for (const out of legs.filter((leg) => leg.type === 'conversion_out')) {
+    const ledger = await deps.transactions.listForPosition(out.assetId, out.institutionId);
+    const before = without(ledger, removed).filter(
+      (transaction) => compareForReplay(transaction, out) < 0,
+    );
+    const replayed = replayPositionWithEstimate(before);
+    // `guardReplacement` has already replayed this position with the group
+    // in place, so its prefix replays too.
+    if (replayed.ok && replayed.value.costEstimated) estimated = true;
+  }
+  return legs.map((leg) => ({
+    ...leg,
+    costIsEstimate: leg.type === 'conversion_in' && estimated,
+    estimateCloseDate: null,
+  }));
 }
 
 interface TouchedPosition {
