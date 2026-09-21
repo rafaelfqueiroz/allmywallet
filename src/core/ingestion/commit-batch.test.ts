@@ -3,12 +3,13 @@ import { BusinessDate } from '@/core/shared/clock';
 import { ImportBatchId, TransactionId, UserId } from '@/core/shared/ids';
 import { Money, Quantity, asStored } from '@/core/shared/money';
 import { editTransaction } from '@/core/ledger/edit-transaction';
+import { recalculatePositionFrom } from '@/core/ledger/recalculate-from';
 import {
   computeTotalValue,
   type Transaction,
   type TransactionType,
 } from '@/core/ledger/transaction';
-import { replayPosition } from '@/core/positions/replay';
+import { replayPosition, replayPositionWithEstimate } from '@/core/positions/replay';
 import { externalFlow } from '@/core/valuation/snapshot';
 import {
   type CorporateEventFactor,
@@ -570,6 +571,81 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
       committedConversionLegs: 0,
     });
     expect(deps.transactions.rows).toHaveLength(transactionCount);
+  });
+
+  it('SPEC-007 BR-007-06: an estimated source marks the conversion_in leg and its position', async () => {
+    // ELET3: buy 220 @ 10,00 (2.200,00) + estimated subscription 40 @ 12,00
+    // (480,00) = 260 shares, 2.680,00, estimated. The conversion removes all
+    // 260 at 2.680,00 and AXIA3 opens 260 at 2.680,00 — an estimate too.
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('220'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const source = deps.transactions.rows[0] as Transaction;
+    const price = Money.fromString('12');
+    const quantity = Quantity.fromString('40');
+    await deps.transactions.insertMany([
+      {
+        ...source,
+        id: TransactionId.generate(),
+        type: 'subscription',
+        tradeDate: BusinessDate.of('2025-01-10'),
+        quantity,
+        unitPrice: price,
+        totalValue: computeTotalValue('subscription', quantity, price, Money.zero()),
+        naturalKey: 'estimated-subscription',
+        costIsEstimate: true,
+        estimateCloseDate: BusinessDate.of('2025-01-09'),
+      },
+    ]);
+
+    const result = await importRows(deps, [evidence('Atualização', 'AXIA3', '2025-02-03', '260')]);
+
+    expect(result.outcome).toMatchObject({ resolvedAssetConversions: 1 });
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    const incoming = legs.find((row) => row.type === 'conversion_in');
+    const outgoing = legs.find((row) => row.type === 'conversion_out');
+    expect(incoming?.costBasis?.toString()).toBe('2680');
+    expect(incoming).toMatchObject({ costIsEstimate: true, estimateCloseDate: null });
+    expect(outgoing).toMatchObject({ costIsEstimate: false });
+    const positions = await deps.positions.list();
+    const axia = positions.find((p) => p.assetId === incoming?.assetId);
+    const elet = positions.find((p) => p.assetId === outgoing?.assetId);
+    expect(axia?.state.totalCost.toString()).toBe('2680');
+    expect(axia?.costEstimated).toBe(true);
+    expect(elet?.state.quantity.isZero() && elet.costEstimated).toBe(false);
+    for (const snapshot of positions) {
+      const replayed = replayPositionWithEstimate(
+        await deps.transactions.listForPosition(snapshot.assetId, snapshot.institutionId),
+      );
+      expect(replayed.ok && replayed.value.costEstimated).toBe(snapshot.costEstimated);
+    }
+  });
+
+  it('an exact source leaves the conversion legs exact', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    await importRows(deps, [evidence('Atualização', 'AXIA3', '2025-02-03', '260')]);
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    expect(legs).toHaveLength(2);
+    expect(legs.every((row) => !row.costIsEstimate)).toBe(true);
+    expect((await deps.positions.list()).every((p) => !p.costEstimated)).toBe(true);
   });
 
   it('promotes stored evidence in place, keeps its key and inserts its companion exactly once', async () => {
@@ -1683,18 +1759,144 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
         };
   }
 
-  /** DM-4 / TS-08: every cached position equals a replay of the ledger behind it. */
+  /**
+   * DM-4 / TS-08: every cached position equals a replay of the ledger behind
+   * it — the SPEC-007 BR-007-06 cost-estimate marker included.
+   */
   async function expectRebuildEqualsIncremental(deps: FakeIngestionDeps) {
     for (const snapshot of await deps.positions.list()) {
-      const replayed = replayPosition(
+      const replayed = replayPositionWithEstimate(
         await deps.transactions.listForPosition(snapshot.assetId, snapshot.institutionId),
       );
       if (!replayed.ok) throw new Error('ledger does not replay');
-      expect(replayed.value.quantity.toString()).toBe(snapshot.state.quantity.toString());
-      expect(replayed.value.totalCost.toString()).toBe(snapshot.state.totalCost.toString());
-      expect(replayed.value.averageCost.toString()).toBe(snapshot.state.averageCost.toString());
+      const { state, costEstimated } = replayed.value;
+      expect(state.quantity.toString()).toBe(snapshot.state.quantity.toString());
+      expect(state.totalCost.toString()).toBe(snapshot.state.totalCost.toString());
+      expect(state.averageCost.toString()).toBe(snapshot.state.averageCost.toString());
+      expect(costEstimated).toBe(snapshot.costEstimated);
     }
   }
+
+  /**
+   * SPEC-005 BR-005-20d's estimated subscription, written straight into the
+   * ledger (the resolver that writes it is a separate piece of #144): 20 at
+   * ORIGEM priced at a 114,90 close, marked, recalculated as any write is.
+   */
+  async function subscribeEstimated(
+    deps: FakeIngestionDeps,
+    tradeDate: string,
+    unitPrice = '114.90',
+    quantity = '20',
+  ): Promise<Transaction> {
+    const source = deps.transactions.rows.find((t) => t.type === 'buy') as Transaction;
+    const price = Money.fromString(unitPrice);
+    const amount = Quantity.fromString(quantity);
+    const subscription: Transaction = {
+      ...source,
+      id: TransactionId.generate(),
+      type: 'subscription',
+      tradeDate: BusinessDate.of(tradeDate),
+      quantity: amount,
+      unitPrice: price,
+      fees: Money.zero(),
+      totalValue: computeTotalValue('subscription', amount, price, Money.zero()),
+      naturalKey: `estimated-subscription-${tradeDate}`,
+      occurrence: 1,
+      costIsEstimate: true,
+      estimateCloseDate: BusinessDate.of(tradeDate),
+    };
+    await deps.transactions.insertMany([subscription]);
+    const recalculated = await recalculatePositionFrom(deps, {
+      assetId: subscription.assetId,
+      institutionId: subscription.institutionId,
+      fromDate: subscription.tradeDate,
+    });
+    if (!recalculated.ok) throw new Error('fixture: subscription does not replay');
+    return subscription;
+  }
+
+  async function markerAt(deps: FakeIngestionDeps, institution: string) {
+    const id = await deps.institutions.resolve(institution);
+    return (await deps.positions.list()).find((p) => p.institutionId === id)?.costEstimated;
+  }
+
+  describe('SPEC-007 BR-007-06 — the estimate marker travels with the carry', () => {
+    it('an estimated source carries an estimated credit: (1.000,00 + 2.298,00) ÷ 120 = 27,48333…', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await subscribeEstimated(deps, '2026-02-10');
+      const moved = { quantity: Quantity.fromString('120') };
+
+      const { outcome } = await importFile(deps, [credit(moved), debit(moved)]);
+
+      expect(outcome.applied).toBe(2);
+      const [carried] = transfersIn(deps);
+      expect(asStored((carried as Transaction).unitPrice)).toBe('27.48333333');
+      expect(carried).toMatchObject({ costIsEstimate: true, estimateCloseDate: null });
+      expect(await markerAt(deps, DESTINO)).toBe(true);
+      // ORIGEM sent all 120: closed, so its lot resets (BR-007-07).
+      expect(await markerAt(deps, ORIGEM)).toBe(false);
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    it('an exact source carries an exact credit', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [credit(), debit()]);
+      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: false });
+      expect(await markerAt(deps, DESTINO)).toBe(false);
+    });
+
+    it('a re-carry follows the marker even when the figure does not move', async () => {
+      // ORIGEM 100 @ 10,00 carried at 10,00, exact. An estimated subscription
+      // of 20 @ 10,00 lands before the transfer: (1.000,00 + 200,00) ÷ 120 is
+      // still 10,00 — only the marker changed, and it must still re-carry.
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [credit(), debit()]);
+      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: false });
+
+      await subscribeEstimated(deps, '2026-02-10', '10');
+      const again = await importFile(deps, [credit(), debit()]);
+
+      expect(again.outcome).toMatchObject({ applied: 0, recarried: 1 });
+      expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
+      expect(transfersIn(deps)[0]).toMatchObject({
+        costIsEstimate: true,
+        estimateCloseDate: null,
+        isUserModified: false,
+      });
+      expect(await markerAt(deps, DESTINO)).toBe(true);
+      await expectRebuildEqualsIncremental(deps);
+
+      // Unchanged the next time: figure and marker both already stored.
+      const third = await importFile(deps, [credit(), debit()]);
+      expect(third.outcome).toMatchObject({ recarried: 0, committed: [] });
+    });
+
+    it('a user correcting the source price clears the marker the next re-carry writes', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      const subscription = await subscribeEstimated(deps, '2026-02-10');
+      await importFile(deps, [credit(), debit()]);
+      // ORIGEM before the debit: 3.298,00 ÷ 120 = 27,48333…, estimated.
+      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: true });
+
+      // The user states the real price: 112,95. ORIGEM before the debit is now
+      // (1.000,00 + 2.259,00) ÷ 120 = 3.259,00 ÷ 120 = 27,158333…, exact.
+      const edited = await editTransaction(deps, subscription.id, {
+        unitPrice: Money.fromString('112.95'),
+      });
+      expect(edited.ok && edited.value.transaction.costIsEstimate).toBe(false);
+      const again = await importFile(deps, [credit(), debit()]);
+
+      expect(again.outcome).toMatchObject({ recarried: 1 });
+      expect(asStored((transfersIn(deps)[0] as Transaction).unitPrice)).toBe('27.15833333');
+      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: false });
+      expect(await markerAt(deps, DESTINO)).toBe(false);
+      await expectRebuildEqualsIncremental(deps);
+    });
+  });
 
   /**
    * The owner's real state after #108: the file committed with the credit
