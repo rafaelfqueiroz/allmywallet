@@ -499,255 +499,94 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
   });
 
   /**
-   * #143 — the BPFF11/HGFF11 → RVBI11 → PSEC11 chain, on generated figures
-   * (DV-24): the shape of B3's record, never the owner's costs.
+   * #143 — the RVBI11 → PSEC11 rename, and the source-restatement reading it
+   * opts into, on generated figures (DV-24): the shape of B3's record, never
+   * the owner's costs. BPFF11/HGFF11 → RVBI11 is a liquidation since v8 (#143
+   * D10, `asset-liquidation-resolution.ts`), not a conversion.
    */
-  describe('#143 BR-005-20c — a cash-bearing incorporation and the rename after it', () => {
-    /**
-     * #143 D10 (definitions v8) replaced this definition with a liquidation, so
-     * no shipped definition names a priced redemption any more. The cash-bearing
-     * `conversion_out` capability stays (migration 0026 is forward-only), and so
-     * do these tests of it, against the v7 shape kept here as a fixture.
-     */
-    const incorporation: AssetConversionDefinition = {
-      id: 'bpff11-and-hgff11-to-rvbi11',
-      sourceAssetCodes: ['BPFF11', 'HGFF11'],
-      targets: [{ assetCode: 'RVBI11', evidenceAssetCode: 'RVBI15', allocationWeight: null }],
-      pricedRedemptionSourceCodes: ['BPFF11', 'HGFF11'],
-      repeatedTargetCredits: true,
-      sourceBalanceRestatements: true,
-    };
+  describe('#143 BR-005-20c — a conversion carries no cash, and the rename to PSEC11', () => {
+    /** A one-to-one definition that opts in to source restatements, as the rename does. */
+    const restating: AssetConversionDefinition = { ...oneToOne, sourceBalanceRestatements: true };
     const rename = ASSET_CONVERSION_DEFINITIONS.find(
       (candidate) => candidate.id === 'rvbi11-to-psec11',
     ) as AssetConversionDefinition;
 
-    function redemption(id: string, code: string, quantity: string, price: string, fees = '0') {
-      return {
-        ...evidence(id, code, quantity, '0', 'resgate', '2025-10-14'),
-        unitPrice: Money.fromString(price),
-        fees: Money.fromString(fees),
-      };
-    }
-    const credits = [
-      evidence('rvbi15-a', 'RVBI15', '0', '83.89', 'atualizacao', '2025-10-06'),
-      evidence('rvbi15-b', 'RVBI15', '0', '75.36', 'atualizacao', '2025-10-06'),
-    ];
-    const redemptions = [
-      redemption('bpff-resgate', 'BPFF11', '90', '2.239'),
-      redemption('hgff-resgate', 'HGFF11', '70', '1.983'),
-    ];
-    const positions = (bpffCost: string, hgffCost: string) => [
-      {
-        assetCode: 'BPFF11',
-        quantity: Quantity.fromString('90'),
-        totalCost: Money.fromString(bpffCost),
-      },
-      {
-        assetCode: 'HGFF11',
-        quantity: Quantity.fromString('70'),
-        totalCost: Money.fromString(hgffCost),
-      },
-    ];
     const legsOf = (result: ResolvedAssetConversion) =>
       result.legs.map((leg) => [
         leg.type,
         leg.assetCode,
         leg.quantity.toString(),
         leg.costBasis?.toString(),
-        leg.unitPrice.toString(),
         leg.totalValue.toString(),
         leg.evidenceId,
       ]);
 
-    it('carries removed cost less the cash to the target, the cash staying on the out legs', () => {
+    it('SPEC-007 BR-007-05b — every leg carries zero cash and Σ in cost = Σ out cost', () => {
       /**
-       * BPFF11 90 at 9.000,00, redeemed 90 × 2,239 = 201,51.
-       * HGFF11 70 at 7.265,32, redeemed 70 × 1,983 = 138,81.
-       * Removed 16.265,32 − cash 340,32 = 15.925,00 into RVBI11 (159,25, avg 100,00).
-       * The two credits share it by quantity: 15.925,00 × 83,89 ÷ 159,25 =
-       * 100,00 × 83,89 = 8.389,00, the rest 15.925,00 − 8.389,00 = 7.536,00.
+       * OLD3 10 at 10,00 = 100,00; B3 states 4 remaining after a Resgate, so
+       * 6 leave at 100,00 × 6 ÷ 10 = 60,00, and NEW3's 6 arrive at 60,00.
+       * No cash on either leg: out 60,00 = in 60,00 exactly.
        */
       const result = expectResolved(
-        resolve([incorporation], [...credits, ...redemptions], positions('9000', '7265.32'), 45),
+        resolve(
+          [oneToOne],
+          [evidence('out', 'OLD3', '10', '4', 'resgate'), evidence('in', 'NEW3', '0', '6')],
+          [source('OLD3', '10', '10')],
+        ),
       );
-      expect(result.totalCost.toString()).toBe('15925');
-      expect(result.cash.toString()).toBe('340.32');
-      expect(
-        result.sources.map((plan) => [
-          plan.assetCode,
-          plan.removedCost.toString(),
-          plan.cash.toString(),
-        ]),
-      ).toEqual([
-        ['BPFF11', '9000', '201.51'],
-        ['HGFF11', '7265.32', '138.81'],
-      ]);
+      expect(result.totalCost.toString()).toBe('60');
       expect(legsOf(result)).toEqual([
-        ['conversion_out', 'BPFF11', '90', '9000', '2.239', '201.51', 'bpff-resgate'],
-        ['conversion_out', 'HGFF11', '70', '7265.32', '1.983', '138.81', 'hgff-resgate'],
-        ['conversion_in', 'RVBI11', '83.89', '8389', '0', '0', 'rvbi15-a'],
-        ['conversion_in', 'RVBI11', '75.36', '7536', '0', '0', 'rvbi15-b'],
+        ['conversion_out', 'OLD3', '6', '60', '0', 'out'],
+        ['conversion_in', 'NEW3', '6', '60', '0', 'in'],
       ]);
-      // The out legs keep the Resgate's own date; the credits keep theirs.
-      expect(result.legs.map((leg) => leg.tradeDate)).toEqual([
-        '2025-10-14',
-        '2025-10-14',
-        '2025-10-06',
-        '2025-10-06',
-      ]);
-    });
-
-    it('puts the storage-scale residual on the final credit when the share repeats', () => {
-      /**
-       * Costs 9.000,00 + 7.000,00: in cost 16.000,00 − 340,32 = 15.659,68.
-       * 15.659,68 × 83,89 = 1.313.690,5552; ÷ 159,25 = 8.249,234255572998…
-       * → 8.249,23425557 at eight places; the rest 15.659,68 − 8.249,23425557
-       * = 7.410,44574443. The two sum to 15.659,68 exactly.
-       */
-      const result = expectResolved(
-        resolve([incorporation], [...credits, ...redemptions], positions('9000', '7000'), 45),
-      );
-      const incoming = result.legs.filter((leg) => leg.type === 'conversion_in');
-      expect(incoming.map((leg) => leg.costBasis?.toString())).toEqual([
-        '8249.23425557',
-        '7410.44574443',
+      expect(result.sources).toEqual([
+        { assetCode: 'OLD3', quantity: Quantity.fromString('6'), removedCost: Money.fromString('60') },
       ]);
       const out = sumMoney(
         result.legs
           .filter((l) => l.type === 'conversion_out')
           .map((l) => l.costBasis ?? Money.zero()),
       );
-      const carried = sumMoney(incoming.map((leg) => leg.costBasis ?? Money.zero()));
-      // 16.000,00 = 15.659,68 + 340,32: the conservation the database enforces.
-      expect(out.equals(carried.plus(result.cash))).toBe(true);
-    });
-
-    it('refuses negative_cost rather than realise a gain when the cash exceeds the cost', () => {
-      // Removed 90,00 + 70,00 = 160,00 < cash 340,32: the target would carry −180,32.
-      expect(
-        resolve([incorporation], [...credits, ...redemptions], positions('90', '70'), 45),
-      ).toEqual({ status: 'unresolved', reason: 'negative_cost' });
-    });
-
-    it('refuses negative_cost when one source’s cash exceeds its own basis (review F6)', () => {
-      // BPFF11: 201,51 of cash against 100,00 of cost — the group total
-      // (100,00 + 7.265,32 − 340,32) would still be positive, absorbing the
-      // excess into HGFF11's basis.
-      expect(
-        resolve([incorporation], [...credits, ...redemptions], positions('100', '7265.32'), 45),
-      ).toEqual({ status: 'unresolved', reason: 'negative_cost' });
-    });
-
-    it('does not convert on the receipts alone, before the cash is known (review F1)', () => {
-      // A file ending between 2025-10-06 and 2025-10-14: the credits without
-      // the priced Resgates. Converting now would carry the whole cost at cash
-      // zero and strand the later Resgates (BR-005-17).
-      expect(resolve([incorporation], credits, positions('9000', '7265.32'), 45)).toEqual({
-        status: 'unresolved',
-        reason: 'incomplete',
-      });
-      expect(
-        resolve([incorporation], [...credits, redemptions[0]!], positions('9000', '7265.32'), 45),
-      ).toEqual({ status: 'unresolved', reason: 'incomplete' });
-    });
-
-    it('carries exactly zero when the cash equals the cost', () => {
-      // 201,51 + 138,81 = 340,32 removed and 340,32 of cash: the target is zero-cost.
-      const result = expectResolved(
-        resolve([incorporation], [...credits, ...redemptions], positions('201.51', '138.81'), 45),
+      const carried = sumMoney(
+        result.legs
+          .filter((l) => l.type === 'conversion_in')
+          .map((l) => l.costBasis ?? Money.zero()),
       );
-      expect(result.totalCost.toString()).toBe('0');
-      expect(
-        result.legs.filter((l) => l.type === 'conversion_in').map((l) => l.costBasis?.toString()),
-      ).toEqual(['0', '0']);
+      expect(out.equals(carried)).toBe(true);
     });
 
-    it('refuses negative_cash where the fees exceed the proceeds', () => {
-      // 90 × 0,001 = 0,09 − 1,00 of fees = −0,91.
+    it('refuses two same-day target Atualizações as two readings of one balance', () => {
+      // B3 stating NEW3 at 4 and at 6 on one date is ambiguous: only
+      // Transferência credits are deltas that sum (#121). The #149 exception
+      // for repeated Atualização credits went with the cash component; a
+      // liquidation reads its own credits (#143 D10).
       expect(
         resolve(
-          [incorporation],
-          [...credits, redemption('bpff-resgate', 'BPFF11', '90', '0.001', '1'), redemptions[1]!],
-          positions('9000', '7265.32'),
-          45,
-        ),
-      ).toEqual({ status: 'unresolved', reason: 'negative_cash' });
-    });
-
-    it('never reads a price on a source its definition does not name', () => {
-      // The same priced evidence under a definition without the field is not a
-      // conversion with cash: it refuses rather than keep or drop the figure.
-      const absent = { ...incorporation, pricedRedemptionSourceCodes: undefined };
-      expect(
-        resolve([absent], [...credits, ...redemptions], positions('9000', '7265.32'), 45),
-      ).toEqual({ status: 'unresolved', reason: 'incomplete' });
-      const unnamed = { ...incorporation, pricedRedemptionSourceCodes: ['HGFF11'] };
-      expect(
-        resolve([unnamed], [...credits, ...redemptions], positions('9000', '7265.32'), 45),
-      ).toEqual({ status: 'unresolved', reason: 'incomplete' });
-    });
-
-    it('sums same-day target credits only for a definition that says so', () => {
-      const withoutFlag = { ...incorporation, repeatedTargetCredits: undefined };
-      expect(
-        resolve([withoutFlag], [...credits, ...redemptions], positions('9000', '7265.32'), 45),
-      ).toEqual({ status: 'unresolved', reason: 'ambiguous' });
-      // Two credits on different days are two readings of a balance: ambiguous
-      // even under the flag.
-      const apart = [
-        credits[0]!,
-        evidence('rvbi15-b', 'RVBI15', '0', '75.36', 'atualizacao', '2025-10-07'),
-      ];
-      expect(
-        resolve([incorporation], [...apart, ...redemptions], positions('9000', '7265.32'), 45),
-      ).toEqual({ status: 'unresolved', reason: 'ambiguous' });
-      // A target named by its ledger code sums its credits the same way:
-      // 4 + 6 = 10 NEW3 carrying the whole 100,00 as 40,00 and 60,00.
-      const plain: AssetConversionDefinition = { ...oneToOne, repeatedTargetCredits: true };
-      const summed = expectResolved(
-        resolve(
-          [plain],
+          [restating],
           [evidence('n1', 'NEW3', '0', '4'), evidence('n2', 'NEW3', '0', '6')],
           [source('OLD3', '10', '10')],
-        ),
-      );
-      expect(summed.legs.map((leg) => leg.costBasis?.toString())).toEqual(['100', '40', '60']);
-      // And a repeated Incorporação is not an Atualização credit.
-      const incorporations = credits.map((row) => ({ ...row, movement: 'incorporacao' as const }));
-      expect(
-        resolve(
-          [incorporation],
-          [...incorporations, ...redemptions],
-          positions('9000', '7265.32'),
-          45,
         ),
       ).toEqual({ status: 'unresolved', reason: 'ambiguous' });
     });
 
     it('sets aside a source Atualização that restates an unchanged balance', () => {
-      // BPFF11 90 → 90 and HGFF11 70 → 70 on the credits' own date: read as
-      // "what remains", each would leave nothing removed.
-      const restated = [
-        evidence('bpff-atualizacao', 'BPFF11', '90', '90', 'atualizacao', '2025-10-06'),
-        evidence('hgff-atualizacao', 'HGFF11', '70', '70', 'atualizacao', '2025-10-06'),
-      ];
-      expect(corroboratesSourceBalance(restated[0]!, [incorporation])).toBe(true);
+      // OLD3 100 → 100 on the credit's date: read as "what remains", it would
+      // leave nothing removed. Set aside, the whole 100 at 10,00 = 1.000,00
+      // converts on the target-only evidence.
+      const restated = evidence('old-atualizacao', 'OLD3', '100', '100');
+      expect(corroboratesSourceBalance(restated, [restating])).toBe(true);
       const result = expectResolved(
         resolve(
-          [incorporation],
-          [...credits, ...redemptions, ...restated],
-          positions('9000', '7265.32'),
-          45,
+          [restating],
+          [restated, evidence('new', 'NEW3', '0', '100')],
+          [source('OLD3', '100', '10')],
         ),
       );
-      // The same group as without them — the statements are not legs.
-      expect(result.legs.map((leg) => leg.evidenceId)).toEqual([
-        'bpff-resgate',
-        'hgff-resgate',
-        'rvbi15-a',
-        'rvbi15-b',
+      // The same group as without it — the statement is not a leg.
+      expect(legsOf(result)).toEqual([
+        ['conversion_out', 'OLD3', '100', '1000', '0', null],
+        ['conversion_in', 'NEW3', '100', '1000', '0', 'new'],
       ]);
-      expect(result.totalCost.toString()).toBe('15925');
     });
 
     it('keeps an unchanged source statement as evidence for a definition that does not opt in (review F3)', () => {
@@ -766,16 +605,12 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
 
     it('still reads a changed source statement, and a target statement, as before', () => {
       // 90 → 30 is a statement of what remains: evidence, not corroboration.
-      expect(corroboratesSourceBalance(evidence('x', 'BPFF11', '90', '30'), [incorporation])).toBe(
-        false,
-      );
+      expect(corroboratesSourceBalance(evidence('x', 'OLD3', '90', '30'), [restating])).toBe(false);
       // An unchanged balance on a code no definition sources is not set aside.
-      expect(corroboratesSourceBalance(evidence('x', 'RVBI15', '5', '5'), [incorporation])).toBe(
-        false,
-      );
-      // Nor is an unchanged Resgate-shaped or transfer row.
+      expect(corroboratesSourceBalance(evidence('x', 'NEW3', '5', '5'), [restating])).toBe(false);
+      // Nor is an unchanged Resgate-shaped row.
       expect(
-        corroboratesSourceBalance(evidence('x', 'BPFF11', '90', '90', 'resgate'), [incorporation]),
+        corroboratesSourceBalance(evidence('x', 'OLD3', '90', '90', 'resgate'), [restating]),
       ).toBe(false);
       // A lone restated source with target-only evidence: the whole position converts.
       const result = expectResolved(
@@ -821,8 +656,8 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
         ),
       );
       expect(legsOf(result)).toEqual([
-        ['conversion_out', 'RVBI11', '159', '15900', '0', '0', null],
-        ['conversion_in', 'PSEC11', '159', '15900', '0', '0', 'psec11'],
+        ['conversion_out', 'RVBI11', '159', '15900', '0', null],
+        ['conversion_in', 'PSEC11', '159', '15900', '0', 'psec11'],
       ]);
       expect(result.legs[0]?.tradeDate).toBe('2025-10-27');
     });

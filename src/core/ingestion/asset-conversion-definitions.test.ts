@@ -16,7 +16,8 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
     // #143: v6 added four one-to-one ticker renames, likewise additive; v7 the
     // BPFF11/HGFF11 → RVBI11 cash-bearing incorporation and RVBI11 → PSEC11,
     // additive too. #143 D10: v8 removed the incorporation — it is a
-    // liquidation, in its own table below — and kept the rename.
+    // liquidation, in its own table below — and kept the rename. Removing the
+    // cash-bearing fields it alone used changed no definition, so no bump.
     expect(ASSET_CONVERSION_DEFINITIONS_VERSION).toBe(8);
     expect(
       ASSET_CONVERSION_DEFINITIONS.map((definition) => ({
@@ -92,16 +93,13 @@ describe('SPEC-005 BR-005-20c — public-code conversion definitions', () => {
     ]);
   });
 
-  it('#143 D10 — no shipped definition carries cash, repeats target credits or reads a restatement but the rename', () => {
-    // The cash-bearing capability (`pricedRedemptionSourceCodes`, migration
-    // 0026) stays in the resolver, unused: the one definition that used it was
-    // a liquidation, not a return of capital.
+  it('#143 — only the rename to PSEC11 reads a source restatement', () => {
+    // A conversion carries no cash (BR-007-05b): #149's cash-bearing fields are
+    // gone with the one definition that used them, and the opt-in that
+    // remains belongs to `rvbi11-to-psec11` alone.
     expect(
       ASSET_CONVERSION_DEFINITIONS.filter(
-        (definition) =>
-          definition.pricedRedemptionSourceCodes !== undefined ||
-          definition.repeatedTargetCredits !== undefined ||
-          definition.sourceBalanceRestatements !== undefined,
+        (definition) => definition.sourceBalanceRestatements !== undefined,
       ).map((definition) => definition.id),
     ).toEqual(['rvbi11-to-psec11']);
   });
