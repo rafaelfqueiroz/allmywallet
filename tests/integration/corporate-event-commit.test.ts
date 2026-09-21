@@ -1043,4 +1043,79 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
       expect(after.find((r) => r.id === row.id)?.updated_at).toEqual(row.updated_at);
     }
   });
+
+  /**
+   * #139 review finding 1 — the owner's actual path: the four VIVT3 rows sit
+   * `unclassified` in the ledger (stored before #139, with no factor to hand),
+   * and a re-import resolves them **in place**. The scaled sale must keep its
+   * scaled quantity through that edit, not only its price: 0,75 @ 26,6419625
+   * would replay 300 − 0,75 = 299,25.
+   */
+  it('BR-005-20b/BR-005-17 (#139): a stored-unclassified VIVT3 pair and fraction activate in place at 240, then re-import writes nothing', async () => {
+    const VIVT = 'VIVT3 - TELEFONICA BRASIL S.A.';
+    const file = await buildMovimentacaoXlsx([
+      compra(VIVT, '02/01/2025', '150', '50,00'),
+      desdobro(VIVT, '16/04/2025', '237'),
+      grupamento(VIVT, '16/04/2025', '3,75'),
+      fracao(VIVT, '16/04/2025', '0,75'),
+      leilao(VIVT, '28/05/2025', '0,75', '2.131,357'),
+    ]);
+
+    // --- Import 1: B3's factor source is down; all four stay unclassified. ---
+    const down = new FakeFactorSource();
+    down.set('VIVT', { outcome: 'failed', failureCode: 'timeout' });
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, file);
+    await handleImportStage({ batchId: first, userId }, handlerDeps(down));
+    await handleImportCommit({ batchId: first, userId }, handlerDeps(down));
+    const stored = await transactionsFor('VIVT3');
+    expect(stored.filter((r) => r.status === 'unclassified')).toHaveLength(4);
+    expect(await positionFor('VIVT3')).toMatchObject({ quantity: '150.00000000' });
+
+    // --- Import 2: the factors are available; everything activates in place. ---
+    const source = new FakeFactorSource();
+    source.set('VIVT', {
+      outcome: 'ok',
+      factors: [
+        factor('VIVT', 'desdobramento', '7900', '2025-04-14'),
+        factor('VIVT', 'grupamento', '0.025', '2025-04-14'),
+      ],
+    });
+    const count = await transactionCount();
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, file);
+    await handleImportStage({ batchId: second, userId }, handlerDeps(source));
+    await handleImportCommit({ batchId: second, userId }, handlerDeps(source));
+
+    expect(await transactionCount()).toBe(count);
+    const rows = await transactionsFor('VIVT3');
+    const storedFraction = stored.find((r) => r.natural_key.endsWith('fracao em ativos'));
+    expect(rows.find((r) => r.id === storedFraction?.id)).toMatchObject({
+      type: 'sell',
+      status: 'active',
+      quantity: '60.00000000',
+      unit_price: '26.64196250',
+      total_value: '1598.51775000',
+      natural_key: storedFraction?.natural_key,
+      is_user_modified: false,
+    });
+    expect(rows.filter((r) => r.status === 'unclassified')).toHaveLength(0);
+    expect(await positionFor('VIVT3')).toMatchObject({
+      quantity: '240.00000000',
+      total_cost: '6000.00000000',
+      realized_gain: '98.51775000',
+    });
+
+    // --- Import 3: the identical file again writes nothing. ---
+    const third = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, third, file);
+    await handleImportStage({ batchId: third, userId }, handlerDeps(source));
+    await handleImportCommit({ batchId: third, userId }, handlerDeps(source));
+    expect(await transactionCount()).toBe(count);
+    const after = await transactionsFor('VIVT3');
+    for (const row of rows) {
+      expect(after.find((r) => r.id === row.id)?.updated_at).toEqual(row.updated_at);
+    }
+    expect(await positionFor('VIVT3')).toMatchObject({ quantity: '240.00000000' });
+  });
 });

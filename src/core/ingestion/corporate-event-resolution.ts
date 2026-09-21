@@ -385,7 +385,8 @@ type PairFigures = Pick<OriginCandidate, 'quantityAfter' | 'fractionalPart'> & {
  * and stored ratio:
  *
  * - the first event: its result, the fraction removed **between** the two as
- *   its fractional part, and the second event's multiplier as `saleScale`;
+ *   its fractional part, and — where that fraction is not zero — the second
+ *   event's multiplier as `saleScale`;
  * - the second: its result, and that result's own fractional part.
  *
  * Read from the ledger rather than carried from `settlePair`, so a fraction a
@@ -426,7 +427,8 @@ function sameDateRatioFigures(active: readonly Transaction[]): ReadonlyMap<strin
     figures.set(pair[sequence.first].id, {
       quantityAfter: sequence.afterFirst,
       fractionalPart: sequence.intermediateFraction,
-      saleScale: second.ratio,
+      // Only a fraction actually removed between the two sells at a scale.
+      saleScale: sequence.intermediateFraction.isPositive() ? second.ratio : null,
     });
     figures.set(second.id, {
       quantityAfter: sequence.afterSecond,
