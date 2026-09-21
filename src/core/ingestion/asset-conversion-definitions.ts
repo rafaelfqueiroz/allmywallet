@@ -1,3 +1,4 @@
+import { BusinessDate } from '@/core/shared/clock';
 import { Money, Quantity } from '@/core/shared/money';
 
 /**
@@ -211,6 +212,15 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
 export interface AssetLiquidationSourceDefinition {
   readonly assetCode: string;
   readonly liquidationValue: Money;
+  /**
+   * #143 D10 review F1 — the first date on which B3 blocked trading in the
+   * source's shares ahead of the liquidation, as the administrator published
+   * it. From that date no ordinary sale of the position can exist, so a stored
+   * active `sell` of the **whole** position dated on or after it — and on or
+   * after the target credits, within the window — can only be B3's `Resgate`,
+   * even under the mapped key that does not name its B3 type.
+   */
+  readonly tradingBlockedFrom: BusinessDate;
 }
 
 /**
@@ -261,11 +271,24 @@ export const ASSET_LIQUIDATION_DEFINITIONS: readonly AssetLiquidationDefinition[
   // 75,36), with nothing in either credit naming its fund — which is why the
   // two sources share one definition. Each source's own `Atualização` of
   // 2025-10-06 restates its balance and stays `unclassified`.
+  //
+  // `tradingBlockedFrom`: the administrator blocked trading in both funds'
+  // shares on B3 from the close of 2025-08-18 until the liquidation (BPFF11
+  // fato relevante of 12/08/2025, fnet 966690). It is what lets a stored sale
+  // under the mapped key be read as the `Resgate` (#143 D10 review F1).
   {
     id: 'bpff11-and-hgff11-liquidated-into-rvbi11',
     sources: [
-      { assetCode: 'BPFF11', liquidationValue: Money.fromString('62.03538245') },
-      { assetCode: 'HGFF11', liquidationValue: Money.fromString('71.04670108') },
+      {
+        assetCode: 'BPFF11',
+        liquidationValue: Money.fromString('62.03538245'),
+        tradingBlockedFrom: BusinessDate.of('2025-08-18'),
+      },
+      {
+        assetCode: 'HGFF11',
+        liquidationValue: Money.fromString('71.04670108'),
+        tradingBlockedFrom: BusinessDate.of('2025-08-18'),
+      },
     ],
     target: {
       assetCode: 'RVBI11',

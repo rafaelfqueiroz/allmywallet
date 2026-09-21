@@ -40,6 +40,7 @@ import {
   type AssetLiquidationDefinition,
 } from '@/core/ingestion/asset-conversion-definitions';
 import {
+  isRedemptionInTradingBlock,
   type LiquidationEvidence,
   liquidationGroupKey,
   resolveLiquidation,
@@ -1444,12 +1445,20 @@ async function planLiquidations(
             },
           );
         }
-        // Stored without its row in this batch: recognisable only under the
-        // unmapped `…|resgate` key, or as the liquidation's sale already.
+        // Stored without its row in this batch: under the unmapped `…|resgate`
+        // key, as the liquidation's sale already, or (#143 D10 review F1) as
+        // a v3 `sell` under the **mapped** key an earlier file applied — which
+        // does not name its B3 type, so it is taken only where no ordinary
+        // sale can be: an untouched import of the **whole** position, dated on
+        // or after the source's `tradingBlockedFrom` (the administrator's
+        // published trading block). The resolver adds the rest: on or after
+        // the credits, within the window. BR-005-17: the result must not
+        // depend on which file came first.
         for (const t of ledgerOf.get(source.assetCode) ?? []) {
           if (represented.has(t.id)) continue;
           const named = storedB3TypeOf(t.naturalKey) === 'resgate';
-          if (!named && !isLiquidationSale(t, source.liquidationValue)) continue;
+          const blockedSale = isRedemptionInTradingBlock(t, source, heldBefore(t.tradeDate));
+          if (!named && !blockedSale && !isLiquidationSale(t, source.liquidationValue)) continue;
           if (named && t.status === 'superseded') continue;
           add(
             {

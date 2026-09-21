@@ -9,6 +9,7 @@ import {
   type AssetLiquidationDefinition,
 } from '@/core/ingestion/asset-conversion-definitions';
 import {
+  isRedemptionInTradingBlock,
   type LiquidationEvidence,
   type ResolvedLiquidation,
   liquidationGroupKey,
@@ -201,6 +202,11 @@ describe('SPEC-005 BR-005-20c (#143 D10) — a liquidation paid partly in anothe
     expect(resolve(complete(), 7)).toEqual({ status: 'unresolved', reason: 'outside_window' });
     expect(resolve(complete(), 8).status).toBe('resolved');
     expect(resolve(complete(), -1)).toEqual({ status: 'unresolved', reason: 'outside_window' });
+    // Review F1: never before the credits — the cash follows the receipts.
+    const early = complete().map((item) =>
+      item.id === 'bpff-resgate' ? { ...item, tradeDate: BusinessDate.of('2025-10-05') } : item,
+    );
+    expect(resolve(early)).toEqual({ status: 'unresolved', reason: 'outside_window' });
     expect(resolve(complete(), 1.5)).toEqual({ status: 'unresolved', reason: 'outside_window' });
   });
 
@@ -251,7 +257,13 @@ describe('SPEC-005 BR-005-20c (#143 D10) — a liquidation paid partly in anothe
   it('reads a target coded like its ledger code when the definition names no evidence code', () => {
     const plain: AssetLiquidationDefinition = {
       id: 'src-liquidated-into-tgt',
-      sources: [{ assetCode: 'SRC11', liquidationValue: Money.fromString('10') }],
+      sources: [
+        {
+          assetCode: 'SRC11',
+          liquidationValue: Money.fromString('10'),
+          tradingBlockedFrom: BusinessDate.of('2025-08-18'),
+        },
+      ],
       target: { assetCode: 'TGT11', unitCost: Money.fromString('4') },
     };
     // 3 SRC11 at 10,00 = 30,00 of proceeds; 7,5 TGT11 at 4,00 = 30,00 acquired.
@@ -275,5 +287,45 @@ describe('SPEC-005 BR-005-20c (#143 D10) — a liquidation paid partly in anothe
     expect(liquidationGroupKey('d', null, BusinessDate.of('2025-10-06'))).toBe(
       'liquidation:d:none:2025-10-06',
     );
+  });
+
+  describe('review F1 — a stored sale under the mapped key read as the Resgate', () => {
+    const bpff = definition.sources[0] as AssetLiquidationDefinition['sources'][number];
+    const sale = (date: string, quantity: string) =>
+      aTransaction()
+        .sell()
+        .of('BPFF11')
+        .on(date)
+        .quantity(quantity)
+        .price('2.239')
+        .imported()
+        .build();
+    const ninety = Quantity.fromString('90');
+
+    it('is the Resgate: an untouched import of the whole position inside the trading block', () => {
+      // Block from 2025-08-18 (fato relevante of 12/08/2025); 90 held, 90 sold.
+      expect(isRedemptionInTradingBlock(sale('2025-10-14', '90'), bpff, ninety)).toBe(true);
+      // The block's first day counts.
+      expect(isRedemptionInTradingBlock(sale('2025-08-18', '90'), bpff, ninety)).toBe(true);
+    });
+
+    it('is not before the block, nor part of the position, nor with no replayable position', () => {
+      expect(isRedemptionInTradingBlock(sale('2025-08-15', '90'), bpff, ninety)).toBe(false);
+      expect(isRedemptionInTradingBlock(sale('2025-10-14', '40'), bpff, ninety)).toBe(false);
+      expect(isRedemptionInTradingBlock(sale('2025-10-14', '90'), bpff, null)).toBe(false);
+    });
+
+    it('is never a row a person touched, entered, or that is not an active sell', () => {
+      const whole = sale('2025-10-14', '90');
+      for (const t of [
+        { ...whole, isUserModified: true },
+        { ...whole, isManual: true },
+        { ...whole, importBatchId: null },
+        { ...whole, status: 'unclassified' as const },
+        { ...whole, type: 'buy' as const },
+      ]) {
+        expect(isRedemptionInTradingBlock(t, bpff, ninety)).toBe(false);
+      }
+    });
   });
 });

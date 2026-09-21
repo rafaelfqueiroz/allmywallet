@@ -4272,6 +4272,81 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       expect(deps.transactions.rows.every((row) => row.type !== 'subscription')).toBe(true);
     });
 
+    it('reaches the same liquidation when the sale file is imported before the credits file (review F1)', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      const buys = file().filter(
+        (row) => row.record.kind === 'transaction' && row.record.tradeDate < '2025-01-01',
+      );
+      await importFile(deps, buys);
+      // The Resgates arrive first, `new` under the current map: stored as
+      // active v3 sells under the **mapped** key, which names no B3 type.
+      const sales = await importFile(deps, after('2025-10-09'));
+      expect(sales.outcome).toMatchObject({ invalid: 0, resolvedLiquidations: 0 });
+      expect((await positionOf(deps, 'BPFF11', INTER)).realizedGain.toString()).toBe('-8798.49');
+
+      // The credits file finds them: whole positions, sold inside the
+      // administrator's trading block, on or after the credits (BR-005-17).
+      const credits = await importFile(
+        deps,
+        file().filter(
+          (row) =>
+            row.record.kind === 'transaction' &&
+            row.record.tradeDate >= '2025-10-01' &&
+            row.record.tradeDate <= '2025-10-09',
+        ),
+      );
+      expect(credits.outcome).toMatchObject({ invalid: 0, resolvedLiquidations: 1 });
+      const bpff11 = await positionOf(deps, 'BPFF11', INTER);
+      expect(bpff11.realizedGain.toString()).toBe('-3416.8155795');
+      const rvbi11 = await positionOf(deps, 'RVBI11', INTER);
+      // 83,89 + 75,36 at 64,15; the fraction and the rename were staged by the
+      // earlier file and wait for a file that carries them again.
+      expect(rvbi11.quantity.toString()).toBe('159.25');
+      expect(rvbi11.totalCost.toString()).toBe('10215.8875');
+
+      // The owner's whole-file import then settles the fraction and the rename.
+      const whole = await importFile(deps, file());
+      expect(whole.outcome).toMatchObject({
+        invalid: 0,
+        resolvedLiquidations: 0,
+        resolvedAssetConversions: 1,
+        resolvedCorporateEvents: 1,
+      });
+      await expectEndState(deps);
+      await expectNoOpReimport(deps);
+    });
+
+    it('does not take a stored sale as the Resgate before the trading block, or of part of the position', async () => {
+      for (const sale of [
+        // An ordinary sale before the block (2025-08-18): the whole 90.
+        fund('Venda', 'debit', 'BPFF11', '2025-08-15', '90', '60'),
+        // Inside the block, but not the whole position: 40 of 90.
+        fund('Resgate', 'debit', 'BPFF11', '2025-10-14', '40', '2.239'),
+      ]) {
+        const deps = buildFakeIngestionDeps('2026-09-21');
+        await importFile(deps, [
+          fund('Compra', 'credit', 'BPFF11', '2024-03-01', '90', '100'),
+          fund('Compra', 'credit', 'HGFF11', '2024-03-01', '70', '103.79', '0.02'),
+          sale,
+          fund('Resgate', 'debit', 'HGFF11', '2025-10-14', '70', '1.983'),
+        ]);
+        const before = deps.transactions.rows.map((row) => ({ ...row }));
+
+        const credits = await importFile(deps, [
+          fund('Atualização', 'credit', 'RVBI15', '2025-10-06', '83.89'),
+          fund('Atualização', 'credit', 'RVBI15', '2025-10-06', '75.36'),
+        ]);
+
+        // BPFF11 has no redemption, so nothing is liquidated — not HGFF11's
+        // sale either (all or nothing), and no subscription.
+        expect(credits.outcome).toMatchObject({ invalid: 0, resolvedLiquidations: 0 });
+        for (const row of before) {
+          expect(deps.transactions.rows.find((r) => r.id === row.id)).toEqual(row);
+        }
+        expect(deps.transactions.rows.every((row) => row.type !== 'subscription')).toBe(true);
+      }
+    });
+
     it('never touches a Resgate a user edited: the whole liquidation waits', async () => {
       const deps = buildFakeIngestionDeps('2026-09-21');
       await importFile(deps, file(), false);

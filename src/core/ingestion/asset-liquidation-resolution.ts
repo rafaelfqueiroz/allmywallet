@@ -1,7 +1,10 @@
-import type { BusinessDate } from '@/core/shared/clock';
+import { BusinessDate } from '@/core/shared/clock';
 import { Money, type Quantity, sumMoney } from '@/core/shared/money';
-import { computeTotalValue } from '@/core/ledger/transaction';
-import type { AssetLiquidationDefinition } from '@/core/ingestion/asset-conversion-definitions';
+import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
+import type {
+  AssetLiquidationDefinition,
+  AssetLiquidationSourceDefinition,
+} from '@/core/ingestion/asset-conversion-definitions';
 
 /**
  * SPEC-005 BR-005-20c (#143 D10) — a fund **liquidated partly in another
@@ -97,7 +100,7 @@ export type LiquidationUnresolvedReason =
   | 'incomplete'
   /** Two `Resgate`s for one source, or target credits on more than one date. */
   | 'ambiguous'
-  /** A source's `Resgate` lies outside the configured window of the credits. */
+  /** A source's `Resgate` lies before the credits, or beyond the configured window after them. */
   | 'outside_window'
   /** The `Resgate` does not redeem exactly the position held before it: history is missing or wrong. */
   | 'quantity_mismatch'
@@ -127,6 +130,37 @@ const unresolved = (reason: LiquidationUnresolvedReason): UnresolvedLiquidation 
 
 function dayNumber(date: BusinessDate): number {
   return Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+}
+
+/**
+ * SPEC-005 BR-005-20c (#143 D10 review F1) — a stored `sell` under the
+ * **mapped** key is B3's `Resgate` of a liquidated source only where no
+ * ordinary sale can be: an active sell an import wrote and no one edited, of
+ * the **whole** position held immediately before it (`heldBefore`), dated on
+ * or after the administrator's published trading block
+ * (`tradingBlockedFrom`). The mapped key does not name the B3 type, so without
+ * the block the row could be any sale. The resolver still requires it to be on
+ * or after the credits and within the window.
+ *
+ * Worked example (DV-17): 90 held, `sell` 90 on 2025-10-14, block from
+ * 2025-08-18 → the Resgate. A `sell` of 90 on 2025-08-15, or of 40 of 90 on
+ * 2025-10-14: not.
+ */
+export function isRedemptionInTradingBlock(
+  sale: Transaction,
+  source: AssetLiquidationSourceDefinition,
+  heldBefore: Quantity | null,
+): boolean {
+  return (
+    sale.status === 'active' &&
+    sale.type === 'sell' &&
+    !sale.isUserModified &&
+    !sale.isManual &&
+    sale.importBatchId !== null &&
+    !BusinessDate.isBefore(sale.tradeDate, source.tradingBlockedFrom) &&
+    heldBefore !== null &&
+    heldBefore.equals(sale.quantity)
+  );
 }
 
 /**
@@ -188,9 +222,12 @@ export function resolveLiquidation(input: ResolveLiquidationInput): LiquidationR
     const own = input.evidence.filter(
       (item) => item.role === 'source_redemption' && item.assetCode === source.assetCode,
     );
-    const inWindow = own.filter(
-      (item) => Math.abs(dayNumber(item.tradeDate) - dayNumber(anchorDate)) <= input.windowDays,
-    );
+    // #143 D10 review F1: the cash is paid on or after the receipts, never
+    // before — B3's Resgate of 2025-10-14 follows the credits of 2025-10-06.
+    const inWindow = own.filter((item) => {
+      const days = dayNumber(item.tradeDate) - dayNumber(anchorDate);
+      return days >= 0 && days <= input.windowDays;
+    });
     const [only, ...others] = inWindow;
     // BR-005-17 (#149 review F1): the credits alone never liquidate. A file
     // ending between the receipts and the cash must leave everything as it is.
