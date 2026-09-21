@@ -540,7 +540,11 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
         ['conversion_in', 'NEW3', '6', '60', '0', 'in'],
       ]);
       expect(result.sources).toEqual([
-        { assetCode: 'OLD3', quantity: Quantity.fromString('6'), removedCost: Money.fromString('60') },
+        {
+          assetCode: 'OLD3',
+          quantity: Quantity.fromString('6'),
+          removedCost: Money.fromString('60'),
+        },
       ]);
       const out = sumMoney(
         result.legs
