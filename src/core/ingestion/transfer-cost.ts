@@ -31,6 +31,12 @@ export interface TransferLeg {
   readonly institutionId: InstitutionId | null;
   readonly tradeDate: BusinessDate;
   readonly quantity: Quantity;
+  /**
+   * #145 follow-up: a credit B3 exported with a price. Such a credit enters at
+   * its own price, so it is never one leg of a no-op round trip. Absent on a
+   * debit, where it means nothing.
+   */
+  readonly priceStated?: boolean;
 }
 
 /**
@@ -40,8 +46,9 @@ export interface TransferLeg {
  * **known** institution (a debit with no institution names no source position
  * to read). A pair is formed only where the relation is one-to-one on **both**
  * sides: two candidate debits for one credit, or two credits for one debit,
- * pair nothing. Computed over the whole relation, never by walking the file,
- * so file order cannot choose a source.
+ * pair nothing — except a same-position round trip (below), where there is no
+ * source to choose. Computed over the whole relation, never by walking the
+ * file, so file order cannot choose a source.
  *
  * **The institution may be the credit's own** (#135). B3 recorded the July
  * 2023 Energias do Brasil buyout as a price-less `Transferência` debit *and*
@@ -89,7 +96,41 @@ export function pairTransfers(
       pairs.set(creditId, only);
     }
   }
+
+  // #145 follow-up: B3 wrote two price-less debits and two credits of one
+  // quantity, on one date, at one institution, on four of the owner's
+  // positions — a round trip inside the broker. Each credit sees both debits,
+  // so no one-to-one pair forms. But where the legs are *all* one position and
+  // the credits and debits match each other exactly, every pairing is the same
+  // no-op: each credit returns what a debit removed, at the average it left
+  // with. Paired in id order, which is as good as any — the legs are
+  // interchangeable, so the order decides nothing.
+  const debitById = new Map(debits.map((debit) => [debit.id, debit]));
+  const grouped = new Set<string>();
+  for (const credit of credits) {
+    if (pairs.has(credit.id) || grouped.has(credit.id)) continue;
+    const matching = debitsOf.get(credit.id) ?? [];
+    if (matching.length < 2) continue;
+    // Every credit sharing this match set is on the same asset, date and
+    // quantity — at *any* institution. Judged as one group, whatever the file
+    // order, and paired only if every leg of it is one position and no credit
+    // carries a price of its own (review findings 1–2).
+    const siblings = credits.filter((other) => sameMatches(debitsOf.get(other.id), matching));
+    for (const sibling of siblings) grouped.add(sibling.id);
+    const onePosition = [...siblings, ...matching.map((id) => debitById.get(id))].every(
+      (leg) => leg !== undefined && leg.institutionId === credit.institutionId,
+    );
+    const priceless = siblings.every((sibling) => sibling.priceStated !== true);
+    if (!onePosition || !priceless || siblings.length !== matching.length) continue;
+    const creditIds = siblings.map((sibling) => sibling.id).sort();
+    const debitIds = [...matching].sort();
+    creditIds.forEach((id, index) => pairs.set(id, debitIds[index] as string));
+  }
   return pairs;
+}
+
+function sameMatches(a: readonly string[] | undefined, b: readonly string[]): boolean {
+  return a !== undefined && a.length === b.length && a.every((id) => b.includes(id));
 }
 
 export interface CarryLeg {
@@ -182,12 +223,39 @@ export function resolveCarriedCosts(
         settleLeg(leg, null);
         continue;
       }
+      // #145 follow-up (review finding 3): a round trip is all or nothing. A
+      // sibling whose debit will not be written leaves this leg a credit
+      // with nothing to return — carrying it would add shares.
+      const brokenTrip = legs.some(
+        (other) =>
+          other.id !== leg.id &&
+          other.debit === null &&
+          sameLeg(other.credit, leg.credit) &&
+          sameLeg(leg.credit, debit),
+      );
+      if (brokenTrip) {
+        settleLeg(leg, null);
+        continue;
+      }
       const atSource = (t: Transaction) =>
         t.assetId === debit.assetId && t.institutionId === debit.institutionId;
+      // #145 follow-up: the other legs of a same-position round trip
+      // (`pairTransfers`) are neither a blocker nor part of the source's
+      // history — the position the round trip leaves from is the one before
+      // any of its legs, so every credit carries that same average.
+      const siblings = new Set(
+        legs
+          .filter((other) => other.id !== leg.id && isRoundTripSibling(leg, other))
+          .map((o) => o.id),
+      );
+      const siblingDebits = new Set(
+        legs.filter((other) => siblings.has(other.id)).map((other) => other.debit?.id),
+      );
 
       const blocked = [...pending.values()].some(
         (other) =>
           other.id !== leg.id &&
+          !siblings.has(other.id) &&
           atSource(other.credit) &&
           compareForReplay(other.credit, debit) < 0,
       );
@@ -195,12 +263,12 @@ export function resolveCarriedCosts(
 
       const carriedIn = legs.flatMap((other) => {
         const cost = resolved.get(other.id);
-        return cost === undefined || !atSource(other.credit)
+        return cost === undefined || siblings.has(other.id) || !atSource(other.credit)
           ? []
           : [withCarriedCost(other.credit, cost)];
       });
       const before = [...history(debit.assetId, debit.institutionId), ...carriedIn].filter(
-        (t) => compareForReplay(t, debit) < 0,
+        (t) => !siblingDebits.has(t.id) && compareForReplay(t, debit) < 0,
       );
       const replayed = replayPosition(before);
       const carriable =
@@ -216,6 +284,32 @@ export function resolveCarriedCosts(
     if (leg.fallback !== null) resolved.set(leg.id, leg.fallback);
   }
   return resolved;
+}
+
+/**
+ * #145 follow-up — two legs of one same-position round trip: both credits and
+ * both debits on one asset, institution, date and quantity. A lone
+ * same-institution pair has no sibling and is unaffected.
+ */
+function isRoundTripSibling(leg: CarryLeg, other: CarryLeg): boolean {
+  const { credit, debit } = leg;
+  return (
+    debit !== null &&
+    other.debit !== null &&
+    sameLeg(credit, debit) &&
+    sameLeg(credit, other.credit) &&
+    sameLeg(credit, other.debit)
+  );
+}
+
+/** One asset, institution, date and quantity. */
+function sameLeg(a: Transaction, b: Transaction): boolean {
+  return (
+    a.assetId === b.assetId &&
+    a.institutionId === b.institutionId &&
+    a.tradeDate === b.tradeDate &&
+    a.quantity.equals(b.quantity)
+  );
 }
 
 /**
@@ -237,10 +331,11 @@ export function resolveCarriedCosts(
  *
  * **Read off the relation, not off a formed pair** (review finding 1). An
  * earlier version asked this of `pairTransfers`' one-to-one matches only, and
- * so let through exactly the shapes where no pair forms: two same-position
- * pairs of equal quantity on one date (each credit sees two debits, so neither
- * pairs) and a same-institution debit competing with a cross-institution one.
- * In both, every debit applied alone and the position went to zero — the
+ * so let through exactly the shapes where no pair forms — then including two
+ * same-position pairs of equal quantity on one date, which `pairTransfers`
+ * now pairs as a round trip (#145) — and a same-institution debit competing
+ * with a cross-institution one. In both, every debit applied alone and the
+ * position went to zero — the
  * ambiguity guard that protects the *cost* was removing the guard on the
  * *quantity*. Whether a credit found a source is a different question from
  * whether its position may be emptied without it.

@@ -998,6 +998,7 @@ function planCarries(
             institutionId: row.institutionId,
             tradeDate: row.record.tradeDate,
             quantity: row.record.quantity,
+            priceStated: row.record.priceStated,
           },
         ]
       : [];

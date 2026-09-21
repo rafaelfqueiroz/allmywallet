@@ -205,6 +205,44 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     expect(costs.get('t')?.toString()).toBe('15');
   });
 
+  describe('#145 follow-up — a same-position round trip', () => {
+    const trip = (id: string, quantity: string) => transfer(id, 'A', 'A', '2026-03-10', quantity);
+
+    it('carries the average from before the trip to every leg, even moving more than half the holding', () => {
+      const history = [
+        aTransaction().buy().at('A').on('2026-01-05').quantity('800').price('10').build(),
+      ];
+      const legs = [trip('t1', '455'), trip('t2', '455')];
+      const debits = legs.map((leg) => leg.debit as Transaction);
+      const costs = resolveCarriedCosts(legs, historyOf([...history, ...debits]));
+      expect([costs.get('t1')?.toString(), costs.get('t2')?.toString()]).toEqual(['10', '10']);
+    });
+
+    it('carries a repeating average at the column scale', () => {
+      const history = [
+        aTransaction().buy().at('A').on('2026-01-05').quantity('3').price('3.33333333').build(),
+      ];
+      const legs = [trip('t1', '2'), trip('t2', '2')];
+      const debits = legs.map((leg) => leg.debit as Transaction);
+      const costs = resolveCarriedCosts(legs, historyOf([...history, ...debits]));
+      expect(costs.get('t1')?.toString()).toBe('3.33333333');
+      expect(costs.get('t2')?.toString()).toBe('3.33333333');
+    });
+
+    it('carries nothing to any leg once one leg loses its debit', () => {
+      const history = [
+        aTransaction().buy().at('A').on('2026-01-05').quantity('800').price('10').build(),
+      ];
+      const kept = trip('t1', '455');
+      const broken = { ...trip('t2', '455'), debit: null };
+      const costs = resolveCarriedCosts(
+        [kept, broken],
+        historyOf([...history, kept.debit as Transaction]),
+      );
+      expect(costs.size).toBe(0);
+    });
+  });
+
   it('carries nothing when the debit will not be in the ledger', () => {
     const history = [aTransaction().buy().at('A').on('2026-01-05').price('10').build()];
     const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), debit: null };
@@ -417,18 +455,37 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     });
 
     /**
-     * Review finding 1A. Two same-position pairs of equal quantity on one
-     * date: each credit sees two candidate debits, so `pairTransfers` forms
-     * nothing — and a rule asked of formed pairs alone let both debits through
-     * and emptied the position.
+     * Review finding 1A, as amended by #145. Two same-position pairs of equal
+     * quantity on one date now pair as a round trip — but a rule asked of
+     * formed pairs alone once let both debits through and emptied the
+     * position, so the hold-back still reads the relation.
      */
-    it('holds back both debits where two same-position pairs of one quantity compete', () => {
-      const credits = [at('credit-1'), at('credit-2')];
-      expect(pairTransfers(credits, [at('debit-1'), at('debit-2')]).size).toBe(0);
+    it('pairs a same-position round trip, and still holds its debits back while the credits are unsettled', () => {
+      const credits = [at('credit-2'), at('credit-1')];
+      // #145 follow-up: interchangeable legs pair in id order.
+      expect([...pairTransfers(credits, [at('debit-2'), at('debit-1')])]).toEqual([
+        ['credit-1', 'debit-1'],
+        ['credit-2', 'debit-2'],
+      ]);
       expect([...debitsHeldBack([at('debit-1'), at('debit-2')], credits)].sort()).toEqual([
         'debit-1',
         'debit-2',
       ]);
+    });
+
+    it('pairs nothing where a credit sits at another institution or carries a price, whatever the order', () => {
+      const clear = at('c2', { institutionId: destino });
+      const debits = [at('d1'), at('d2')];
+      expect(pairTransfers([at('c1'), clear], debits).size).toBe(0);
+      expect(pairTransfers([clear, at('c1')], debits).size).toBe(0);
+      expect(pairTransfers([at('c1'), at('c2', { priceStated: true })], debits).size).toBe(0);
+    });
+
+    it('pairs nothing where the round trip is unequal, or a debit sits at another institution', () => {
+      expect(pairTransfers([at('c1'), at('c2'), at('c3')], [at('d1'), at('d2')]).size).toBe(0);
+      expect(
+        pairTransfers([at('c1'), at('c2')], [at('d1'), at('d2', { institutionId: destino })]).size,
+      ).toBe(0);
     });
 
     /**
