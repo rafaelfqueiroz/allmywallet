@@ -4,21 +4,21 @@
 -- leg carry a non-negative cash `total_value`, for a return-of-capital
 -- reading of B3's priced `Resgate` on the BPFF11 -> RVBI11 incorporation.
 -- The owner has since decided that reading was wrong: the one real case was
--- actually a taxable liquidation, not a conversion with a cash component
--- (D10), and it is now stored as a mapped-key sell instead. No code path
--- written since #149 produces a cash-bearing conversion leg — no ledger
--- definition sets a priced redemption field on a conversion leg — so no
--- stored row anywhere has non-zero `total_value` on a conversion leg. This
--- migration removes the capability by tightening the CHECK and the trigger
--- function back to the exact-cost invariant `0023_asset_conversions.sql`
--- first established.
+-- a taxable liquidation, not a conversion with a cash component (D10), now
+-- stored as a sale at the liquidation value plus a subscription. No ledger
+-- ever wrote a cash-bearing conversion leg: #149's v7 definition was the only
+-- one that could, and the owner never imported under it (checked on the
+-- personal ledger before #150). This migration removes the capability by
+-- tightening the CHECK and the trigger back to the exact-cost invariant
+-- `0023_asset_conversions.sql` established.
 --
--- Safe alongside the previous application image (main at fc8ce7b, #149):
--- that image only ever writes conversion cash through a definition field
--- that no definition sets, so it never attempts to write a non-zero
--- `total_value` on a conversion leg either. It is therefore safe to leave in
--- place if a deploy using it is rolled back to that image (AR-69) — the
--- rolled-back image still cannot produce a row this migration would reject.
+-- Rollback (AR-69): the image before this one (main at fc8ce7b, #149) still
+-- carries v7 `bpff11-and-hgff11-to-rvbi11`, which would write cash on a
+-- `conversion_out`. On this schema such a commit is **rejected** by the CHECK,
+-- and the import transaction rolls back whole: an import fails loudly, and
+-- nothing is corrupted. Every other path of that image writes cash-free legs
+-- and works unchanged. So after a rollback past this migration, do not import
+-- a Movimentação holding the BPFF11/HGFF11 `Resgate` rows until upgraded again.
 --
 -- The ADD ... NOT VALID / VALIDATE / DROP / RENAME sequence below is the
 -- safety net: VALIDATE scans every existing row under the new, tighter

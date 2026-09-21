@@ -12,8 +12,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Text } from '@/components/ui/text';
-import { Money } from '@/components/patterns/money';
-import { Money as MoneyValue } from '@/core/shared/money';
 
 export interface ConversionGroupFormLeg {
   readonly id: string;
@@ -22,12 +20,6 @@ export interface ConversionGroupFormLeg {
   readonly tradeDate: string;
   readonly quantity: string;
   readonly costBasis: string;
-  /**
-   * #143 SPEC-007 BR-007-05b: the cash B3 paid on an outgoing leg (a priced
-   * `Resgate`), a return of capital. Shown, not edited: it is B3's price ×
-   * quantity, and the action recomputes it from the submitted quantity.
-   */
-  readonly cash?: string | undefined;
 }
 
 interface ConversionGroupFormProps {
@@ -76,11 +68,6 @@ export function ConversionGroupForm({ action, conversionGroupId, legs }: Convers
               required
               defaultValue={leg.costBasis}
             />
-            {leg.cash !== undefined && (
-              <Text size="sm" tone="muted">
-                {t('cash')} <Money value={MoneyValue.fromString(leg.cash)} />
-              </Text>
-            )}
           </Stack>
         ))}
         <Cluster gap="sm">

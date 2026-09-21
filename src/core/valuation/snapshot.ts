@@ -250,17 +250,6 @@ export function externalFlow(transaction: Transaction): Money {
     case 'sell':
     case 'transfer_out':
       return cashEffect.negated();
-    /**
-     * SPEC-007 BR-007-05b (#143): the cash component of a conversion — B3's
-     * priced `Resgate` retyped in place as the group's outgoing leg — left the
-     * portfolio exactly as the old `sell` reading had it leave, so net
-     * contributions are unchanged by the retyping. Only the cost side differs:
-     * the cash is a return of capital, not proceeds realising a gain. A
-     * price-less leg computes to zero here, as every conversion did before.
-     * Worked example: 90 @ 2,239, no fees → a flow of −201,51.
-     */
-    case 'conversion_out':
-      return cashEffect.negated();
     default:
       return Money.zero();
   }

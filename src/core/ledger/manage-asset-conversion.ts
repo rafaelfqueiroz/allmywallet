@@ -1,35 +1,16 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { ConversionGroupId } from '@/core/shared/ids';
-import { asStored, Money, sumMoney } from '@/core/shared/money';
+import { Money, sumMoney } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
 import { guardReplayable, without } from '@/core/ledger/guard-replayable';
 import { recalculatePositionFrom } from '@/core/ledger/recalculate-from';
-import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
+import type { Transaction } from '@/core/ledger/transaction';
 import { positionKeyString, type PositionKey } from '@/core/positions/replay';
 
-/**
- * SPEC-006 BR-006-05 / SPEC-007 BR-007-05b: validate the whole event, never one leg.
- *
- * **The conservation rule (#143):** `Σ out.cost_basis = Σ in.cost_basis +
- * Σ out.total_value` — the same invariant the database trigger enforces
- * (`0026_conversion_cash_component.sql`). An outgoing leg may carry the cash
- * component B3 states for the conversion; that cash is a **return of capital**,
- * so it leaves the carried cost rather than realising a gain.
- *
- * Worked example (DV-17): 90 BPFF11-shaped units at cost 9.000,00 and 70
- * HGFF11-shaped at 7.000,00, redeemed for 201,51 and 138,81 of cash. Out cost
- * 16.000,00 = in cost 15.659,68 + cash 340,32. A price-less group has cash 0
- * and reduces to the original equality.
- *
- * An incoming leg never carries cash (`total_value = 0`). An outgoing leg's
- * total must be the cash its own quantity, price and fees state, at the
- * `NUMERIC(20,8)` scale: `externalFlow` recomputes the flow from those fields
- * (never from `total_value`), so a total that disagreed with them would make
- * the conserved figure and the performance flow two different numbers.
- */
+/** SPEC-006 BR-006-05 / SPEC-007 BR-007-05b: validate the whole event, never one leg. */
 export function validateAssetConversionGroup(
   legs: readonly Transaction[],
 ): Result<ConversionGroupId, DomainError> {
@@ -50,34 +31,22 @@ export function validateAssetConversionGroup(
         leg.conversionGroupId === groupId &&
         leg.costBasis !== null &&
         !leg.costBasis.isNegative() &&
-        cashIsConsistent(leg),
+        leg.totalValue.isZero(),
     );
   if (!structurallyComplete) {
     return err(ledgerError(LedgerErrorCode.INVALID_CONVERSION_GROUP));
   }
   const outgoingCost = sumMoney(outgoing.map((leg) => leg.costBasis ?? Money.zero()));
   const incomingCost = sumMoney(incoming.map((leg) => leg.costBasis ?? Money.zero()));
-  const outgoingCash = sumMoney(outgoing.map((leg) => leg.totalValue));
-  if (!outgoingCost.equals(incomingCost.plus(outgoingCash))) {
+  if (!outgoingCost.equals(incomingCost)) {
     return err(
       ledgerError(LedgerErrorCode.INVALID_CONVERSION_GROUP, {
         outgoingCost: outgoingCost.toString(),
         incomingCost: incomingCost.toString(),
-        outgoingCash: outgoingCash.toString(),
       }),
     );
   }
   return ok(groupId);
-}
-
-/** #143: `in` carries no cash; `out` carries exactly the non-negative cash its fields state. */
-function cashIsConsistent(leg: Transaction): boolean {
-  if (leg.type === 'conversion_in') return leg.totalValue.isZero();
-  return (
-    !leg.totalValue.isNegative() &&
-    asStored(leg.totalValue) ===
-      asStored(computeTotalValue(leg.type, leg.quantity, leg.unitPrice, leg.fees))
-  );
 }
 
 export async function createAssetConversionGroup(

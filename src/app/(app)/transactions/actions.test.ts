@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AssetId, ConversionGroupId, TransactionId, UserId } from '@/core/shared/ids';
-import { Money, Quantity } from '@/core/shared/money';
+import { AssetId, ConversionGroupId, UserId } from '@/core/shared/ids';
+import { Money } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
 import type { TransactionWriteDeps } from '@/app/(app)/transactions/composition';
 
@@ -26,16 +26,12 @@ import { withTransactionWriteDeps } from '@/app/(app)/transactions/composition';
 import { editTransaction } from '@/core/ledger/edit-transaction';
 import { deleteTransaction } from '@/core/ledger/delete-transaction';
 import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
-import {
-  deleteAssetConversionGroup,
-  replaceAssetConversionGroup,
-} from '@/core/ledger/manage-asset-conversion';
+import { deleteAssetConversionGroup } from '@/core/ledger/manage-asset-conversion';
 import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
 import {
   bulkTransactionsAction,
   createTransactionAction,
   deleteTransactionAction,
-  editAssetConversionGroupAction,
   editTransactionAction,
 } from './actions';
 
@@ -120,51 +116,5 @@ describe('transaction actions — grouped conversion boundary', () => {
 
     expect(result).toMatchObject({ status: 'error', code: 'VALIDATION_FAILED' });
     expect(bulkDeleteTransactions).not.toHaveBeenCalled();
-  });
-
-  it('recomputes an outgoing leg’s cash from the edited quantity (#143)', async () => {
-    // SPEC-007 BR-007-05b: 90 redeemed at 2,239 carried 201,51 of cash; edited
-    // to 80 the leg must carry 80 × 2,239 = 179,12, never the stale 201,51.
-    const out = {
-      ...conversion,
-      id: TransactionId.of('01920000-0000-7000-8000-000000000011'),
-      quantity: Quantity.fromString('90'),
-      unitPrice: Money.fromString('2.239'),
-      fees: Money.zero(),
-      totalValue: Money.fromString('201.51'),
-    } as Transaction;
-    const incoming = {
-      ...conversion,
-      id: TransactionId.of('01920000-0000-7000-8000-000000000012'),
-      type: 'conversion_in',
-      quantity: Quantity.fromString('83.89'),
-      unitPrice: Money.zero(),
-      fees: Money.zero(),
-      totalValue: Money.zero(),
-    } as Transaction;
-    vi.mocked(deps.ledger.transactions.listByConversionGroup).mockResolvedValueOnce([
-      out,
-      incoming,
-    ]);
-    (deps.ledger as unknown as { clock: { now: () => Date } }).clock = { now: () => new Date() };
-    vi.mocked(replaceAssetConversionGroup).mockResolvedValue({
-      ok: false,
-      error: { code: 'INVALID_CONVERSION_GROUP', context: {} },
-    } as never);
-    const data = new FormData();
-    data.set('conversionGroupId', conversion.conversionGroupId as string);
-    for (const [id, quantity, cost] of [
-      [out.id, '80', '8000'],
-      [incoming.id, '83.89', '7820.88'],
-    ]) {
-      data.append('legId', id as string);
-      data.append('quantity', quantity as string);
-      data.append('costBasis', cost as string);
-    }
-
-    await editAssetConversionGroupAction({ status: 'idle' }, data);
-
-    const replacements = vi.mocked(replaceAssetConversionGroup).mock.calls[0]?.[2] ?? [];
-    expect(replacements.map((leg) => leg.totalValue.toString())).toEqual(['179.12', '0']);
   });
 });

@@ -216,7 +216,7 @@
     "FUTURE_TRADE_DATE": "A data {tradeDate} está no futuro. O extrato registra apenas operações já realizadas.",
     "EMPTY_SELECTION": "Selecione ao menos uma transação.",
     "INVALID_PAGINATION": "Não foi possível carregar esta página da lista.",
-    "INVALID_CONVERSION_GROUP": "A conversão precisa ter todas as saídas e entradas, e o custo das entradas precisa ser exatamente o custo das saídas menos o dinheiro recebido nelas.",
+    "INVALID_CONVERSION_GROUP": "A conversão precisa ter todas as saídas e entradas, com o mesmo custo total exato.",
     "IMPORT_BATCH_NOT_FOUND": "Esta importação não existe mais.",
     "IMPORT_BATCH_NOT_PENDING": "Este arquivo já foi processado.",
     "IMPORT_BATCH_NOT_PREVIEWED": "Revise a prévia antes de confirmar a importação.",
@@ -790,8 +790,7 @@
     "conversionGroup": {
       "createTitle": "Nova conversão de ativos",
       "createDescription": "Registre a troca de um ativo por outro sem criar caixa ou ganho realizado.",
-      "hint": "Todas as pernas desta conversão são salvas juntas. O custo total das entradas deve ser exatamente o das saídas menos o dinheiro recebido nelas (devolução de capital).",
-      "cash": "Dinheiro recebido nesta saída (devolução de capital):",
+      "hint": "Todas as pernas desta conversão são salvas juntas. O custo total das saídas deve ser exatamente igual ao das entradas.",
       "leg": "Perna {index}: {type} · ativo {assetId}",
       "sourceAsset": "Ativo de origem",
       "targetAsset": "Ativo de destino",
