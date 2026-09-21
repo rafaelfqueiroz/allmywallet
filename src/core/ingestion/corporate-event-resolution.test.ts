@@ -1433,6 +1433,138 @@ describe('#143 BR-005-20b — a fraction whose origin is the conversion itself',
 });
 
 /**
+ * SPEC-005 BR-005-20b (#143 D10) — **a fraction a liquidation's acquisitions
+ * left.**
+ *
+ * Generated shape of BPFF11/HGFF11 liquidated into RVBI11 (DV-24): TGT11 is
+ * subscribed 83,89 and 75,36 at 64,15 on 2025-10-06 — 159,25 for 10.215,8875,
+ * average 64,15. B3 removes the 0,25 on 2025-10-20 and auctions it on
+ * 2025-11-06 at 59,43. The subscriptions carry no group id, so the caller
+ * names them (`liquidationGroupOf`); their total left the fraction, so the
+ * liquidation is its origin, read as a split's (BR-007-04b). Replayed:
+ * proceeds 0,25 × 59,43 = 14,8575, cost out 0,25 × 64,15 = 16,0375, **realised
+ * −1,18**, 159 left at 10.199,85.
+ */
+describe('#143 D10 BR-005-20b — a fraction whose origin is a liquidation', () => {
+  const LIQUIDATION = 'liquidation:generated:xp:2025-10-06';
+  const subscribe = (quantity: string, date = '2025-10-06') =>
+    aTransaction()
+      .subscription()
+      .of('TGT11')
+      .at(BROKER)
+      .on(date)
+      .quantity(quantity)
+      .price('64.15')
+      .imported()
+      .build();
+  const acquisitions = [subscribe('83.89'), subscribe('75.36')];
+  const acquired = new Set<string>(acquisitions.map((t) => t.id));
+
+  function resolveWith(
+    rows: readonly CorporateEventRow[],
+    ledger: readonly Transaction[],
+    groupOf: ((t: Transaction) => string | null) | undefined,
+    originDays = 60,
+  ) {
+    return resolveCorporateEvents({
+      rows,
+      history: (key) => ledger.filter((t) => positionKeyString(t) === positionKeyString(key)),
+      factors: new Map(),
+      windows: { factorDays: 7, originDays, auctionDays: 180 },
+      liquidationGroupOf: groupOf,
+    });
+  }
+  const named = (t: Transaction) => (acquired.has(t.id) ? LIQUIDATION : null);
+
+  it('sells the fraction at the auction price and consumes the auction', () => {
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.25');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.25', '59.43');
+    const outcomes = resolveWith([fraction, auction], acquisitions, named);
+
+    const sale = written(outcomes, fraction);
+    expect(sale).toMatchObject({ type: 'sell', status: 'active', tradeDate: '2025-10-20' });
+    expect(sale.unitPrice.toString()).toBe('59.43');
+    // 0,25 × 59,43 = 14,8575.
+    expect(sale.totalValue.toString()).toBe('14.8575');
+    expect(outcomeOf(outcomes, auction)).toMatchObject({
+      status: 'consumed',
+      transaction: { status: 'superseded' },
+    });
+    const outcome = outcomeOf(outcomes, fraction);
+    expect(outcome.movement === 'fracao_em_ativos' && outcome.evidence.origin).toMatchObject({
+      id: LIQUIDATION,
+      type: 'liquidation',
+      tradeDate: '2025-10-06',
+      tracedFrom: null,
+    });
+    expect(str(outcome.movement === 'fracao_em_ativos' ? outcome.evidence.origin?.quantityAfter : null)).toBe(
+      '159.25',
+    );
+
+    const target = replayed([...acquisitions, sale]);
+    expect(target.quantity.toString()).toBe('159');
+    // 10.215,8875 − 16,0375 = 10.199,85, average still 64,15 (BR-007-03).
+    expect(target.totalCost.toString()).toBe('10199.85');
+    expect(target.averageCost.toString()).toBe('64.15');
+    expect(target.realizedGain.toString()).toBe('-1.18');
+  });
+
+  it('is no origin when the caller names no liquidation: a subscription alone never is', () => {
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.25');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.25', '59.43');
+    for (const groupOf of [undefined, () => null]) {
+      expect(outcomeOf(resolveWith([fraction, auction], acquisitions, groupOf), fraction)).toMatchObject({
+        status: 'refused',
+        refusal: 'no_origin',
+      });
+    }
+  });
+
+  it('measures the origin window from the last acquisition', () => {
+    // 2025-10-06 → 2025-10-20 is 14 days: a 13-day window misses it.
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.25');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.25', '59.43');
+    expect(
+      outcomeOf(resolveWith([fraction, auction], acquisitions, named, 13), fraction),
+    ).toMatchObject({ status: 'refused', refusal: 'no_origin' });
+  });
+
+  it('ignores an acquisition dated after the fraction', () => {
+    const late = [subscribe('83.89'), subscribe('75.36', '2025-10-21')];
+    const lateIds = new Set<string>(late.map((t) => t.id));
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.89');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.89', '59.43');
+    // Only 83,89 precedes the fraction, and it alone leaves 0,89: the later
+    // acquisition is not part of what the position held at the fraction.
+    const outcomes = resolveWith([fraction, auction], late, (t) =>
+      lateIds.has(t.id) ? LIQUIDATION : null,
+    );
+    const outcome = outcomeOf(outcomes, fraction);
+    expect(outcome.movement === 'fracao_em_ativos' && outcome.evidence.origin).toMatchObject({
+      id: LIQUIDATION,
+      type: 'liquidation',
+    });
+    expect(written(outcomes, fraction)).toMatchObject({ type: 'sell' });
+  });
+
+  it('leaves whole acquisitions out, so a target bonificação keeps its one origin', () => {
+    // 80 + 79 = 159 whole: no fraction created. TGT11's own bonificação of
+    // 2,4 → 161,4 leaves the 0,4 B3 auctions: a bonificação fraction.
+    const whole = [subscribe('80'), subscribe('79')];
+    const wholeIds = new Set<string>(whole.map((t) => t.id));
+    const own = bonus('TGT11', '2025-10-10', '2.4');
+    const fraction = open('fracao_em_ativos', 'TGT11', '2025-10-20', '0.4');
+    const auction = open('leilao_de_fracao', 'TGT11', '2025-11-06', '0.4', '12.5');
+    const outcomes = resolveWith([fraction, auction], [...whole, own], (t) =>
+      wholeIds.has(t.id) ? LIQUIDATION : null,
+    );
+    expect(written(outcomes, fraction)).toMatchObject({ type: 'fracao_bonificacao' });
+    // 0,4 × 12,50 = 5,00, a provento.
+    expect(written(outcomes, auction).totalValue.toString()).toBe('5');
+  });
+});
+
+/**
  * SPEC-005 BR-005-20b (#120) — B3 publishes share-ratio factors only for
  * **listed companies**, so a fund or a delisted issuer has no factor of any
  * kind, ever, and every split or reverse split of theirs refused `no_factor`

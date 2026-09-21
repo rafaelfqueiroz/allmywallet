@@ -7,6 +7,7 @@ import {
   institutionIdFor,
 } from '@/core/ledger/test-support/transaction-builder';
 import {
+  acquisitionCreatedFraction,
   auctionTransaction,
   conversionCreatedFraction,
   type FractionLeg,
@@ -143,6 +144,21 @@ describe('#143 BR-005-20b — conversionCreatedFraction', () => {
 
   it('is never the conversion without an outgoing leg to read', () => {
     expect(conversionCreatedFraction([], [q('159.25')])).toBe(false);
+  });
+});
+
+describe('#143 D10 BR-005-20b — acquisitionCreatedFraction', () => {
+  it('is the liquidation when its acquisitions total a fractional quantity', () => {
+    // 83,89 + 75,36 = 159,25, fractional part 0,25.
+    expect(acquisitionCreatedFraction([q('83.89'), q('75.36')])).toBe(true);
+    expect(acquisitionCreatedFraction([q('0.5')])).toBe(true);
+  });
+
+  it('is not when they total a whole quantity, or there are none', () => {
+    // 0,6 + 0,4 = 1; 80 + 79 = 159.
+    expect(acquisitionCreatedFraction([q('0.6'), q('0.4')])).toBe(false);
+    expect(acquisitionCreatedFraction([q('80'), q('79')])).toBe(false);
+    expect(acquisitionCreatedFraction([])).toBe(false);
   });
 });
 
