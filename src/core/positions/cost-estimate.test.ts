@@ -104,6 +104,9 @@ describe('BR-007-06 — the marker through a sequence (TS-06)', () => {
    *                                            estimated one
    *  5. 2026-06-01  sell 200 @ 16,00 → qty 0, reset (BR-007-07)   → exact
    *  6. 2026-07-01  buy 10 @ 12,00 → a new lot, 120,00, avg 12,00 → exact
+   *
+   * Repeating averages are asserted at the column's eight places (`asStored`,
+   * half-up as Postgres casts): 27,48333333 and 13,74166667.
    */
   const history = () => [
     aTransaction().buy().on('2026-01-05').quantity('100').price('10.00').build(),

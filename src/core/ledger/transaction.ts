@@ -145,17 +145,19 @@ export interface Transaction {
   readonly isUserModified: boolean;
   /**
    * SPEC-007 BR-007-06 (amended 2026-09-21) / SPEC-005 BR-005-20d: this row's
-   * `unitPrice`/`costBasis` is provisional — a corporate event or a
-   * carried-forward B3 row reconciled to a figure that has not settled —
-   * rather than an exact one. `false` for every row this schema expansion
-   * did not itself introduce (AR-69); nothing in this change classifies a
-   * row as an estimate, only makes the field storable.
+   * `unitPrice`/`costBasis` is an estimate rather than a figure B3 stated — a
+   * subscription priced at a stored close, or a transfer or conversion leg
+   * carrying the average of a source lot that included one. A position whose
+   * open lot includes such an acquisition is itself marked
+   * (`core/positions/cost-estimate.ts`). A user edit changing the price
+   * clears it (`core/ledger/edit-transaction.ts`).
    */
   readonly costIsEstimate: boolean;
   /**
-   * SPEC-005 BR-005-20d: the date an estimate is expected to close to an
-   * exact figure. Null whenever `costIsEstimate` is false — the database
-   * CHECK enforces the pairing (AR-30), matching `ratio`'s precedent.
+   * SPEC-005 BR-005-20d: the date of the stored close an estimated price was
+   * read from. Null whenever `costIsEstimate` is false — the database CHECK
+   * enforces the pairing (AR-30), matching `ratio`'s precedent — and null on
+   * a carried estimate, which was read from no close.
    */
   readonly estimateCloseDate: BusinessDate | null;
   readonly createdAt: Date;
