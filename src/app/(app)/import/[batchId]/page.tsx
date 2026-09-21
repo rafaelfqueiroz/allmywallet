@@ -445,7 +445,7 @@ export default async function ImportBatchDetailPage({
                   // BR-005-25 (#110): no button where accepting would be refused.
                   const blocker = acceptBlockers.get(positionKeyString(d));
                   return (
-                    <TableRow key={d.assetId}>
+                    <TableRow key={positionKeyString(d)}>
                       <TableCell className="py-row font-medium">{d.assetCode}</TableCell>
                       <TableCell className="py-row tabular-nums">{d.computedQuantity}</TableCell>
                       <TableCell className="py-row tabular-nums">{d.b3Quantity}</TableCell>

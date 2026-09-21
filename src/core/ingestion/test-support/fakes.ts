@@ -5,6 +5,7 @@ import type {
   CorporateEventFactorReader,
 } from '@/core/quotes/corporate-event-factors';
 import type { AssetResolveInput } from '@/core/ingestion/ports';
+import type { AssetDescriptor } from '@/core/ledger/test-support/fake-repositories';
 import type {
   AssetResolverPort,
   FixedIncomeContractWriterPort,
@@ -128,12 +129,30 @@ export class FakeImportRowRepository implements ImportRowRepository {
 /** Upserts by `code`, mirroring `DrizzleAssetCatalogRepository.upsertByCode`'s behaviour. */
 export class FakeAssetResolver implements AssetResolverPort {
   #byCode = new Map<string, AssetId>();
+  #descriptors = new Map<AssetId, AssetDescriptor>();
+
+  /**
+   * #145: the catalog a resolve writes, handed on so a fake ledger's `export`
+   * joins the same code and class the real repository would — with #108's
+   * rule that a stated class or name overwrites and a guessed one only fills.
+   */
+  readonly #onDescribe: ((id: AssetId, descriptor: AssetDescriptor) => void) | undefined;
+
+  constructor(onDescribe?: (id: AssetId, descriptor: AssetDescriptor) => void) {
+    this.#onDescribe = onDescribe;
+  }
 
   async resolve(input: AssetResolveInput): Promise<AssetId> {
-    const existing = this.#byCode.get(input.code);
-    if (existing) return existing;
-    const id = AssetId.generate();
+    const id = this.#byCode.get(input.code) ?? AssetId.generate();
     this.#byCode.set(input.code, id);
+    const seen = this.#descriptors.get(id);
+    const descriptor: AssetDescriptor = {
+      code: input.code,
+      name: seen === undefined || input.nameStated ? input.name : seen.name,
+      assetClass: seen === undefined || input.classStated ? input.assetClass : seen.assetClass,
+    };
+    this.#descriptors.set(id, descriptor);
+    this.#onDescribe?.(id, descriptor);
     return id;
   }
 }

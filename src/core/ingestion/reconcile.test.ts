@@ -16,6 +16,7 @@ function input(overrides: Partial<ReconciliationInput> = {}): ReconciliationInpu
     b3Quantity: Quantity.fromString('100'),
     firstComputedTradeDate: BusinessDate.of('2020-01-10'),
     hasUnclassifiedRowsAffectingAsset: false,
+    inB3Snapshot: true,
     ...overrides,
   };
 }
@@ -87,6 +88,39 @@ describe('SPEC-005 BR-005-22..26 — reconcilePositions', () => {
       }),
     ]);
     expect(report.discrepancies[0]?.cause).toBe('uncaptured_corporate_event');
+  });
+
+  it('BR-005-24 (#145): a ledger position B3 does not list reads "absent from the snapshot", at B3 = 0', () => {
+    const report = reconcilePositions(asOf, [
+      input({
+        assetCode: 'WIZS3',
+        computedQuantity: Quantity.fromString('180'),
+        b3Quantity: Quantity.zero(),
+        inB3Snapshot: false,
+      }),
+    ]);
+    expect(report.status).toBe('discrepancies_found');
+    expect(report.discrepancies).toEqual([
+      expect.objectContaining({
+        assetCode: 'WIZS3',
+        computedQuantity: '180',
+        b3Quantity: '0',
+        difference: '-180',
+        cause: 'absent_from_b3_snapshot',
+      }),
+    ]);
+  });
+
+  it('BR-005-24 (#145): an unclassified row on an unlisted position still names the unclassified row', () => {
+    const report = reconcilePositions(asOf, [
+      input({
+        computedQuantity: Quantity.fromString('180'),
+        b3Quantity: Quantity.zero(),
+        inB3Snapshot: false,
+        hasUnclassifiedRowsAffectingAsset: true,
+      }),
+    ]);
+    expect(report.discrepancies[0]?.cause).toBe('unclassified_rows_affecting_asset');
   });
 
   it('multiple assets: only the ones that disagree appear in the report', () => {
