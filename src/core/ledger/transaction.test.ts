@@ -111,9 +111,23 @@ describe('computeTotalValue', () => {
     ).toBe('2.8');
   });
 
-  it('BR-006-05 / BR-007-05b — is zero for both conversion legs', () => {
-    expect(computeTotalValue('conversion_out', quantity, price, fees).toString()).toBe('0');
+  it('BR-006-05 / BR-007-05b — a price-less conversion leg is zero either way', () => {
+    expect(
+      computeTotalValue('conversion_out', quantity, Money.zero(), Money.zero()).toString(),
+    ).toBe('0');
     expect(computeTotalValue('conversion_in', quantity, price, fees).toString()).toBe('0');
+  });
+
+  it('BR-007-05b (#143) — a conversion_out carries its stated cash like a sale', () => {
+    // 90 × 2,239 = 201,51; less 0,51 of fees = 201,00 returned to the investor.
+    expect(
+      computeTotalValue(
+        'conversion_out',
+        Quantity.fromString('90'),
+        Money.fromString('2.239'),
+        Money.fromString('0.51'),
+      ).toString(),
+    ).toBe('201');
   });
 
   it('values a provento at quantity × per-share amount', () => {
