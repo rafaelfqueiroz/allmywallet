@@ -86,6 +86,12 @@ export interface PositionFigures {
   readonly totalCost: string;
   readonly averageCost: string;
   readonly realizedGain: string;
+  /**
+   * SPEC-007 BR-007-06: part of what DM-4 compares. A cache that shows an
+   * estimated average as exact — or an exact one as estimated — has drifted
+   * as surely as one with a wrong figure (DL-007-12).
+   */
+  readonly costEstimated: boolean;
 }
 
 export interface PositionVerification {
@@ -99,6 +105,7 @@ function figuresOf(snapshot: PositionSnapshot): PositionFigures {
     totalCost: asStored(snapshot.state.totalCost),
     averageCost: asStored(snapshot.state.averageCost),
     realizedGain: asStored(snapshot.state.realizedGain),
+    costEstimated: snapshot.costEstimated,
   };
 }
 
@@ -107,7 +114,8 @@ function sameFigures(a: PositionFigures, b: PositionFigures): boolean {
     a.quantity === b.quantity &&
     a.totalCost === b.totalCost &&
     a.averageCost === b.averageCost &&
-    a.realizedGain === b.realizedGain
+    a.realizedGain === b.realizedGain &&
+    a.costEstimated === b.costEstimated
   );
 }
 

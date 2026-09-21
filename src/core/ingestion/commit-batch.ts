@@ -19,6 +19,7 @@ import {
   positionKeyString,
   type ReplayFailure,
   replayPosition,
+  replayPositionWithEstimate,
 } from '@/core/positions/replay';
 import { sortForReplay } from '@/core/positions/ordering';
 import type { CorporateEventFactor } from '@/core/quotes/corporate-event-factors';
@@ -304,6 +305,8 @@ interface Group {
    */
   readonly waitsForCarry: boolean;
   readonly state: PositionState | null;
+  /** SPEC-007 BR-007-06: the replayed open lot includes an estimated cost. */
+  readonly costEstimated: boolean;
 }
 
 /** One settling round: what it made of every position, and what it settled. */
@@ -758,9 +761,12 @@ export async function commitBatch(
       group.reclassified.some((r) => r.kind === 'activate') ||
       group.conversions.length > 0 ||
       group.corporate.some((c) => c.status === 'resolved');
-    // SPEC-007 BR-007-06: no transaction can be marked an estimate yet.
     if (changesPosition) {
-      positionUpserts.push({ ...group.key, state: group.state, costEstimated: false });
+      positionUpserts.push({
+        ...group.key,
+        state: group.state,
+        costEstimated: group.costEstimated,
+      });
     }
   }
 
@@ -2438,12 +2444,15 @@ function settle(
         ...group.conversions.map((write) => write.transaction),
         ...group.corporate.map((c) => c.transaction),
       ];
-      const replayed = replayPosition(ledger);
+      // SPEC-007 BR-007-06: the marker from the same fold as the figures, so
+      // the position this commit caches agrees with a rebuild on it (DM-4).
+      const replayed = replayPositionWithEstimate(ledger);
       return {
         ...group,
         ledger,
         waitsForCarry: waiting.has(positionKeyString(group.key)),
-        state: replayed.ok ? replayed.value : null,
+        state: replayed.ok ? replayed.value.state : null,
+        costEstimated: replayed.ok && replayed.value.costEstimated,
       };
     }),
     // BR-005-20a (#135): read from this round's `costs`, so a credit that a
