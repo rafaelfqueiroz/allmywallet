@@ -43,6 +43,7 @@ Upgrades when `:latest` has moved (backup → pull → migrate → start → hea
 | Last-known-good is not healthy either | Stop. Restore (below). |
 | A holding reads zero, or `start.sh` logged that the position rebuild failed | The position cache is derived and the ledger is authoritative (SPEC-007 BR-007-14): replay it with `scripts/personal/rebuild-positions.sh`. `start.sh` already runs this after every migration; running it again changes nothing when the cache agrees. |
 | `start.sh` rolled back **after** a migration merged institution rows ([#136](https://github.com/rafaelfqueiroz/allmywallet/issues/136)) | The old image serves the merged ledger correctly, but its importer writes B3's raw spelling — so **do not import while rolled back**, or the split re-opens and needs another data migration. |
+| `start.sh` rolled back **after** migration 0027 ([#143](https://github.com/rafaelfqueiroz/allmywallet/issues/143)) | The old image's importer would write a cash-bearing conversion for the BPFF11/HGFF11 `Resgate` rows, which 0027 rejects: that import fails whole and writes nothing. Every other import works — just do not import a Movimentação holding those rows until upgraded again. |
 
 **Do not** run `docker compose down -v`, `pnpm db:*`, or any test suite with the personal env loaded.
 
