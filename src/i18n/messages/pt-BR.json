@@ -391,7 +391,13 @@
     "goalsLink": "Objetivos",
     "needsAttentionOutOfBalance": "{wallet}: ao menos um ativo passou da tolerância que você definiu.",
     "needsAttentionNeedsReview": "{wallet}: as metas não somam 100%.",
-    "needsAttentionBalanceOpen": "Ver metas e desvio"
+    "needsAttentionBalanceOpen": "Ver metas e desvio",
+    "markers": {
+      "costEstimated": {
+        "badge": "Preço estimado",
+        "explanation": "O custo desta carteira inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
+      }
+    }
   },
   "import": {
     "title": "Importar extratos B3",
@@ -662,6 +668,10 @@
         "cdi_percent": "% do CDI",
         "prefixado": "taxa prefixada",
         "ipca_spread": "IPCA + juros"
+      },
+      "costEstimated": {
+        "badge": "Preço estimado",
+        "explanation": "O custo desta posição inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
       }
     },
     "attentionTitle": "Precisam de atenção",
@@ -822,6 +832,13 @@
       "assigned": "{assigned} ativo(s) atribuído(s) à carteira.",
       "assignedPartial": "{assigned} ativo(s) atribuído(s). {skipped} não entrou(aram): já estava(m) em outra carteira ou a seleção não deixou cotas livres.",
       "assignedNone": "Nada foi atribuído: os ativos selecionados já estão em alguma carteira ou a seleção não deixou cotas livres."
+    },
+    "markers": {
+      "costEstimated": {
+        "badge": "Preço estimado",
+        "closeExplanation": "Preço estimado pelo fechamento de {date}. A B3 não informa o preço da subscrição — o custo usa o preço de fechamento no dia em que os ativos foram creditados.",
+        "carriedExplanation": "Custo herdado de uma posição com preço estimado."
+      }
     }
   },
   "privacy": {

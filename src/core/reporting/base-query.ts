@@ -316,6 +316,10 @@ export function buildHoldingSet(
         priceDate: position.priceDate,
         needsAttention: position.needsAttention,
         basis: position.basis,
+        // SPEC-007 BR-007-06 / DL-007-12 — carried onto every slice, not
+        // split, for the same reason `carriedForward` is above: it describes
+        // where the cost came from, not an amount to apportion.
+        costEstimated: position.costEstimated,
       });
     });
   }
@@ -392,6 +396,9 @@ export function totalsOf(holdings: readonly ReportHolding[]): ReportTotals {
     quantity: sumQuantity(holdings.map((holding) => holding.quantity)),
     // BR-011-15 / AC-15: one accrued component is enough to mark the figure.
     estimated: holdings.some((holding) => holding.estimated),
+    // SPEC-007 BR-007-06 / DL-007-12: one estimated-cost component is enough
+    // to mark the whole total, for the same reason.
+    costEstimated: holdings.some((holding) => holding.costEstimated),
   };
 }
 
@@ -434,6 +441,7 @@ const EMPTY_TOTALS: ReportTotals = {
   costBasis: Money.zero(),
   quantity: Quantity.zero(),
   estimated: false,
+  costEstimated: false,
 };
 
 // ---------------------------------------------------------------------------

@@ -209,5 +209,6 @@ function asHolding(slice: EarningSlice, descriptor: AssetDescriptor | undefined)
     priceDate: null,
     needsAttention: null,
     basis: null,
+    costEstimated: false,
   };
 }

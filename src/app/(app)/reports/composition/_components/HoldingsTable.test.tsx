@@ -35,6 +35,8 @@ const labels: HoldingsTableLabels = {
   concentratedTitle: 'Marcação informativa, sem recomendação.',
   estimated: 'Estimado',
   estimatedTitle: 'Valor estimado, não observado no mercado.',
+  costEstimated: 'Preço estimado',
+  costEstimatedTitle: 'O custo desta posição inclui uma aquisição estimada.',
   sortBy: 'Ordenar por {column}',
   sortField: 'Ordenar por',
   sortAscending: 'Ordem crescente',
@@ -71,6 +73,7 @@ const rows: readonly HoldingRow[] = [
     unrealizedGain: cell('R$ 100,00', 2),
     concentrated: true,
     estimated: false,
+    costEstimated: false,
     // SPEC-018 BR-018-19 — watched, with a usable quote.
     opportunityState: 'buy',
     opportunityStateLabel: 'compra',
@@ -90,6 +93,10 @@ const rows: readonly HoldingRow[] = [
     unrealizedGain: cell('−R$ 50,00', 0, true),
     concentrated: true,
     estimated: false,
+    // SPEC-007 BR-007-06 — a subscription B3 states no price for, so this
+    // row's *preço médio* is the one marked, independently of `estimated`
+    // (SPEC-009's unrelated valuation estimate — see the test below).
+    costEstimated: true,
     // BR-018-16 — watched, but no usable quote: still a badge, deliberately.
     opportunityState: 'unknown',
     opportunityStateLabel: 'sem cotação válida',
@@ -115,6 +122,7 @@ const rows: readonly HoldingRow[] = [
     opportunityStateTitle: '',
     concentrated: false,
     estimated: true,
+    costEstimated: false,
   },
 ];
 
@@ -220,6 +228,20 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
   it('BR-015-09: marks the accrued row and only that one', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     // Both renderings of the row are in the DOM (DL-12), so one row yields two.
+    expect(screen.getAllByText('Estimado')).toHaveLength(2);
+  });
+
+  it('SPEC-007 BR-007-06 / DL-007-12: marks preço médio for the cost-estimated row, independently of the accrued one', () => {
+    render(<HoldingsTable rows={rows} labels={labels} />);
+    // ITSA4 carries a cost estimate; both renderings are in the DOM (DL-12).
+    const badges = screen.getAllByText('Preço estimado');
+    expect(badges).toHaveLength(2);
+    expect(badges[0]).toHaveAttribute(
+      'title',
+      'O custo desta posição inclui uma aquisição estimada.',
+    );
+    // CDBX is the accrued (`estimated`) row, not the cost-estimated one — the
+    // two markers must not collapse into each other.
     expect(screen.getAllByText('Estimado')).toHaveLength(2);
   });
 

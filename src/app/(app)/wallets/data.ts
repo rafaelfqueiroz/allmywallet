@@ -109,6 +109,14 @@ export interface WalletDetailData {
   readonly wallet: Wallet;
   readonly allocations: readonly WalletAllocation[];
   readonly labels: ReadonlyMap<AssetId, AssetLabel>;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — whether each
+   * allocated asset's *current* position carries an estimated cost. Read
+   * from `PositionQueryPort`, the same seam `compareWallets` reads, so a
+   * wallet's own detail page cannot disagree with the comparison table above
+   * it about which assets are estimated.
+   */
+  readonly costEstimated: ReadonlyMap<AssetId, boolean>;
 }
 
 export async function loadWalletDetail(
@@ -119,7 +127,9 @@ export async function loadWalletDetail(
     const wallet = await deps.wallets.findById(walletId);
     if (wallet === null) return null;
     const allocations = await deps.allocations.listForWallet(walletId);
-    return { wallet, allocations };
+    const held = await deps.positionQuery.listHeld();
+    const costEstimated = new Map(held.map((position) => [position.assetId, position.costEstimated]));
+    return { wallet, allocations, costEstimated };
   });
   if (result === null) return null;
 

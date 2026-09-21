@@ -271,6 +271,24 @@ describe('buildHoldingSet — BR-011-09, the canonical slices', () => {
     expect(holdings.every((h) => h.estimated)).toBe(true);
   });
 
+  it('SPEC-007 BR-007-06 / DL-007-12 — carries the cost-estimate marker onto every slice, unsplit', () => {
+    const holdings = unwrap(
+      buildHoldingSet({
+        positions: [
+          aPosition({
+            assetId: itsa,
+            quantity: qty('100'),
+            value: money('1000'),
+            costEstimated: true,
+          }),
+        ],
+        allocations: [{ walletId: walletA, assetId: itsa, quantity: qty('60') }],
+        assets: [descriptor],
+      }),
+    );
+    expect(holdings.every((h) => h.costEstimated)).toBe(true);
+  });
+
   it('preserves a null institution rather than inventing one', () => {
     const holdings = unwrap(
       buildHoldingSet({
@@ -374,7 +392,21 @@ describe('totalsOf', () => {
       costBasis: Money.zero(),
       quantity: Quantity.zero(),
       estimated: false,
+      costEstimated: false,
     });
+  });
+
+  it('SPEC-007 BR-007-06 / DL-007-12 — marks the total cost-estimated when any single holding is', () => {
+    const totals = totalsOf([
+      aHolding({ value: money('10'), costBasis: money('8'), quantity: qty('1') }),
+      aHolding({
+        value: money('20'),
+        costBasis: money('15'),
+        quantity: qty('2'),
+        costEstimated: true,
+      }),
+    ]);
+    expect(totals.costEstimated).toBe(true);
   });
 
   it('marks the total estimated when any single holding is', () => {

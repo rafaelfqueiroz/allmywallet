@@ -65,6 +65,7 @@ function groupedReport(total: string, estimated = false): GroupedReport {
       costBasis: Money.zero(),
       quantity: Quantity.zero(),
       estimated,
+      costEstimated: false,
     },
   };
 }

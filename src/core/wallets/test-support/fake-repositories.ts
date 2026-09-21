@@ -210,13 +210,24 @@ export class FakeWalletTargetRepository implements WalletTargetRepository {
 export class FakePositionQueryPort implements PositionQueryPort {
   #rows = new Map<AssetId, AssetPositionQuery>();
 
-  set(assetId: AssetId, quantity: Quantity, averageCost: Money): void {
-    this.#rows.set(assetId, { assetId, quantity, averageCost });
+  /**
+   * `costEstimated` defaults to `false`: every existing caller predates
+   * SPEC-007 BR-007-06 (amended 2026-09-21) and is testing something else
+   * entirely, so its ordinary position is exact cost by default. A test for
+   * the cost-estimate marker passes `true` explicitly.
+   */
+  set(assetId: AssetId, quantity: Quantity, averageCost: Money, costEstimated = false): void {
+    this.#rows.set(assetId, { assetId, quantity, averageCost, costEstimated });
   }
 
   async query(assetId: AssetId): Promise<AssetPositionQuery> {
     return (
-      this.#rows.get(assetId) ?? { assetId, quantity: Quantity.zero(), averageCost: Money.zero() }
+      this.#rows.get(assetId) ?? {
+        assetId,
+        quantity: Quantity.zero(),
+        averageCost: Money.zero(),
+        costEstimated: false,
+      }
     );
   }
 

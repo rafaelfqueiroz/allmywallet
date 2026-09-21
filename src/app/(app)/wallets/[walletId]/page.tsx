@@ -10,6 +10,7 @@ import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
+import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Field } from '@/components/patterns/field';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
@@ -124,7 +125,15 @@ export default async function WalletDetailPage({
                         // say "free", which is a different and wrong claim.
                         <span aria-label={t('costBasisUnknown')}>—</span>
                       ) : (
-                        <Money value={allocation.costBasisAtAllocation} />
+                        <Cluster gap="sm" align="baseline">
+                          <Money value={allocation.costBasisAtAllocation} />
+                          {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
+                          <CostEstimateMarker
+                            shown={detail.costEstimated.get(allocation.assetId) ?? false}
+                            label={t('markers.costEstimated.badge')}
+                            title={t('markers.costEstimated.explanation')}
+                          />
+                        </Cluster>
                       )}
                     </TableCell>
                   </TableRow>

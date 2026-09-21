@@ -38,6 +38,7 @@ function aRow(overrides: Partial<UnflaggedRow> & { readonly share: Money | null 
     priceDate: null,
     needsAttention: null,
     basis: null,
+    costEstimated: false,
     ...overrides,
   };
 }

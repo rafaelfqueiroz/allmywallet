@@ -275,6 +275,26 @@ describe('assetRows — BR-015-02/08: the table, one row per asset', () => {
     expect(row?.priceDate).toBe('2026-03-20');
   });
 
+  it('SPEC-007 BR-007-06 / DL-007-12: one cost-estimated institution slice marks the whole row', () => {
+    const mixed = [
+      aHolding({
+        assetId: assetIdOf('1'),
+        quantity: qty('1'),
+        value: money('10'),
+        costEstimated: false,
+      }),
+      aHolding({
+        assetId: assetIdOf('1'),
+        quantity: qty('1'),
+        value: money('10'),
+        costEstimated: true,
+      }),
+    ];
+    const row = assetRows(mixed, money('20'))[0];
+
+    expect(row?.costEstimated).toBe(true);
+  });
+
   it('SPEC-009 AC-11: carries the needs-attention reason and the estimate basis onto the row', () => {
     const basis = {
       indexer: 'cdi_percent',
