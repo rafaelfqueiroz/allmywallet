@@ -69,6 +69,15 @@ export interface AssetConversionDefinition {
    * nothing in either row to say which fund it came from.
    */
   readonly repeatedTargetCredits?: boolean | undefined;
+  /**
+   * #143 — a source `Atualização` restating exactly the balance the replay
+   * already holds is **corroboration**, set aside rather than read as what
+   * remains (`corroboratesSourceBalance`). Per definition, not global: for any
+   * other definition an unchanged statement still means nothing converted and
+   * the group refuses — an ordinary same-day buy excluded from the replay
+   * before the statement would otherwise let a guess through (BR-005-20c).
+   */
+  readonly sourceBalanceRestatements?: boolean | undefined;
 }
 
 function oneTarget(
@@ -185,6 +194,7 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
     targets: [{ assetCode: 'RVBI11', evidenceAssetCode: 'RVBI15', allocationWeight: null }],
     pricedRedemptionSourceCodes: ['BPFF11', 'HGFF11'],
     repeatedTargetCredits: true,
+    sourceBalanceRestatements: true,
   },
   // #143 (v7): RVBI11 → PSEC11, the ticker change of 2025-10-27, 1:1 and
   // target-only like the v6 renames. It must follow the definition above: the
@@ -193,7 +203,7 @@ export const ASSET_CONVERSION_DEFINITIONS: readonly AssetConversionDefinition[] 
   // 2025-10-17 restates 159,25 unchanged and is dropped as corroboration;
   // measured after its 0,25 `Fração em Ativos` settles (#128 D2), RVBI11
   // holds 159, all of which converts.
-  oneTarget('rvbi11-to-psec11', ['RVBI11'], 'PSEC11'),
+  { ...oneTarget('rvbi11-to-psec11', ['RVBI11'], 'PSEC11'), sourceBalanceRestatements: true },
   {
     id: 'klbn11-to-klbn3-and-klbn4',
     sourceAssetCodes: ['KLBN11'],

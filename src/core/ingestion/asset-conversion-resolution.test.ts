@@ -618,6 +618,28 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
       ).toEqual({ status: 'unresolved', reason: 'negative_cost' });
     });
 
+    it('refuses negative_cost when one source’s cash exceeds its own basis (review F6)', () => {
+      // BPFF11: 201,51 of cash against 100,00 of cost — the group total
+      // (100,00 + 7.265,32 − 340,32) would still be positive, absorbing the
+      // excess into HGFF11's basis.
+      expect(
+        resolve([incorporation], [...credits, ...redemptions], positions('100', '7265.32'), 45),
+      ).toEqual({ status: 'unresolved', reason: 'negative_cost' });
+    });
+
+    it('does not convert on the receipts alone, before the cash is known (review F1)', () => {
+      // A file ending between 2025-10-06 and 2025-10-14: the credits without
+      // the priced Resgates. Converting now would carry the whole cost at cash
+      // zero and strand the later Resgates (BR-005-17).
+      expect(resolve([incorporation], credits, positions('9000', '7265.32'), 45)).toEqual({
+        status: 'unresolved',
+        reason: 'incomplete',
+      });
+      expect(
+        resolve([incorporation], [...credits, redemptions[0]!], positions('9000', '7265.32'), 45),
+      ).toEqual({ status: 'unresolved', reason: 'incomplete' });
+    });
+
     it('carries exactly zero when the cash equals the cost', () => {
       // 201,51 + 138,81 = 340,32 removed and 340,32 of cash: the target is zero-cost.
       const result = expectResolved(
@@ -715,6 +737,20 @@ describe('SPEC-005 BR-005-20c / SPEC-007 BR-007-05b — asset conversion plannin
         'rvbi15-b',
       ]);
       expect(result.totalCost.toString()).toBe('15925');
+    });
+
+    it('keeps an unchanged source statement as evidence for a definition that does not opt in (review F3)', () => {
+      // OLD3 holds 100 and B3 states 100 remaining: without the opt-in that
+      // still says nothing converted, so the group refuses instead of guessing.
+      const restatement = evidence('old-atualizacao', 'OLD3', '100', '100');
+      expect(corroboratesSourceBalance(restatement, [oneToOne])).toBe(false);
+      expect(
+        resolve(
+          [oneToOne],
+          [restatement, evidence('new', 'NEW3', '0', '20')],
+          [source('OLD3', '100', '10')],
+        ),
+      ).toEqual({ status: 'unresolved', reason: 'insufficient_quantity' });
     });
 
     it('still reads a changed source statement, and a target statement, as before', () => {

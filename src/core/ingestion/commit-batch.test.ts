@@ -4029,6 +4029,26 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       expect(deps.transactions.rows).toEqual(snapshot);
     });
 
+    it('reaches the same end state when the file is split between the receipts and the cash (review F1)', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      const rows = file();
+      const cut = (row: (typeof rows)[number]) =>
+        row.record.kind === 'transaction' && row.record.tradeDate <= '2025-10-10';
+
+      // The first file ends before the Resgates: the receipts alone must not
+      // convert at cash zero (BR-005-17).
+      const early = await importFile(deps, rows.filter(cut));
+      expect(early.outcome).toMatchObject({ resolvedAssetConversions: 0, invalid: 0 });
+      expect((await positionOf(deps, 'BPFF11', INTER)).quantity.toString()).toBe('90');
+
+      const late = await importFile(
+        deps,
+        rows.filter((row) => !cut(row)),
+      );
+      expect(late.outcome).toMatchObject({ invalid: 0, resolvedAssetConversions: 2 });
+      await expectEndState(deps);
+    });
+
     it('finds a Resgate sell stored under the placeholder key an older map gave it', async () => {
       const deps = buildFakeIngestionDeps('2026-09-21');
       await importFile(deps, file(), false);

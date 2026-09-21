@@ -267,7 +267,7 @@ function targetAllocations(
  * evidence is target-only).
  *
  * Only an **exactly** unchanged balance, only an `Atualização`, only on a code
- * some definition sources. A statement that differs from the replay by any
+ * a definition sources **and** opts in with `sourceBalanceRestatements`. A statement that differs from the replay by any
  * amount is still read as what remains; a target's unchanged statement still
  * refuses as adding nothing. `beforeQuantity` is the replayed balance
  * immediately before the row's date (`commit-batch.ts`), which is why an
@@ -280,7 +280,11 @@ export function corroboratesSourceBalance(
   return (
     item.movement === 'atualizacao' &&
     item.statementQuantity.equals(item.beforeQuantity) &&
-    definitions.some((definition) => definition.sourceAssetCodes.includes(item.assetCode))
+    definitions.some(
+      (definition) =>
+        definition.sourceBalanceRestatements === true &&
+        definition.sourceAssetCodes.includes(item.assetCode),
+    )
   );
 }
 
@@ -332,6 +336,18 @@ export function resolveAssetConversion(
       return unresolved('insufficient_quantity');
     }
     const sourceEvidence = evidenceByCode.get(sourceCode)?.[0];
+    // #143 (review F1): a source whose definition names its priced redemption
+    // converts only **with** that redemption. Target-only evidence alone — a
+    // file ending between the receipts and the cash — would convert the whole
+    // position at cash zero, carry the full cost, and leave the later
+    // `Resgate` with no group to join; the result would depend on how the
+    // files were split (BR-005-17).
+    if (
+      (definition.pricedRedemptionSourceCodes ?? []).includes(sourceCode) &&
+      sourceEvidence?.movement !== 'resgate'
+    ) {
+      return unresolved('incomplete');
+    }
     const remaining = sourceEvidence?.statementQuantity ?? Quantity.zero();
     const unitPrice = sourceEvidence?.unitPrice ?? Money.zero();
     const fees = sourceEvidence?.fees ?? Money.zero();
@@ -363,6 +379,9 @@ export function resolveAssetConversion(
     // persisted total and `externalFlow`'s recomputation are the same figure.
     const cash = storedMoney(computeTotalValue('conversion_out', removed, unitPrice, fees));
     if (cash.isNegative()) return unresolved('negative_cash');
+    // #143 (review F6): per source, not only in total — one source's cash above
+    // its own basis would otherwise be absorbed into another source's cost.
+    if (cash.comparedTo(removedCost) > 0) return unresolved('negative_cost');
     sourcePlans.push({
       assetCode: sourceCode,
       quantity: removed,
