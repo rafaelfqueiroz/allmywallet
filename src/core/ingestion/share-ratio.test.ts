@@ -12,9 +12,11 @@ import {
   corroborateRatio,
   corroborationCandidate,
   derivedRatioOf,
+  evaluateRatioPair,
   evaluateShareRatio,
   factorsInWindow,
   ratioTransaction,
+  sequenceRatioPair,
 } from '@/core/ingestion/share-ratio';
 
 const q = (value: string) => Quantity.fromString(value);
@@ -368,5 +370,118 @@ describe('#113 BR-007-04 — ratioTransaction', () => {
     // 630 × 0 = 0: no cash moves.
     expect(split.totalValue.isZero()).toBe(true);
     expect(ratioTransaction(stored, 'grupamento', q('0.1')).type).toBe('grupamento');
+  });
+});
+
+describe('#139 BR-005-20b — sequenceRatioPair', () => {
+  const desdobro = (stated: string) => ({ movement: 'desdobro' as const, stated: q(stated) });
+  const grupamento = (stated: string) => ({ movement: 'grupamento' as const, stated: q(stated) });
+
+  it('finds grupamento, fraction removed, desdobro for VIVT3: 150 → 3,75 → 3 → 240', () => {
+    // 150 × 0,025 = 3,75 = R; on 3 (0,75 removed) 3 × 79 = 237 = Δ.
+    const sequences = sequenceRatioPair(
+      q('150'),
+      [desdobro('237'), grupamento('3.75')],
+      [q('80'), q('0.025')],
+    );
+    expect(sequences).toHaveLength(1);
+    const [only] = sequences;
+    expect(only).toMatchObject({ first: 1, second: 0 });
+    expect(only?.afterFirst.toString()).toBe('3.75');
+    expect(only?.intermediateFraction.toString()).toBe('0.75');
+    expect(only?.secondBasis.toString()).toBe('3');
+    expect(only?.afterSecond.toString()).toBe('240');
+  });
+
+  it('finds desdobro then grupamento with nothing removed between: 100 → 200 → 2,5', () => {
+    const [only, ...others] = sequenceRatioPair(
+      q('100'),
+      [desdobro('100'), grupamento('2.5')],
+      [q('2'), q('0.0125')],
+    );
+    expect(others).toHaveLength(0);
+    expect(only).toMatchObject({ first: 0, second: 1 });
+    expect(only?.intermediateFraction.isZero()).toBe(true);
+    expect(only?.afterSecond.toString()).toBe('2.5');
+  });
+
+  it('finds nothing where neither order reproduces both quantities', () => {
+    expect(
+      sequenceRatioPair(q('150'), [desdobro('236'), grupamento('3.75')], [q('80'), q('0.025')]),
+    ).toHaveLength(0);
+  });
+
+  it('never tries a zero second basis: 0,5 grouped leaves nothing whole to split', () => {
+    // 10 × 0,05 = 0,5 = R; its floor is 0, so only 0,5 whole is tried: 0,5 × 1 = 0,5 ≠ 0.
+    expect(
+      sequenceRatioPair(q('10'), [desdobro('0'), grupamento('0.5')], [q('2'), q('0.05')]),
+    ).toHaveLength(0);
+  });
+
+  it('finds two sequences where a 0 % desdobramento cannot be ordered', () => {
+    expect(
+      sequenceRatioPair(q('100'), [desdobro('0'), grupamento('50')], [q('1'), q('0.5')]),
+    ).toHaveLength(2);
+  });
+});
+
+describe('#139 BR-005-20b / BR-007-04a — evaluateRatioPair', () => {
+  const legs = [
+    { movement: 'desdobro' as const, stated: q('237') },
+    { movement: 'grupamento' as const, stated: q('3.75') },
+  ] as const;
+  const factors = [
+    factor('desdobramento', '7900', '2025-04-14', 'VIVT'),
+    factor('grupamento', '0.025', '2025-04-14', 'VIVT'),
+  ];
+  const base: Parameters<typeof evaluateRatioPair>[0] = {
+    legs,
+    basis: q('150'),
+    issuerCode: 'VIVT',
+    issuerFactors: factors,
+    tradeDate: BusinessDate.of('2025-04-16'),
+    factorDays: 7,
+    structural: null,
+  };
+
+  it('resolves both at B3’s multipliers, each leg showing the basis it met', () => {
+    const verdict = evaluateRatioPair(base);
+    expect(verdict.ok).toBe(true);
+    if (!verdict.ok) return;
+    expect(verdict.ratios.map(String)).toEqual(['80', '0.025']);
+    expect(verdict.evidence[0].basis?.toString()).toBe('3');
+    expect(verdict.evidence[1].basis?.toString()).toBe('150');
+  });
+
+  it('refuses in order: structural, no_basis, no issuer or no factor at all, per-leg factor, representability', () => {
+    const refusal = (input: Partial<typeof base>) => {
+      const verdict = evaluateRatioPair({ ...base, ...input });
+      return verdict.ok ? 'ok' : verdict.refusal;
+    };
+    expect(refusal({ structural: 'blocked' })).toBe('blocked');
+    expect(refusal({ basis: null })).toBe('no_basis');
+    expect(refusal({ basis: q('0') })).toBe('no_basis');
+    expect(refusal({ issuerCode: null })).toBe('combined_same_day');
+    expect(refusal({ issuerFactors: [] })).toBe('combined_same_day');
+    expect(refusal({ issuerFactors: [factors[0] as CorporateEventFactor] })).toBe('no_factor');
+    expect(
+      refusal({
+        issuerFactors: [...factors, factor('grupamento', '0.05', '2025-04-15', 'VIVT')],
+      }),
+    ).toBe('ambiguous_factor');
+    expect(
+      refusal({
+        issuerFactors: [
+          factors[0] as CorporateEventFactor,
+          factor('grupamento', '0.333333333333', '2025-04-14', 'VIVT'),
+        ],
+      }),
+    ).toBe('not_representable');
+    expect(refusal({ basis: q('151') })).toBe('disagrees');
+  });
+
+  it('shows P on both legs when refused', () => {
+    const verdict = evaluateRatioPair({ ...base, basis: q('151') });
+    expect(verdict.evidence.map((e) => e.basis?.toString())).toEqual(['151', '151']);
   });
 });

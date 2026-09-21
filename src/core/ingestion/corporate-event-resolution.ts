@@ -21,12 +21,14 @@ import {
   pairFractionAuctions,
   pairingRefusalOf,
   partnerAgrees,
+  scaledFractionSale,
   tracedConversionOrigin,
 } from '@/core/ingestion/fraction-auction';
 import {
   calendarDaysBetween,
   corroborateRatio,
   corroborationCandidate,
+  evaluateRatioPair,
   evaluateShareRatio,
   type RatioCorroboration,
   type RatioEvidence,
@@ -34,6 +36,7 @@ import {
   type RatioRefusal,
   type RatioVerdict,
   ratioTransaction,
+  sequenceRatioPair,
 } from '@/core/ingestion/share-ratio';
 
 /**
@@ -267,7 +270,10 @@ function issuerFactorsOf(
  * whole point. Two rows of one set are therefore always on two different
  * positions: a second ratio row on the same position and date is counted by
  * `ratioEventsOn` below and refused `combined_same_day`, which is not
- * `no_factor`, so it never reaches a set at all.
+ * `no_factor`, so it never reaches a set at all. A same-date pair (#139) can
+ * refuse `no_factor`, but only for an issuer with published factors —
+ * `evaluateRatioPair` refuses `combined_same_day` for one with none — so
+ * `corroborationCandidate` turns it away too.
  */
 function corroborationGroupKey(transaction: Transaction, movement: RatioMovement): string {
   return `${transaction.assetId}|${transaction.tradeDate}|${movement}`;
@@ -364,6 +370,73 @@ function corroboratedVerdict(
 const isRatioMovement = (movement: CorporateEventMovement): movement is RatioMovement =>
   movement === 'desdobro' || movement === 'grupamento';
 
+type PairFigures = Pick<OriginCandidate, 'quantityAfter' | 'fractionalPart'> & {
+  readonly saleScale: Quantity | null;
+};
+
+/**
+ * SPEC-005 BR-005-20b (#139) — the origin figures of **active** ratio events
+ * that share a date with another, by transaction id.
+ *
+ * Replay cannot say what a same-date pair left: both rank alike and apply
+ * before any of the day's sales, so VIVT3's day replays 150 → 12.000 → 300 and
+ * neither event leaves the 0,75 B3 removed between them. The pair's own
+ * sequence does (`sequenceRatioPair`), from P and each event's stated quantity
+ * and stored ratio:
+ *
+ * - the first event: its result, the fraction removed **between** the two as
+ *   its fractional part, and the second event's multiplier as `saleScale`;
+ * - the second: its result, and that result's own fractional part.
+ *
+ * Read from the ledger rather than carried from `settlePair`, so a fraction a
+ * later import resolves against a pair an earlier one settled finds the same
+ * origin. Any date that is not exactly one pair of one sequence — three ratio
+ * events, two of a kind, a ratio missing, an unreplayable P, no order or two —
+ * gets unknown figures, and a fraction in its window refuses
+ * `origin_unresolved` rather than meeting a replay artefact.
+ */
+function sameDateRatioFigures(active: readonly Transaction[]): ReadonlyMap<string, PairFigures> {
+  const byDate = new Map<BusinessDate, Transaction[]>();
+  for (const t of active) {
+    if (t.type !== 'split' && t.type !== 'grupamento') continue;
+    byDate.set(t.tradeDate, [...(byDate.get(t.tradeDate) ?? []), t]);
+  }
+  const figures = new Map<string, PairFigures>();
+  const unknown: PairFigures = { quantityAfter: null, fractionalPart: null, saleScale: null };
+  for (const events of byDate.values()) {
+    if (events.length < 2) continue;
+    for (const event of events) figures.set(event.id, unknown);
+    const [a, b, ...rest] = [...events].sort(compareForReplay) as [Transaction, Transaction];
+    if (rest.length > 0 || a.type === b.type || a.ratio === null || b.ratio === null) continue;
+    const before = replayPosition(active.filter((t) => compareForReplay(t, a) < 0));
+    if (!before.ok) continue;
+    const movementOf = (t: Transaction): RatioMovement =>
+      t.type === 'split' ? 'desdobro' : 'grupamento';
+    const [sequence, ...others] = sequenceRatioPair(
+      before.value.quantity,
+      [
+        { movement: movementOf(a), stated: a.quantity },
+        { movement: movementOf(b), stated: b.quantity },
+      ],
+      [a.ratio, b.ratio],
+    );
+    if (sequence === undefined || others.length > 0) continue;
+    const pair = [a, b] as const;
+    const second = pair[sequence.second];
+    figures.set(pair[sequence.first].id, {
+      quantityAfter: sequence.afterFirst,
+      fractionalPart: sequence.intermediateFraction,
+      saleScale: second.ratio,
+    });
+    figures.set(second.id, {
+      quantityAfter: sequence.afterSecond,
+      fractionalPart: sequence.afterSecond.fractionalPart(),
+      saleScale: null,
+    });
+  }
+  return figures;
+}
+
 /** The order a position is walked in: date, ratio events first, then replay order. */
 function walkOrder(a: CorporateEventRow, b: CorporateEventRow): number {
   const byDate = BusinessDate.compare(a.transaction.tradeDate, b.transaction.tradeDate);
@@ -400,8 +473,9 @@ function walkPosition(
   const unresolvedRatios: Transaction[] = [];
   const claims = new Map<string, string[]>();
 
-  // BR-005-20b: two ratio events on one position and date — open, unclassified
-  // or already active in the ledger — and neither applies.
+  // BR-005-20b: ratio events on one position and date — open, unclassified or
+  // already active in the ledger. More than one refuses `combined_same_day`,
+  // except the open `Desdobro` + `Grupamento` pair below (#139).
   const ratioEventsOn = new Map<string, number>();
   const countRatioEvent = (date: BusinessDate) =>
     ratioEventsOn.set(date, (ratioEventsOn.get(date) ?? 0) + 1);
@@ -410,6 +484,25 @@ function walkPosition(
   const unresolvedRatioRow = (row: CorporateEventRow) =>
     isRatioMovement(row.movement) && (row.open || row.transaction.status === 'unclassified');
   for (const row of rows) if (unresolvedRatioRow(row)) countRatioEvent(row.transaction.tradeDate);
+
+  // BR-005-20b (#139): the one same-date shape that may still resolve — exactly
+  // two ratio events on the date, both open here, one `Desdobro` and one
+  // `Grupamento`. They are decided together (`evaluateRatioPair`); every other
+  // same-date shape keeps refusing `combined_same_day`.
+  const pairOf = new Map<string, readonly [CorporateEventRow, CorporateEventRow]>();
+  const openRatioRowsOn = new Map<BusinessDate, CorporateEventRow[]>();
+  for (const row of rows) {
+    if (!isRatioMovement(row.movement) || !row.open) continue;
+    const date = row.transaction.tradeDate;
+    openRatioRowsOn.set(date, [...(openRatioRowsOn.get(date) ?? []), row]);
+  }
+  for (const [date, onDate] of openRatioRowsOn) {
+    if (onDate.length !== 2 || ratioEventsOn.get(date) !== 2) continue;
+    const [a, b] = [...onDate].sort(walkOrder) as [CorporateEventRow, CorporateEventRow];
+    if (a.movement === b.movement) continue;
+    pairOf.set(a.id, [a, b]);
+    pairOf.set(b.id, [a, b]);
+  }
 
   const fractions = rows.filter((row) => row.movement === 'fracao_em_ativos');
   const auctions = rows.filter((row) => row.movement === 'leilao_de_fracao');
@@ -460,10 +553,24 @@ function walkPosition(
     return outLegs.map((out) => {
       const sourceHistory = input.history(out);
       const active = sourceHistory.filter((t) => t.status === 'active');
+      const pairFiguresById = sameDateRatioFigures(active);
       const candidates: OriginCandidate[] = active
         .filter((t) => isShareBaseType(t.type) && inWindow(t))
         .sort(compareForReplay)
         .map((event) => {
+          // #139: a same-date pair on the source is read as the pair it is.
+          // What crossed the conversion is the source's own quantity, so a
+          // fraction removed between the pair (`saleScale`) is not traced.
+          const pairFigures = pairFiguresById.get(event.id);
+          if (pairFigures !== undefined) {
+            return {
+              id: event.id,
+              type: event.type as OriginCandidate['type'],
+              tradeDate: event.tradeDate,
+              quantityAfter: pairFigures.quantityAfter,
+              fractionalPart: pairFigures.saleScale === null ? pairFigures.fractionalPart : null,
+            };
+          }
           const upTo = replayPosition(active.filter((t) => compareForReplay(t, event) <= 0));
           return {
             id: event.id,
@@ -508,6 +615,64 @@ function walkPosition(
     });
   };
 
+  const ratioShape = (row: CorporateEventRow): Transaction => ({
+    ...row.transaction,
+    type: row.movement === 'desdobro' ? 'split' : 'grupamento',
+    status: 'active',
+  });
+
+  /**
+   * BR-005-20b (#139) — a same-date `Desdobro` + `Grupamento` pair, decided as
+   * one: both resolve at B3's multipliers in the order their stated quantities
+   * prove, or both refuse with the same reason. P is the position before
+   * either — both rank as ratio events, so the earlier shape's prefix excludes
+   * the other. The fraction B3 removed between them is not written here: it
+   * is its own `Fração em Ativos` row, whose origin `sameDateRatioFigures`
+   * finds on the first event of the pair.
+   */
+  const settlePair = (pair: readonly [CorporateEventRow, CorporateEventRow]) => {
+    const [a, b] = pair;
+    const movements = [a.movement as RatioMovement, b.movement as RatioMovement] as const;
+    const shapes = [ratioShape(a), ratioShape(b)] as const;
+    const tradeDate = a.transaction.tradeDate;
+    const blocked = unresolvedRatios.some((t) => BusinessDate.isBefore(t.tradeDate, tradeDate));
+    const before = blocked ? null : replayUpTo(shapes[0], false);
+    const issuerCode = issuerCodeOf(a.ticker);
+    const verdict = evaluateRatioPair({
+      legs: [
+        { movement: movements[0], stated: a.transaction.quantity },
+        { movement: movements[1], stated: b.transaction.quantity },
+      ],
+      basis: before !== null && before.ok ? before.value.quantity : null,
+      issuerCode,
+      issuerFactors: issuerFactorsOf(input, issuerCode),
+      tradeDate,
+      factorDays: windows.factorDays,
+      structural: blocked
+        ? 'blocked'
+        : declined.has(a.id) || declined.has(b.id)
+          ? 'conflicts_with_ledger'
+          : null,
+    });
+    pair.forEach((row, index) => {
+      const movement = movements[index] as RatioMovement;
+      const evidence = verdict.evidence[index] as RatioEvidence;
+      if (verdict.ok) {
+        // BR-007-04a: each event at its own published multiplier.
+        const transaction = ratioTransaction(
+          row.transaction,
+          movement,
+          verdict.ratios[index] as Quantity,
+        );
+        resolved.push(transaction);
+        outcomes.set(row.id, { movement, status: 'resolved', transaction, evidence });
+      } else {
+        unresolvedRatios.push(shapes[index] as Transaction);
+        outcomes.set(row.id, { movement, status: 'refused', refusal: verdict.refusal, evidence });
+      }
+    });
+  };
+
   const walk = rows
     .filter((row) => unresolvedRatioRow(row) || row.movement === 'fracao_em_ativos')
     .sort(walkOrder);
@@ -516,15 +681,17 @@ function walkPosition(
     if (isRatioMovement(row.movement)) {
       const movement = row.movement;
       // Sorted as the event it would become: rank 0, before the day's trades.
-      const shape: Transaction = {
-        ...row.transaction,
-        type: movement === 'desdobro' ? 'split' : 'grupamento',
-        status: 'active',
-      };
+      const shape = ratioShape(row);
       // A ratio row this call may not resolve — unclassified in the ledger, not
       // part of this import — is still an unresolved event: later ones wait.
       if (!row.open) {
         unresolvedRatios.push(shape);
+        continue;
+      }
+      const pair = pairOf.get(row.id);
+      if (pair !== undefined) {
+        // The pair's first row settled both; its partner has nothing left to do.
+        if (!outcomes.has(row.id)) settlePair(pair);
         continue;
       }
       const combined = (ratioEventsOn.get(shape.tradeDate) as number) > 1;
@@ -588,10 +755,20 @@ function walkPosition(
       const days = calendarDaysBetween(t.tradeDate, fraction.tradeDate);
       return days >= 0 && days <= windows.originDays;
     };
+    const pairFiguresById = sameDateRatioFigures([...base, ...resolved]);
     const ownOrigins: OriginCandidate[] = [...base, ...resolved]
       .filter((t) => isShareBaseType(t.type) && inOriginWindow(t))
       .sort(compareForReplay)
       .map((event) => {
+        const pairFigures = pairFiguresById.get(event.id);
+        if (pairFigures !== undefined) {
+          return {
+            id: event.id,
+            type: event.type as OriginCandidate['type'],
+            tradeDate: event.tradeDate,
+            ...pairFigures,
+          };
+        }
         const after = replayUpTo(event, true);
         return {
           id: event.id,
@@ -696,9 +873,16 @@ function walkPosition(
       } else if (declined.has(row.id) || declined.has(auction.id)) {
         refusal = 'conflicts_with_ledger';
       } else if (row.open) {
-        written = fractionTransaction(fraction, origin, auction.transaction);
+        // #139: a fraction removed between a same-date pair sells at the
+        // second event's scale, because replay meets it after both.
+        const scale = originVerdict.origin.saleScale ?? null;
+        written =
+          scale === null
+            ? fractionTransaction(fraction, origin, auction.transaction)
+            : scaledFractionSale(fraction, auction.transaction, scale);
+        if (written === null) refusal = 'scale_not_representable';
         // BR-006-15: the position must be able to give the fraction up.
-        if (!replayUpTo(written, true, [written]).ok) refusal = 'no_basis';
+        else if (!replayUpTo(written, true, [written]).ok) refusal = 'no_basis';
       }
     }
 

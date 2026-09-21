@@ -952,4 +952,95 @@ describe('SPEC-005 BR-005-20b (#113) — corporate-event resolution at commit (i
       realized_gain: '90.00000000',
     });
   });
+
+  /**
+   * #139 — the VIVT3 re-denomination shape, generated (DV-24): one
+   * `Desdobro` and one `Grupamento` on one position and date, then the
+   * fraction B3 removed between them and its auction. B3 publishes both
+   * factors with the same *última data com*, so only the stated quantities
+   * can order them: 150 × 0,025 = 3,75 = R; 0,75 removed; 3 × 79 = 237 = Δ;
+   * 240 held — the count B3's Posição shows.
+   */
+  it('BR-005-20b/BR-007-04b (#139): a same-day Desdobro and Grupamento resolve as an ordered pair and reconcile to B3', async () => {
+    const VIVT = 'VIVT3 - TELEFONICA BRASIL S.A.';
+    const file = await buildMovimentacaoXlsx([
+      compra(VIVT, '02/01/2025', '150', '50,00'),
+      desdobro(VIVT, '16/04/2025', '237'),
+      grupamento(VIVT, '16/04/2025', '3,75'),
+      fracao(VIVT, '16/04/2025', '0,75'),
+      leilao(VIVT, '28/05/2025', '0,75', '2.131,357'),
+    ]);
+    const source = new FakeFactorSource();
+    source.set('VIVT', {
+      outcome: 'ok',
+      factors: [
+        factor('VIVT', 'desdobramento', '7900', '2025-04-14'),
+        factor('VIVT', 'grupamento', '0.025', '2025-04-14'),
+      ],
+    });
+
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, file);
+    await handleImportStage({ batchId: first, userId }, handlerDeps(source));
+    await handleImportCommit({ batchId: first, userId }, handlerDeps(source));
+
+    const rows = await transactionsFor('VIVT3');
+    expect(rows.find((r) => r.type === 'grupamento')).toMatchObject({
+      status: 'active',
+      ratio: '0.02500000',
+    });
+    expect(rows.find((r) => r.type === 'split')).toMatchObject({
+      status: 'active',
+      ratio: '80.00000000',
+    });
+    // The fraction sold at the desdobro's scale: 0,75 × 80 = 60 @ 2.131,357 ÷ 80.
+    expect(rows.find((r) => r.type === 'sell')).toMatchObject({
+      status: 'active',
+      trade_date: '2025-04-16',
+      quantity: '60.00000000',
+      unit_price: '26.64196250',
+      total_value: '1598.51775000',
+    });
+    expect(rows.find((r) => r.natural_key.endsWith('leilao de fracao'))).toMatchObject({
+      status: 'superseded',
+    });
+    expect(rows.filter((r) => r.status === 'unclassified')).toHaveLength(0);
+
+    // 7.500,00 → 20 % out with the fraction: 6.000,00 over 240, average 25,00;
+    // realised 1.598,51775 − 1.500,00 = 98,51775.
+    expect(await positionFor('VIVT3')).toMatchObject({
+      quantity: '240.00000000',
+      total_cost: '6000.00000000',
+      average_cost: '25.00000000',
+      realized_gain: '98.51775000',
+    });
+
+    // B3's Posição agrees.
+    const posicao = await newPendingBatch('b3_posicao');
+    await saveUploadedFile(
+      uploadDir,
+      posicao,
+      await buildPosicaoXlsx({
+        Acoes: [{ produto: 'VIVT3 - TELEFONICA BRASIL', codigo: 'VIVT3', quantidade: '240' }],
+      }),
+    );
+    await handleImportStage({ batchId: posicao, userId }, handlerDeps(source));
+    await handleImportCommit({ batchId: posicao, userId, asOf: '2025-06-30' }, handlerDeps(source));
+    const report = (await batchRow(posicao))?.reconciliation as {
+      discrepancies: { assetCode: string }[];
+    } | null;
+    expect(report?.discrepancies.filter((d) => d.assetCode === 'VIVT3')).toEqual([]);
+
+    // The identical file again writes nothing.
+    const before = { count: await transactionCount(), rows };
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, file);
+    await handleImportStage({ batchId: second, userId }, handlerDeps(source));
+    await handleImportCommit({ batchId: second, userId }, handlerDeps(source));
+    expect(await transactionCount()).toBe(before.count);
+    const after = await transactionsFor('VIVT3');
+    for (const row of before.rows) {
+      expect(after.find((r) => r.id === row.id)?.updated_at).toEqual(row.updated_at);
+    }
+  });
 });

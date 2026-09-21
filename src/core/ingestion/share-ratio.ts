@@ -54,8 +54,11 @@ export type RatioMovement = 'desdobro' | 'grupamento';
  * - `disagrees` — P and the stated quantity do not give B3's multiplier;
  * - `not_representable` — B3's multiplier is not exact at `NUMERIC(20,8)`, so
  *   the ratio the ledger would store is not the one B3 published;
- * - `combined_same_day` — two ratio events on one position and date (VIVT3's
- *   desdobro and grupamento): which applies first is not stated, so neither is;
+ * - `combined_same_day` — ratio events on one position and date whose order
+ *   cannot be identified: more than two, two of one kind, one already settled,
+ *   an issuer with no published factor, or a `Desdobro` + `Grupamento` pair
+ *   whose stated quantities fit more than one order (#139,
+ *   `evaluateRatioPair`) — so none applies;
  * - `blocked` — an earlier ratio event on the position is unresolved, so P
  *   cannot be trusted;
  * - `conflicts_with_ledger` — it agrees, but applied it leaves a later row of
@@ -205,11 +208,197 @@ export function evaluateShareRatio(input: {
   const m = factor.multiplier;
   if (!Quantity.fromString(asStored(m)).equals(m)) return refuse('not_representable');
 
-  const agrees =
-    movement === 'desdobro'
-      ? basis.times(m.minus(Quantity.fromString('1'))).equals(stated)
-      : basis.times(m).equals(stated);
-  return agrees ? { ok: true, ratio: m, evidence } : refuse('disagrees');
+  return ratioAgrees(movement, basis, m, stated)
+    ? { ok: true, ratio: m, evidence }
+    : refuse('disagrees');
+}
+
+/** Whether `m` reproduces B3's stated quantity from `basis` — the two equalities above. */
+function ratioAgrees(movement: RatioMovement, basis: Quantity, m: Quantity, stated: Quantity) {
+  return movement === 'desdobro'
+    ? basis.times(m.minus(Quantity.fromString('1'))).equals(stated)
+    : basis.times(m).equals(stated);
+}
+
+/** The quantity after a ratio event B3 stated as `stated`: P + Δ, or R. */
+function quantityAfterRatio(movement: RatioMovement, basis: Quantity, stated: Quantity): Quantity {
+  return movement === 'desdobro' ? basis.plus(stated) : stated;
+}
+
+/** One side of a same-date `Desdobro` + `Grupamento` pair: its movement and B3's stated quantity. */
+export interface RatioPairLeg {
+  readonly movement: RatioMovement;
+  readonly stated: Quantity;
+}
+
+/**
+ * SPEC-005 BR-005-20b (#139) — the one order a same-date pair can have been
+ * applied in, as B3's stated quantities prove it. Indices are into the `legs`
+ * the caller passed.
+ */
+export interface RatioPairSequence {
+  /** The leg applied first, then the other. */
+  readonly first: 0 | 1;
+  readonly second: 0 | 1;
+  /** P — the position before either. */
+  readonly basis: Quantity;
+  /** After the first event. */
+  readonly afterFirst: Quantity;
+  /**
+   * The fraction B3 removed **between** the two events — `afterFirst` less its
+   * floor — or zero, where the second event applied to `afterFirst` whole.
+   */
+  readonly intermediateFraction: Quantity;
+  /** The basis the second event applied to: `afterFirst − intermediateFraction`. */
+  readonly secondBasis: Quantity;
+  /** After the second event — B3's post-event count, before any fraction it leaves. */
+  readonly afterSecond: Quantity;
+}
+
+/**
+ * SPEC-005 BR-005-20b (#139) — **every** sequence in which the pair reproduces
+ * both of B3's stated quantities exactly, given each leg's multiplier.
+ *
+ * B3 does not say which of the two applied first, and the two factors it
+ * publishes share one *última data com*, so the date cannot say either. The
+ * quantities can: each order, and for the second event each of the two bases
+ * it may have met — the whole first result, or its floor where B3 removed the
+ * first event's fraction before applying the second — is tried against the
+ * same exact equalities `evaluateShareRatio` runs. The caller applies the pair
+ * only where exactly one sequence survives.
+ *
+ * Worked example (DV-17), VIVT3 at Inter, April 2025: P = 150, `Desdobro`
+ * Δ = 237 at m = 80 (factor `7900`, percent added), `Grupamento` R = 3,75 at
+ * m = 0,025.
+ *
+ * - Desdobro first: 150 × 79 = 11.850 ≠ 237 — no.
+ * - Grupamento first: 150 × 0,025 = 3,75 = R. Then the desdobro on 3,75 whole:
+ *   3,75 × 79 = 296,25 ≠ 237 — no; on its floor 3 (0,75 removed between):
+ *   3 × 79 = **237** = Δ — yes, ending at 3 + 237 = **240**, B3's count.
+ *
+ * One sequence: grupamento, fraction of 0,75 removed, desdobro.
+ */
+export function sequenceRatioPair(
+  basis: Quantity,
+  legs: readonly [RatioPairLeg, RatioPairLeg],
+  ratios: readonly [Quantity, Quantity],
+): readonly RatioPairSequence[] {
+  const sequences: RatioPairSequence[] = [];
+  for (const [first, second] of [
+    [0, 1],
+    [1, 0],
+  ] as const) {
+    const a = legs[first];
+    const b = legs[second];
+    if (!ratioAgrees(a.movement, basis, ratios[first], a.stated)) continue;
+    const afterFirst = quantityAfterRatio(a.movement, basis, a.stated);
+    const fraction = afterFirst.fractionalPart();
+    const bases = fraction.isZero() ? [afterFirst] : [afterFirst, afterFirst.minus(fraction)];
+    for (const secondBasis of bases) {
+      if (!secondBasis.isPositive()) continue;
+      if (!ratioAgrees(b.movement, secondBasis, ratios[second], b.stated)) continue;
+      sequences.push({
+        first,
+        second,
+        basis,
+        afterFirst,
+        intermediateFraction: afterFirst.minus(secondBasis),
+        secondBasis,
+        afterSecond: quantityAfterRatio(b.movement, secondBasis, b.stated),
+      });
+    }
+  }
+  return sequences;
+}
+
+export type RatioPairVerdict =
+  | {
+      readonly ok: true;
+      readonly sequence: RatioPairSequence;
+      /** B3's multiplier for each leg, by the caller's index. */
+      readonly ratios: readonly [Quantity, Quantity];
+      readonly evidence: readonly [RatioEvidence, RatioEvidence];
+    }
+  | {
+      readonly ok: false;
+      readonly refusal: RatioRefusal;
+      readonly evidence: readonly [RatioEvidence, RatioEvidence];
+    };
+
+/**
+ * SPEC-005 BR-005-20b (#139) / SPEC-007 BR-007-04a — the verdict for a
+ * same-date `Desdobro` + `Grupamento` pair on one position, **as a pair**:
+ * both apply or neither does, and both carry the same refusal.
+ *
+ * Checked in `evaluateShareRatio`'s order, over both legs, so the refusal
+ * names the first thing to fix:
+ *
+ * - structural (`blocked`, `conflicts_with_ledger`) → `no_basis`;
+ * - **the issuer publishes no factor of any kind** → `combined_same_day`, as
+ *   before #139: corroboration across positions confirms one ratio, it cannot
+ *   order two, so a pair without B3's factors is never reached by it;
+ * - each leg's own factor — `no_factor` / `ambiguous_factor` — then
+ *   `not_representable`;
+ * - `sequenceRatioPair`: no sequence → `disagrees`; more than one →
+ *   `combined_same_day`, the order still not identified. Never a majority.
+ *
+ * Each leg's evidence shows the basis it was measured against where the pair
+ * resolved (P for the first, the second's basis for the other); refused, both
+ * show P, the only basis known without an order.
+ */
+export function evaluateRatioPair(input: {
+  readonly legs: readonly [RatioPairLeg, RatioPairLeg];
+  readonly basis: Quantity | null;
+  readonly issuerCode: string | null;
+  readonly issuerFactors: readonly CorporateEventFactor[];
+  readonly tradeDate: BusinessDate;
+  readonly factorDays: number;
+  readonly structural: 'blocked' | 'conflicts_with_ledger' | null;
+}): RatioPairVerdict {
+  const { legs, basis } = input;
+  const evidenceAt = (leg: RatioPairLeg, legBasis: Quantity | null): RatioEvidence => ({
+    issuerCode: input.issuerCode,
+    basis: legBasis,
+    stated: leg.stated,
+    derivedRatio:
+      legBasis !== null && legBasis.isPositive()
+        ? derivedRatioOf(leg.movement, legBasis, leg.stated)
+        : null,
+    factors:
+      input.issuerCode === null
+        ? []
+        : factorsInWindow(input.issuerFactors, leg.movement, input.tradeDate, input.factorDays),
+  });
+  const evidence = [evidenceAt(legs[0], basis), evidenceAt(legs[1], basis)] as const;
+  const refuse = (refusal: RatioRefusal): RatioPairVerdict => ({ ok: false, refusal, evidence });
+
+  if (input.structural !== null) return refuse(input.structural);
+  if (basis === null || !basis.isPositive()) return refuse('no_basis');
+  if (input.issuerCode === null || input.issuerFactors.length === 0) {
+    return refuse('combined_same_day');
+  }
+  for (const leg of evidence) if (leg.factors.length === 0) return refuse('no_factor');
+  for (const leg of evidence) if (leg.factors.length > 1) return refuse('ambiguous_factor');
+  // Exactly one factor per leg, checked just above.
+  const ratios = [
+    (evidence[0].factors[0] as CorporateEventFactor).multiplier,
+    (evidence[1].factors[0] as CorporateEventFactor).multiplier,
+  ] as const;
+  if (ratios.some((m) => !Quantity.fromString(asStored(m)).equals(m))) {
+    return refuse('not_representable');
+  }
+
+  const [sequence, ...others] = sequenceRatioPair(basis, legs, ratios);
+  if (sequence === undefined) return refuse('disagrees');
+  if (others.length > 0) return refuse('combined_same_day');
+  const legBasis = (index: 0 | 1) =>
+    index === sequence.first ? sequence.basis : sequence.secondBasis;
+  return {
+    ok: true,
+    sequence,
+    ratios,
+    evidence: [evidenceAt(legs[0], legBasis(0)), evidenceAt(legs[1], legBasis(1))],
+  };
 }
 
 /**

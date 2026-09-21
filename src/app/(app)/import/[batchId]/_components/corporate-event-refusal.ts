@@ -46,5 +46,7 @@ export function corporateEventRefusalKey(refusal: CorporateEventRefusal): string
       return 'partner_conflict';
     case 'partner_unresolved':
       return 'partner_unresolved';
+    case 'scale_not_representable':
+      return 'scale_not_representable';
   }
 }
