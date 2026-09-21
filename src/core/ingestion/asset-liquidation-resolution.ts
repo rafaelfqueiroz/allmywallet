@@ -53,12 +53,13 @@ export interface LiquidationEvidence {
    */
   readonly quantity: Quantity;
   readonly state: LiquidationEvidenceState;
-}
-
-export interface LiquidationSourcePosition {
-  readonly assetCode: string;
-  /** Replayed quantity immediately before the source's `Resgate` date; null when it does not replay. */
-  readonly quantity: Quantity | null;
+  /**
+   * A source `Resgate` only: the source position replayed immediately before
+   * the row's date, or `null` where it does not replay. Carried on the row
+   * rather than per source, so it is always measured at the `Resgate` the
+   * group actually uses.
+   */
+  readonly heldBefore?: Quantity | null | undefined;
 }
 
 export interface LiquidationWritePlan {
@@ -114,7 +115,6 @@ export interface ResolveLiquidationInput {
   readonly definition: AssetLiquidationDefinition;
   /** Every row of this definition's codes at one institution, from the batch and the ledger. */
   readonly evidence: readonly LiquidationEvidence[];
-  readonly sourcePositions: readonly LiquidationSourcePosition[];
   /** `import.asset_conversion_window_days` (SPEC-002): no default here. */
   readonly windowDays: number;
 }
@@ -198,9 +198,8 @@ export function resolveLiquidation(input: ResolveLiquidationInput): LiquidationR
     // A liquidation redeems every share. A `Resgate` of any other quantity
     // means the ledger's history is not B3's, and a liquidation value applied
     // to it would realise a result on shares the owner may not hold.
-    const held = input.sourcePositions.find((position) => position.assetCode === source.assetCode);
-    const heldQuantity = held?.quantity ?? null;
-    if (heldQuantity === null || !heldQuantity.equals(only.quantity)) {
+    const held = only.heldBefore ?? null;
+    if (held === null || !held.equals(only.quantity)) {
       return unresolved('quantity_mismatch');
     }
     redemptions.push(only);
