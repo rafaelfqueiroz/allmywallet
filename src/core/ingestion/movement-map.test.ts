@@ -90,8 +90,9 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
 });
 
 describe('SPEC-005 BR-005-18 v5 — corporate-event and conversion rows are named, not mapped', () => {
-  it('is version 5', () => {
-    expect(MOVEMENT_MAP_VERSION).toBe(5);
+  it('is version 6', () => {
+    // SPEC-005 BR-005-18 (v6, #144): subscription paperwork joined the map.
+    expect(MOVEMENT_MAP_VERSION).toBe(6);
   });
 
   it('names the four rows BR-005-20b resolves at commit, whatever the casing', () => {
@@ -146,5 +147,54 @@ describe('SPEC-005 BR-005-18 v5 — asset-conversion evidence', () => {
       ).toBeNull();
       expect(classifyMovement('Resgate')).toBe('sell');
     }
+  });
+});
+
+/**
+ * SPEC-005 BR-005-18 v6 / BR-005-19 (#144) — subscription paperwork rows
+ * that move no position. They stage `ignored` exactly like the #110
+ * settlement mirrors: stored, visible on the batch, never in the ledger and
+ * never in Needs attention, still hand-classifiable under BR-005-20.
+ *
+ * `Direitos de Subscrição - Exercido` is deliberately excluded from this
+ * set — it is the acquisition evidence BR-005-20d's resolver pairs against
+ * an `Atualização` credit, and must keep staging as an unmapped, price-less
+ * `subscription` row (asserted separately below).
+ */
+describe('SPEC-005 BR-005-18 v6 — subscription paperwork is ignored, not mapped', () => {
+  const paperwork = [
+    'Direito de Subscrição',
+    'Solicitação de Subscrição',
+    'Direitos de Subscrição - Não Exercido',
+    'Direito Sobras de Subscrição - Não Exercido',
+    'Cessão de Direitos',
+    'Cessão de Direitos - Solicitada',
+    'Recibo de Subscrição',
+  ];
+
+  it('is staged ignored, whatever the casing or accenting', () => {
+    for (const type of paperwork) {
+      expect(isIgnoredMovement(type)).toBe(true);
+      expect(isIgnoredMovement(type.toUpperCase())).toBe(true);
+      expect(isIgnoredMovement(normalizeMovementType(type))).toBe(true);
+    }
+  });
+
+  it('classifyMovement never maps a paperwork row directly — the caller checks isIgnoredMovement first', () => {
+    for (const type of paperwork) {
+      expect(classifyMovement(type, 'credit')).toBeNull();
+      expect(classifyMovement(type, 'debit')).toBeNull();
+    }
+  });
+
+  it('keeps Direitos de Subscrição - Exercido out of the ignored set and mapped as price-less subscription evidence', () => {
+    expect(isIgnoredMovement('Direitos de Subscrição - Exercido')).toBe(false);
+    expect(classifyMovement('Direitos de Subscrição - Exercido')).toBe('subscription');
+    expect(classifyMovement('Direitos de Subscrição - Exercido', 'debit')).toBe('subscription');
+  });
+
+  it('does not confuse the exercised row with the unexercised or ceded ones by prefix', () => {
+    expect(isIgnoredMovement('Direitos de Subscrição - Não Exercido')).toBe(true);
+    expect(classifyMovement('Direitos de Subscrição - Não Exercido')).toBeNull();
   });
 });

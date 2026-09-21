@@ -429,9 +429,9 @@
     "countIgnored": "Ignoradas",
     "ignored": {
       "title": "Ignoradas",
-      "description": "Linhas que repetem um registro de outro extrato — liquidações de negócios que a Negociação já traz e proventos transferidos entre corretoras. Ficam guardadas, mas não entram nos cálculos.",
+      "description": "Linhas que não entram nos cálculos, por dois motivos possíveis: repetem um registro que outro extrato já traz — liquidações de negócios que a Negociação registra e proventos transferidos entre corretoras — ou são papelada de um evento de subscrição que, por si só, não move a posição (aviso, pedido, direitos ou sobras não exercidos, cessão de direitos, recibo). Ficam guardadas, mas fora dos cálculos.",
       "show": "Ver {count} linha(s) ignorada(s)",
-      "classifyHint": "Só classifique se você não importa a Negociação; senão, o negócio conta duas vezes."
+      "classifyHint": "Classifique à mão só se tiver certeza do que a linha representa: uma liquidação ou um provento repassado deve virar lançamento apenas se você não importa a Negociação, senão o negócio conta duas vezes. Papelada de subscrição normalmente não deve ser classificada — o exercício em si chega como uma linha própria."
     },
     "needsAttentionTitle": "Precisa de atenção",
     "needsAttentionEmpty": "Nada esperando classificação nesta importação.",

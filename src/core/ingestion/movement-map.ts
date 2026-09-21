@@ -23,7 +23,7 @@ import type { TransactionType } from '@/core/ledger/transaction';
  * own casing and accenting of these strings is not perfectly consistent
  * across extracts.
  */
-export const MOVEMENT_MAP_VERSION = 5;
+export const MOVEMENT_MAP_VERSION = 6;
 
 function normalize(value: string): string {
   return value
@@ -142,17 +142,24 @@ export function classifyMovement(
 }
 
 /**
- * SPEC-005 BR-005-19 (amended, #110) — rows that **mirror a record another
- * extract owns**. They are staged `ignored`: stored and visible on the batch,
- * never written to the ledger and never in Needs attention, and still
- * classifiable by hand (BR-005-20) by a user who exported only Movimentação.
+ * SPEC-005 BR-005-19 (amended, #110, #144) — rows staged `ignored`: stored
+ * and visible on the batch, never written to the ledger and never in Needs
+ * attention, and still classifiable by hand (BR-005-20) by a user who
+ * exported only Movimentação. Two different reasons share this staging path:
  *
- * - `Transferência - Liquidação` is a trade settling; Negociação is the
- *   authoritative trade record (BR-005-01), so classifying it would double
- *   every trade — see the `transferencia` entry above.
- * - `… - Transferido` is a provento moved between brokers, both legs of it:
- *   the provento itself arrives as its own `Dividendo` / `Juros Sobre Capital
- *   Próprio` row.
+ * - Rows that **mirror a record another extract owns**:
+ *   - `Transferência - Liquidação` is a trade settling; Negociação is the
+ *     authoritative trade record (BR-005-01), so classifying it would double
+ *     every trade — see the `transferencia` entry above.
+ *   - `… - Transferido` is a provento moved between brokers, both legs of it:
+ *     the provento itself arrives as its own `Dividendo` / `Juros Sobre
+ *     Capital Próprio` row.
+ * - SPEC-005 BR-005-18 v6 (#144) — **subscription paperwork that moves no
+ *   position**: an offer notice, a request, an expired or ceded right, or a
+ *   receipt. None of these states an acquisition; the acquisition itself, if
+ *   exercised, arrives as `Direitos de Subscrição - Exercido` (mapped above,
+ *   price-less, kept as evidence for BR-005-20d's resolver) paired at commit
+ *   with the `Atualização` credit that settles it.
  *
  * Checked before `classifyMovement`, whatever the direction.
  */
@@ -160,6 +167,15 @@ const IGNORED_MOVEMENTS: ReadonlySet<string> = new Set([
   'transferencia - liquidacao',
   'juros sobre capital proprio - transferido',
   'dividendo - transferido',
+  // SPEC-005 BR-005-18 v6 / BR-005-19 (#144): subscription paperwork — no
+  // position ever moves on these rows.
+  'direito de subscricao',
+  'solicitacao de subscricao',
+  'direitos de subscricao - nao exercido',
+  'direito sobras de subscricao - nao exercido',
+  'cessao de direitos',
+  'cessao de direitos - solicitada',
+  'recibo de subscricao',
 ]);
 
 export function isIgnoredMovement(b3Type: string): boolean {

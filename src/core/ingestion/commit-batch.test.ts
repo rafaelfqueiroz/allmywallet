@@ -2698,6 +2698,61 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
     expect(await deps.positions.list()).toHaveLength(0);
   });
 
+  /**
+   * SPEC-005 BR-005-18 v6 / BR-005-19 (#144) — the same mirror path the test
+   * above exercises for `Transferência - Liquidação` also covers the
+   * subscription paperwork the v6 map newly names: a copy an older map
+   * version stored `unclassified` is `superseded` and its origin row turns
+   * `ignored`, through the untouched `planReclassifications` mirror branch
+   * (`isIgnoredMovement`) — no new code, since the row's `b3Type` alone
+   * decides the branch.
+   */
+  const cessaoDeDireitos = () => buy({ b3Type: 'Cessão de Direitos', direction: null });
+
+  it('a subscription paperwork row an older map stored unclassified is superseded and its origin row ignored', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [cessaoDeDireitos()]);
+    const [stored] = transactions as [Transaction];
+
+    const again = await importFile(deps, [cessaoDeDireitos()]);
+
+    expect(again.outcome).toMatchObject({
+      applied: 0,
+      superseded: 1,
+      reclassified: 0,
+      skippedDuplicates: 1,
+      committed: [],
+    });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      status: 'superseded',
+      naturalKey: stored.naturalKey,
+      isUserModified: false,
+    });
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('ignored');
+    // 1 needing attention − 1 = 0; 0 ignored + 1 = 1 (countNeedsAttentionByBatch drops).
+    expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+      new: 0,
+      needsAttention: 0,
+      ignored: 1,
+    });
+    expect(await deps.positions.list()).toHaveLength(0);
+  });
+
+  it('leaves a user-modified copy of a subscription paperwork row alone (BR-006-16)', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [cessaoDeDireitos()]);
+    const [stored] = transactions as [Transaction];
+    await deps.transactions.update({ ...stored, isUserModified: true });
+
+    const again = await importFile(deps, [cessaoDeDireitos()]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, superseded: 0, reclassified: 0 });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      status: 'unclassified',
+      isUserModified: true,
+    });
+  });
+
   it('an APLICAÇÃO is activated in place as a buy and the position recalculated', async () => {
     const deps = buildFakeIngestionDeps();
     const { batchId, transactions } = await commitUnderMapV2(deps, [aplicacao()]);
