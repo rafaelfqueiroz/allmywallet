@@ -24,7 +24,7 @@ import type {
   ParsedRecord,
 } from '@/core/ingestion/ports';
 import { explainRefusal } from '@/core/ingestion/refusal';
-import { stageBatch } from '@/core/ingestion/stage-batch';
+import { keyFormsFor, stageBatch } from '@/core/ingestion/stage-batch';
 import { commitBatch } from '@/core/ingestion/test-support/commit';
 import {
   buildFakeIngestionDeps,
@@ -4027,6 +4027,36 @@ describe('#138 — the four Movimentação rows that refused on every import', (
         committed: [],
       });
       expect(deps.transactions.rows).toEqual(snapshot);
+    });
+
+    it('finds a Resgate sell stored under the placeholder key an older map gave it', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      await importFile(deps, file(), false);
+      // The owner's history: a map that did not know `Resgate` stored each row
+      // `unclassified` under the placeholder key, and a later import activated
+      // it in place as a sell — keeping that key. A re-import stages the row
+      // under its `mapped` key, so an exact-key lookup never finds the sell.
+      const sells = deps.transactions.rows.filter((row) => row.type === 'sell');
+      expect(sells).toHaveLength(2);
+      for (const sell of sells) {
+        const { unmapped } = keyFormsFor(
+          {
+            assetId: sell.assetId,
+            institutionId: sell.institutionId,
+            tradeDate: sell.tradeDate,
+            quantity: sell.quantity,
+            unitPrice: sell.unitPrice,
+          },
+          'sell',
+          'Resgate',
+        );
+        await deps.transactions.update({ ...sell, naturalKey: unmapped });
+      }
+
+      const again = await importFile(deps, file());
+
+      expect(again.outcome).toMatchObject({ invalid: 0, resolvedAssetConversions: 2 });
+      await expectEndState(deps);
     });
 
     it('reaches the same end state when the file is first imported with conversions enabled', async () => {

@@ -875,6 +875,33 @@ function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undef
 }
 
 /**
+ * #143 — a priced `Resgate` an earlier map stored `unclassified` under the
+ * placeholder key (`…|rendimento|…|resgate`) and a later import then activated
+ * in place as a `sell` keeps that `unmapped` key, while a re-import stages the
+ * same row under its `mapped` key (`…|sell|…`). `storedCopyOf` misses it, so
+ * the incorporation's outgoing evidence was never found on the owner's ledger.
+ * Same rebuild `planReclassifications` uses: `keyFormsFor`, same occurrence.
+ */
+function storedCopyAcrossKeyForms(stored: StoredLedger, row: ImportRow): Transaction | undefined {
+  const exact = storedCopyOf(stored, row);
+  if (exact !== undefined || row.record.kind !== 'transaction' || row.ledgerType === null) {
+    return exact;
+  }
+  const { unmapped } = keyFormsFor(
+    {
+      assetId: row.assetId,
+      institutionId: row.institutionId,
+      tradeDate: row.record.tradeDate,
+      quantity: row.record.quantity,
+      unitPrice: row.record.unitPrice,
+    },
+    row.ledgerType,
+    row.record.b3Type,
+  );
+  return stored(row).find((t) => t.naturalKey === unmapped && t.occurrence === row.occurrence);
+}
+
+/**
  * SPEC-005 BR-005-17..19 (#110) — duplicates whose stored copy an older map
  * version left `unclassified`, and what this map makes of them.
  *
@@ -1403,7 +1430,7 @@ async function planAssetConversions(
               context.today,
             ) ?? undefined;
         } else if (row.classification === 'duplicate') {
-          const copy = storedCopyOf(stored, row);
+          const copy = priced ? storedCopyAcrossKeyForms(stored, row) : storedCopyOf(stored, row);
           // #143: a priced Resgate an earlier import applied as v3's `sell` is
           // re-read as this definition's outgoing evidence and retyped in
           // place. Only through the row: a stored sell's mapped key does not
