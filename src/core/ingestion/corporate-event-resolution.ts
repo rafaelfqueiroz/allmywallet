@@ -12,6 +12,7 @@ import {
 } from '@/core/ingestion/movement-map';
 import {
   auctionTransaction,
+  acquisitionCreatedFraction,
   conversionCreatedFraction,
   type ConversionOutTrace,
   type FractionRefusal,
@@ -133,6 +134,14 @@ export interface CorporateEventResolutionInput {
    * absence, the candidate list is simply the position's own events.
    */
   readonly conversionLegs?: ((groupId: ConversionGroupId) => readonly Transaction[]) | undefined;
+  /**
+   * BR-005-20b (#143 D10) — the liquidation (BR-005-20c) a transaction is an
+   * **acquisition** of, by its `liquidationGroupKey`, or `null`. The target's
+   * subscriptions carry no group id of their own, so the caller, which planned
+   * or recognised them, names them here. Omitted where no liquidation is in
+   * scope.
+   */
+  readonly liquidationGroupOf?: ((transaction: Transaction) => string | null) | undefined;
 }
 
 /** Every figure the batch page shows for a fraction or auction, resolved or not. */
@@ -855,7 +864,41 @@ function walkPosition(
         ];
       });
 
-    const origins: OriginCandidate[] = [...ownOrigins, ...tracedOrigins];
+    /**
+     * #143 D10 — a liquidation's acquisitions on this position are one origin
+     * when their total left a fraction (`acquisitionCreatedFraction`), dated
+     * at the last of them and bound by the same origin window. The fraction is
+     * the one after **all** of them, for the reason a conversion group's is:
+     * two same-day subscriptions of 83,89 and 75,36 leave 0,25 together, and
+     * either alone would leave a different figure by replay-order tiebreak.
+     */
+    const acquisitionsByGroup = new Map<string, Transaction[]>();
+    for (const t of [...base, ...resolved]) {
+      const groupKey = input.liquidationGroupOf?.(t) ?? null;
+      if (groupKey === null || BusinessDate.isBefore(fraction.tradeDate, t.tradeDate)) continue;
+      acquisitionsByGroup.set(groupKey, [...(acquisitionsByGroup.get(groupKey) ?? []), t]);
+    }
+    const liquidationOrigins: OriginCandidate[] = [...acquisitionsByGroup].flatMap(
+      ([groupKey, legs]): OriginCandidate[] => {
+        const last = [...legs].sort(compareForReplay)[legs.length - 1] as Transaction;
+        if (!inOriginWindow(last) || !acquisitionCreatedFraction(legs.map((l) => l.quantity))) {
+          return [];
+        }
+        const after = replayUpTo(last, true);
+        return [
+          {
+            id: groupKey,
+            type: 'liquidation',
+            tradeDate: last.tradeDate,
+            quantityAfter: after.ok ? after.value.quantity : null,
+            fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
+            tracedFrom: null,
+          },
+        ];
+      },
+    );
+
+    const origins: OriginCandidate[] = [...ownOrigins, ...tracedOrigins, ...liquidationOrigins];
     const originVerdict = originOf(
       fraction.quantity,
       origins,
