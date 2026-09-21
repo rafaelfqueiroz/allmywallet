@@ -159,6 +159,33 @@ describe('verifyPositions', () => {
     expect(result.value.drift).toEqual([]);
   });
 
+  /**
+   * SPEC-007 BR-007-06 / DL-007-12: a cache showing an estimated average as
+   * exact has drifted as surely as one with a wrong figure — every number
+   * agrees, and the user is told it is exact when it is not.
+   */
+  it('BR-007-06: reports a cache that disagrees only on the estimate marker', async () => {
+    const subscription = aTransaction()
+      .subscription()
+      .of('PETR4')
+      .at(null)
+      .quantity('100')
+      .price('10.00')
+      .costEstimate('2026-03-10')
+      .build();
+    const state = deps([subscription]);
+    // Figures right (100 @ 10,00 = 1.000,00), marker lost.
+    await state.positions.upsertMany([snapshot('100', '1000')]);
+
+    const result = await verifyPositions(state);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.drift.map((each) => each.kind)).toEqual(['changed']);
+    expect(result.value.drift[0]?.cached?.costEstimated).toBe(false);
+    expect(result.value.drift[0]?.rebuilt?.costEstimated).toBe(true);
+  });
+
   it('still reports a difference that survives the stored scale', async () => {
     const buy = aTransaction().buy().of('PETR4').at(null).quantity('3').price('10.00').build();
     const state = deps([buy]);

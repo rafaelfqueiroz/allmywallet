@@ -156,4 +156,67 @@ describe('aggregateAcrossInstitutions', () => {
   it('aggregates nothing from nothing', () => {
     expect(aggregateAcrossInstitutions([])).toEqual([]);
   });
+
+  /**
+   * SPEC-007 BR-007-06 / DL-007-12: the aggregate average is cost-weighted over
+   * every institution's lot, so one estimated lot makes it an estimate.
+   *
+   *   Clear  100 @ 10,00           → 1.000,00, exact
+   *   Rico    20 @ 114,90, estim.  → 2.298,00, estimated
+   *   Aggregate 3.298,00 ÷ 120 = 27,48333… — part of it an estimate.
+   */
+  it('BR-007-06: one institution’s estimated lot marks the aggregate', () => {
+    const replayed = replayPositions([
+      aTransaction().buy().of('PETR4').at('Clear').quantity('100').price('10.00').build(),
+      aTransaction()
+        .subscription()
+        .of('PETR4')
+        .at('Rico')
+        .quantity('20')
+        .price('114.90')
+        .costEstimate('2026-03-10')
+        .build(),
+      aTransaction().buy().of('VALE3').at('Clear').quantity('10').price('50.00').build(),
+    ]);
+    expect(replayed.ok).toBe(true);
+    if (!replayed.ok) return;
+
+    const aggregated = aggregateAcrossInstitutions(replayed.value);
+    const petr = aggregated.find((a) => a.assetId === assetIdFor('PETR4'));
+    const vale = aggregated.find((a) => a.assetId === assetIdFor('VALE3'));
+    expect(petr?.state.totalCost.toString()).toBe('3298');
+    expect(petr?.costEstimated).toBe(true);
+    expect(vale?.costEstimated).toBe(false);
+  });
+
+  it('BR-007-06 / BR-007-07: a closed estimated lot does not mark the aggregate', () => {
+    // Rico's estimated 20 were sold in full, so its lot reset; only Clear's
+    // exact 100 @ 10,00 remain.
+    const replayed = replayPositions([
+      aTransaction().buy().of('PETR4').at('Clear').quantity('100').price('10.00').build(),
+      aTransaction()
+        .subscription()
+        .of('PETR4')
+        .at('Rico')
+        .on('2026-03-10')
+        .quantity('20')
+        .price('114.90')
+        .costEstimate('2026-03-10')
+        .build(),
+      aTransaction()
+        .sell()
+        .of('PETR4')
+        .at('Rico')
+        .on('2026-04-01')
+        .quantity('20')
+        .price('120.00')
+        .build(),
+    ]);
+    expect(replayed.ok).toBe(true);
+    if (!replayed.ok) return;
+
+    const [petr] = aggregateAcrossInstitutions(replayed.value);
+    expect(petr?.state.averageCost.toString()).toBe('10');
+    expect(petr?.costEstimated).toBe(false);
+  });
 });

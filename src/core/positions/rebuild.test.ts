@@ -3,6 +3,10 @@ import { FakeClock } from '@/core/shared/clock';
 import type { Clock } from '@/core/shared/clock';
 import type { Transaction } from '@/core/ledger/transaction';
 import { createTransaction } from '@/core/ledger/create-transaction';
+import { editTransaction } from '@/core/ledger/edit-transaction';
+import { guardReplayable } from '@/core/ledger/guard-replayable';
+import { recalculatePositionFrom } from '@/core/ledger/recalculate-from';
+import { Money } from '@/core/shared/money';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import {
   FakePositionRepository,
@@ -234,6 +238,8 @@ function fingerprint(snapshots: readonly PositionSnapshot[]) {
     .map((snapshot) => ({
       key: positionKeyString(snapshot),
       ...serializePosition(snapshot.state),
+      // SPEC-007 BR-007-06: the marker is part of what must agree (DM-4).
+      costEstimated: snapshot.costEstimated,
     }));
 }
 
@@ -457,3 +463,167 @@ async function rebuildOne(): Promise<PositionSnapshot> {
   if (only === undefined) throw new Error('fixture');
   return only;
 }
+
+/**
+ * TS-08 / DL-007-06 with the SPEC-007 BR-007-06 cost-estimate marker.
+ *
+ * `createTransaction` writes exact rows only — an estimated row is written by
+ * import (SPEC-005 BR-005-20d) — so the incremental side here is the write path
+ * import and every ledger use case share: BR-006-15's guard, the row stored,
+ * then `recalculatePositionFrom` for its position. Rows arrive scrambled and
+ * backdated, so the marker must survive re-sorting; histories close positions
+ * to zero and reopen them, so it must reset (BR-007-07) the same way in both.
+ */
+function generateEstimatedHistory(seed: number, length: number): Transaction[] {
+  const random = seededRandom(seed);
+  const pick = <T>(values: readonly T[]): T => {
+    const value = values[Math.floor(random() * values.length)];
+    if (value === undefined) throw new Error('generator: empty choice');
+    return value;
+  };
+  const held = new Map<string, number>();
+  const nextDay = new Map<string, number>();
+  const rows: Transaction[] = [];
+
+  for (let i = 0; i < length; i += 1) {
+    const asset = pick(ASSETS);
+    const institution = pick(INSTITUTIONS);
+    const key = `${asset}|${institution ?? ''}`;
+    const quantity = held.get(key) ?? 0;
+    const day = (nextDay.get(key) ?? 0) + 1 + Math.floor(random() * 3);
+    nextDay.set(key, day);
+    const base = aTransaction().of(asset).at(institution).on(isoDate(day));
+    const roll = random();
+
+    if (quantity >= 1 && roll < 0.15) {
+      // A full close: the marker must reset here (BR-007-07).
+      held.set(key, 0);
+      rows.push(base.sell().quantity(String(quantity)).price(price(random)).build());
+    } else if (quantity >= 2 && roll < 0.35) {
+      const sold = 1 + Math.floor(random() * (quantity - 1));
+      held.set(key, quantity - sold);
+      rows.push(base.sell().quantity(String(sold)).price(price(random)).fees('0.97').build());
+    } else if (quantity > 0 && roll < 0.42) {
+      held.set(key, quantity * 2);
+      rows.push(base.split().ratio('2').build());
+    } else if (roll < 0.65) {
+      const subscribed = 1 + Math.floor(random() * 20);
+      held.set(key, quantity + subscribed);
+      const subscription = base.subscription().quantity(String(subscribed)).price(price(random));
+      rows.push(
+        random() < 0.6 ? subscription.costEstimate(isoDate(day)).build() : subscription.build(),
+      );
+    } else {
+      const bought = 1 + Math.floor(random() * 50);
+      held.set(key, quantity + bought);
+      rows.push(base.buy().quantity(String(bought)).price(price(random)).fees('4.13').build());
+    }
+  }
+  return rows;
+}
+
+/** BR-006-15's guard, the write, then the recalculation — deferring what cannot apply yet. */
+async function writeInArrivalOrder(
+  state: LedgerDependencies & { transactions: FakeTransactionRepository },
+  arrival: readonly Transaction[],
+): Promise<number> {
+  let pending = [...arrival];
+  let accepted = 0;
+  while (pending.length > 0) {
+    const deferred: Transaction[] = [];
+    for (const row of pending) {
+      const guard = await guardReplayable(state, row, (existing) => [...existing, row]);
+      if (!guard.ok) {
+        deferred.push(row);
+        continue;
+      }
+      await state.transactions.insert(row);
+      const recalculated = await recalculatePositionFrom(state, {
+        assetId: row.assetId,
+        institutionId: row.institutionId,
+        fromDate: row.tradeDate,
+      });
+      if (!recalculated.ok) throw new Error(`recalculation failed: ${recalculated.error.code}`);
+      accepted += 1;
+    }
+    if (deferred.length === pending.length) {
+      throw new Error(`generator produced an unenterable ledger: ${deferred.length} rows stuck`);
+    }
+    pending = deferred;
+  }
+  return accepted;
+}
+
+describe('TS-08 / DL-007-06 — rebuild equals incremental, including the BR-007-06 marker', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  const clock = new FakeClock('2030-01-01T12:00:00Z');
+  const seeds = [3, 11, 99, 2026, 314159];
+
+  it.each(seeds)('agrees on figures and marker (seed %i), scrambled arrival', async (seed) => {
+    resetTransactionSequence();
+    const chronological = generateEstimatedHistory(seed, 150);
+    const arrival = shuffle(chronological, seededRandom(seed + 1));
+
+    const incremental = deps(clock);
+    expect(await writeInArrivalOrder(incremental, arrival)).toBe(arrival.length);
+
+    const rebuilt = await rebuildPositions({
+      transactions: incremental.transactions,
+      positions: new FakePositionRepository(),
+    });
+    expect(rebuilt.ok).toBe(true);
+    if (!rebuilt.ok) return;
+    expect(fingerprint(await incremental.positions.list())).toEqual(fingerprint(rebuilt.value));
+
+    // ---- a user corrects every estimated price: each edit clears its row's
+    //      marker (BR-007-06), recalculated incrementally one edit at a time ----
+    const estimatedRows = (await incremental.transactions.listAll()).filter(
+      (t) => t.costIsEstimate,
+    );
+    for (const row of estimatedRows) {
+      const edited = await editTransaction(incremental, row.id, {
+        unitPrice: row.unitPrice.plus(Money.fromString('0.01')),
+      });
+      expect(edited.ok).toBe(true);
+    }
+    const afterEdits = await rebuildPositions({
+      transactions: incremental.transactions,
+      positions: new FakePositionRepository(),
+    });
+    expect(afterEdits.ok).toBe(true);
+    if (!afterEdits.ok) return;
+    expect(fingerprint(await incremental.positions.list())).toEqual(fingerprint(afterEdits.value));
+    expect(afterEdits.value.every((snapshot) => !snapshot.costEstimated)).toBe(true);
+  });
+
+  it('the generated histories exercise both an estimated and a reset position', async () => {
+    // Guards against a degenerate generator: across the seeds, some position
+    // ends estimated and some position that held an estimate ends exact.
+    let estimatedAtEnd = 0;
+    let exactDespiteEstimate = 0;
+    for (const seed of seeds) {
+      resetTransactionSequence();
+      const history = generateEstimatedHistory(seed, 150);
+      const rebuilt = await rebuildPositions({
+        transactions: new FakeTransactionRepository(history),
+        positions: new FakePositionRepository(),
+      });
+      if (!rebuilt.ok) throw new Error('fixture');
+      for (const snapshot of rebuilt.value) {
+        const hadEstimate = history.some(
+          (t) =>
+            t.costIsEstimate &&
+            t.assetId === snapshot.assetId &&
+            t.institutionId === snapshot.institutionId,
+        );
+        if (snapshot.costEstimated) estimatedAtEnd += 1;
+        else if (hadEstimate) exactDespiteEstimate += 1;
+      }
+    }
+    expect(estimatedAtEnd).toBeGreaterThan(0);
+    expect(exactDespiteEstimate).toBeGreaterThan(0);
+  });
+});
