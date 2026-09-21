@@ -143,6 +143,21 @@ export interface Transaction {
    * overwrite the correction (SPEC-005 consumes this).
    */
   readonly isUserModified: boolean;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / SPEC-005 BR-005-20d: this row's
+   * `unitPrice`/`costBasis` is provisional — a corporate event or a
+   * carried-forward B3 row reconciled to a figure that has not settled —
+   * rather than an exact one. `false` for every row this schema expansion
+   * did not itself introduce (AR-69); nothing in this change classifies a
+   * row as an estimate, only makes the field storable.
+   */
+  readonly costIsEstimate: boolean;
+  /**
+   * SPEC-005 BR-005-20d: the date an estimate is expected to close to an
+   * exact figure. Null whenever `costIsEstimate` is false — the database
+   * CHECK enforces the pairing (AR-30), matching `ratio`'s precedent.
+   */
+  readonly estimateCloseDate: BusinessDate | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }

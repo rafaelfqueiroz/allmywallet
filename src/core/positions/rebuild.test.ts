@@ -402,6 +402,7 @@ describe('rebuildPositions', () => {
         assetId: assetIdFor('STALE3'),
         institutionId: institutionIdFor('Clear'),
         state: (await rebuildOne()).state,
+        costEstimated: false,
       },
     ]);
 

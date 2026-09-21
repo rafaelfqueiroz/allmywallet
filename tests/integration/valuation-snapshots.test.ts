@@ -134,6 +134,8 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
       importBatchId: null,
       isManual: true,
       isUserModified: false,
+      costIsEstimate: false,
+      estimateCloseDate: null,
       createdAt: new Date(Date.UTC(2026, 0, 1, 12, 0, 0, sequence)),
       updatedAt: new Date(Date.UTC(2026, 0, 1, 12, 0, 0, sequence)),
     };

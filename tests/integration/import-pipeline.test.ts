@@ -2209,6 +2209,8 @@ describe('SPEC-005 — import pipeline (integration)', () => {
             importBatchId: origin,
             isManual: false,
             isUserModified: false,
+            costIsEstimate: false,
+            estimateCloseDate: null,
             createdAt: clock.now(),
             updatedAt: clock.now(),
           };

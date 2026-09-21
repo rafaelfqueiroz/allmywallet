@@ -39,6 +39,7 @@ function snapshot(quantity: string, totalCost: string, realizedGain = '0'): Posi
       Money.fromString(totalCost),
       Money.fromString(realizedGain),
     ),
+    costEstimated: false,
   };
 }
 

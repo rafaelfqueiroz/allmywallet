@@ -76,6 +76,7 @@ describe('aggregateAcrossInstitutions', () => {
           Money.fromString('100'),
           Money.fromString('30'),
         ),
+        costEstimated: false,
       },
       {
         assetId: assetIdFor('PETR4'),
@@ -85,6 +86,7 @@ describe('aggregateAcrossInstitutions', () => {
           Money.fromString('500'),
           Money.fromString('12.5'),
         ),
+        costEstimated: false,
       },
     ];
 
@@ -101,11 +103,13 @@ describe('aggregateAcrossInstitutions', () => {
         assetId: assetIdFor('PETR4'),
         institutionId: null,
         state: makePosition(Quantity.zero(), Money.zero(), Money.fromString('200')),
+        costEstimated: false,
       },
       {
         assetId: assetIdFor('PETR4'),
         institutionId: null,
         state: makePosition(Quantity.zero(), Money.zero(), Money.fromString('-50')),
+        costEstimated: false,
       },
     ];
 
@@ -143,6 +147,7 @@ describe('aggregateAcrossInstitutions', () => {
       assetId,
       institutionId: null,
       state: makePosition(Quantity.fromString('1'), Money.fromString('10'), Money.zero()),
+      costEstimated: false,
     }));
 
     expect(aggregateAcrossInstitutions(snapshots).map((a) => a.assetId)).toEqual(ids);

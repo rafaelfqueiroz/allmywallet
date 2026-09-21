@@ -1,0 +1,56 @@
+-- SPEC-007 BR-007-06 (amended 2026-09-21) / SPEC-005 BR-005-20d: a cost basis
+-- reconciliation can resolve to a provisional figure — a corporate event or a
+-- carried-forward B3 row priced before B3 restates it — rather than an exact
+-- one. This migration adds the three columns that let a transaction and the
+-- position replayed from it say so:
+--
+--   - `transactions.cost_is_estimate` — this row's `unit_price`/`cost_basis`
+--     is provisional, not settled.
+--   - `transactions.estimate_close_date` — when the estimate is expected to
+--     close to an exact figure. Null unless `cost_is_estimate` is true; the
+--     CHECK below is the floor for that pairing, matching the
+--     `transactions_ratio_pairing_check` / `transactions_conversion_pairing_check`
+--     precedent of enforcing a field-pairing rule at the database as well as
+--     in `core/ledger/validate.ts`, because the import path writes here too.
+--   - `positions.cost_estimated` — set when any transaction folded into a
+--     cached position carries `cost_is_estimate`. The position cache is
+--     derived (BR-006-01) and only ever overwritten with a whole replayed
+--     value, so this is a replay output like every other column on the
+--     table, never adjusted in place.
+--
+-- AR-69 expand/contract: every column is additive.
+--   - `cost_is_estimate` is `NOT NULL DEFAULT false` and `cost_estimated` is
+--     `NOT NULL DEFAULT false` — both a metadata-only change in Postgres 11+,
+--     no table rewrite, no lock beyond the brief one `ADD COLUMN` itself
+--     takes. Every row the previous application version already wrote reads
+--     back `false`, which is the correct value for a row it never knew to be
+--     an estimate.
+--   - `estimate_close_date` is nullable with no default; every existing row
+--     reads back `NULL`.
+--   - The previous application version neither reads nor writes any of the
+--     three columns, and never inserts a row that could fail the CHECK
+--     below (it cannot write `estimate_close_date` at all). So this
+--     migration is safe to leave in place if a deploy using it is rolled
+--     back — the previous image keeps inserting and reading exactly as it
+--     did before.
+--
+-- The CHECK is added `NOT VALID` and then validated in a second statement
+-- (the `0026`/`0027` precedent for a constraint on `transactions`), so
+-- `VALIDATE CONSTRAINT`'s full-table scan takes only a `SHARE UPDATE
+-- EXCLUSIVE` lock rather than blocking every writer for the scan's duration.
+-- There is never a window where an arbitrary shape can pass: the constraint
+-- is in place (checked against every new/updated row) from the `ADD
+-- CONSTRAINT` statement onward, `NOT VALID` only defers checking the rows
+-- already on disk.
+--
+-- No table or policy is created here. `transactions` and `positions` retain
+-- their existing ENABLE + FORCE RLS and USING + WITH CHECK policy from
+-- `0003_ledger_and_positions.sql` (AR-14) — a new column on an existing
+-- table needs no policy change, since the policy is defined on the row via
+-- `user_id`, not per column.
+
+ALTER TABLE "transactions" ADD COLUMN "cost_is_estimate" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "transactions" ADD COLUMN "estimate_close_date" date;--> statement-breakpoint
+ALTER TABLE "positions" ADD COLUMN "cost_estimated" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_estimate_close_date_check" CHECK ("transactions"."estimate_close_date" IS NULL OR "transactions"."cost_is_estimate") NOT VALID;--> statement-breakpoint
+ALTER TABLE "transactions" VALIDATE CONSTRAINT "transactions_estimate_close_date_check";

@@ -83,6 +83,7 @@ describe('SPEC-010 — wallet allocation (integration)', () => {
               averageCost: Money.fromString(averageCost),
               realizedGain: Money.zero(),
             },
+            costEstimated: false,
           },
         ]);
       },

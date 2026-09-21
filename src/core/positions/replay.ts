@@ -40,6 +40,17 @@ export interface ReplayOptions {
 
 export interface PositionSnapshot extends PositionKey {
   readonly state: PositionState;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21): set when any transaction folded
+   * into this position carries `costIsEstimate`. Lives on the snapshot
+   * envelope rather than inside `PositionState` deliberately — it is not a
+   * figure `positionsEqual`'s DM-4 rebuild-equals-incremental comparison
+   * should treat as arithmetic, and a change here must never move the
+   * average-cost engine's 100% branch gate. Nothing in this change computes
+   * it; every replay here defaults it `false` until a later piece wires the
+   * actual classification through.
+   */
+  readonly costEstimated: boolean;
 }
 
 /**
@@ -159,7 +170,9 @@ export function replayPositions(
     // rather than re-applying `asOf` to a subset it has already narrowed.
     const replayed = replayPosition(group.transactions);
     if (!replayed.ok) return replayed;
-    snapshots.push({ ...group.key, state: replayed.value });
+    // SPEC-007 BR-007-06: no transaction can be marked an estimate yet
+    // (that lands with the classification logic), so every replay is exact.
+    snapshots.push({ ...group.key, state: replayed.value, costEstimated: false });
   }
 
   /**

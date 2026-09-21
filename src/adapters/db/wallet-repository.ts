@@ -427,6 +427,7 @@ function toSnapshot(row: typeof positions.$inferSelect): PositionSnapshot {
       averageCost: row.averageCost,
       realizedGain: row.realizedGain,
     },
+    costEstimated: row.costEstimated,
   };
 }
 

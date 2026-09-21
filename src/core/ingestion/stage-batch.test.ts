@@ -575,6 +575,8 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
         importBatchId: null,
         isManual: false,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });

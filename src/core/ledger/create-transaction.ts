@@ -112,6 +112,11 @@ export async function createTransaction(
     importBatchId: input.importBatchId ?? null,
     isManual: (input.importBatchId ?? null) === null,
     isUserModified: false,
+    // SPEC-007 BR-007-06 / SPEC-005 BR-005-20d: manual single-row entry never
+    // creates an estimate — only the import/reconciliation path can classify
+    // a row that way.
+    costIsEstimate: false,
+    estimateCloseDate: null,
     createdAt: now,
     updatedAt: now,
   };

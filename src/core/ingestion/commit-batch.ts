@@ -758,7 +758,10 @@ export async function commitBatch(
       group.reclassified.some((r) => r.kind === 'activate') ||
       group.conversions.length > 0 ||
       group.corporate.some((c) => c.status === 'resolved');
-    if (changesPosition) positionUpserts.push({ ...group.key, state: group.state });
+    // SPEC-007 BR-007-06: no transaction can be marked an estimate yet.
+    if (changesPosition) {
+      positionUpserts.push({ ...group.key, state: group.state, costEstimated: false });
+    }
   }
 
   // `unclassified` rows are excluded from replay by `status`
@@ -2140,6 +2143,10 @@ async function planAssetConversions(
               importBatchId: context.batchId,
               isManual: false,
               isUserModified: false,
+              // SPEC-007 BR-007-06: a conversion leg's cost is exact, per
+              // BR-007-05b — never an estimate.
+              costIsEstimate: false,
+              estimateCloseDate: null,
               createdAt: context.now,
             }),
             assetId,
@@ -2923,6 +2930,10 @@ export function buildCandidate(
     importBatchId: batchId,
     isManual: false,
     isUserModified: false,
+    // SPEC-007 BR-007-06: this schema expansion adds the column without
+    // wiring any classification into the import path yet.
+    costIsEstimate: false,
+    estimateCloseDate: null,
     createdAt: now,
     updatedAt: now,
   };

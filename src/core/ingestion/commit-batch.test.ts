@@ -1728,6 +1728,8 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
         importBatchId: batchId,
         isManual: false,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -1740,7 +1742,12 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       );
       if (!replayed.ok) throw new Error('#108 state does not replay');
       await deps.positions.upsertMany([
-        { assetId: t.assetId, institutionId: t.institutionId, state: replayed.value },
+        {
+          assetId: t.assetId,
+          institutionId: t.institutionId,
+          state: replayed.value,
+          costEstimated: false,
+        },
       ]);
     }
     await deps.rows.attachTransactions(
@@ -2631,6 +2638,8 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         importBatchId: batchId,
         isManual: false,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -4491,6 +4500,8 @@ describe('#138 — the four Movimentação rows that refused on every import', (
         importBatchId: null,
         isManual: true,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });

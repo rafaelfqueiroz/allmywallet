@@ -74,6 +74,8 @@ export async function recalculatePositionFrom(
     assetId: scope.assetId,
     institutionId: scope.institutionId,
     state: replayed.value,
+    // SPEC-007 BR-007-06: no transaction can be marked an estimate yet.
+    costEstimated: false,
   };
   await deps.positions.upsertMany([position]);
   return ok({ scope, position });

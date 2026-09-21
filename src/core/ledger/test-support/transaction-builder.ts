@@ -105,6 +105,8 @@ interface BuilderState {
   readonly costBasis: Money | null;
   readonly importBatchName: string | null;
   readonly createdAt: Date | null;
+  readonly costIsEstimate: boolean;
+  readonly estimateCloseDate: BusinessDate | null;
 }
 
 const DEFAULTS: BuilderState = {
@@ -121,6 +123,8 @@ const DEFAULTS: BuilderState = {
   costBasis: null,
   importBatchName: null,
   createdAt: null,
+  costIsEstimate: false,
+  estimateCloseDate: null,
 };
 
 export class TransactionBuilder {
@@ -242,6 +246,10 @@ export class TransactionBuilder {
   createdAt(instant: string): TransactionBuilder {
     return this.#with({ createdAt: new Date(instant) });
   }
+  /** SPEC-007 BR-007-06 / SPEC-005 BR-005-20d — a provisional cost, closing on the given date. */
+  costEstimate(closeDate: string): TransactionBuilder {
+    return this.#with({ costIsEstimate: true, estimateCloseDate: BusinessDate.of(closeDate) });
+  }
 
   build(): Transaction {
     sequence += 1;
@@ -270,6 +278,8 @@ export class TransactionBuilder {
       importBatchId,
       isManual: importBatchId === null,
       isUserModified: false,
+      costIsEstimate: state.costIsEstimate,
+      estimateCloseDate: state.estimateCloseDate,
       createdAt,
       updatedAt: createdAt,
     };
