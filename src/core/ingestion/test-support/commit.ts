@@ -17,18 +17,26 @@ export function commitBatch(
   userId: UserId,
   input: Omit<
     CommitBatchInput,
-    'corporateEventWindows' | 'assetConversionWindowDays' | 'assetConversionsEnabled'
+    | 'corporateEventWindows'
+    | 'assetConversionWindowDays'
+    | 'subscriptionCreditWindowDays'
+    | 'assetConversionsEnabled'
   > &
     Partial<
       Pick<
         CommitBatchInput,
-        'corporateEventWindows' | 'assetConversionWindowDays' | 'assetConversionsEnabled'
+        | 'corporateEventWindows'
+        | 'assetConversionWindowDays'
+        | 'subscriptionCreditWindowDays'
+        | 'assetConversionsEnabled'
       >
     >,
 ) {
   return commitBatchWithWindows(deps, userId, {
     corporateEventWindows: TEST_CORPORATE_EVENT_WINDOWS,
     assetConversionWindowDays: 45,
+    // SPEC-005 BR-005-20d (#144): the seeded config default (SPEC-002, 120).
+    subscriptionCreditWindowDays: 120,
     assetConversionsEnabled: true,
     ...input,
   } as CommitBatchInput);

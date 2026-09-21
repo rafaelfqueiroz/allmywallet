@@ -1,7 +1,7 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import { ConversionGroupId, TransactionId } from '@/core/shared/ids';
-import type { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
+import type { AssetId, ImportBatchId, ImportRowId, InstitutionId, UserId } from '@/core/shared/ids';
 import { Money, Quantity, asStored } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
@@ -57,6 +57,11 @@ import {
   corporateEventMovementOfKey,
   resolveCorporateEvents,
 } from '@/core/ingestion/corporate-event-resolution';
+import {
+  resolveSubscriptions,
+  type SubscriptionEvidence,
+  type SubscriptionEvidenceState,
+} from '@/core/ingestion/subscription-resolution';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import { keyFormsFor, summarizeRows } from '@/core/ingestion/stage-batch';
 import {
@@ -118,6 +123,11 @@ export interface CommitBatchInput {
   readonly corporateEventWindows: CorporateEventWindows;
   /** SPEC-005 BR-005-20c: resolved by the caller from SPEC-002. */
   readonly assetConversionWindowDays: number;
+  /**
+   * SPEC-005 BR-005-20d: resolved by the caller from
+   * `import.subscription_credit_window_days` (SPEC-002, default 120).
+   */
+  readonly subscriptionCreditWindowDays: number;
   /** AR-69: personal upgrades enable new ledger values only after health succeeds. */
   readonly assetConversionsEnabled: boolean;
 }
@@ -158,6 +168,17 @@ export interface CommitBatchOutcome {
    * subscribed at its unit cost.
    */
   readonly resolvedLiquidations: number;
+  /**
+   * SPEC-005 BR-005-20d (#144): exercised subscriptions this commit paired
+   * with their `Atualização` credit — the credit written active as a
+   * `subscription`, the exercise `superseded`.
+   */
+  readonly resolvedSubscriptions: number;
+  /**
+   * SPEC-005 BR-005-20e (#144): whole-position `Atualização` credits this
+   * commit resolved as a refresh — stored copy `superseded`, row `ignored`.
+   */
+  readonly resolvedPositionRefreshes: number;
   /** BR-005-19 (amended, #113): Leilão de Fração rows consumed by a split or grupamento fraction sale, now `superseded`. */
   readonly consumedAuctions: number;
   /**
@@ -277,11 +298,20 @@ interface ConversionWrite {
    * but its rows are ordinary trades, so they carry no `conversionGroupId`.
    */
   readonly liquidation?: string | undefined;
+  /**
+   * SPEC-005 BR-005-20d (#144) — a resolved subscription pair's key. Set only
+   * on the **credit** write (the exercise never enters replay — it is
+   * superseded separately, once this write is known to have survived
+   * settlement; see `planSubscriptions`/`resolvedSubscriptionKeys`). Declining
+   * this key leaves the credit `unclassified`, exactly as a failed
+   * liquidation or conversion leg falls back.
+   */
+  readonly subscription?: string | undefined;
 }
 
-/** The group a write is declined with: its conversion group, or its liquidation. */
+/** The group a write is declined with: its conversion group, its liquidation, or its subscription pair. */
 function declineKeyOf(write: ConversionWrite): string | null {
-  return write.transaction.conversionGroupId ?? write.liquidation ?? null;
+  return write.transaction.conversionGroupId ?? write.liquidation ?? write.subscription ?? null;
 }
 
 interface ConversionPlan {
@@ -384,6 +414,8 @@ export async function commitBatch(
       resolvedAssetConversions: 0,
       committedConversionLegs: 0,
       resolvedLiquidations: 0,
+      resolvedSubscriptions: 0,
+      resolvedPositionRefreshes: 0,
       consumedAuctions: 0,
       committed: [],
     });
@@ -457,6 +489,25 @@ export async function commitBatch(
   // `sell` (#110): the liquidation is what that row now means.
   const liquidated = new Set<string>(liquidationWrites.map((write) => write.transaction.id));
   const reclassifications = plannedReclassifications.filter((r) => !liquidated.has(r.updated.id));
+  /**
+   * SPEC-005 BR-005-20d (#144) — subscriptions are planned next, still before
+   * corporate events and conversions: pairing depends on none of them (a
+   * definition's codes are excluded statically, `subscriptionExcludedCodes`
+   * below), while a fraction or conversion measuring the main asset's
+   * position needs the resolved credit in its replay.
+   */
+  const { writes: subscriptionCreditWrites, supersedes: subscriptionSupersedes } =
+    await planSubscriptions(
+      deps,
+      rows,
+      newCandidates,
+      carryLegs,
+      reclassifications,
+      stored,
+      context,
+      input.subscriptionCreditWindowDays,
+      liquidationWrites,
+    );
   const corporate = await planCorporateEvents(
     deps,
     rows,
@@ -530,8 +581,19 @@ export async function commitBatch(
       : [];
   // Nothing settled — a commit with no corporate rows, or one whose rows all
   // refused. Pass 2 would read exactly the inputs pass 1 did.
-  const conversionPlan =
-    settledCorporate.length === 0 ? firstPass : await planConversions(settledCorporate);
+  //
+  // SPEC-005 BR-005-20d (#144): the subscription credit write joins here
+  // **unconditionally** — unlike conversions and liquidations, pairing an
+  // exercised subscription with its credit is not gated by
+  // `assetConversionsEnabled` (AR-69's personal-upgrade gate is scoped to the
+  // asset-conversion capability by name, not to every resolver added since).
+  const conversionPlan = {
+    writes: [
+      ...subscriptionCreditWrites,
+      ...(settledCorporate.length === 0 ? firstPass : await planConversions(settledCorporate))
+        .writes,
+    ],
+  };
 
   /**
    * SPEC-005 BR-005-20a (#110) — carries are resolved here, at commit, where
@@ -771,6 +833,37 @@ export async function commitBatch(
     }
   }
 
+  /**
+   * SPEC-005 BR-005-20d (#144) — the exercise half of every subscription pair
+   * whose credit survived settlement above (it is in `committedConversions`,
+   * so it was not declined). Applied only now, never inside the settle loop:
+   * the exercise never enters replay (a superseded transaction is excluded
+   * from it exactly as an unclassified one is, BR-007-16), so its own
+   * "group" never fails or succeeds — only the credit's does.
+   */
+  const survivedSubscriptionKeys = new Set(
+    subscriptionCreditWrites
+      .filter((write) => committedConversions.includes(write.transaction))
+      .map((write) => write.subscription as string),
+  );
+  const subscriptionSupersededInserts: Transaction[] = [];
+  const subscriptionUpdates: Transaction[] = [];
+  const subscriptionRowClassification = new Map<ImportRowId, 'ignored'>();
+  const subscriptionExerciseRowIds = new Set<ImportRowId>();
+  for (const key of survivedSubscriptionKeys) {
+    const supersede = subscriptionSupersedes.get(key);
+    if (supersede === undefined) continue;
+    if (supersede.mode === 'insert') {
+      const row = supersede.row as ImportRow;
+      subscriptionSupersededInserts.push(supersede.transaction);
+      rowToTransaction.set(row.id, supersede.transaction.id);
+      subscriptionRowClassification.set(row.id, 'ignored');
+      subscriptionExerciseRowIds.add(row.id);
+    } else {
+      subscriptionUpdates.push(supersede.transaction);
+    }
+  }
+
   // `unclassified` rows are excluded from replay by `status`
   // (`selectForReplay`, SPEC-007), so they can never make a position
   // unreplayable and never need the group check above.
@@ -778,7 +871,8 @@ export async function commitBatch(
     if (
       carriedRowIds.has(row.id) ||
       corporateRowClassification.has(row.id) ||
-      conversionRowIds.has(row.id)
+      conversionRowIds.has(row.id) ||
+      subscriptionExerciseRowIds.has(row.id)
     ) {
       continue;
     }
@@ -799,14 +893,23 @@ export async function commitBatch(
   // Guarded like the two writes below it: a batch that is entirely duplicates
   // applies nothing, and should issue no statement at all rather than an empty
   // insert — which `commit-batch.test.ts` asserts by counting writes.
-  if (toInsert.length + supersededInserts.length > 0) {
-    await deps.transactions.insertMany([...toInsert, ...supersededInserts]);
+  if (toInsert.length + supersededInserts.length + subscriptionSupersededInserts.length > 0) {
+    await deps.transactions.insertMany([
+      ...toInsert,
+      ...supersededInserts,
+      ...subscriptionSupersededInserts,
+    ]);
   }
   // SPEC-005 BR-005-20c: row-backed conversion legs activate the existing
   // imported transaction in place. All updates share this commit's tenant
   // transaction, so no partial group can become durable.
   for (const write of conversionInPlace) {
     await deps.transactions.update(write.transaction);
+  }
+  // SPEC-005 BR-005-20d: a stored exercise superseded in place (found only
+  // through `SubscriptionEvidenceReader`, not this batch's own row).
+  for (const transaction of subscriptionUpdates) {
+    await deps.transactions.update(transaction);
   }
   if (positionUpserts.length > 0) {
     await deps.positions.upsertMany(positionUpserts);
@@ -826,6 +929,11 @@ export async function commitBatch(
   }
   // BR-005-19/20b: nor does a resolved or consumed corporate-event row.
   for (const [rowId, classification] of corporateRowClassification) {
+    await deps.rows.updateClassification(rowId, classification);
+  }
+  // SPEC-005 BR-005-20d: a resolved subscription's own exercise row leaves
+  // Needs Attention `ignored`, not `new` — it moved nothing itself.
+  for (const [rowId, classification] of subscriptionRowClassification) {
     await deps.rows.updateClassification(rowId, classification);
   }
 
@@ -904,6 +1012,8 @@ export async function commitBatch(
         .filter((write) => committedConversions.includes(write.transaction))
         .map((write) => write.liquidation),
     ).size,
+    resolvedSubscriptions: survivedSubscriptionKeys.size,
+    resolvedPositionRefreshes: 0,
     consumedAuctions: supersededInserts.length + superseded.filter(isCorporate).length,
     // Superseded rows are left out: they enter no calculation (BR-006-03).
     committed: [
@@ -1654,6 +1764,295 @@ async function planLiquidations(
     }
   }
   return writes;
+}
+
+/**
+ * SPEC-005 BR-005-20d — every asset code any `ASSET_CONVERSION_DEFINITIONS`
+ * or `ASSET_LIQUIDATION_DEFINITIONS` entry names, on either side. A code a
+ * definition already owns is never read as a subscription's main asset — "an
+ * asset-conversion or liquidation definition names the credit's code"
+ * refuses the pair outright, before any evidence is even gathered for it.
+ * Computed once: the definition tables are module-level constants.
+ */
+const SUBSCRIPTION_EXCLUDED_CODES: ReadonlySet<string> = new Set([
+  ...ASSET_CONVERSION_DEFINITIONS.flatMap((definition) => [
+    ...definition.sourceAssetCodes,
+    ...definition.targets.flatMap((target) =>
+      target.evidenceAssetCode === undefined
+        ? [target.assetCode]
+        : [target.assetCode, target.evidenceAssetCode],
+    ),
+  ]),
+  ...ASSET_LIQUIDATION_DEFINITIONS.flatMap((definition) => [
+    ...definition.sources.map((source) => source.assetCode),
+    definition.target.assetCode,
+    ...(definition.target.evidenceAssetCode === undefined
+      ? []
+      : [definition.target.evidenceAssetCode]),
+  ]),
+]);
+
+/** What a resolved pair's exercise write does: insert a fresh superseded copy, or update an existing stored one in place. */
+interface PlannedSubscriptionSupersede {
+  readonly mode: 'insert' | 'in_place';
+  /** Already carrying `status: 'superseded'`. */
+  readonly transaction: Transaction;
+  /** Only for `mode: 'insert'` — this batch's own staged exercise row. */
+  readonly row: ImportRow | null;
+}
+
+interface SubscriptionRef {
+  readonly assetId: AssetId;
+  /** This batch's own row, when the evidence came from staging rather than the stored ledger. */
+  readonly row: ImportRow | null;
+  /** The stored transaction, when the evidence came from the ledger rather than this batch. */
+  readonly existing: Transaction | null;
+}
+
+/**
+ * SPEC-005 BR-005-20d (#144) — pairs every exercised subscription in this
+ * batch (or already stored, still unresolved) with its `Atualização` credit,
+ * and plans what a resolved pair writes.
+ *
+ * Two structurally different halves, because only one of them ever enters
+ * replay:
+ *
+ * - the **credit** becomes an active `subscription` — a `ConversionWrite`
+ *   (`.subscription` as its decline key) that joins the same early-writes
+ *   settle loop a liquidation's writes do, so a replay failure elsewhere in
+ *   the group still declines it back to `unclassified` (BR-005-17);
+ * - the **exercise** is `superseded` — inert to replay either way
+ *   (`selectForReplay` excludes `unclassified` and `superseded` alike,
+ *   BR-007-16) — so `commitBatch` applies it only once the credit is known
+ *   to have survived settlement (`subscriptionSupersedes`, keyed the same).
+ *
+ * `windowDays` and the stored close are read once per issuer root, not per
+ * pair: `import.subscription_credit_window_days` never varies within one
+ * commit, and DL-005-22 places no lookback bound on the close.
+ */
+async function planSubscriptions(
+  deps: IngestionDependencies,
+  rows: readonly ImportRow[],
+  candidates: readonly Candidate[],
+  carryLegs: readonly PlannedCarry[],
+  reclassifications: readonly Reclassification[],
+  stored: StoredLedger,
+  context: { batchId: ImportBatchId; userId: UserId; now: Date; today: BusinessDate },
+  windowDays: number,
+  liquidationWrites: readonly ConversionWrite[],
+): Promise<{
+  readonly writes: readonly ConversionWrite[];
+  readonly supersedes: ReadonlyMap<string, PlannedSubscriptionSupersede>;
+}> {
+  const writes: ConversionWrite[] = [];
+  const supersedes = new Map<string, PlannedSubscriptionSupersede>();
+  const candidateByRow = new Map(candidates.map((c) => [c.row.id as string, c.transaction]));
+  const activations = reclassifications.filter((r) => r.kind === 'activate').map((r) => r.updated);
+  const carriedTransactions = carriedTransactionsOf(candidates, carryLegs, stored);
+  const claimedByLiquidation = new Set(liquidationWrites.map((write) => write.transaction.id));
+
+  const isExerciseRow = (row: ImportRow): boolean =>
+    row.record.kind === 'transaction' &&
+    row.classification === 'unclassified' &&
+    row.ledgerType === 'subscription';
+  const isCreditRow = (row: ImportRow): boolean =>
+    row.classification === 'unclassified' && isAtualizacaoRow(row);
+
+  // SPEC-005 BR-005-20d — which (issuer root, institution) groups this batch
+  // actually touches. Scoped to this batch's own rows: any pair resolvable
+  // purely from older, already-staged evidence would already have been
+  // resolved by the commit that staged the second half of it.
+  const groups = new Map<string, { issuerRoot: string; institutionId: InstitutionId | null }>();
+  for (const row of rows) {
+    if (row.record.kind !== 'transaction' || (!isExerciseRow(row) && !isCreditRow(row))) continue;
+    const issuerRoot = issuerCodeOf(row.record.assetCode);
+    if (issuerRoot === null) continue;
+    groups.set(`${issuerRoot}|${row.institutionId ?? ''}`, {
+      issuerRoot,
+      institutionId: row.institutionId,
+    });
+  }
+
+  const replayBalanceBefore = (
+    assetId: AssetId,
+    institutionId: InstitutionId | null,
+    date: BusinessDate,
+  ): Quantity | null => {
+    const onPosition = (t: Transaction) =>
+      t.assetId === assetId && t.institutionId === institutionId;
+    const history = [
+      ...stored({ assetId, institutionId }).filter(
+        (t) => !carryLegs.some((leg) => leg.credit.id === t.id),
+      ),
+      ...candidates.map((c) => c.transaction).filter(onPosition),
+      ...carriedTransactions.filter(onPosition),
+      ...activations.filter(onPosition),
+    ].filter((t) => BusinessDate.isBefore(t.tradeDate, date));
+    const replayed = replayPosition(history);
+    return replayed.ok ? replayed.value.quantity : null;
+  };
+
+  for (const { issuerRoot, institutionId } of groups.values()) {
+    const storedEvidence = await deps.subscriptionEvidence.evidenceForIssuer(
+      issuerRoot,
+      institutionId,
+    );
+
+    // Every position this evidence touches needs real history for the
+    // balance-before replay above — `loadLedgers` primed only the positions
+    // this batch's own rows touch, which excludes a main asset whose credit
+    // is stored from an earlier import and untouched here.
+    for (const item of storedEvidence) {
+      const key = {
+        assetId: item.transaction.assetId,
+        institutionId: item.transaction.institutionId,
+      };
+      if (stored(key).length > 0) continue;
+      stored.prime(key, await deps.transactions.listForPosition(key.assetId, key.institutionId));
+    }
+
+    const evidence: SubscriptionEvidence[] = [];
+    const refById = new Map<string, SubscriptionRef>();
+    const atInstitution = rows.filter((row) => row.institutionId === institutionId);
+
+    for (const row of atInstitution) {
+      if (row.record.kind !== 'transaction' || issuerCodeOf(row.record.assetCode) !== issuerRoot) {
+        continue;
+      }
+      const transaction = candidateByRow.get(row.id);
+      if (transaction === undefined) continue; // Refused elsewhere (invalid draft) — no evidence.
+      if (isExerciseRow(row)) {
+        refById.set(transaction.id, { assetId: row.assetId, row, existing: null });
+        evidence.push({
+          id: transaction.id,
+          role: 'exercise',
+          assetCode: row.record.assetCode,
+          tradeDate: row.record.tradeDate,
+          quantity: row.record.quantity,
+          state: 'open',
+        });
+      } else if (isCreditRow(row) && !SUBSCRIPTION_EXCLUDED_CODES.has(row.record.assetCode)) {
+        refById.set(transaction.id, { assetId: row.assetId, row, existing: null });
+        evidence.push({
+          id: transaction.id,
+          role: 'credit',
+          assetCode: row.record.assetCode,
+          tradeDate: row.record.tradeDate,
+          quantity: row.record.quantity,
+          state: 'open',
+          balanceBefore: replayBalanceBefore(row.assetId, institutionId, row.record.tradeDate),
+        });
+      }
+    }
+
+    const represented = new Set(evidence.map((item) => item.id));
+    for (const item of storedEvidence) {
+      if (represented.has(item.transaction.id) || claimedByLiquidation.has(item.transaction.id)) {
+        continue;
+      }
+      const isExercise = item.transaction.type === 'subscription';
+      const isCredit = storedB3TypeOf(item.transaction.naturalKey) === 'atualizacao';
+      if (!isExercise && !isCredit) continue;
+      if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(item.assetCode)) continue;
+      const state: SubscriptionEvidenceState =
+        imported(item.transaction) && item.transaction.status === 'unclassified'
+          ? 'open'
+          : 'locked';
+      refById.set(item.transaction.id, {
+        assetId: item.transaction.assetId,
+        row: null,
+        existing: item.transaction,
+      });
+      evidence.push({
+        id: item.transaction.id,
+        role: isExercise ? 'exercise' : 'credit',
+        assetCode: item.assetCode,
+        tradeDate: item.transaction.tradeDate,
+        quantity: item.transaction.quantity,
+        state,
+        ...(isExercise
+          ? {}
+          : {
+              balanceBefore: replayBalanceBefore(
+                item.transaction.assetId,
+                institutionId,
+                item.transaction.tradeDate,
+              ),
+            }),
+      });
+    }
+
+    const resolution = resolveSubscriptions({ evidence, windowDays });
+    for (const pair of resolution.pairs) {
+      if (pair.status !== 'resolved') continue;
+      const exerciseRef = refById.get(pair.plan.exerciseId);
+      const creditRef = refById.get(pair.plan.creditId);
+      if (exerciseRef === undefined || creditRef === undefined) continue;
+
+      // DL-005-22 / D1: no stored close, no invented price — both rows stay
+      // exactly as they are, for a later import once one exists.
+      const close = await deps.closePrices.closeOnOrBefore(creditRef.assetId, pair.plan.tradeDate);
+      if (close === null) continue;
+
+      const creditTransaction = (creditRef.existing ??
+        candidateByRow.get((creditRef.row as ImportRow).id)) as Transaction;
+      const written: Transaction = {
+        ...creditTransaction,
+        type: 'subscription',
+        status: 'active',
+        tradeDate: pair.plan.tradeDate,
+        quantity: pair.plan.quantity,
+        unitPrice: close.close,
+        fees: Money.zero(),
+        totalValue: computeTotalValue(
+          'subscription',
+          pair.plan.quantity,
+          close.close,
+          Money.zero(),
+        ),
+        ratio: null,
+        conversionGroupId: null,
+        costBasis: null,
+        isUserModified: false,
+        // SPEC-007 BR-007-06 / SPEC-005 BR-005-20d: B3 states no price for a
+        // subscription — the close stands in for it, marked as an estimate.
+        costIsEstimate: true,
+        estimateCloseDate: close.date,
+        updatedAt: context.now,
+      };
+      const draftValid = validateTransactionDraft(
+        {
+          type: written.type,
+          tradeDate: written.tradeDate,
+          quantity: written.quantity,
+          unitPrice: written.unitPrice,
+          fees: written.fees,
+          ratio: written.ratio,
+        },
+        context.today,
+      ).ok;
+      if (!draftValid) continue;
+
+      const pairKey = `subscription:${pair.plan.exerciseId}:${pair.plan.creditId}`;
+      writes.push({
+        transaction: written,
+        row: creditRef.row,
+        mode: creditRef.row !== null ? 'insert' : 'in_place',
+        origin: creditRef.existing?.importBatchId ?? null,
+        subscription: pairKey,
+      });
+
+      const exerciseTransaction = (exerciseRef.existing ??
+        candidateByRow.get((exerciseRef.row as ImportRow).id)) as Transaction;
+      supersedes.set(pairKey, {
+        mode: exerciseRef.row !== null ? 'insert' : 'in_place',
+        row: exerciseRef.row,
+        transaction: { ...exerciseTransaction, status: 'superseded', updatedAt: context.now },
+      });
+    }
+  }
+
+  return { writes, supersedes };
 }
 
 interface ConversionEvidenceRef {

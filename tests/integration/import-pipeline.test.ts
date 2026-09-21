@@ -1013,6 +1013,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
             batchId,
             corporateEventWindows: TEST_CORPORATE_EVENT_WINDOWS,
             assetConversionWindowDays: 45,
+            subscriptionCreditWindowDays: 120,
             assetConversionsEnabled: true,
           });
         },

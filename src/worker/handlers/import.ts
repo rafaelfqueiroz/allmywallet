@@ -14,12 +14,22 @@ import { commitBatch } from '@/core/ingestion/commit-batch';
 import { cancelBatch } from '@/core/ingestion/cancel-batch';
 import { failBatch } from '@/core/ingestion/fail-batch';
 import type { Transaction } from '@/core/ledger/transaction';
-import { corporateEventMovementOf } from '@/core/ingestion/movement-map';
+import {
+  corporateEventMovementOf,
+  conversionEvidenceMovementOf,
+} from '@/core/ingestion/movement-map';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import type { CorporateEventFactorSource } from '@/core/quotes/corporate-event-factors';
 import { refreshCorporateEventFactors } from '@/core/quotes/refresh-corporate-event-factors';
+import { fetchClosesForDates, type CloseDateRequest } from '@/core/quotes/fetch-closes-for-dates';
+import type { QuoteProvider } from '@/core/quotes/ports';
 import { DrizzleCorporateEventFactorRepository } from '@/adapters/db/corporate-event-factor-repository';
 import { B3ListedCompaniesFactorSource } from '@/adapters/market-data/b3-listed-companies';
+import {
+  buildQuoteProvider,
+  buildQuotesComposition,
+  resolveQuoteBudgetConfig,
+} from '@/worker/handlers/composition';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
 import type { SnapshotJobPayload } from '@/worker/handlers/valuation';
@@ -83,6 +93,14 @@ export interface ImportHandlerDeps {
    * tests never reach B3 and can simulate an outage.
    */
   readonly corporateEventFactorSource?: CorporateEventFactorSource;
+  /**
+   * SPEC-005 BR-005-20d (#144) — the quote provider
+   * `backfillSubscriptionClosesForBatch` fetches from, when not overridden
+   * (`quotes.provider`, the same `BrapiQuoteProvider` the poller uses). A
+   * seam so integration tests never reach brapi for real; #151 tracks the
+   * missing token this defaults to needing in production.
+   */
+  readonly quoteProvider?: QuoteProvider;
 }
 
 function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps {
@@ -97,6 +115,7 @@ function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps 
     ...(overrides?.corporateEventFactorSource === undefined
       ? {}
       : { corporateEventFactorSource: overrides.corporateEventFactorSource }),
+    ...(overrides?.quoteProvider === undefined ? {} : { quoteProvider: overrides.quoteProvider }),
   };
 }
 
@@ -300,7 +319,11 @@ export async function handleImportCommit(
   const assetConversionWindowDays = (
     await resolveConfig('import.asset_conversion_window_days', { db: deps.database })
   ).value;
+  const subscriptionCreditWindowDays = (
+    await resolveConfig('import.subscription_credit_window_days', { db: deps.database })
+  ).value;
   await refreshFactorsForBatch(deps, userId, batchId);
+  await backfillSubscriptionClosesForBatch(deps, userId, batchId);
 
   const result = await withTenant(
     userId,
@@ -309,6 +332,7 @@ export async function handleImportCommit(
         batchId,
         corporateEventWindows,
         assetConversionWindowDays,
+        subscriptionCreditWindowDays,
         assetConversionsEnabled: env().ASSET_CONVERSIONS_ENABLED,
         ...(payload.asOf === undefined ? {} : { asOf: BusinessDate.of(payload.asOf) }),
       });
@@ -395,6 +419,8 @@ export async function handleImportCommit(
       resolvedAssetConversions: result.value.resolvedAssetConversions,
       committedConversionLegs: result.value.committedConversionLegs,
       resolvedLiquidations: result.value.resolvedLiquidations,
+      resolvedSubscriptions: result.value.resolvedSubscriptions,
+      resolvedPositionRefreshes: result.value.resolvedPositionRefreshes,
       reconciliationStatus: result.value.batch.reconciliation?.status ?? null,
       rebuildFrom,
     },
@@ -459,6 +485,90 @@ async function refreshFactorsForBatch(
     logger.error(
       { err: error, queue: 'import.commit', batchId },
       'SPEC-008 BR-008-29: could not refresh corporate-event factors; rows stay unconfirmed',
+    );
+  }
+}
+
+/**
+ * SPEC-005 BR-005-20d / DL-005-22 (#144) — fetch the closes a subscription
+ * resolution needs, **before** the commit transaction, modelled on
+ * `refreshFactorsForBatch` immediately above for the same two reasons: the
+ * commit would otherwise hold ledger row locks across an HTTP call, and a
+ * pg-boss retry of `import.commit` would then depend on brapi being up.
+ *
+ * Scoped tightly: only an issuer root this batch stages **both** an
+ * unresolved exercise and an `Atualização` credit for spends a request — an
+ * unrelated position-refresh `Atualização` (BR-005-20e) never does (BR-021-28
+ * — bounded network requests). Never fatal: an outage, an exhausted budget,
+ * or any failure to record one leaves the pair unpriced and `unclassified`;
+ * `commitBatch` resolves it on a later import once a close exists. Without a
+ * brapi token (#151) this fails in production today, which is expected.
+ */
+async function backfillSubscriptionClosesForBatch(
+  deps: ImportHandlerDeps,
+  userId: UserId,
+  batchId: ImportBatchId,
+): Promise<void> {
+  try {
+    const rows = await withTenant(
+      userId,
+      async (tx) => buildIngestionDeps(tx, userId, deps.clock).rows.listByBatch(batchId),
+      deps.database,
+    );
+
+    const exerciseIssuers = new Set<string>();
+    for (const row of rows) {
+      if (
+        row.record.kind !== 'transaction' ||
+        row.classification !== 'unclassified' ||
+        row.ledgerType !== 'subscription'
+      ) {
+        continue;
+      }
+      const issuer = issuerCodeOf(row.record.assetCode);
+      if (issuer !== null) exerciseIssuers.add(issuer);
+    }
+    if (exerciseIssuers.size === 0) return;
+
+    const requests: CloseDateRequest[] = [];
+    for (const row of rows) {
+      if (row.record.kind !== 'transaction' || row.classification !== 'unclassified') continue;
+      const evidence = conversionEvidenceMovementOf(row.record.b3Type, {
+        assetClass: row.record.assetClass,
+        priceStated: row.record.priceStated,
+      });
+      if (evidence !== 'atualizacao') continue;
+      const issuer = issuerCodeOf(row.record.assetCode);
+      if (issuer === null || !exerciseIssuers.has(issuer)) continue;
+      requests.push({
+        assetId: row.assetId,
+        assetCode: row.record.assetCode,
+        upTo: row.record.tradeDate,
+      });
+    }
+    if (requests.length === 0) return;
+
+    const provider = deps.quoteProvider ?? (await buildQuoteProvider(deps.database));
+    const { repository, budgetCounter } = buildQuotesComposition(deps.database);
+    const { monthlyQuota, ondemandReservePct } = await resolveQuoteBudgetConfig(deps.database);
+    const summary = await fetchClosesForDates(
+      { repository, provider, budgetCounter, clock: deps.clock },
+      requests,
+      { monthlyQuota, ondemandReservePct },
+    );
+    logger.info(
+      {
+        queue: 'import.commit',
+        batchId,
+        fetched: summary.fetched.length,
+        requests: summary.requests,
+      },
+      'SPEC-005 BR-005-20d: subscription closes backfilled',
+    );
+  } catch (error) {
+    logger.error(
+      { err: error, queue: 'import.commit', batchId },
+      'SPEC-005 BR-005-20d: could not backfill subscription closes; unpriced pairs stay unclassified',
     );
   }
 }
