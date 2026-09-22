@@ -190,6 +190,7 @@ describe('SPEC-011 — report surface tenant isolation', () => {
       quantity: 'Quantidade',
       value: 'Valor',
       costBasis: 'Custo',
+      costEstimated: 'Custo estimado',
       estimated: 'Estimado',
       unassigned: 'Não atribuído',
       notClassified: 'Não classificado',

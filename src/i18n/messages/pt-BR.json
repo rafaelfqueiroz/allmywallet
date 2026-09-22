@@ -618,6 +618,7 @@
       "quantity": "Quantidade",
       "value": "Valor",
       "costBasis": "Custo",
+      "costEstimated": "Custo estimado",
       "estimated": "Estimado",
       "total": "Total",
       "share": "Participação",

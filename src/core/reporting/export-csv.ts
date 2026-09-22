@@ -32,6 +32,14 @@ export interface CsvLabels {
   readonly quantity: string;
   readonly value: string;
   readonly costBasis: string;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — "an estimated cost
+   * is carried and shown, never hidden," and an export is a place the cost
+   * basis is read as much as the screen is. Deliberately a separate column
+   * and a separate label from `estimated` below, which is SPEC-009's
+   * unrelated valuation estimate.
+   */
+  readonly costEstimated: string;
   readonly estimated: string;
   /** BR-011-09 — the Unassigned bucket's heading. */
   readonly unassigned: string;
@@ -93,6 +101,7 @@ export function exportGroupedCsv(
       labels.quantity,
       labels.value,
       labels.costBasis,
+      labels.costEstimated,
       labels.estimated,
     ],
   ];
@@ -114,6 +123,7 @@ export function exportGroupedCsv(
     report.total.quantity.toString(),
     report.total.value.toString(),
     report.total.costBasis.toString(),
+    report.total.costEstimated ? labels.yes : labels.no,
     report.total.estimated ? labels.yes : labels.no,
   ]);
 
@@ -128,6 +138,7 @@ function holdingRow(groupLabel: string, holding: ReportHolding, labels: CsvLabel
     holding.quantity.toString(),
     holding.value.toString(),
     holding.costBasis.toString(),
+    holding.costEstimated ? labels.yes : labels.no,
     holding.estimated ? labels.yes : labels.no,
   ];
 }
