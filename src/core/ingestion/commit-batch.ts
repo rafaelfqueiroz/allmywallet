@@ -2287,18 +2287,32 @@ async function planPositionRefreshes(
     // BR-005-20e: no subscription exercise on the same issuer, at the same
     // institution, within the window — that evidence belongs to BR-005-20d,
     // matched or not (a quantity mismatch there must not fall through here).
+    // Both sources: `SubscriptionEvidenceReader` for an exercise already
+    // stored, and `rows` for one staged fresh in *this* batch — not yet
+    // written, so the reader alone would miss it (this function runs before
+    // the batch's own unclassified rows are inserted).
     const issuerRoot = issuerCodeOf(record.assetCode);
     if (issuerRoot !== null) {
-      const evidence = await deps.subscriptionEvidence.evidenceForIssuer(
+      const isNearby = (exerciseDate: BusinessDate) => {
+        const days = dayCount(record.tradeDate) - dayCount(exerciseDate);
+        return days >= 0 && days <= subscriptionWindowDays;
+      };
+      const storedEvidence = await deps.subscriptionEvidence.evidenceForIssuer(
         issuerRoot,
         row.institutionId,
       );
-      const nearbyExercise = evidence.some((item) => {
-        if (item.transaction.type !== 'subscription') return false;
-        const days = dayCount(record.tradeDate) - dayCount(item.transaction.tradeDate);
-        return days >= 0 && days <= subscriptionWindowDays;
-      });
-      if (nearbyExercise) continue;
+      const nearbyStored = storedEvidence.some(
+        (item) => item.transaction.type === 'subscription' && isNearby(item.transaction.tradeDate),
+      );
+      const nearbyThisBatch = rows.some(
+        (candidate) =>
+          candidate.record.kind === 'transaction' &&
+          candidate.institutionId === row.institutionId &&
+          candidate.ledgerType === 'subscription' &&
+          issuerCodeOf(candidate.record.assetCode) === issuerRoot &&
+          isNearby(candidate.record.tradeDate),
+      );
+      if (nearbyStored || nearbyThisBatch) continue;
     }
 
     const balanceBefore = replayBalanceBefore(row.assetId, row.institutionId, record.tradeDate);

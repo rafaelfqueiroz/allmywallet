@@ -161,6 +161,20 @@ export class FakeQuoteRepository implements QuoteRepositoryPort, LatestCloseDate
     this.closes.set(`${quote.assetId}:${quote.date}`, quote);
     this.closeWrites.push(quote);
   }
+
+  /**
+   * SPEC-009 BR-009-03 / SPEC-005 BR-005-20d — the carry-forward lookup
+   * `PriceHistoryPort`/`ClosePriceReader` both declare it under: the close on
+   * `date`, or the nearest earlier one however old (D2).
+   */
+  async getCloseOnOrBefore(assetId: AssetId, date: BusinessDate): Promise<PriceQuote | null> {
+    let nearest: PriceQuote | null = null;
+    for (const quote of this.closes.values()) {
+      if (quote.assetId !== assetId || quote.date > date) continue;
+      if (nearest === null || quote.date > nearest.date) nearest = quote;
+    }
+    return nearest;
+  }
 }
 
 /** SPEC-021 BR-021-31 — gaps keyed `(assetId, date)`, the same key the table uses. */

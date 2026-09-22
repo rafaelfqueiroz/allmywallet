@@ -5191,4 +5191,45 @@ describe('SPEC-005 BR-005-20e (#144) — a whole-position Atualização credit i
     expect(credit).toBeDefined();
     expect(credit?.status).not.toBe('superseded');
   });
+
+  it('refuses a coincidental balance match when a same-issuer exercise sits nearby, even at a mismatched quantity C never pairs', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'ZZZZ1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        // A genuine right on the same issuer, but for a different quantity —
+        // BR-005-20d never pairs it (46 ≠ 5), so it stays `unclassified`.
+        subscriptionExercise({
+          assetCode: 'ZZZZ2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('5'),
+          tradeDate: BusinessDate.of('2024-01-10'),
+        }),
+        // Coincidentally restates the balance already held (46) — the exact
+        // shape BR-005-20e's own check would otherwise take as a refresh.
+        atualizacaoCredit({
+          assetCode: 'ZZZZ1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-01-20'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const ledger = await deps.transactions.listAll();
+    const credit = ledger.find((t) => t.type === 'rendimento' && t.quantity.toString() === '46');
+    expect(credit?.status).toBe('unclassified');
+  });
 });
