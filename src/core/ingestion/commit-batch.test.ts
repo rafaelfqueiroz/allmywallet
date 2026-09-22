@@ -5039,3 +5039,150 @@ describe('SPEC-005 BR-005-20d (#144) — an exercised subscription pairs with it
     expect(mainLedger.every((t) => t.status === 'unclassified')).toBe(true);
   });
 });
+
+describe('SPEC-005 BR-005-20e (#144) — a whole-position Atualização credit is a refresh, not a movement', () => {
+  it('supersedes a price-less Atualização whose quantity equals the position it lands on, and ignores its row', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'REFR3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'REFR3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedPositionRefreshes).toBe(1);
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const rows = await deps.rows.listByBatch(batchId);
+    const creditRow = rows.find(
+      (r) => r.record.kind === 'transaction' && r.record.b3Type === 'Atualização',
+    );
+    expect(creditRow).toBeDefined();
+    const updatedRow = await deps.rows.findById((creditRow as ImportRow).id);
+    expect(updatedRow?.classification).toBe('ignored');
+
+    const ledger = await deps.transactions.listAll();
+    const credit = ledger.find((t) => t.id === updatedRow?.transactionId);
+    expect(credit?.status).toBe('superseded');
+
+    // The position is exactly the buy's 46 — the refresh moved nothing.
+    const buyTx = ledger.find((t) => t.type === 'buy');
+    const replayed = replayPosition(ledger.filter((t) => t.assetId === buyTx?.assetId));
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('46');
+  });
+
+  it('never treats an Atualização on a position that does not yet exist (balance zero) as a refresh', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'NEWX3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('5'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const ledger = await deps.transactions.listAll();
+    expect(ledger.every((t) => t.status === 'unclassified')).toBe(true);
+  });
+
+  it('never resolves a credit whose quantity simply does not equal the balance it lands on', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'REFR4',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('100'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'REFR4',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('7'), // neither the balance (100) nor a subscription
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+  });
+
+  it('never fires on a credit a subscription pairing already claims — row identity, not the built transaction id, is what the two resolvers share (#144 review)', async () => {
+    // BR-005-20d's own D8 refusal (balance-before equal to the credited
+    // quantity) and BR-005-20e's acceptance condition (balance-before equal
+    // to the credit's quantity) are mutually exclusive by construction, so a
+    // credit a subscription genuinely resolves can never *also* satisfy this
+    // resolver's balance check. What this proves instead is that the two
+    // resolvers agree on *which row* a subscription already claimed —
+    // `planPositionRefreshes` calls `buildCandidate` on the same `ImportRow`
+    // independently of `planSubscriptions`, which generates a fresh
+    // `TransactionId` every call, so the shared claim key must be the row's
+    // own id, never the built transaction's.
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'XXXX12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-10'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'XXXX11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-20'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const rows = await deps.rows.listByBatch(batchId);
+    const mainAssetId = (
+      rows.find(
+        (r) => r.record.kind === 'transaction' && r.record.assetCode === 'XXXX11',
+      ) as ImportRow
+    ).assetId;
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-01-20'), Money.fromString('50.00'));
+
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(1);
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const ledger = await deps.transactions.listAll();
+    const credit = ledger.find(
+      (t) => t.assetId === mainAssetId && t.type === 'subscription' && t.status === 'active',
+    );
+    expect(credit).toBeDefined();
+    expect(credit?.status).not.toBe('superseded');
+  });
+});
