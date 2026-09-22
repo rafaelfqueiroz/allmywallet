@@ -15,6 +15,7 @@ import { bulkTransactionsAction } from '@/app/(app)/transactions/actions';
 import { BulkBar } from '@/app/(app)/transactions/_components/BulkBar';
 import { Controls } from '@/app/(app)/transactions/_components/Controls';
 import { Pagination } from '@/app/(app)/transactions/_components/Pagination';
+import { TransactionCostEstimateMarker } from '@/app/(app)/transactions/_components/TransactionCostEstimateMarker';
 import {
   listAssetOptions,
   listInstitutionOptions,
@@ -249,7 +250,18 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
         <Money value={tx.quantity} kind="quantity" />
       </TableCell>
       <TableCell className="py-row text-right">
-        <Money value={tx.unitPrice} />
+        <Cluster gap="sm" justify="end" align="baseline">
+          <Money value={tx.unitPrice} />
+          {/* SPEC-007 BR-007-06 / SPEC-005 BR-005-20d — never hidden: this
+              is the transaction whose own price is the estimate. */}
+          <TransactionCostEstimateMarker
+            costIsEstimate={tx.costIsEstimate}
+            estimateCloseDate={tx.estimateCloseDate}
+            label={t('markers.costEstimated.badge')}
+            closeExplanation={(date) => t('markers.costEstimated.closeExplanation', { date })}
+            carriedExplanation={t('markers.costEstimated.carriedExplanation')}
+          />
+        </Cluster>
       </TableCell>
       <TableCell className="py-row text-right">
         <Money value={tx.totalValue} />

@@ -2,7 +2,7 @@ import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId, TransactionId } from '@/core/shared/ids';
 import { type Result, err, ok } from '@/core/shared/result';
-import { replayPosition } from '@/core/positions/replay';
+import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { PositionState } from '@/core/positions/position-state';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
@@ -39,6 +39,16 @@ export interface DeletionImpact {
   readonly subsequentTransactionCount: number;
   readonly currentPosition: PositionState;
   readonly projectedPosition: PositionState;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — whether the
+   * position, before and after the deletion, carries an estimated cost.
+   * Folded by `replayPositionWithEstimate`, the same fold every position
+   * writer uses, rather than decided here: a page showing "before" and
+   * "after" figures that disagreed with the position cache about which one
+   * is an estimate would be worse than showing neither.
+   */
+  readonly currentCostEstimated: boolean;
+  readonly projectedCostEstimated: boolean;
 }
 
 export async function describeDeletionImpact(
@@ -52,11 +62,11 @@ export async function describeDeletionImpact(
 
   const existing = await deps.transactions.listForPosition(target.assetId, target.institutionId);
 
-  const current = replayPosition(existing);
+  const current = replayPositionWithEstimate(existing);
   if (!current.ok) return current;
 
   const remaining = without(existing, new Set([target.id]));
-  const projected = replayPosition(remaining);
+  const projected = replayPositionWithEstimate(remaining);
   // BR-006-15 again: deleting the buy a later sale drew on leaves a ledger
   // that cannot be replayed. The user is told that here, before confirming,
   // rather than after the row is already gone.
@@ -68,8 +78,10 @@ export async function describeDeletionImpact(
     institutionId: target.institutionId,
     fromDate: target.tradeDate,
     subsequentTransactionCount: countOnOrAfter(remaining, target.tradeDate),
-    currentPosition: current.value,
-    projectedPosition: projected.value,
+    currentPosition: current.value.state,
+    projectedPosition: projected.value.state,
+    currentCostEstimated: current.value.costEstimated,
+    projectedCostEstimated: projected.value.costEstimated,
   });
 }
 

@@ -35,7 +35,9 @@ export async function compareWallets(
   // is routinely split across several wallets, and re-querying its position
   // per wallet would be one round trip per row instead of one for the page.
   const held = await deps.positionQuery.listHeld();
-  const costEstimatedByAsset = new Map(held.map((position) => [position.assetId, position.costEstimated]));
+  const costEstimatedByAsset = new Map(
+    held.map((position) => [position.assetId, position.costEstimated]),
+  );
 
   const rows: WalletComparisonRow[] = [];
   for (const wallet of wallets) {

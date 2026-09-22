@@ -113,6 +113,13 @@ export interface ExportedTransaction {
   readonly fees: Money;
   readonly totalValue: Money;
   readonly isManual: boolean;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — "an estimated cost
+   * is carried and shown, never hidden," and a personal-data export is a
+   * place these figures are read as much as any screen is.
+   */
+  readonly costIsEstimate: boolean;
+  readonly estimateCloseDate: BusinessDate | null;
 }
 
 export interface ExportedWallet {

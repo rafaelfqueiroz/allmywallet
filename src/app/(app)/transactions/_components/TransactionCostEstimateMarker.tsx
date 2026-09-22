@@ -42,7 +42,8 @@ export function TransactionCostEstimateMarker({
 }: TransactionCostEstimateMarkerProps): React.JSX.Element | null {
   if (!costIsEstimate) return null;
 
-  const title = estimateCloseDate === null ? carriedExplanation : closeExplanation(estimateCloseDate);
+  const title =
+    estimateCloseDate === null ? carriedExplanation : closeExplanation(estimateCloseDate);
 
   return (
     <Badge variant="outline" title={title} className={className}>

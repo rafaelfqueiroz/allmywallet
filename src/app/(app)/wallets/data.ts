@@ -128,7 +128,9 @@ export async function loadWalletDetail(
     if (wallet === null) return null;
     const allocations = await deps.allocations.listForWallet(walletId);
     const held = await deps.positionQuery.listHeld();
-    const costEstimated = new Map(held.map((position) => [position.assetId, position.costEstimated]));
+    const costEstimated = new Map(
+      held.map((position) => [position.assetId, position.costEstimated]),
+    );
     return { wallet, allocations, costEstimated };
   });
   if (result === null) return null;

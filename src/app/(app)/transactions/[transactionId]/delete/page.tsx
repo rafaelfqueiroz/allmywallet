@@ -14,7 +14,9 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Note } from '@/components/patterns/note';
 import { Money } from '@/components/patterns/money';
+import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
+import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
 import {
   Table,
@@ -54,6 +56,10 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
   const tTable = await getTranslations('transactions.table');
   const tSignedOut = await getTranslations('transactions');
   const tErrors = await getTranslations('errors');
+  // SPEC-007 BR-007-06 / DL-007-12 — the position-level marker reuses
+  // `reports.markers.costEstimated`, the same catalogue entry every other
+  // Custo/preço médio surface reads, rather than a transactions-scoped copy.
+  const tReports = await getTranslations('reports');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -165,10 +171,25 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
               <TableRow>
                 <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
                 <TableCell className="py-row text-right">
-                  <Money value={impact.value.currentPosition.averageCost} />
+                  <Cluster gap="sm" justify="end" align="baseline">
+                    <Money value={impact.value.currentPosition.averageCost} />
+                    {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
+                    <CostEstimateMarker
+                      shown={impact.value.currentCostEstimated}
+                      label={tReports('markers.costEstimated.badge')}
+                      title={tReports('markers.costEstimated.explanation')}
+                    />
+                  </Cluster>
                 </TableCell>
                 <TableCell className="py-row text-right">
-                  <Money value={impact.value.projectedPosition.averageCost} />
+                  <Cluster gap="sm" justify="end" align="baseline">
+                    <Money value={impact.value.projectedPosition.averageCost} />
+                    <CostEstimateMarker
+                      shown={impact.value.projectedCostEstimated}
+                      label={tReports('markers.costEstimated.badge')}
+                      title={tReports('markers.costEstimated.explanation')}
+                    />
+                  </Cluster>
                 </TableCell>
               </TableRow>
               <TableRow>
