@@ -43,7 +43,7 @@ export function buildFakeIngestionDeps(today = '2026-03-15'): FakeIngestionDeps 
     clock: new FakeClock(`${today}T12:00:00-03:00`),
     corporateEventFactors: new FakeCorporateEventFactorReader(),
     closePrices: new FakeClosePriceReader(),
-    subscriptionEvidence: new FakeSubscriptionEvidenceReader(),
+    subscriptionEvidence: new FakeSubscriptionEvidenceReader(transactions),
   };
 }
 

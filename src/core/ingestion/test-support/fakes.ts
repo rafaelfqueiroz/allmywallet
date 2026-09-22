@@ -2,14 +2,16 @@ import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
 import type { ImportRowId, TransactionId } from '@/core/shared/ids';
 import type { BusinessDate } from '@/core/shared/clock';
 import type { Money } from '@/core/shared/money';
-import type { Transaction } from '@/core/ledger/transaction';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import type {
   CorporateEventFactor,
   CorporateEventFactorReader,
 } from '@/core/quotes/corporate-event-factors';
 import type { AssetResolveInput } from '@/core/ingestion/ports';
-import type { AssetDescriptor } from '@/core/ledger/test-support/fake-repositories';
+import type {
+  AssetDescriptor,
+  FakeTransactionRepository,
+} from '@/core/ledger/test-support/fake-repositories';
 import type {
   AssetResolverPort,
   ClosePriceReader,
@@ -239,27 +241,30 @@ export class FakeClosePriceReader implements ClosePriceReader {
 }
 
 /**
- * SPEC-005 BR-005-20d — stored transactions across one issuer's assets, in
- * memory. Seeded with the whole ledger a test wants visible to the resolver;
- * `issuerCodeOf` filters exactly as the Drizzle adapter's SQL LIKE plus
- * application filter does, so a fixture using a real B3 ticker shape behaves
- * the same against either implementation.
+ * SPEC-005 BR-005-20d — stored transactions across one issuer's assets, read
+ * live from the same `FakeTransactionRepository` a commit writes to — not a
+ * second, separately seeded store. A commit resolving a subscription staged
+ * in an earlier batch depends on finding that batch's own write here with no
+ * further test setup, exactly as the real `DrizzleSubscriptionEvidenceReader`
+ * finds it in `transactions` with no help from the test. `issuerCodeOf`
+ * filters exactly as the Drizzle adapter's SQL LIKE plus application filter
+ * does, so a fixture using a real B3 ticker shape behaves the same against
+ * either implementation.
  */
 export class FakeSubscriptionEvidenceReader implements SubscriptionEvidenceReader {
-  #rows: { transaction: Transaction; assetCode: string }[] = [];
-
-  seed(assetCode: string, transaction: Transaction): void {
-    this.#rows.push({ transaction, assetCode });
-  }
+  constructor(private readonly transactions: FakeTransactionRepository) {}
 
   async evidenceForIssuer(
     issuerRoot: string,
     institutionId: InstitutionId | null,
   ): Promise<readonly SubscriptionEvidenceRow[]> {
-    return this.#rows.filter(
-      (row) =>
-        issuerCodeOf(row.assetCode) === issuerRoot &&
-        row.transaction.institutionId === institutionId,
-    );
+    const rows: SubscriptionEvidenceRow[] = [];
+    for (const transaction of this.transactions.rows) {
+      if (transaction.institutionId !== institutionId) continue;
+      const assetCode = this.transactions.assetCodeOf(transaction.assetId);
+      if (assetCode === undefined || issuerCodeOf(assetCode) !== issuerRoot) continue;
+      rows.push({ transaction, assetCode });
+    }
+    return rows;
   }
 }

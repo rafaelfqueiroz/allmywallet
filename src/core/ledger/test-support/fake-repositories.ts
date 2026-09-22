@@ -49,6 +49,11 @@ export class FakeTransactionRepository implements TransactionRepository {
     this.#assets.set(assetId, descriptor);
   }
 
+  /** SPEC-005 BR-005-20d — the code `describeAsset` resolved for `assetId`, for `FakeSubscriptionEvidenceReader`'s issuer-root join. */
+  assetCodeOf(assetId: AssetId): string | undefined {
+    return this.#assets.get(assetId)?.code;
+  }
+
   describeInstitution(institutionId: InstitutionId, name: string): void {
     this.#institutions.set(institutionId, name);
   }

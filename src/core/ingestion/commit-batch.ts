@@ -1805,7 +1805,15 @@ interface SubscriptionRef {
   readonly assetId: AssetId;
   /** This batch's own row, when the evidence came from staging rather than the stored ledger. */
   readonly row: ImportRow | null;
-  /** The stored transaction, when the evidence came from the ledger rather than this batch. */
+  /**
+   * The transaction this evidence stands for: a fresh `unclassified` draft
+   * built from `row` (`buildCandidate`, mirroring how `planLiquidations`
+   * treats its own price-less `unclassified` evidence — never looked up in
+   * `newCandidates`, which holds only `new`-classified rows), or the stored
+   * transaction the ledger already holds.
+   */
+  readonly transaction: Transaction;
+  /** Set only when `transaction` came from the stored ledger, for `origin`/`state`. */
   readonly existing: Transaction | null;
 }
 
@@ -1846,7 +1854,6 @@ async function planSubscriptions(
 }> {
   const writes: ConversionWrite[] = [];
   const supersedes = new Map<string, PlannedSubscriptionSupersede>();
-  const candidateByRow = new Map(candidates.map((c) => [c.row.id as string, c.transaction]));
   const activations = reclassifications.filter((r) => r.kind === 'activate').map((r) => r.updated);
   const carriedTransactions = carriedTransactionsOf(candidates, carryLegs, stored);
   const claimedByLiquidation = new Set(liquidationWrites.map((write) => write.transaction.id));
@@ -1857,14 +1864,25 @@ async function planSubscriptions(
     row.ledgerType === 'subscription';
   const isCreditRow = (row: ImportRow): boolean =>
     row.classification === 'unclassified' && isAtualizacaoRow(row);
+  // Looser, classification-agnostic shape checks for the group-trigger scan
+  // below: BR-005-20d's "a later import resolves them" means a **re-import**
+  // of the identical exercise/credit rows — now staged `duplicate`, since
+  // their stored copies already exist unclassified — must still trigger the
+  // scan. `isExerciseRow`/`isCreditRow` stay strict (`unclassified` only) for
+  // building *this batch's own* evidence just below: a `duplicate` row's
+  // candidate is never re-built, its already-stored copy is what
+  // `SubscriptionEvidenceReader` finds.
+  const looksLikeExercise = (row: ImportRow): boolean =>
+    row.record.kind === 'transaction' && row.ledgerType === 'subscription';
+  const looksLikeCredit = (row: ImportRow): boolean => isAtualizacaoRow(row);
 
   // SPEC-005 BR-005-20d — which (issuer root, institution) groups this batch
-  // actually touches. Scoped to this batch's own rows: any pair resolvable
-  // purely from older, already-staged evidence would already have been
-  // resolved by the commit that staged the second half of it.
+  // touches, this import's rows or a re-import of an earlier one.
   const groups = new Map<string, { issuerRoot: string; institutionId: InstitutionId | null }>();
   for (const row of rows) {
-    if (row.record.kind !== 'transaction' || (!isExerciseRow(row) && !isCreditRow(row))) continue;
+    if (row.record.kind !== 'transaction' || (!looksLikeExercise(row) && !looksLikeCredit(row))) {
+      continue;
+    }
     const issuerRoot = issuerCodeOf(row.record.assetCode);
     if (issuerRoot === null) continue;
     groups.set(`${issuerRoot}|${row.institutionId ?? ''}`, {
@@ -1919,30 +1937,37 @@ async function planSubscriptions(
       if (row.record.kind !== 'transaction' || issuerCodeOf(row.record.assetCode) !== issuerRoot) {
         continue;
       }
-      const transaction = candidateByRow.get(row.id);
-      if (transaction === undefined) continue; // Refused elsewhere (invalid draft) — no evidence.
-      if (isExerciseRow(row)) {
-        refById.set(transaction.id, { assetId: row.assetId, row, existing: null });
-        evidence.push({
-          id: transaction.id,
-          role: 'exercise',
-          assetCode: row.record.assetCode,
-          tradeDate: row.record.tradeDate,
-          quantity: row.record.quantity,
-          state: 'open',
-        });
-      } else if (isCreditRow(row) && !SUBSCRIPTION_EXCLUDED_CODES.has(row.record.assetCode)) {
-        refById.set(transaction.id, { assetId: row.assetId, row, existing: null });
-        evidence.push({
-          id: transaction.id,
-          role: 'credit',
-          assetCode: row.record.assetCode,
-          tradeDate: row.record.tradeDate,
-          quantity: row.record.quantity,
-          state: 'open',
-          balanceBefore: replayBalanceBefore(row.assetId, institutionId, row.record.tradeDate),
-        });
-      }
+      const isExercise = isExerciseRow(row);
+      const isCredit = !isExercise && isCreditRow(row);
+      if (!isExercise && !isCredit) continue;
+      if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(row.record.assetCode)) continue;
+      // Both rows are `unclassified` by construction (`isExerciseRow`,
+      // `isCreditRow`), never `new` — `buildCandidate` mirrors exactly how
+      // `planLiquidations` builds its own unclassified evidence, not the
+      // `newCandidates` lookup, which holds only `new`-classified rows.
+      const transaction = buildCandidate(
+        row,
+        context.batchId,
+        context.userId,
+        'unclassified',
+        context.now,
+        context.today,
+      );
+      if (transaction === null) continue; // Refused elsewhere (invalid draft) — no evidence.
+      refById.set(transaction.id, { assetId: row.assetId, row, transaction, existing: null });
+      evidence.push({
+        id: transaction.id,
+        role: isExercise ? 'exercise' : 'credit',
+        assetCode: row.record.assetCode,
+        tradeDate: row.record.tradeDate,
+        quantity: row.record.quantity,
+        state: 'open',
+        ...(isExercise
+          ? {}
+          : {
+              balanceBefore: replayBalanceBefore(row.assetId, institutionId, row.record.tradeDate),
+            }),
+      });
     }
 
     const represented = new Set(evidence.map((item) => item.id));
@@ -1961,6 +1986,7 @@ async function planSubscriptions(
       refById.set(item.transaction.id, {
         assetId: item.transaction.assetId,
         row: null,
+        transaction: item.transaction,
         existing: item.transaction,
       });
       evidence.push({
@@ -1994,10 +2020,8 @@ async function planSubscriptions(
       const close = await deps.closePrices.closeOnOrBefore(creditRef.assetId, pair.plan.tradeDate);
       if (close === null) continue;
 
-      const creditTransaction = (creditRef.existing ??
-        candidateByRow.get((creditRef.row as ImportRow).id)) as Transaction;
       const written: Transaction = {
-        ...creditTransaction,
+        ...creditRef.transaction,
         type: 'subscription',
         status: 'active',
         tradeDate: pair.plan.tradeDate,
@@ -2042,12 +2066,14 @@ async function planSubscriptions(
         subscription: pairKey,
       });
 
-      const exerciseTransaction = (exerciseRef.existing ??
-        candidateByRow.get((exerciseRef.row as ImportRow).id)) as Transaction;
       supersedes.set(pairKey, {
         mode: exerciseRef.row !== null ? 'insert' : 'in_place',
         row: exerciseRef.row,
-        transaction: { ...exerciseTransaction, status: 'superseded', updatedAt: context.now },
+        transaction: {
+          ...exerciseRef.transaction,
+          status: 'superseded',
+          updatedAt: context.now,
+        },
       });
     }
   }
