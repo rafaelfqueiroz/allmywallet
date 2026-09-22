@@ -135,6 +135,48 @@ describe('SPEC-008 market data repositories (integration)', () => {
       expect(await repo.getClosePrice(asset.id, BusinessDate.of('2026-03-17'))).toBeNull();
     });
 
+    /**
+     * SPEC-005 BR-005-20d (#144) — `ClosePriceReader.closeOnOrBefore`, the
+     * commit-time read a resolved subscription is priced from. Same table,
+     * same query `getCloseOnOrBefore` already proves for SPEC-009's
+     * carry-forward; this is the second name that query answers to.
+     */
+    it('SPEC-005 BR-005-20d: closeOnOrBefore returns the close on the date, or the nearest earlier one, however old', async () => {
+      const catalog = new DrizzleAssetCatalogRepository(db);
+      const repo = new DrizzleQuoteRepository(db);
+      const asset = await catalog.upsertByCode({
+        code: 'XPML11',
+        name: 'XP Malls',
+        assetClass: 'fii',
+      });
+
+      await repo.upsertClosePrice({
+        assetId: asset.id,
+        date: BusinessDate.of('2024-01-02'),
+        close: Money.fromString('100.00'),
+        source: 'brapi_free',
+      });
+      await repo.upsertClosePrice({
+        assetId: asset.id,
+        date: BusinessDate.of('2024-02-22'),
+        close: Money.fromString('114.90'),
+        source: 'brapi_free',
+      });
+
+      // Exact date.
+      const exact = await repo.closeOnOrBefore(asset.id, BusinessDate.of('2024-02-22'));
+      expect(exact?.date).toBe('2024-02-22');
+      expect(exact?.close.equals(Money.fromString('114.90'))).toBe(true);
+
+      // No close on this date — D2: the nearest earlier one, however old.
+      const carried = await repo.closeOnOrBefore(asset.id, BusinessDate.of('2024-06-01'));
+      expect(carried?.date).toBe('2024-02-22');
+      expect(carried?.close.equals(Money.fromString('114.90'))).toBe(true);
+
+      // Before any close exists at all.
+      expect(await repo.closeOnOrBefore(asset.id, BusinessDate.of('2023-12-31'))).toBeNull();
+    });
+
     it('BR-008-09/10: the close upsert never rewrites a different day, and never touches latest_quotes', async () => {
       const catalog = new DrizzleAssetCatalogRepository(db);
       const repo = new DrizzleQuoteRepository(db);

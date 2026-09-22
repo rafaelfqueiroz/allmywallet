@@ -8,6 +8,10 @@ import { applyMigrations, startTestDatabase, type TestDatabase } from '../suppor
 import { resetLedger, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
 import { AssetId } from '@/core/shared/ids';
+import { BusinessDate } from '@/core/shared/clock';
+import { Money } from '@/core/shared/money';
+import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
+import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/build-deps';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { allocateToWallet } from '@/core/wallets/allocate';
@@ -2451,6 +2455,152 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       expect(containsCpf(row.raw_payload)).toBe(false);
       expect(containsCpf(row.parsed_payload)).toBe(false);
     }
+  });
+
+  /**
+   * SPEC-005 BR-005-20d/20e (#144) — against real Postgres: proves
+   * `DrizzleSubscriptionEvidenceReader`'s issuer-root SQL join (an exercise
+   * staged in one committed batch, found by a later batch's credit with no
+   * row of its own naming it) and `ClosePriceReader.closeOnOrBefore` (the
+   * subscription's price), together, through `handleImportCommit` exactly as
+   * production runs it — no fakes.
+   */
+  describe('SPEC-005 BR-005-20d/20e (#144) — subscription resolution against real Postgres', () => {
+    it('BR-005-20d: pairs an exercise staged in one import with its Atualização credit staged in a later one, priced from a real stored close', async () => {
+      const exerciseBatch = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(
+        uploadDir,
+        exerciseBatch,
+        await buildMovimentacaoXlsx([
+          {
+            data: '22/01/2024',
+            movimentacao: 'Direitos de Subscrição - Exercido',
+            produto: 'XPML12 - XP Malls',
+            quantidade: '3',
+            precoUnitario: '-',
+          },
+        ]),
+      );
+      await handleImportStage({ batchId: exerciseBatch, userId }, handlerDeps());
+      await handleImportCommit({ batchId: exerciseBatch, userId }, handlerDeps());
+
+      // A close becomes available before the credit is ever imported —
+      // exactly DL-005-22's "the close is fetched by a pre-commit worker
+      // backfill", stood in for here by seeding it directly.
+      const catalog = new DrizzleAssetCatalogRepository(appDb);
+      const mainAsset = await catalog.upsertByCode({
+        code: 'XPML11',
+        name: 'XP Malls',
+        assetClass: 'fii',
+      });
+      const quotes = new DrizzleQuoteRepository(appDb);
+      await quotes.upsertClosePrice({
+        assetId: mainAsset.id,
+        date: BusinessDate.of('2024-02-22'),
+        close: Money.fromString('114.90'),
+        source: 'brapi_free',
+      });
+
+      const creditBatch = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(
+        uploadDir,
+        creditBatch,
+        await buildMovimentacaoXlsx([
+          {
+            data: '22/02/2024',
+            movimentacao: 'Atualização',
+            produto: 'XPML11 - XP Malls',
+            quantidade: '3',
+            precoUnitario: '-',
+            valorOperacao: '-',
+          },
+        ]),
+      );
+      await handleImportStage({ batchId: creditBatch, userId }, handlerDeps());
+      await handleImportCommit({ batchId: creditBatch, userId }, handlerDeps());
+
+      const { rows: credit } = await migratorPool.query<{
+        type: string;
+        status: string;
+        quantity: string;
+        unit_price: string;
+        cost_is_estimate: boolean;
+        estimate_close_date: string | null;
+      }>(
+        `SELECT t.type, t.status, t.quantity, t.unit_price, t.cost_is_estimate,
+                t.estimate_close_date::text AS estimate_close_date
+           FROM transactions t JOIN assets a ON a.id = t.asset_id
+          WHERE a.code = 'XPML11'`,
+      );
+      expect(credit).toHaveLength(1);
+      expect(credit[0]).toMatchObject({
+        type: 'subscription',
+        status: 'active',
+        quantity: '3.00000000',
+        unit_price: '114.90000000',
+        cost_is_estimate: true,
+        estimate_close_date: '2024-02-22',
+      });
+
+      const { rows: exercise } = await migratorPool.query<{ status: string }>(
+        `SELECT t.status FROM transactions t JOIN assets a ON a.id = t.asset_id WHERE a.code = 'XPML12'`,
+      );
+      expect(exercise).toEqual([{ status: 'superseded' }]);
+
+      const { rows: exerciseRows } = await migratorPool.query<{ classification: string }>(
+        'SELECT classification FROM import_rows WHERE batch_id = $1',
+        [exerciseBatch],
+      );
+      expect(exerciseRows).toEqual([{ classification: 'ignored' }]);
+    });
+
+    it('BR-005-20e: supersedes a whole-position Atualização credit with no subscription exercise nearby', async () => {
+      const buyBatch = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(
+        uploadDir,
+        buyBatch,
+        await buildMovimentacaoXlsx([
+          {
+            data: '01/01/2024',
+            movimentacao: 'Compra',
+            produto: 'REFR3 - Refricom ON',
+            quantidade: '46',
+            precoUnitario: '10,00',
+          },
+        ]),
+      );
+      await handleImportStage({ batchId: buyBatch, userId }, handlerDeps());
+      await handleImportCommit({ batchId: buyBatch, userId }, handlerDeps());
+
+      const refreshBatch = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(
+        uploadDir,
+        refreshBatch,
+        await buildMovimentacaoXlsx([
+          {
+            data: '01/02/2024',
+            movimentacao: 'Atualização',
+            produto: 'REFR3 - Refricom ON',
+            quantidade: '46',
+            precoUnitario: '-',
+            valorOperacao: '-',
+          },
+        ]),
+      );
+      await handleImportStage({ batchId: refreshBatch, userId }, handlerDeps());
+      await handleImportCommit({ batchId: refreshBatch, userId }, handlerDeps());
+
+      const { rows: refreshRows } = await migratorPool.query<{ classification: string }>(
+        'SELECT classification FROM import_rows WHERE batch_id = $1',
+        [refreshBatch],
+      );
+      expect(refreshRows).toEqual([{ classification: 'ignored' }]);
+
+      const { rows: position } = await migratorPool.query<{ quantity: string }>(
+        `SELECT p.quantity FROM positions p JOIN assets a ON a.id = p.asset_id WHERE a.code = 'REFR3'`,
+      );
+      expect(position[0]?.quantity).toBe('46.00000000');
+    });
   });
 });
 

@@ -4882,6 +4882,12 @@ describe('SPEC-005 BR-005-20d (#144) — an exercised subscription pairs with it
       (t) => t.assetId === rightAssetId,
     );
     expect(rightLedger.find((t) => t.type === 'subscription')?.status).toBe('superseded');
+
+    // #144 review — the exercise's row sits in `firstBatch`, which this
+    // commit never otherwise touches; it must still leave Needs Attention.
+    const exerciseRow = await rowForCode(deps, firstBatch, 'XXXX12');
+    const updatedExerciseRow = await deps.rows.findById(exerciseRow.id);
+    expect(updatedExerciseRow?.classification).toBe('ignored');
   });
 
   it('leaves both rows unclassified with no stored close, and resolves them on re-import once one exists (DL-005-22)', async () => {

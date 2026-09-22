@@ -996,6 +996,12 @@ export async function commitBatch(
   const corporateIds = new Set<string>(corporateInPlace.map((r) => r.updated.id));
   const isCorporate = (t: Transaction) => corporateIds.has(t.id);
   await markConversionOrigins(deps, conversionInPlace);
+  // SPEC-005 BR-005-20d/20e: the same fix-up as `markConversionOrigins`, for
+  // an exercise or a position-refresh credit superseded `in_place` — found
+  // only through `SubscriptionEvidenceReader`, so its row sits in a batch
+  // this commit never otherwise touches and stayed `unclassified` there
+  // until now. `ignored`, not `new`: neither ever moves a position.
+  await markSubscriptionOriginsIgnored(deps, [...subscriptionUpdates, ...positionRefreshUpdates]);
 
   await settleEarlierRefusals(deps, batch.id, toInsert);
 
@@ -3569,6 +3575,53 @@ async function markConversionOrigins(
       rowCounts: {
         ...batch.rowCounts,
         new: batch.rowCounts.new + changed,
+        needsAttention: batch.rowCounts.needsAttention - changed,
+      },
+    });
+  }
+}
+
+/**
+ * SPEC-005 BR-005-20d/20e (#144) — `markConversionOrigins`'s counterpart for
+ * a subscription exercise or a position-refresh credit superseded `in_place`:
+ * finds each updated transaction's own origin batch by `importBatchId`
+ * (every `Transaction` carries it; no separate `origin` field is needed) and
+ * reclassifies the matching still-`unclassified` row there to `ignored`
+ * rather than `new` — neither ever moves a position, so the row that staged
+ * it leaves Needs Attention without ever being counted as applied.
+ */
+async function markSubscriptionOriginsIgnored(
+  deps: IngestionDependencies,
+  updates: readonly Transaction[],
+): Promise<void> {
+  const byOrigin = new Map<ImportBatchId, Set<string>>();
+  for (const transaction of updates) {
+    if (transaction.importBatchId === null) continue;
+    byOrigin.set(
+      transaction.importBatchId,
+      (byOrigin.get(transaction.importBatchId) ?? new Set<string>()).add(transaction.id),
+    );
+  }
+  for (const [origin, transactionIds] of byOrigin) {
+    let changed = 0;
+    for (const row of await deps.rows.listByBatch(origin)) {
+      if (
+        row.transactionId === null ||
+        !transactionIds.has(row.transactionId) ||
+        row.classification !== 'unclassified'
+      ) {
+        continue;
+      }
+      await deps.rows.updateClassification(row.id, 'ignored');
+      changed += 1;
+    }
+    const batch = await deps.batches.findById(origin);
+    if (batch === null || batch.rowCounts === null || changed === 0) continue;
+    await deps.batches.update({
+      ...batch,
+      rowCounts: {
+        ...batch.rowCounts,
+        ignored: batch.rowCounts.ignored + changed,
         needsAttention: batch.rowCounts.needsAttention - changed,
       },
     });
