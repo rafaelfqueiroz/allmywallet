@@ -5,6 +5,7 @@ import type { Money, Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
+import { planCarriedLegUpdates } from '@/core/ledger/carried-legs';
 import { guardReplayable, type PositionLookupKey, without } from '@/core/ledger/guard-replayable';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import {
@@ -91,6 +92,8 @@ export interface EditTransactionResult {
    * rebuild disagrees with it (DM-4).
    */
   readonly recalculations: readonly RecalculationOutcome[];
+  /** SPEC-007 BR-007-06 (#144 F6): carried legs downstream, re-derived with the edit. */
+  readonly rederived: readonly Transaction[];
 }
 
 export async function editTransaction(
@@ -105,6 +108,7 @@ export async function editTransaction(
   return ok({
     transaction: transaction as Transaction,
     recalculations: result.value.recalculations,
+    rederived: result.value.rederived,
   });
 }
 
@@ -116,8 +120,25 @@ export interface TransactionEdit {
 export interface EditTransactionsResult {
   /** The edited transactions, in the order the edits were given. */
   readonly transactions: readonly Transaction[];
-  /** One per position any edit touched — each recalculated once. */
+  /**
+   * One per position any edit touched — each recalculated once — including
+   * every position a re-derived carried leg sits in (`carried-legs.ts`).
+   */
   readonly recalculations: readonly RecalculationOutcome[];
+  /** SPEC-007 BR-007-06 (#144 F6): carried legs downstream, re-derived with the edit. */
+  readonly rederived: readonly Transaction[];
+}
+
+export interface EditTransactionsOptions {
+  /**
+   * SPEC-007 BR-007-06 (#144 F6): re-derive the carried transfer credits and
+   * import-resolved conversion legs downstream of the edited positions
+   * (`carried-legs.ts`). Default on. Import's own in-place writes turn it off:
+   * a commit resolves carries itself, over the ledger *and* its batch
+   * (SPEC-005 BR-005-20a), and a second derivation over the stored ledger alone
+   * could disagree with it mid-commit.
+   */
+  readonly rederiveCarriedLegs?: boolean;
 }
 
 /**
@@ -135,6 +156,7 @@ export interface EditTransactionsResult {
 export async function editTransactions(
   deps: LedgerDependencies,
   edits: readonly TransactionEdit[],
+  options: EditTransactionsOptions = {},
 ): Promise<Result<EditTransactionsResult, DomainError>> {
   const now = deps.clock.now();
   const today = deps.clock.today();
@@ -190,22 +212,42 @@ export async function editTransactions(
     }
   }
 
+  const removed = new Set<string>(pairs.map((pair) => pair.original.id));
+  const edited = pairs.map((pair) => pair.updated);
+
+  /**
+   * SPEC-007 BR-007-06 (#144 F6): the carried legs downstream of every
+   * position the edits touched, re-derived over the ledger as the edits leave
+   * it — so correcting an estimated price at A clears the marker, and the cost
+   * read from the estimate, on what A carried to B. Planned before anything is
+   * written, so the guard below covers the positions they land in too.
+   */
+  const rederived =
+    options.rederiveCarriedLegs === false
+      ? []
+      : await planCarriedLegUpdates(deps, [...scopes.values()], (ledger) => [
+          ...without(ledger, removed),
+          ...edited,
+        ]);
+  for (const leg of rederived) touch(leg, leg.tradeDate);
+  const replacing = new Set<string>([...removed, ...rederived.map((leg) => leg.id)]);
+  const writes = [...edited.filter((t) => !rederived.some((leg) => leg.id === t.id)), ...rederived];
+
   // BR-006-15: each ledger must hold together with every edit in place.
   // `without` first, because an edit that only changes the quantity is a
   // replace, not an addition; a row moved away is simply absent from the
   // position it left, which is what can strand a sale there.
-  const removed = new Set<string>(pairs.map((pair) => pair.original.id));
   for (const scope of scopes.values()) {
     const guard = await guardReplayable(deps, scope, (existing) => [
-      ...without(existing, removed),
-      ...pairs
-        .map((pair) => pair.updated)
-        .filter((t) => t.assetId === scope.assetId && t.institutionId === scope.institutionId),
+      ...without(existing, replacing),
+      ...writes.filter(
+        (t) => t.assetId === scope.assetId && t.institutionId === scope.institutionId,
+      ),
     ]);
     if (!guard.ok) return guard;
   }
 
-  for (const { updated } of pairs) await deps.transactions.update(updated);
+  for (const row of writes) await deps.transactions.update(row);
 
   const recalculations: RecalculationOutcome[] = [];
   for (const scope of scopes.values()) {
@@ -214,7 +256,13 @@ export async function editTransactions(
     recalculations.push(recalculated.value);
   }
 
-  return ok({ transactions: pairs.map((pair) => pair.updated), recalculations });
+  return ok({
+    transactions: pairs.map(
+      (pair) => rederived.find((leg) => leg.id === pair.updated.id) ?? pair.updated,
+    ),
+    recalculations,
+    rederived,
+  });
 }
 
 function applyEdit(original: Transaction, input: EditTransactionInput, now: Date): Transaction {

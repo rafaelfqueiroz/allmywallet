@@ -1898,7 +1898,7 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       expect(third.outcome).toMatchObject({ recarried: 0, committed: [] });
     });
 
-    it('a user correcting the source price clears the marker the next re-carry writes', async () => {
+    it('#144 F6: a user correcting the source price re-carries at once, clearing the marker', async () => {
       const deps = buildFakeIngestionDeps();
       await importFile(deps, [history()]);
       const subscription = await subscribeEstimated(deps, '2026-02-10');
@@ -1912,12 +1912,25 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
         unitPrice: Money.fromString('112.95'),
       });
       expect(edited.ok && edited.value.transaction.costIsEstimate).toBe(false);
-      const again = await importFile(deps, [credit(), debit()]);
 
-      expect(again.outcome).toMatchObject({ recarried: 1 });
+      // SPEC-007 BR-007-06 (#144 F6): the edit itself re-carries — a real
+      // import-written credit, found by its price-less key — without waiting
+      // for a re-import, and without marking the credit as the user's.
+      expect(edited.ok && edited.value.rederived.map((t) => t.id)).toEqual([
+        transfersIn(deps)[0]?.id,
+      ]);
       expect(asStored((transfersIn(deps)[0] as Transaction).unitPrice)).toBe('27.15833333');
-      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: false });
+      expect(transfersIn(deps)[0]).toMatchObject({
+        costIsEstimate: false,
+        estimateCloseDate: null,
+        isUserModified: false,
+      });
       expect(await markerAt(deps, DESTINO)).toBe(false);
+      await expectRebuildEqualsIncremental(deps);
+
+      // A re-import agrees: the figure and marker it would carry are stored.
+      const again = await importFile(deps, [credit(), debit()]);
+      expect(again.outcome).toMatchObject({ recarried: 0, committed: [] });
       await expectRebuildEqualsIncremental(deps);
     });
   });

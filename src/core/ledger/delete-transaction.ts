@@ -6,6 +6,11 @@ import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { PositionState } from '@/core/positions/position-state';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
+import {
+  guardCarriedLegs,
+  planCarriedLegUpdates,
+  recalculateCarriedPositions,
+} from '@/core/ledger/carried-legs';
 import { guardReplayable, without } from '@/core/ledger/guard-replayable';
 import type { Transaction } from '@/core/ledger/transaction';
 import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
@@ -88,6 +93,13 @@ export async function describeDeletionImpact(
 export interface DeleteTransactionResult {
   readonly deletedCount: number;
   readonly recalculation: RecalculationOutcome;
+  /**
+   * SPEC-007 BR-007-06 (#144 F6): the carried legs downstream of the deleted
+   * row's position, re-derived without it, and a recalculation for every
+   * position they sit in.
+   */
+  readonly rederived: readonly Transaction[];
+  readonly downstream: readonly RecalculationOutcome[];
 }
 
 export async function deleteTransaction(
@@ -99,12 +111,20 @@ export async function deleteTransaction(
     return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { transactionId: id }));
   }
 
-  const guard = await guardReplayable(deps, target, (existing) =>
-    without(existing, new Set([target.id])),
-  );
+  const removed = new Set<string>([target.id]);
+  const guard = await guardReplayable(deps, target, (existing) => without(existing, removed));
   if (!guard.ok) return guard;
 
+  // SPEC-007 BR-007-06 (#144 F6): deleting an estimated row at A re-derives
+  // what A carried on, exactly as correcting its price does.
+  const rederived = await planCarriedLegUpdates(deps, [target], (ledger) =>
+    without(ledger, removed),
+  );
+  const guardDownstream = await guardCarriedLegs(deps, rederived, removed);
+  if (!guardDownstream.ok) return guardDownstream;
+
   const deletedCount = await deps.transactions.deleteByIds([target.id]);
+  for (const leg of rederived) await deps.transactions.update(leg);
 
   const recalculation = await recalculatePositionFrom(deps, {
     assetId: target.assetId,
@@ -113,7 +133,15 @@ export async function deleteTransaction(
   });
   if (!recalculation.ok) return recalculation;
 
-  return ok({ deletedCount, recalculation: recalculation.value });
+  const downstream = await recalculateCarriedPositions(deps, rederived, [target]);
+  if (!downstream.ok) return downstream;
+
+  return ok({
+    deletedCount,
+    recalculation: recalculation.value,
+    rederived,
+    downstream: downstream.value,
+  });
 }
 
 function countOnOrAfter(transactions: readonly Transaction[], date: BusinessDate): number {

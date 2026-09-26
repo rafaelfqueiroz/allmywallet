@@ -3575,39 +3575,46 @@ async function updateInPlace(
   const supersedes = reclassifications.filter((r) => r.kind === 'supersede');
   if (carried.length === 0 && reclassifications.length === 0) return outcome;
 
-  const edited = await editTransactions(deps, [
-    ...carried.map(({ transaction }) => ({
-      id: transaction.id,
-      input: {
-        unitPrice: transaction.unitPrice,
-        status: 'active' as const,
-        preserveNaturalKey: true,
-        flagUserModified: false,
-        // SPEC-007 BR-007-06: the marker the carry computed with the price
-        // (`withCarriedCost`), set or cleared with it.
-        costEstimate: transaction.costIsEstimate
-          ? { closeDate: transaction.estimateCloseDate }
-          : null,
-      },
-    })),
-    ...reclassified.map(({ updated }) => ({
-      id: updated.id,
-      input: {
-        type: updated.type,
-        status: updated.status,
-        ratio: updated.ratio,
-        // #113 BR-007-04b: a split fraction's sale takes its auction's price
-        // (`applyEdit` recomputes the total). Every other activation keeps its own.
-        unitPrice: updated.unitPrice,
-        // #139 BR-007-04b: a fraction removed between a same-date pair sells at
-        // the second event's scale — its quantity changes with its price.
-        // Every other activation keeps its own.
-        quantity: updated.quantity,
-        preserveNaturalKey: true,
-        flagUserModified: false,
-      },
-    })),
-  ]);
+  const edited = await editTransactions(
+    deps,
+    [
+      ...carried.map(({ transaction }) => ({
+        id: transaction.id,
+        input: {
+          unitPrice: transaction.unitPrice,
+          status: 'active' as const,
+          preserveNaturalKey: true,
+          flagUserModified: false,
+          // SPEC-007 BR-007-06: the marker the carry computed with the price
+          // (`withCarriedCost`), set or cleared with it.
+          costEstimate: transaction.costIsEstimate
+            ? { closeDate: transaction.estimateCloseDate }
+            : null,
+        },
+      })),
+      ...reclassified.map(({ updated }) => ({
+        id: updated.id,
+        input: {
+          type: updated.type,
+          status: updated.status,
+          ratio: updated.ratio,
+          // #113 BR-007-04b: a split fraction's sale takes its auction's price
+          // (`applyEdit` recomputes the total). Every other activation keeps its own.
+          unitPrice: updated.unitPrice,
+          // #139 BR-007-04b: a fraction removed between a same-date pair sells at
+          // the second event's scale — its quantity changes with its price.
+          // Every other activation keeps its own.
+          quantity: updated.quantity,
+          preserveNaturalKey: true,
+          flagUserModified: false,
+        },
+      })),
+    ],
+    // SPEC-005 BR-005-20a: this commit resolved its carries over the ledger
+    // and the batch together; a second pass over the stored ledger alone is
+    // for user writes (SPEC-007 BR-007-06, #144 F6).
+    { rederiveCarriedLegs: false },
+  );
   if (!edited.ok) {
     throw new Error(`SPEC-005 #110: in-place import updates failed: ${edited.error.code}`);
   }
