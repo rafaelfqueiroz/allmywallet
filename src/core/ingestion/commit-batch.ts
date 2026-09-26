@@ -2061,12 +2061,30 @@ async function planSubscriptions(
       if (represented.has(item.transaction.id) || claimedByLiquidation.has(item.transaction.id)) {
         continue;
       }
-      const isExercise = item.transaction.type === 'subscription';
-      const isCredit = storedB3TypeOf(item.transaction.naturalKey) === 'atualizacao';
+      const suffix = storedB3TypeOf(item.transaction.naturalKey);
+      // #144 review F7 — once a pair applies, the credit becomes
+      // `type: 'subscription'` too, so the transaction's own type can no
+      // longer tell the two roles apart on a re-import; only the natural
+      // key's own B3-type suffix (unchanged by resolution) still can.
+      const isExercise =
+        item.transaction.type === 'subscription' && suffix === 'direitos de subscricao - exercido';
+      const isCredit = !isExercise && suffix === 'atualizacao';
       if (!isExercise && !isCredit) continue;
       if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(item.assetCode)) continue;
-      const state: SubscriptionEvidenceState =
-        imported(item.transaction) && item.transaction.status === 'unclassified'
+      // #144 review F7 — "already applied" is now decided explicitly rather
+      // than falling out of the type-based misread above: an exercise is
+      // applied once superseded (never any other terminal status reaches
+      // this path), a credit once it is the active, estimated `subscription`
+      // this very resolution would itself have written.
+      const applied = isExercise
+        ? item.transaction.status === 'superseded' && imported(item.transaction)
+        : item.transaction.status === 'active' &&
+          item.transaction.type === 'subscription' &&
+          item.transaction.costIsEstimate &&
+          imported(item.transaction);
+      const state: SubscriptionEvidenceState = applied
+        ? 'applied'
+        : imported(item.transaction) && item.transaction.status === 'unclassified'
           ? 'open'
           : 'locked';
       refById.set(item.transaction.id, {

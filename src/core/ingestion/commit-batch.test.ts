@@ -5044,6 +5044,175 @@ describe('SPEC-005 BR-005-20d (#144) — an exercised subscription pairs with it
     const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
     expect(mainLedger.every((t) => t.status === 'unclassified')).toBe(true);
   });
+
+  it('BR-005-20d D8, through commitBatch: refuses when the position already held exactly the credited quantity', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'YYYY1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('40'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        subscriptionExercise({
+          assetCode: 'YYYY2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('40'),
+          tradeDate: BusinessDate.of('2024-01-10'),
+        }),
+        // Credits exactly the balance already held (40) — D8: the
+        // Atualização may be a balance statement, not an acquisition.
+        atualizacaoCredit({
+          assetCode: 'YYYY1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('40'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const mainAssetId = await assetIdForCode(deps, batchId, 'YYYY1');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-01'), Money.fromString('30.00'));
+
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    expect(mainLedger.some((t) => t.type === 'subscription')).toBe(false);
+  });
+
+  it('a hand-classified exercise, through commitBatch: a credit that arrives later never pairs with it', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const exerciseBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'WWWW2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2024-01-05'),
+        }),
+      ],
+    });
+    const committedFirst = await commitBatch(deps, userId, { batchId: exerciseBatch });
+    expect(committedFirst.ok).toBe(true);
+    if (!committedFirst.ok) return;
+    expect(committedFirst.value.resolvedSubscriptions).toBe(0);
+
+    const exerciseRows = await deps.rows.listByBatch(exerciseBatch);
+    const exerciseRow = exerciseRows[0] as ImportRow;
+    // The owner classifies it by hand as something else — BR-005-20d must
+    // never touch a row a person decided, however a later credit shapes up.
+    const classified = await classifyImportRow(deps, {
+      rowId: exerciseRow.id,
+      type: 'bonificacao',
+    });
+    expect(classified.ok).toBe(true);
+
+    const creditBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'WWWW1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2024-02-05'),
+        }),
+      ],
+    });
+    const mainAssetId = await assetIdForCode(deps, creditBatch, 'WWWW1');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-05'), Money.fromString('55.00'));
+
+    const result = await commitBatch(deps, userId, { batchId: creditBatch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    expect(mainLedger.every((t) => t.status === 'unclassified')).toBe(true);
+  });
+
+  it('#144 review F7 — an applied credit never misreads as an exercise and steals a later, unrelated pair on the same issuer', async () => {
+    const deps = buildFakeIngestionDeps('2024-07-01');
+    // Round 1: resolves and applies, on main asset VVVV3. Its exercise
+    // (Jan 22) is deliberately more than the 120-day window before round
+    // 2's credit (Jun 15) below, so it is never itself a candidate there —
+    // only round 1's *credit* (Feb 22, 114 days before Jun 15, still inside
+    // the window) is close enough to collide. Before the fix, that credit's
+    // `type: 'subscription'` read as a second exercise: a different main
+    // asset (VVVV4) and the same quantity (3) is exactly what
+    // `resolveSubscriptions`'s shape match asks for, so it collided with
+    // round 2's own exercise and made round 2 wrongly `ambiguous`.
+    const roundOne = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'VVVV2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-22'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'VVVV3',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-02-22'),
+        }),
+      ],
+    });
+    const roundOneAssetId = await assetIdForCode(deps, roundOne, 'VVVV3');
+    deps.closePrices.seed(
+      roundOneAssetId,
+      BusinessDate.of('2024-02-22'),
+      Money.fromString('100.00'),
+    );
+    const first = await commitBatch(deps, userId, { batchId: roundOne });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(1);
+
+    // Round 2: a genuinely separate exercise/credit pair on the same
+    // issuer's OTHER main asset (VVVV4, never touched before — so D8's
+    // balance check cannot be what saves this test), same quantity (3).
+    const roundTwo = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'VVVV6',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-05-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'VVVV4',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-06-15'),
+        }),
+      ],
+    });
+    const roundTwoAssetId = await assetIdForCode(deps, roundTwo, 'VVVV4');
+    deps.closePrices.seed(
+      roundTwoAssetId,
+      BusinessDate.of('2024-06-15'),
+      Money.fromString('105.00'),
+    );
+    const second = await commitBatch(deps, userId, { batchId: roundTwo });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.resolvedSubscriptions).toBe(1);
+
+    const roundTwoLedger = (await deps.transactions.listAll()).filter(
+      (t) => t.assetId === roundTwoAssetId,
+    );
+    const credit = roundTwoLedger.find((t) => t.type === 'subscription' && t.status === 'active');
+    expect(credit).toBeDefined();
+    expect(asStored((credit as Transaction).unitPrice)).toBe('105.00000000');
+  });
 });
 
 describe('SPEC-005 BR-005-20e (#144) — a whole-position Atualização credit is a refresh, not a movement', () => {
