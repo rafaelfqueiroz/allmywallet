@@ -12,6 +12,8 @@ import { BusinessDate } from '@/core/shared/clock';
 import { Money } from '@/core/shared/money';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
+import { FakeQuoteProvider } from '@/core/quotes/test-support';
+import { ok } from '@/core/shared/result';
 import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/build-deps';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { allocateToWallet } from '@/core/wallets/allocate';
@@ -2600,6 +2602,72 @@ describe('SPEC-005 — import pipeline (integration)', () => {
         `SELECT p.quantity FROM positions p JOIN assets a ON a.id = p.asset_id WHERE a.code = 'REFR3'`,
       );
       expect(position[0]?.quantity).toBe('46.00000000');
+    });
+
+    /**
+     * #144 review F1 — the pre-commit backfill itself must find a pair split
+     * across two imports, not only one staged fresh in a single batch. No
+     * close is seeded by hand here: `backfillSubscriptionClosesForBatch`
+     * (via `planSubscriptionCloseRequests`) must discover the exercise
+     * already committed in the first batch through `SubscriptionEvidenceReader`
+     * and fetch the credit's close itself.
+     */
+    it('BR-005-20d / F1: the pre-commit backfill fetches the close for a pair split across two imports, with no close seeded by hand', async () => {
+      const exerciseBatch = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(
+        uploadDir,
+        exerciseBatch,
+        await buildMovimentacaoXlsx([
+          {
+            data: '18/01/2024',
+            movimentacao: 'Direitos de Subscrição - Exercido',
+            produto: 'HSML12 - HSI Malls',
+            quantidade: '9',
+            precoUnitario: '-',
+          },
+        ]),
+      );
+      await handleImportStage({ batchId: exerciseBatch, userId }, handlerDeps());
+      await handleImportCommit({ batchId: exerciseBatch, userId }, handlerDeps());
+
+      const fakeProvider = new FakeQuoteProvider();
+      fakeProvider.setHistory('HSML11', () =>
+        ok({
+          ticker: 'HSML11',
+          source: 'brapi_free',
+          closes: [{ date: BusinessDate.of('2024-02-26'), close: Money.fromString('90.10') }],
+        }),
+      );
+
+      const creditBatch = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(
+        uploadDir,
+        creditBatch,
+        await buildMovimentacaoXlsx([
+          {
+            data: '26/02/2024',
+            movimentacao: 'Atualização',
+            produto: 'HSML11 - HSI Malls',
+            quantidade: '9',
+            precoUnitario: '-',
+            valorOperacao: '-',
+          },
+        ]),
+      );
+      await handleImportStage({ batchId: creditBatch, userId }, handlerDeps());
+      await handleImportCommit(
+        { batchId: creditBatch, userId },
+        { ...handlerDeps(), quoteProvider: fakeProvider },
+      );
+
+      expect(fakeProvider.historicalCalls).toEqual([
+        { ticker: 'HSML11', from: '2024-02-16', to: '2024-02-26' },
+      ]);
+
+      const { rows: credit } = await migratorPool.query<{ status: string; unit_price: string }>(
+        `SELECT t.status, t.unit_price FROM transactions t JOIN assets a ON a.id = t.asset_id WHERE a.code = 'HSML11'`,
+      );
+      expect(credit).toEqual([{ status: 'active', unit_price: '90.10000000' }]);
     });
   });
 });

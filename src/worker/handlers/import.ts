@@ -14,14 +14,12 @@ import { commitBatch } from '@/core/ingestion/commit-batch';
 import { cancelBatch } from '@/core/ingestion/cancel-batch';
 import { failBatch } from '@/core/ingestion/fail-batch';
 import type { Transaction } from '@/core/ledger/transaction';
-import {
-  corporateEventMovementOf,
-  conversionEvidenceMovementOf,
-} from '@/core/ingestion/movement-map';
+import { corporateEventMovementOf } from '@/core/ingestion/movement-map';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
+import { planSubscriptionCloseRequests } from '@/core/ingestion/subscription-close-requests';
 import type { CorporateEventFactorSource } from '@/core/quotes/corporate-event-factors';
 import { refreshCorporateEventFactors } from '@/core/quotes/refresh-corporate-event-factors';
-import { fetchClosesForDates, type CloseDateRequest } from '@/core/quotes/fetch-closes-for-dates';
+import { fetchClosesForDates } from '@/core/quotes/fetch-closes-for-dates';
 import type { QuoteProvider } from '@/core/quotes/ports';
 import { DrizzleCorporateEventFactorRepository } from '@/adapters/db/corporate-event-factor-repository';
 import { B3ListedCompaniesFactorSource } from '@/adapters/market-data/b3-listed-companies';
@@ -323,7 +321,7 @@ export async function handleImportCommit(
     await resolveConfig('import.subscription_credit_window_days', { db: deps.database })
   ).value;
   await refreshFactorsForBatch(deps, userId, batchId);
-  await backfillSubscriptionClosesForBatch(deps, userId, batchId);
+  await backfillSubscriptionClosesForBatch(deps, userId, batchId, subscriptionCreditWindowDays);
 
   const result = await withTenant(
     userId,
@@ -496,56 +494,36 @@ async function refreshFactorsForBatch(
  * commit would otherwise hold ledger row locks across an HTTP call, and a
  * pg-boss retry of `import.commit` would then depend on brapi being up.
  *
- * Scoped tightly: only an issuer root this batch stages **both** an
- * unresolved exercise and an `Atualização` credit for spends a request — an
- * unrelated position-refresh `Atualização` (BR-005-20e) never does (BR-021-28
- * — bounded network requests). Never fatal: an outage, an exhausted budget,
- * or any failure to record one leaves the pair unpriced and `unclassified`;
- * `commitBatch` resolves it on a later import once a close exists. Without a
- * brapi token (#151) this fails in production today, which is expected.
+ * #144 review F1 — which pairs to fetch for is decided by
+ * `planSubscriptionCloseRequests`, the same pure resolver `commitBatch`'s own
+ * `planSubscriptions` runs, over this batch's own rows **and** the stored
+ * ledger (`SubscriptionEvidenceReader`) — not a bare scan of this batch's
+ * `unclassified` rows, which missed a pair split across two imports (the
+ * exercise already committed) and a re-import of an already-staged, still-
+ * unresolved pair (both rows now stage `duplicate`, so neither is
+ * `unclassified` in *this* batch at all).
+ *
+ * Never fatal: an outage, an exhausted budget, or any failure to record one
+ * leaves the pair unpriced and `unclassified`; `commitBatch` resolves it on a
+ * later import once a close exists. Without a brapi token (#151) this fails
+ * in production today, which is expected.
  */
 async function backfillSubscriptionClosesForBatch(
   deps: ImportHandlerDeps,
   userId: UserId,
   batchId: ImportBatchId,
+  subscriptionCreditWindowDays: number,
 ): Promise<void> {
   try {
-    const rows = await withTenant(
+    const requests = await withTenant(
       userId,
-      async (tx) => buildIngestionDeps(tx, userId, deps.clock).rows.listByBatch(batchId),
+      async (tx) => {
+        const ingestionDeps = buildIngestionDeps(tx, userId, deps.clock);
+        const rows = await ingestionDeps.rows.listByBatch(batchId);
+        return planSubscriptionCloseRequests(ingestionDeps, rows, subscriptionCreditWindowDays);
+      },
       deps.database,
     );
-
-    const exerciseIssuers = new Set<string>();
-    for (const row of rows) {
-      if (
-        row.record.kind !== 'transaction' ||
-        row.classification !== 'unclassified' ||
-        row.ledgerType !== 'subscription'
-      ) {
-        continue;
-      }
-      const issuer = issuerCodeOf(row.record.assetCode);
-      if (issuer !== null) exerciseIssuers.add(issuer);
-    }
-    if (exerciseIssuers.size === 0) return;
-
-    const requests: CloseDateRequest[] = [];
-    for (const row of rows) {
-      if (row.record.kind !== 'transaction' || row.classification !== 'unclassified') continue;
-      const evidence = conversionEvidenceMovementOf(row.record.b3Type, {
-        assetClass: row.record.assetClass,
-        priceStated: row.record.priceStated,
-      });
-      if (evidence !== 'atualizacao') continue;
-      const issuer = issuerCodeOf(row.record.assetCode);
-      if (issuer === null || !exerciseIssuers.has(issuer)) continue;
-      requests.push({
-        assetId: row.assetId,
-        assetCode: row.record.assetCode,
-        upTo: row.record.tradeDate,
-      });
-    }
     if (requests.length === 0) return;
 
     const provider = deps.quoteProvider ?? (await buildQuoteProvider(deps.database));
