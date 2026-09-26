@@ -1000,8 +1000,10 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(byDate('2026-03-19')?.totalValue.toString()).toBe('19.90326');
 
     // A pure balance statement: 68 restates what the ledger already holds, no
-    // target asset appears beside it, and nothing may be invented for it.
-    expect(byDate('2026-06-22')).toMatchObject({ status: 'unclassified' });
+    // target asset appears beside it, and nothing may be invented for it —
+    // BR-005-20e (#144) now resolves this as a position refresh rather than
+    // leaving it in Needs Attention with no correct hand-classification.
+    expect(byDate('2026-06-22')).toMatchObject({ status: 'superseded' });
     expect(byDate('2026-06-22')?.conversionGroupId).toBeNull();
 
     // 4 × 53,71 = 214,84 of proceeds against 0,00 of carried cost.
@@ -4313,11 +4315,24 @@ describe('#138 — the four Movimentação rows that refused on every import', (
         .reduce((sum, row) => sum.plus(externalFlow(row)), Money.zero());
       expect(liquidationFlow.toString()).toBe('-340.5659961');
 
-      // The three restated balances are no evidence: left `unclassified`, and
-      // nothing is left on the receipt code.
+      // The three restated balances carry no evidence of their own — nothing
+      // is left on the receipt code either — and, BR-005-20e (#144): each one
+      // restates exactly the balance the ledger already holds, so all three
+      // resolve as position refreshes (superseded), not left unclassified.
       expect(
         deps.transactions.rows
           .filter((row) => row.status === 'unclassified')
+          .map((row) => [codeOf.get(row.assetId), row.tradeDate, row.quantity.toString()])
+          .sort(),
+      ).toEqual([]);
+      expect(
+        deps.transactions.rows
+          .filter(
+            (row) =>
+              row.status === 'superseded' &&
+              (row.tradeDate === '2025-10-06' || row.tradeDate === '2025-10-17') &&
+              ['BPFF11', 'HGFF11', 'RVBI11'].includes(codeOf.get(row.assetId) ?? ''),
+          )
           .map((row) => [codeOf.get(row.assetId), row.tradeDate, row.quantity.toString()])
           .sort(),
       ).toEqual([
@@ -4400,16 +4415,18 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       const first = await importFile(deps, file());
 
       expect(first.outcome).toMatchObject({
-        // 2 buys, 3 unclassified restatements, 2 subscriptions, 2 sales, the
-        // fraction's sale, and the rename's 2 legs; the auction is inserted
-        // `superseded`, outside `applied`.
-        applied: 12,
+        // 2 buys, 2 subscriptions, 2 sales, the fraction's sale, and the
+        // rename's 2 legs; the auction is inserted `superseded`, outside
+        // `applied`. #144 review F4: the 3 restated balances resolve as
+        // position refreshes (BR-005-20e), counted separately.
+        applied: 9,
         invalid: 0,
         resolvedLiquidations: 1,
         resolvedAssetConversions: 1,
         committedConversionLegs: 2,
         resolvedCorporateEvents: 1,
         consumedAuctions: 1,
+        resolvedPositionRefreshes: 3,
       });
       await expectEndState(deps);
       await expectNoOpReimport(deps);
@@ -4525,6 +4542,16 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       const deps = buildFakeIngestionDeps('2026-09-21');
       await importFile(deps, file());
       const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
+      console.log(
+        'DEBUG snapshot after first import',
+        snapshot
+          .filter(
+            (r) =>
+              r.type === 'rendimento' ||
+              (r.quantity && ['90', '70', '159.25'].includes(r.quantity.toString())),
+          )
+          .map((r) => [r.status, r.type, r.quantity?.toString(), r.tradeDate, r.naturalKey]),
+      );
 
       // Each half finds the other already applied in the ledger — the sales by
       // their liquidation value, the subscriptions on the ledger code.
@@ -5213,6 +5240,73 @@ describe('SPEC-005 BR-005-20d (#144) — an exercised subscription pairs with it
     expect(credit).toBeDefined();
     expect(asStored((credit as Transaction).unitPrice)).toBe('105.00000000');
   });
+
+  it('#144 review F3 — an applied subscription never blocks a later whole-position refresh (XPML11-shaped)', async () => {
+    // Before the fix, BR-005-20e's own nearby-exercise guard read
+    // `item.transaction.type === 'subscription'` — true for the credit half
+    // of an *applied* pair forever after, since resolution never changes its
+    // type. A refresh landing on the same main asset within the window was
+    // wrongly refused no matter how long ago the pair applied. The guard
+    // must fire only for an evidence row still `open` and unpaired.
+    const deps = buildFakeIngestionDeps('2024-05-01');
+    const roundOne = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'XPML11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('50'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        subscriptionExercise({
+          assetCode: 'XPML13',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-01-15'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'XPML11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-02-22'),
+        }),
+      ],
+    });
+    const mainAssetId = await assetIdForCode(deps, roundOne, 'XPML11');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-22'), Money.fromString('90.00'));
+    const first = await commitBatch(deps, userId, { batchId: roundOne });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(1);
+    // The position now stands at 50 + 10 = 60, and the exercise/credit pair
+    // is applied — the exercise superseded, the credit an active, estimated
+    // subscription. Both are still well inside a 120-day window of the
+    // refresh below (39 and 68 days), so only the fix, not distance, is what
+    // lets this resolve.
+
+    const refreshBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'XPML11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('60'),
+          tradeDate: BusinessDate.of('2024-04-01'),
+        }),
+      ],
+    });
+    const second = await commitBatch(deps, userId, { batchId: refreshBatch });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.resolvedPositionRefreshes).toBe(1);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    const refreshRow = (await deps.rows.listByBatch(refreshBatch))[0] as ImportRow;
+    const refreshTransaction = mainLedger.find((t) => t.id === refreshRow.transactionId);
+    expect(refreshTransaction?.status).toBe('superseded');
+    const replayed = replayPosition(mainLedger);
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('60');
+  });
 });
 
 describe('SPEC-005 BR-005-20e (#144) — a whole-position Atualização credit is a refresh, not a movement', () => {
@@ -5400,5 +5494,185 @@ describe('SPEC-005 BR-005-20e (#144) — a whole-position Atualização credit i
     const ledger = await deps.transactions.listAll();
     const credit = ledger.find((t) => t.type === 'rendimento' && t.quantity.toString() === '46');
     expect(credit?.status).toBe('unclassified');
+  });
+
+  async function stockIdOf(deps: FakeIngestionDeps, code: string) {
+    return deps.assets.resolve({
+      code,
+      name: code,
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: false,
+    });
+  }
+
+  it('#144 review F4 — resolves on a definition-named code with no conversion evidence in the batch', async () => {
+    // ELET3 names a real conversion (`elet3-to-axia3`), so the old
+    // `SUBSCRIPTION_EXCLUDED_CODES` blanket refused a refresh on it forever,
+    // whether or not this batch (or any batch) ever actually converted it.
+    // With nothing else in this batch touching ELET3, nothing claims the
+    // row, and it must resolve like any other whole-position restatement.
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const setup = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'ELET3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('100'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+      ],
+    });
+    expect((await commitBatch(deps, userId, { batchId: setup })).ok).toBe(true);
+
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'ELET3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('100'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    });
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedAssetConversions).toBe(0);
+    expect(result.value.resolvedPositionRefreshes).toBe(1);
+
+    const eletId = await stockIdOf(deps, 'ELET3');
+    const ledger = await deps.transactions.listAll();
+    const refreshed = ledger.find((t) => t.assetId === eletId && t.tradeDate === '2024-02-01');
+    expect(refreshed?.status).toBe('superseded');
+    const replayed = replayPosition(ledger.filter((t) => t.assetId === eletId));
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('100');
+  });
+
+  it('#144 review F4 — never fires on a definition-named code the conversion itself consumes in the same batch', async () => {
+    // The same shape as "moves ELET3 260 ... to AXIA3" above: a single
+    // target-only Atualização is the *only* candidate row in this batch, and
+    // the conversion consumes it whole. Before the fix this was already safe
+    // by construction — AXIA3 held nothing before, so the old exclusion and
+    // the balance-zero guard both happened to agree — but the assertion is
+    // exactly BR-005-20e's own contract: a row a conversion resolves must
+    // never also fire as a position refresh.
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const setup = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'ELET3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('260'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+          unitPrice: Money.fromString('10'),
+        }),
+      ],
+    });
+    expect((await commitBatch(deps, userId, { batchId: setup })).ok).toBe(true);
+
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'AXIA3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('260'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    });
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedAssetConversions).toBe(1);
+    expect(result.value.committedConversionLegs).toBe(2);
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const eletId = await stockIdOf(deps, 'ELET3');
+    const axiaId = await stockIdOf(deps, 'AXIA3');
+    const ledger = await deps.transactions.listAll();
+    const eletReplayed = replayPosition(ledger.filter((t) => t.assetId === eletId));
+    expect(eletReplayed.ok && eletReplayed.value.quantity.toString()).toBe('0');
+    const axiaReplayed = replayPosition(ledger.filter((t) => t.assetId === axiaId));
+    expect(axiaReplayed.ok && axiaReplayed.value.quantity.toString()).toBe('260');
+  });
+
+  it('#144 review F5 — a split then a whole-position refresh to the new balance resolves in the same import, and a re-import is a no-op', async () => {
+    // Before the fix, `planPositionRefreshes`'s own balance-before replay
+    // never saw this commit's *own* just-resolved subscription credit — only
+    // the stored ledger, which does not have it yet — so a refresh landing
+    // on the balance the subscription itself just produced needed a second
+    // import to see what the first one had already written.
+    // BR-005-20e's own nearby-exercise guard (#144 review F3) is deliberately
+    // out of play here: the exercise (2023-09-01) sits 182 days before the
+    // refresh (2024-03-01) — outside the 120-day window — while still inside
+    // it relative to its own credit (61 days), so the pair still resolves.
+    const deps = buildFakeIngestionDeps('2024-05-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'UUUU1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('50'),
+          tradeDate: BusinessDate.of('2023-01-01'),
+        }),
+        subscriptionExercise({
+          assetCode: 'UUUU2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2023-09-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'UUUU1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2023-11-01'),
+        }),
+        // Restates the balance the subscription above is about to produce
+        // (50 + 10 = 60) — not the balance already stored (50).
+        atualizacaoCredit({
+          assetCode: 'UUUU1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('60'),
+          tradeDate: BusinessDate.of('2024-03-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const rows = await deps.rows.listByBatch(batchId);
+    const mainAssetId = (
+      rows.find(
+        (r) => r.record.kind === 'transaction' && r.record.assetCode === 'UUUU1',
+      ) as ImportRow
+    ).assetId;
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2023-11-01'), Money.fromString('80.00'));
+
+    const first = await commitBatch(deps, userId, { batchId });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(1);
+    expect(first.value.resolvedPositionRefreshes).toBe(1);
+
+    const ledger = await deps.transactions.listAll();
+    const replayed = replayPosition(ledger.filter((t) => t.assetId === mainAssetId));
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('60');
+
+    const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
+    const secondBatch = await stagedBatch(deps, extract);
+    const second = await commitBatch(deps, userId, { batchId: secondBatch });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value).toMatchObject({
+      applied: 0,
+      invalid: 0,
+      resolvedSubscriptions: 0,
+      resolvedPositionRefreshes: 0,
+    });
+    expect(deps.transactions.rows).toEqual(snapshot);
   });
 });
