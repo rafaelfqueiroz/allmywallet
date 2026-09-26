@@ -270,8 +270,8 @@ export const REGISTRY = {
    * SPEC-005 BR-005-20d (#144) — how many days on or after an exercised
    * subscription's date a price-less `Atualização` credit on the main asset
    * may fall and still pair with it. No default in `core/ingestion` (SPEC-002):
-   * the caller (`worker/handlers/import.ts`, `src/app/(app)/import/data.ts`)
-   * resolves this and hands it to `commitBatch` as
+   * the caller (`worker/handlers/import.ts`) resolves this and hands it to
+   * `commitBatch` as
    * `CommitBatchInput.subscriptionCreditWindowDays`, exactly as the other
    * `import.*` windows are resolved and passed.
    */
