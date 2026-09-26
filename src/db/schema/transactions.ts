@@ -181,11 +181,16 @@ export const transactions = pgTable(
      */
     costIsEstimate: boolean('cost_is_estimate').notNull().default(false),
     /**
-     * SPEC-005 BR-005-20d: the date an estimate is expected to close to an
-     * exact figure — B3 typically restates a provisional event within one or
-     * two extract cycles. Null whenever `cost_is_estimate` is false (see the
-     * CHECK below) and for every pre-existing row, which the previous
-     * application version never wrote (AR-69).
+     * SPEC-005 BR-005-20d (#144 review F8) — the date of the stored market
+     * close an estimated *price* was read from, not a date the estimate is
+     * expected to resolve by: B3 never states a subscription's price, so the
+     * cost is the close on the day the shares were credited, and that day
+     * never becomes more exact later (`transfer-cost.ts`'s own comment on
+     * this same field). Null whenever `cost_is_estimate` is false (see the
+     * CHECK below), for a carried estimate with no single close of its own
+     * (an average over a lot that may blend several), and for every
+     * pre-existing row, which the previous application version never wrote
+     * (AR-69).
      */
     estimateCloseDate: date('estimate_close_date'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

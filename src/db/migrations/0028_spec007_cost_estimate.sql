@@ -6,12 +6,17 @@
 --
 --   - `transactions.cost_is_estimate` — this row's `unit_price`/`cost_basis`
 --     is provisional, not settled.
---   - `transactions.estimate_close_date` — when the estimate is expected to
---     close to an exact figure. Null unless `cost_is_estimate` is true; the
---     CHECK below is the floor for that pairing, matching the
---     `transactions_ratio_pairing_check` / `transactions_conversion_pairing_check`
---     precedent of enforcing a field-pairing rule at the database as well as
---     in `core/ledger/validate.ts`, because the import path writes here too.
+--   - `transactions.estimate_close_date` — the date of the stored market
+--     close an estimated price was read from (SPEC-005 BR-005-20d: a
+--     subscription B3 never prices, costed at the close on its credit date),
+--     not a date the estimate is expected to resolve by — a carried estimate
+--     sets `cost_is_estimate` with this column null (`transfer-cost.ts`),
+--     since an averaged lot names no single close. Null unless
+--     `cost_is_estimate` is true; the CHECK below is the floor for that
+--     pairing, matching the `transactions_ratio_pairing_check` /
+--     `transactions_conversion_pairing_check` precedent of enforcing a
+--     field-pairing rule at the database as well as in
+--     `core/ledger/validate.ts`, because the import path writes here too.
 --   - `positions.cost_estimated` — set when any transaction folded into a
 --     cached position carries `cost_is_estimate`. The position cache is
 --     derived (BR-006-01) and only ever overwritten with a whole replayed
