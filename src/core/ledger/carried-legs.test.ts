@@ -467,6 +467,110 @@ describe('#144 F6 — a delete re-derives what its position carried on', () => {
   });
 });
 
+describe('#144 F6 — what the downstream re-derivation guards and recalculates', () => {
+  it('refuses a delete whose re-carry would strand a manual conversion downstream (BR-006-15)', async () => {
+    //  A: buy 100 @ 10,00 + estimated subscription 20 @ 114,90; 100 sent to B
+    //  at 27,48333333 (2.748,333333). B converts all 100 by hand, removing
+    //  2.748,333333. Deleting the subscription re-carries B's credit at 10,00
+    //  — 1.000,00 — and the hand-made leg would remove 1.748,33 more than B
+    //  holds. Refused whole: nothing is deleted, nothing re-carried.
+    const sub = subscription('A');
+    const [debit, credit] = transferPair('A', 'B', '2026-03-10', '100', '27.48333333');
+    const group = '00000000-c0de-7000-8000-000000000046';
+    const manualOut = aTransaction()
+      .conversionOut(group, '2748.333333')
+      .at('B')
+      .on('2026-04-01')
+      .quantity('100')
+      .build();
+    const manualIn = aTransaction()
+      .conversionIn('2748.333333', group)
+      .of('NEW3')
+      .at('B')
+      .on('2026-04-01')
+      .quantity('50')
+      .build();
+    const rows = [
+      buy100('A'),
+      sub,
+      debit,
+      { ...credit, costIsEstimate: true },
+      manualOut,
+      manualIn,
+    ];
+
+    const single = await seeded(rows);
+    const refused = await deleteTransaction(single, sub.id);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe('INSUFFICIENT_QUANTITY');
+    expect(await single.transactions.findById(sub.id)).not.toBeNull();
+    expect((await single.transactions.findById(credit.id))?.costIsEstimate).toBe(true);
+
+    const bulk = await seeded(rows);
+    expect((await bulkDeleteTransactions(bulk, [sub.id])).ok).toBe(false);
+    expect(await bulk.transactions.findById(sub.id)).not.toBeNull();
+  });
+
+  it('a same-position round trip is re-carried and recalculated once, with its own position', async () => {
+    //  #135's shape: A sends 100 to itself on 2026-03-10. With the estimated
+    //  subscription the credit carried 27,48333333; deleted, A holds 100 @
+    //  10,00 before the debit, the credit carries 10,00, and A ends at 100
+    //  shares, 1.000,00, exact.
+    const sub = subscription('A');
+    const [debit, credit] = transferPair('A', 'A', '2026-03-10', '100', '27.48333333');
+    const state = await seeded([buy100('A'), sub, debit, { ...credit, costIsEstimate: true }]);
+
+    const result = await deleteTransaction(state, sub.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.rederived.map((t) => t.id)).toEqual([credit.id]);
+    // A is the deleted row's own position: recalculated there, not twice.
+    expect(result.value.downstream).toEqual([]);
+    const a = position(await state.positions.list(), 'A');
+    expect(a?.state.totalCost.toString()).toBe('1000');
+    expect(a?.costEstimated).toBe(false);
+    await expectRebuildEqualsIncremental(state);
+  });
+
+  it('recalculates a position two re-derived legs land in once, from the earlier leg', async () => {
+    //  X and Y each hold 100 @ 10,00 plus an estimated 20 @ 114,90 and send
+    //  60 to B — Y on 2026-03-01, X on 2026-03-10 (X's credit stored first).
+    //  Each carries 3.298,00 ÷ 120 = 27,48333333. Deleting both subscriptions:
+    //  each carries 10,00, B holds 120 at 1.200,00, exact.
+    const subX = subscription('X');
+    const subY = subscription('Y');
+    const [xDebit, xCredit] = transferPair('X', 'B', '2026-03-10', '60', '27.48333333');
+    const [yDebit, yCredit] = transferPair('Y', 'B', '2026-03-01', '60', '27.48333333');
+    const state = await seeded([
+      buy100('X'),
+      buy100('Y'),
+      subX,
+      subY,
+      xDebit,
+      yDebit,
+      { ...xCredit, costIsEstimate: true },
+      { ...yCredit, costIsEstimate: true },
+    ]);
+
+    const result = await bulkDeleteTransactions(state, [subX.id, subY.id]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // X, Y, then B — once, from 2026-03-01.
+    expect(result.value.recalculations.map((r) => r.scope.fromDate)).toEqual([
+      '2026-02-10',
+      '2026-02-10',
+      '2026-03-01',
+    ]);
+    const b = position(await state.positions.list(), 'B');
+    expect(b?.state.totalCost.toString()).toBe('1200');
+    expect(b?.costEstimated).toBe(false);
+    await expectRebuildEqualsIncremental(state);
+  });
+});
+
 describe('rederiveCarriedLegs — the pure planner', () => {
   const key = (at: string, asset = 'PETR4') => ({
     assetId: assetIdFor(asset),
