@@ -3,6 +3,7 @@ import type { UserId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
 import { PositionErrorCode } from '@/core/positions/errors';
+import type { AmortizationTerms } from '@/core/positions/amortization';
 import { firstUnreplayable } from '@/core/positions/replay';
 import { buildCandidate } from '@/core/ingestion/commit-batch';
 import { corporateEventMovementOfKey } from '@/core/ingestion/corporate-event-resolution';
@@ -49,18 +50,36 @@ export type RowRefusal =
    * empties the position; the two legs are written together or not at all.
    */
   | { readonly kind: 'unresolved_transfer_pair'; readonly date: BusinessDate }
+  /**
+   * SPEC-007 BR-007-05c (#166) — an amortization on an asset with no defined
+   * principal (another Tesouro title, CDB, LCI, LCA): refused rather than
+   * applied at a guessed amount.
+   */
+  | { readonly kind: 'amortization_not_supported'; readonly date: BusinessDate }
+  /** SPEC-007 BR-007-05c (#166) — an Educa+/Renda+ payment outside the title's schedule. */
+  | {
+      readonly kind: 'amortization_outside_schedule';
+      readonly date: BusinessDate;
+      readonly firstPayment: BusinessDate;
+      readonly lastPayment: BusinessDate;
+    }
   /** The ledger now accepts it: importing the file again applies it. */
   | { readonly kind: 'applicable' }
   /** The ledger already holds it, from another import. */
   | { readonly kind: 'applied' };
 
-/** `ledger` is the stored ledger of the row's `(asset, institution)` position. */
+/**
+ * `ledger` is the stored ledger of the row's `(asset, institution)` position;
+ * `amortization` the terms of its asset (SPEC-007 BR-007-05c), without which
+ * an amortization row there could not be replayed.
+ */
 export function explainRefusal(
   row: ImportRow,
   ledger: readonly Transaction[],
   userId: UserId,
   now: Date,
   today: BusinessDate,
+  amortization: AmortizationTerms,
 ): RowRefusal {
   if (
     ledger.some(
@@ -75,7 +94,7 @@ export function explainRefusal(
   const candidate = buildCandidate(row, row.batchId, userId, 'active', now, today);
   if (candidate === null) return { kind: 'malformed' };
 
-  const failure = firstUnreplayable([...ledger, candidate]);
+  const failure = firstUnreplayable([...ledger, candidate], { amortization });
   // BR-005-20a (#135): asked only of a row the ledger would otherwise accept,
   // because that is what a held-back debit is — it replays perfectly well, and
   // that is exactly the problem. A row refused for any other reason keeps the
@@ -89,6 +108,20 @@ export function explainRefusal(
   }
   if (failure.transaction.id !== candidate.id) {
     return { kind: 'conflicts_with_ledger', date: failure.transaction.tradeDate };
+  }
+  // SPEC-007 BR-007-05c (#166): an amortization refused for want of a defined
+  // principal says so, with the schedule where there is one — not "malformed",
+  // which reads as a broken row when the row is exactly what B3 wrote.
+  if (failure.error.code === PositionErrorCode.AMORTIZATION_NOT_SUPPORTED) {
+    return { kind: 'amortization_not_supported', date: candidate.tradeDate };
+  }
+  if (failure.error.code === PositionErrorCode.AMORTIZATION_OUTSIDE_SCHEDULE) {
+    return {
+      kind: 'amortization_outside_schedule',
+      date: candidate.tradeDate,
+      firstPayment: failure.error.context['firstPayment'] as BusinessDate,
+      lastPayment: failure.error.context['lastPayment'] as BusinessDate,
+    };
   }
   if (failure.error.code !== PositionErrorCode.INSUFFICIENT_QUANTITY) return { kind: 'malformed' };
   return {

@@ -3,6 +3,7 @@ import type { AssetId, InstitutionId } from '@/core/shared/ids';
 import { asStored, Money, type Quantity } from '@/core/shared/money';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { compareForReplay } from '@/core/positions/ordering';
+import type { AmortizationTerms } from '@/core/positions/amortization';
 import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { ImportRow } from '@/core/ingestion/ports';
 
@@ -234,6 +235,8 @@ export function withCarriedCost(credit: Transaction, carried: CarriedCost): Tran
 export function resolveCarriedCosts(
   legs: readonly CarryLeg[],
   history: (assetId: AssetId, institutionId: InstitutionId | null) => readonly Transaction[],
+  /** SPEC-007 BR-007-05c: an amortization before the debit moves the cost it carries. */
+  amortization: AmortizationTerms,
 ): ReadonlyMap<string, CarriedCost> {
   const resolved = new Map<string, CarriedCost>();
   const pending = new Map(legs.map((leg) => [leg.id, leg]));
@@ -301,7 +304,7 @@ export function resolveCarriedCosts(
       const before = [...history(debit.assetId, debit.institutionId), ...carriedIn].filter(
         (t) => !siblingDebits.has(t.id) && compareForReplay(t, debit) < 0,
       );
-      const replayed = replayPositionWithEstimate(before);
+      const replayed = replayPositionWithEstimate(before, { amortization });
       const carriable =
         replayed.ok &&
         replayed.value.state.quantity.comparedTo(debit.quantity) >= 0 &&

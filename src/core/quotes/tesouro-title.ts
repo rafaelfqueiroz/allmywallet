@@ -54,6 +54,12 @@ interface TesouroProduct {
   readonly nameYearOffset: number;
   /** `MM-DD` every maturity falls on, where the offset depends on it; `null` for any date. */
   readonly maturityMonthDay: string | null;
+  /**
+   * SPEC-007 BR-007-05c — the monthly payments an NTN-B1 title makes from
+   * 15 January of the year in its name, the last one on its maturity;
+   * `null` for every product that does not pay in instalments.
+   */
+  readonly monthlyPayments: number | null;
   /** Words of the name beyond `tesouro`, the indexer and the coupon words. */
   readonly nameWords: readonly string[];
 }
@@ -65,17 +71,31 @@ export const TESOURO_PRODUCTS: readonly TesouroProduct[] = [
   product('Tesouro IPCA+', 'ipca+', false),
   product('Tesouro IPCA+ com Juros Semestrais', 'ipca+', true),
   product('Tesouro IGPM+ com Juros Semestrais', 'igpm+', true),
-  { ...product('Tesouro Educa+', 'educa+', false), nameYearOffset: 4, maturityMonthDay: '12-15' },
+  {
+    ...product('Tesouro Educa+', 'educa+', false),
+    nameYearOffset: 4,
+    maturityMonthDay: '12-15',
+    monthlyPayments: 60,
+  },
   {
     ...product('Tesouro Renda+ Aposentadoria Extra', 'renda+', false),
     nameYearOffset: 19,
     maturityMonthDay: '12-15',
     nameWords: ['aposentadoria', 'extra'],
+    monthlyPayments: 240,
   },
 ];
 
 function product(name: string, indexer: string, coupon: boolean): TesouroProduct {
-  return { name, indexer, coupon, nameYearOffset: 0, maturityMonthDay: null, nameWords: [] };
+  return {
+    name,
+    indexer,
+    coupon,
+    nameYearOffset: 0,
+    maturityMonthDay: null,
+    nameWords: [],
+    monthlyPayments: null,
+  };
 }
 
 const INDEXERS = new Set(TESOURO_PRODUCTS.map((entry) => entry.indexer));
@@ -191,4 +211,58 @@ export function tesouroCatalogCodes(titles: readonly TesouroTitle[]): readonly s
     const code = b3Codes[index] ?? null;
     return code !== null && sources.get(code)?.size === 1 ? code : fullTesouroCode(title);
   });
+}
+
+/**
+ * SPEC-007 BR-007-05c — the payment schedule of a Tesouro Educa+ or Renda+
+ * title (NTN-B1).
+ */
+export interface PayoutSchedule {
+  /** 15 January of the year in the title's name. */
+  readonly firstPayment: BusinessDate;
+  /** Monthly payments in all, the last on the maturity: Educa+ 60, Renda+ 240. */
+  readonly installments: number;
+}
+
+/**
+ * SPEC-007 BR-007-05c — the payout schedule of the title a catalogue code
+ * names, or `null` for any code that is not an NTN-B1 title this table knows.
+ *
+ * Both forms a catalogue code takes are read (`tesouroCatalogCodes`): B3's
+ * name (`Tesouro Educa+ 2026`), whose year is the year payments start, and
+ * the full-date code a title keeps when its B3 name is ambiguous
+ * (`Tesouro Educa+ 15/12/2030`), whose date is the maturity and is turned
+ * back into B3's name by the same rule the sync uses (`b3TesouroCode`) — so a
+ * maturity that does not fit the product's structure has no schedule either.
+ *
+ * Worked example (DV-17): `Tesouro Educa+ 2026` pays 60 instalments, the
+ * first on 2026-01-15, the sixtieth on 2030-12-15 — its maturity, 4 years
+ * after the name year (`nameYearOffset`), which is 5 × 12 = 60 months.
+ * `Tesouro Renda+ Aposentadoria Extra 2030` pays 240 from 2030-01-15 to
+ * 2049-12-15, 20 × 12 months.
+ */
+export function payoutScheduleOf(code: string): PayoutSchedule | null {
+  const trimmed = code.trim();
+  const byName = /^(.*\S)\s+(\d{4})$/.exec(trimmed);
+  if (byName !== null) {
+    const [, name = '', year = ''] = byName;
+    const entry = productOf(name);
+    if (entry === null || entry.monthlyPayments === null) return null;
+    return {
+      // 15 January exists in every year, so the date is built rather than
+      // parsed: `BusinessDate.of`'s probe reads a year below 100 as 19xx.
+      firstPayment: `${year}-01-15` as BusinessDate,
+      installments: entry.monthlyPayments,
+    };
+  }
+  const byMaturity = /^(.*\S)\s+(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+  if (byMaturity === null) return null;
+  const [, name = '', day = '', month = '', year = ''] = byMaturity;
+  // `b3TesouroCode` reads the maturity as text only (its `MM-DD` and year),
+  // so an impossible calendar date here is simply no match, never a throw.
+  const b3Name = b3TesouroCode({
+    product: name,
+    maturity: `${year}-${month}-${day}` as BusinessDate,
+  });
+  return b3Name === null ? null : payoutScheduleOf(b3Name);
 }

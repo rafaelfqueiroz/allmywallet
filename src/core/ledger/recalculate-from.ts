@@ -3,6 +3,7 @@ import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
 import { type Result, ok } from '@/core/shared/result';
 import type { PositionSnapshot } from '@/core/positions/replay';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
 import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 
@@ -69,7 +70,8 @@ export async function recalculatePositionFrom(
 
   // SPEC-007 BR-007-06: the cost-estimate marker comes from the same fold as
   // the figures, so this cache row agrees with a rebuild on it (DM-4).
-  const replayed = replayPositionWithEstimate(transactions);
+  const amortization = await loadAmortizationTerms(deps.transactions, [scope.assetId]);
+  const replayed = replayPositionWithEstimate(transactions, { amortization });
   if (!replayed.ok) return replayed;
 
   const position: PositionSnapshot = {

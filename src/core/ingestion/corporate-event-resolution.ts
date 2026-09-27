@@ -3,7 +3,7 @@ import type { ConversionGroupId } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
 import { compareForReplay } from '@/core/positions/ordering';
-import { type PositionKey, positionKeyString, replayPosition } from '@/core/positions/replay';
+import { type PositionKey, positionKeyString, replayQuantity } from '@/core/positions/replay';
 import type { CorporateEventFactor } from '@/core/quotes/corporate-event-factors';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import {
@@ -419,12 +419,12 @@ function sameDateRatioFigures(active: readonly Transaction[]): ReadonlyMap<strin
     for (const event of events) figures.set(event.id, unknown);
     const [a, b, ...rest] = [...events].sort(compareForReplay) as [Transaction, Transaction];
     if (rest.length > 0 || a.type === b.type || a.ratio === null || b.ratio === null) continue;
-    const before = replayPosition(active.filter((t) => compareForReplay(t, a) < 0));
+    const before = replayQuantity(active.filter((t) => compareForReplay(t, a) < 0));
     if (!before.ok) continue;
     const movementOf = (t: Transaction): RatioMovement =>
       t.type === 'split' ? 'desdobro' : 'grupamento';
     const [sequence, ...others] = sequenceRatioPair(
-      before.value.quantity,
+      before.value,
       [
         { movement: movementOf(a), stated: a.quantity },
         { movement: movementOf(b), stated: b.quantity },
@@ -534,7 +534,7 @@ function walkPosition(
 
   /** What the position holds at `until`, inclusive or not, with this walk's resolutions in. */
   const replayUpTo = (until: Transaction, inclusive: boolean, extra: readonly Transaction[] = []) =>
-    replayPosition(
+    replayQuantity(
       [...base, ...resolved, ...extra].filter((t) => {
         const order = compareForReplay(t, until);
         return inclusive ? order <= 0 : order < 0;
@@ -583,13 +583,13 @@ function walkPosition(
               fractionalPart: pairFigures.saleScale === null ? pairFigures.fractionalPart : null,
             };
           }
-          const upTo = replayPosition(active.filter((t) => compareForReplay(t, event) <= 0));
+          const upTo = replayQuantity(active.filter((t) => compareForReplay(t, event) <= 0));
           return {
             id: event.id,
             type: event.type as OriginCandidate['type'],
             tradeDate: event.tradeDate,
-            quantityAfter: upTo.ok ? upTo.value.quantity : null,
-            fractionalPart: upTo.ok ? upTo.value.quantity.fractionalPart() : null,
+            quantityAfter: upTo.ok ? upTo.value : null,
+            fractionalPart: upTo.ok ? upTo.value.fractionalPart() : null,
           };
         });
       /**
@@ -655,7 +655,7 @@ function walkPosition(
         { movement: movements[0], stated: a.transaction.quantity },
         { movement: movements[1], stated: b.transaction.quantity },
       ],
-      basis: before !== null && before.ok ? before.value.quantity : null,
+      basis: before !== null && before.ok ? before.value : null,
       issuerCode,
       issuerFactors: issuerFactorsOf(input, issuerCode),
       tradeDate,
@@ -718,7 +718,7 @@ function walkPosition(
       const issuerFactors = issuerFactorsOf(input, issuerCode);
       const own = evaluateShareRatio({
         movement,
-        basis: before !== null && before.ok ? before.value.quantity : null,
+        basis: before !== null && before.ok ? before.value : null,
         stated: row.transaction.quantity,
         issuerCode,
         issuerFactors,
@@ -786,8 +786,8 @@ function walkPosition(
           id: event.id,
           type: event.type as OriginCandidate['type'],
           tradeDate: event.tradeDate,
-          quantityAfter: after.ok ? after.value.quantity : null,
-          fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
+          quantityAfter: after.ok ? after.value : null,
+          fractionalPart: after.ok ? after.value.fractionalPart() : null,
         };
       });
 
@@ -836,8 +836,8 @@ function walkPosition(
               id: groupId,
               type: 'conversion',
               tradeDate: last.tradeDate,
-              quantityAfter: after.ok ? after.value.quantity : null,
-              fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
+              quantityAfter: after.ok ? after.value : null,
+              fractionalPart: after.ok ? after.value.fractionalPart() : null,
               tracedFrom: null,
             };
             return [created];
@@ -857,8 +857,8 @@ function walkPosition(
             id: groupId,
             type: trace.event.type,
             tradeDate: trace.event.tradeDate,
-            quantityAfter: after.ok ? after.value.quantity : null,
-            fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
+            quantityAfter: after.ok ? after.value : null,
+            fractionalPart: after.ok ? after.value.fractionalPart() : null,
             tracedFrom: trace,
           },
         ];
@@ -890,8 +890,8 @@ function walkPosition(
             id: groupKey,
             type: 'liquidation',
             tradeDate: last.tradeDate,
-            quantityAfter: after.ok ? after.value.quantity : null,
-            fractionalPart: after.ok ? after.value.quantity.fractionalPart() : null,
+            quantityAfter: after.ok ? after.value : null,
+            fractionalPart: after.ok ? after.value.fractionalPart() : null,
             tracedFrom: null,
           },
         ];

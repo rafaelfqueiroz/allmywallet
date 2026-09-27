@@ -8,6 +8,7 @@ import {
 import { AssetId, InstitutionId, WalletId, type UserId } from '@/core/shared/ids';
 import { Money, Quantity, sumQuantity } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
 import { replayPositions } from '@/core/positions/replay';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
 import { EARNING_TYPES } from '@/core/reporting/ports';
@@ -384,10 +385,15 @@ export class DrizzleReportDataPort implements ReportDataPort {
     assetIds: readonly AssetId[],
     upTo: BusinessDate,
   ): Promise<(assetId: AssetId, payDate: BusinessDate) => Quantity> {
-    const ledger = await new DrizzleTransactionRepository(this.tx, this.userId).listForAssetsUpTo(
-      [...new Set(assetIds)],
-      upTo,
-    );
+    const repository = new DrizzleTransactionRepository(this.tx, this.userId);
+    const ledger = await repository.listForAssetsUpTo([...new Set(assetIds)], upTo);
+    // SPEC-007 BR-007-05c: an amortization in these ledgers replays only with
+    // its asset's terms; without them the fold would fail and this throw.
+    // Asked only when a leilão was paid, like the ledger read above.
+    const amortization =
+      assetIds.length === 0
+        ? new Map()
+        : await loadAmortizationTerms(repository, [...new Set(assetIds)]);
     const byAsset = new Map<AssetId, Transaction[]>();
     for (const transaction of ledger) {
       const rows = byAsset.get(transaction.assetId) ?? [];
@@ -401,7 +407,7 @@ export class DrizzleReportDataPort implements ReportDataPort {
       const cached = memo.get(key);
       if (cached !== undefined) return cached;
 
-      const replayed = replayPositions(byAsset.get(assetId) ?? [], { asOf: payDate });
+      const replayed = replayPositions(byAsset.get(assetId) ?? [], { asOf: payDate, amortization });
       if (!replayed.ok) {
         throw new Error(
           `listEarnings: the ledger of asset ${assetId} does not replay to ${payDate} (${replayed.error.code})`,

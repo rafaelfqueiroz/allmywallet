@@ -135,13 +135,14 @@ describe('reports and the dashboard read snapshots, not the ledger (SPEC-016 BR-
       if (!LEDGER_IMPORT.test(contents) && !TRANSACTIONS_TABLE.test(contents)) continue;
       // The purpose is checked by the code that bounds the replay, not by a
       // word: only the rows of that type pick the assets, and each replay
-      // stops at the payment date.
+      // stops at the payment date. The replay may also carry its assets'
+      // amortization terms (SPEC-007 BR-007-05c), which bound nothing.
       if (
         file === allowed &&
         /\.filter\(\s*\(\s*row\s*\)\s*=>\s*row\.type\s*===\s*'leilao_fracoes'\s*\)/.test(
           contents,
         ) &&
-        /replayPositions\([^;]*\{\s*asOf:\s*payDate\s*\}\s*\)/.test(contents)
+        /replayPositions\([^;]*\{\s*asOf:\s*payDate\s*(,\s*amortization\s*)?\}\s*\)/.test(contents)
       ) {
         continue;
       }

@@ -7,11 +7,13 @@ import {
   institutionIdFor,
   resetTransactionSequence,
 } from '@/core/ledger/test-support/transaction-builder';
+import type { AmortizationTerms } from '@/core/positions/amortization';
 import {
   firstUnreplayable,
   positionKeyString,
   replayPosition,
   replayPositions,
+  replayQuantity,
 } from '@/core/positions/replay';
 
 /**
@@ -596,5 +598,81 @@ describe('BR-007-08 — one position per (asset, institution)', () => {
       { asOf: BusinessDate.of('2026-03-01') },
     );
     expect(result.ok && result.value).toHaveLength(1);
+  });
+});
+
+describe('SPEC-007 BR-007-05c — amortization terms reach every fold', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  const VIVT3_IS_LISTED: AmortizationTerms = new Map([
+    [assetIdFor('VIVT3'), { kind: 'whole_amount' }],
+  ]);
+
+  /**
+   * 100 VIVT3 @ 10,00 = 1.000,00 at two brokers; a restitution of 0,50 a
+   * share at Clear only: 100 × 0,50 = 50,00 → Clear 950,00 (9,50), Rico
+   * untouched at 1.000,00 (10,00). Quantity 100 at both.
+   */
+  function ledger(): Transaction[] {
+    const v = aTransaction().of('VIVT3');
+    return [
+      v.at('Clear').buy().on('2026-01-05').quantity('100').price('10.00').build(),
+      v.at('Rico').buy().on('2026-01-05').quantity('100').price('10.00').build(),
+      v.at('Clear').amortization().on('2026-02-10').quantity('100').price('0.50').build(),
+    ];
+  }
+
+  it('replayPositions applies them in every position it folds', () => {
+    const result = replayPositions(ledger(), { amortization: VIVT3_IS_LISTED });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const byInstitution = new Map(
+      result.value.map((snapshot) => [snapshot.institutionId, snapshot.state]),
+    );
+    expect(byInstitution.get(institutionIdFor('Clear'))?.totalCost.toString()).toBe('950');
+    expect(byInstitution.get(institutionIdFor('Clear'))?.averageCost.toString()).toBe('9.5');
+    expect(byInstitution.get(institutionIdFor('Rico'))?.totalCost.toString()).toBe('1000');
+  });
+
+  it('asOf the day before the payment, the restitution has not happened yet', () => {
+    const result = replayPosition(
+      ledger().filter((t) => t.institutionId === institutionIdFor('Clear')),
+      { asOf: BusinessDate.of('2026-02-09'), amortization: VIVT3_IS_LISTED },
+    );
+    expect(result.ok && result.value.totalCost.toString()).toBe('1000');
+  });
+
+  it('without them, a ledger holding an amortization does not replay — it fails closed', () => {
+    const result = replayPositions(ledger());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('AMORTIZATION_TERMS_UNKNOWN');
+
+    const failure = firstUnreplayable(
+      ledger().filter((t) => t.institutionId === institutionIdFor('Clear')),
+    );
+    expect(failure?.transaction.type).toBe('amortization');
+  });
+
+  it('replayQuantity needs no terms: an amortization never moves quantity', () => {
+    // Clear: 100 bought, restitution (quantity unchanged) → 100.
+    const clear = ledger().filter((t) => t.institutionId === institutionIdFor('Clear'));
+    const result = replayQuantity(clear);
+    expect(result.ok && result.value.toString()).toBe('100');
+    // asOf is honoured: nothing held before the buy.
+    const before = replayQuantity(clear, { asOf: BusinessDate.of('2026-01-04') });
+    expect(before.ok && before.value.toString()).toBe('0');
+  });
+
+  it('replayQuantity still refuses a ledger that sells more than it holds', () => {
+    const result = replayQuantity([
+      aTransaction().of('VIVT3').buy().on('2026-01-05').quantity('10').build(),
+      aTransaction().of('VIVT3').sell().on('2026-01-06').quantity('11').build(),
+    ]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('INSUFFICIENT_QUANTITY');
   });
 });

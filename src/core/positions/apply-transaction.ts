@@ -1,7 +1,8 @@
 import type { DomainError } from '@/core/shared/domain-error';
 import { type Result, err, ok } from '@/core/shared/result';
-import type { Transaction } from '@/core/ledger/transaction';
+import { type Transaction, computeTotalValue } from '@/core/ledger/transaction';
 import type { PositionState } from '@/core/positions/position-state';
+import { type AmortizationTerms, applyAmortization } from '@/core/positions/amortization';
 import {
   applyAcquisition,
   applyExactCostAcquisition,
@@ -15,7 +16,11 @@ import {
   applyShareRatioEvent,
   applySubscription,
 } from '@/core/positions/corporate-events';
-import { missingConversionCostBasis, missingEventRatio } from '@/core/positions/errors';
+import {
+  amortizationTermsUnknown,
+  missingConversionCostBasis,
+  missingEventRatio,
+} from '@/core/positions/errors';
 
 /**
  * The one place a transaction type is turned into an effect on a position.
@@ -24,10 +29,15 @@ import { missingConversionCostBasis, missingEventRatio } from '@/core/positions/
  * case, and the switch has **no `default`**, so adding an eighteenth type stops
  * the build rather than silently falling through to "no effect". A default
  * branch here would be the cheapest possible way to lose a corporate event.
+ *
+ * `amortization` is what SPEC-007 BR-007-05c needs to know about the asset an
+ * `amortization` row belongs to (`amortization.ts`). Absent, or missing that
+ * asset, such a row fails rather than being applied under a guessed rule.
  */
 export function applyTransaction(
   state: PositionState,
   transaction: Transaction,
+  amortization?: AmortizationTerms,
 ): Result<PositionState, DomainError> {
   const { quantity, unitPrice, fees, tradeDate } = transaction;
 
@@ -118,18 +128,36 @@ export function applyTransaction(
       return applyAdjustment(state, transaction);
 
     /**
+     * SPEC-007 BR-007-05c / DL-007-13: capital returned. Quantity unchanged,
+     * total cost down by the principal — the whole amount for a listed asset,
+     * remaining cost ÷ payments remaining for an NTN-B1 title — never below
+     * zero, the excess realised. Still a provento as well (SPEC-014
+     * BR-014-01): the cash stays in the Earnings report.
+     *
+     * The amount received is recomputed from the row's figures, exactly as
+     * `computeTotalValue` derives the `totalValue` the Earnings report shows —
+     * never read from the stored denormalisation (see `Transaction.totalValue`).
+     */
+    case 'amortization': {
+      const basis = amortization?.get(transaction.assetId);
+      if (basis === undefined) return err(amortizationTermsUnknown(tradeDate));
+      return applyAmortization(state, {
+        received: computeTotalValue(transaction.type, quantity, unitPrice, fees),
+        basis,
+        date: tradeDate,
+      });
+    }
+
+    /**
      * SPEC-014's proventos. Recognised at pay date as earnings, never as a
      * change in quantity and never assumed reinvested — so the position is
-     * returned untouched. `amortization` sits here too: it returns principal
-     * in cash, which SPEC-014 reports and SPEC-009 values; it is not a share
-     * count and does not move cost basis in v1. So does `leilao_fracoes`
-     * (SPEC-014 BR-014-01): the fraction it pays for already left the position
-     * through `fracao_bonificacao` (SPEC-007 BR-007-05a).
+     * returned untouched. So is `leilao_fracoes` (SPEC-014 BR-014-01): the
+     * fraction it pays for already left the position through
+     * `fracao_bonificacao` (SPEC-007 BR-007-05a).
      */
     case 'dividend':
     case 'jcp':
     case 'rendimento':
-    case 'amortization':
     case 'leilao_fracoes':
       return ok(state);
   }

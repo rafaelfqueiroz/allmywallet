@@ -20,6 +20,26 @@ export const PositionErrorCode = {
   INVALID_EVENT_RATIO: 'INVALID_EVENT_RATIO',
   /** SPEC-007 BR-007-05b: an incoming conversion must state the exact carried cost. */
   MISSING_CONVERSION_COST_BASIS: 'MISSING_CONVERSION_COST_BASIS',
+  /**
+   * SPEC-007 BR-007-05c: the replay was not told what kind of asset an
+   * amortization belongs to, so it cannot say how much of it is principal.
+   * A wiring defect rather than a ledger one — every writer of the position
+   * cache supplies the terms — and failing closed is what keeps it from
+   * becoming a plausible wrong *preço médio* instead.
+   */
+  AMORTIZATION_TERMS_UNKNOWN: 'AMORTIZATION_TERMS_UNKNOWN',
+  /**
+   * SPEC-007 BR-007-05c defines the principal of an amortization for a listed
+   * asset and for an NTN-B1 title only. Any other asset — another Tesouro
+   * title, bank paper — has no rule, so its amortization is refused rather
+   * than given an invented principal.
+   */
+  AMORTIZATION_NOT_SUPPORTED: 'AMORTIZATION_NOT_SUPPORTED',
+  /**
+   * SPEC-007 BR-007-05c: an NTN-B1 payment dated outside its title's schedule
+   * has no "payments remaining including this one" to divide by.
+   */
+  AMORTIZATION_OUTSIDE_SCHEDULE: 'AMORTIZATION_OUTSIDE_SCHEDULE',
 } as const;
 
 export type PositionErrorCode = (typeof PositionErrorCode)[keyof typeof PositionErrorCode];
@@ -59,4 +79,28 @@ export function missingConversionCostBasis(
   date: BusinessDate,
 ): DomainError<typeof PositionErrorCode.MISSING_CONVERSION_COST_BASIS> {
   return domainError(PositionErrorCode.MISSING_CONVERSION_COST_BASIS, { date });
+}
+
+export function amortizationTermsUnknown(
+  date: BusinessDate,
+): DomainError<typeof PositionErrorCode.AMORTIZATION_TERMS_UNKNOWN> {
+  return domainError(PositionErrorCode.AMORTIZATION_TERMS_UNKNOWN, { date });
+}
+
+export function amortizationNotSupported(
+  date: BusinessDate,
+): DomainError<typeof PositionErrorCode.AMORTIZATION_NOT_SUPPORTED> {
+  return domainError(PositionErrorCode.AMORTIZATION_NOT_SUPPORTED, { date });
+}
+
+export function amortizationOutsideSchedule(
+  date: BusinessDate,
+  firstPayment: BusinessDate,
+  lastPayment: BusinessDate,
+): DomainError<typeof PositionErrorCode.AMORTIZATION_OUTSIDE_SCHEDULE> {
+  return domainError(PositionErrorCode.AMORTIZATION_OUTSIDE_SCHEDULE, {
+    date,
+    firstPayment,
+    lastPayment,
+  });
 }

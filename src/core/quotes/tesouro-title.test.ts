@@ -4,6 +4,7 @@ import {
   b3TesouroCode,
   canonicalTesouroCode,
   fullTesouroCode,
+  payoutScheduleOf,
   TESOURO_PRODUCTS,
   tesouroCatalogCodes,
   type TesouroTitle,
@@ -105,6 +106,7 @@ describe('#164 SPEC-005 BR-005-14 — canonicalTesouroCode, B3’s Produto on im
     'Tesouro Selic',
     'Tesouro Novo Produto 2040',
     'Tesouro IPCA+ Educacional 2040',
+    'NTN-B1 2030',
     'CDB - BANCO TESTE S/A',
     '',
   ])('“%s” names no Tesouro title the table knows', (produto) => {
@@ -178,5 +180,61 @@ describe('#152 — tesouroCatalogCodes over the published file', () => {
 
   it('an empty file has no codes', () => {
     expect(tesouroCatalogCodes([])).toEqual([]);
+  });
+});
+
+describe('#166 SPEC-007 BR-007-05c — payoutScheduleOf, an NTN-B1 title’s payments', () => {
+  it.each([
+    // Name year = first payment year; 60 payments for Educa+, 240 for Renda+.
+    ['Tesouro Educa+ 2026', '2026-01-15', 60],
+    ['Tesouro Educa+ 2035', '2035-01-15', 60],
+    ['Tesouro Renda+ Aposentadoria Extra 2030', '2030-01-15', 240],
+    ['Tesouro Renda+ Aposentadoria Extra 2065', '2065-01-15', 240],
+    // Spelled the way B3's Produto may spell it: words, not exact text.
+    ['TESOURO EDUCA+ 2026', '2026-01-15', 60],
+    ['  Tesouro Renda+  Aposentadoria Extra 2030 ', '2030-01-15', 240],
+  ])('%s pays from %s, %i times', (code, firstPayment, installments) => {
+    expect(payoutScheduleOf(code)).toEqual({ firstPayment, installments });
+  });
+
+  it.each([
+    // The full-date code a title keeps when its B3 name is ambiguous: the date
+    // is the maturity, 15/12 of name year + 4 (Educa+) or + 19 (Renda+).
+    ['Tesouro Educa+ 15/12/2030', '2026-01-15', 60],
+    ['Tesouro Renda+ Aposentadoria Extra 15/12/2049', '2030-01-15', 240],
+  ])('the full-date code %s pays from %s, %i times', (code, firstPayment, installments) => {
+    expect(payoutScheduleOf(code)).toEqual({ firstPayment, installments });
+  });
+
+  it.each([
+    'Tesouro IPCA+ 2029',
+    'Tesouro Selic 2031',
+    'Tesouro IPCA+ com Juros Semestrais 2035',
+    'Tesouro Prefixado 01/01/2031',
+    'Tesouro Selic 31/02/2029', // an impossible date is no match, never a throw
+    'Tesouro Educa+ 01/06/2030', // a maturity that does not fit the product
+    'Tesouro Educa+', // no year
+    'Tesouro Novo 2030',
+    'VIVT3',
+    'HGLG11',
+    '',
+  ])('%s has no payout schedule', (code) => {
+    expect(payoutScheduleOf(code)).toBeNull();
+  });
+
+  it('every product that pays in instalments pays monthly up to its 15 December maturity', () => {
+    // The schedule and the maturity rule describe one structure: n monthly
+    // payments from January of the name year end in December of name year +
+    // offset, so n = (offset + 1) × 12 — Educa+ (4 + 1) × 12 = 60, Renda+
+    // (19 + 1) × 12 = 240.
+    const paying = TESOURO_PRODUCTS.filter((entry) => entry.monthlyPayments !== null);
+    expect(paying.map((entry) => entry.name)).toEqual([
+      'Tesouro Educa+',
+      'Tesouro Renda+ Aposentadoria Extra',
+    ]);
+    for (const entry of paying) {
+      expect(entry.monthlyPayments).toBe((entry.nameYearOffset + 1) * 12);
+      expect(entry.maturityMonthDay).toBe('12-15');
+    }
   });
 });

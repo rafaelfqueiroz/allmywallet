@@ -24,6 +24,10 @@ import {
   type TransferLeg,
   withCarriedCost,
 } from '@/core/ingestion/transfer-cost';
+import type { AmortizationTerms } from '@/core/positions/amortization';
+
+/** SPEC-007 BR-007-05c: these ledgers hold no amortization, so no asset needs terms. */
+const NO_AMORTIZATION: AmortizationTerms = new Map();
 
 const money = (value: string) => Money.fromString(value);
 
@@ -178,7 +182,11 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       aTransaction().buy().at('A').on('2026-01-05').quantity('100').price('10').build(),
       aTransaction().buy().at('A').on('2026-02-05').quantity('100').price('20').build(),
     ];
-    const costs = resolveCarriedCosts([transfer('t', 'A', 'B', '2026-03-10')], historyOf(history));
+    const costs = resolveCarriedCosts(
+      [transfer('t', 'A', 'B', '2026-03-10')],
+      historyOf(history),
+      NO_AMORTIZATION,
+    );
     expect(costs.get('t')?.cost.toString()).toBe('15');
   });
 
@@ -188,7 +196,11 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       // BR-007-05: zero attributed value — quantity up, total cost unchanged.
       aTransaction().bonificacao().at('A').on('2026-02-01').quantity('100').build(),
     ];
-    const costs = resolveCarriedCosts([transfer('t', 'A', 'B', '2026-03-10')], historyOf(history));
+    const costs = resolveCarriedCosts(
+      [transfer('t', 'A', 'B', '2026-03-10')],
+      historyOf(history),
+      NO_AMORTIZATION,
+    );
     expect(costs.get('t')?.cost.toString()).toBe('5');
   });
 
@@ -201,7 +213,11 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     ];
     const leg = transfer('t', 'A', 'B', '2026-03-10');
     // The debit itself sits in the source history, as it does once written.
-    const costs = resolveCarriedCosts([leg], historyOf([...history, leg.debit as Transaction]));
+    const costs = resolveCarriedCosts(
+      [leg],
+      historyOf([...history, leg.debit as Transaction]),
+      NO_AMORTIZATION,
+    );
     expect(costs.get('t')?.cost.toString()).toBe('15');
   });
 
@@ -214,7 +230,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       ];
       const legs = [trip('t1', '455'), trip('t2', '455')];
       const debits = legs.map((leg) => leg.debit as Transaction);
-      const costs = resolveCarriedCosts(legs, historyOf([...history, ...debits]));
+      const costs = resolveCarriedCosts(legs, historyOf([...history, ...debits]), NO_AMORTIZATION);
       expect([costs.get('t1')?.cost.toString(), costs.get('t2')?.cost.toString()]).toEqual([
         '10',
         '10',
@@ -227,7 +243,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       ];
       const legs = [trip('t1', '2'), trip('t2', '2')];
       const debits = legs.map((leg) => leg.debit as Transaction);
-      const costs = resolveCarriedCosts(legs, historyOf([...history, ...debits]));
+      const costs = resolveCarriedCosts(legs, historyOf([...history, ...debits]), NO_AMORTIZATION);
       expect(costs.get('t1')?.cost.toString()).toBe('3.33333333');
       expect(costs.get('t2')?.cost.toString()).toBe('3.33333333');
     });
@@ -241,6 +257,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       const costs = resolveCarriedCosts(
         [kept, broken],
         historyOf([...history, kept.debit as Transaction]),
+        NO_AMORTIZATION,
       );
       expect(costs.size).toBe(0);
     });
@@ -249,27 +266,39 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
   it('carries nothing when the debit will not be in the ledger', () => {
     const history = [aTransaction().buy().at('A').on('2026-01-05').price('10').build()];
     const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), debit: null };
-    expect(resolveCarriedCosts([leg], historyOf(history)).size).toBe(0);
+    expect(resolveCarriedCosts([leg], historyOf(history), NO_AMORTIZATION).size).toBe(0);
   });
 
   it('carries nothing when the source prefix cannot be replayed', () => {
     const history = [aTransaction().sell().at('A').on('2026-01-05').quantity('10').build()];
     expect(
-      resolveCarriedCosts([transfer('t', 'A', 'B', '2026-03-10')], historyOf(history)).size,
+      resolveCarriedCosts(
+        [transfer('t', 'A', 'B', '2026-03-10')],
+        historyOf(history),
+        NO_AMORTIZATION,
+      ).size,
     ).toBe(0);
   });
 
   it('carries nothing when the source held fewer shares than leave: 100 < 150', () => {
     const history = [aTransaction().buy().at('A').on('2026-01-05').quantity('100').build()];
     expect(
-      resolveCarriedCosts([transfer('t', 'A', 'B', '2026-03-10', '150')], historyOf(history)).size,
+      resolveCarriedCosts(
+        [transfer('t', 'A', 'B', '2026-03-10', '150')],
+        historyOf(history),
+        NO_AMORTIZATION,
+      ).size,
     ).toBe(0);
   });
 
   it('carries nothing when the source held its shares at no cost', () => {
     const history = [aTransaction().bonificacao().at('A').on('2026-01-05').quantity('100').build()];
     expect(
-      resolveCarriedCosts([transfer('t', 'A', 'B', '2026-03-10')], historyOf(history)).size,
+      resolveCarriedCosts(
+        [transfer('t', 'A', 'B', '2026-03-10')],
+        historyOf(history),
+        NO_AMORTIZATION,
+      ).size,
     ).toBe(0);
   });
 
@@ -281,7 +310,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     const xToA = transfer('x-to-a', 'X', 'A', '2026-03-01');
     const aToB = transfer('a-to-b', 'A', 'B', '2026-03-10');
 
-    const costs = resolveCarriedCosts([aToB, xToA], historyOf(history));
+    const costs = resolveCarriedCosts([aToB, xToA], historyOf(history), NO_AMORTIZATION);
 
     // X→A: X's 100 @ 8,00 → 8,00.
     expect(costs.get('x-to-a')?.cost.toString()).toBe('8');
@@ -298,7 +327,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     const aToB = transfer('a-to-b', 'A', 'B', '2026-03-10');
     const laterXToA = transfer('x-to-a', 'X', 'A', '2026-03-20');
 
-    const costs = resolveCarriedCosts([aToB, laterXToA], historyOf(history));
+    const costs = resolveCarriedCosts([aToB, laterXToA], historyOf(history), NO_AMORTIZATION);
 
     // Only A's own 100 @ 12,00 precedes the debit.
     expect(costs.get('a-to-b')?.cost.toString()).toBe('12');
@@ -313,6 +342,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     const costs = resolveCarriedCosts(
       [transfer('a-to-b', 'A', 'B', '2026-03-10'), transfer('c-to-d', 'C', 'D', '2026-03-12')],
       historyOf(history),
+      NO_AMORTIZATION,
     );
     expect(costs.get('a-to-b')?.cost.toString()).toBe('10');
     expect(costs.get('c-to-d')?.cost.toString()).toBe('30');
@@ -326,6 +356,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
     const costs = resolveCarriedCosts(
       [transfer('a-to-b', 'A', 'B', '2026-03-10'), transfer('b-to-a', 'B', 'A', '2026-03-10')],
       historyOf(history),
+      NO_AMORTIZATION,
     );
     expect(costs.size).toBe(0);
   });
@@ -341,13 +372,17 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       aTransaction().buy().at('A').on('2026-02-05').quantity('100').price('20').build(),
     ];
     const leg = transfer('t', 'A', 'A', '2026-03-10', '200');
-    const costs = resolveCarriedCosts([leg], historyOf([...history, leg.debit as Transaction]));
+    const costs = resolveCarriedCosts(
+      [leg],
+      historyOf([...history, leg.debit as Transaction]),
+      NO_AMORTIZATION,
+    );
     expect(costs.get('t')?.cost.toString()).toBe('15');
   });
 
   it('#135: a same-institution pair carries nothing when the position has no history to read', () => {
     const leg = transfer('t', 'A', 'A', '2026-03-10', '200');
-    expect(resolveCarriedCosts([leg], historyOf([])).size).toBe(0);
+    expect(resolveCarriedCosts([leg], historyOf([]), NO_AMORTIZATION).size).toBe(0);
   });
 
   describe('#112 — a credit carried before keeps or recomputes its cost', () => {
@@ -357,17 +392,23 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
         aTransaction().buy().at('A').on('2026-02-01').quantity('100').price('20').build(),
       ];
       const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), fallback: money('10') };
-      expect(resolveCarriedCosts([leg], historyOf(history)).get('t')?.cost.toString()).toBe('15');
+      expect(
+        resolveCarriedCosts([leg], historyOf(history), NO_AMORTIZATION).get('t')?.cost.toString(),
+      ).toBe('15');
     });
 
     it('keeps the stored cost when the debit is no longer in the ledger', () => {
       const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), debit: null, fallback: money('10') };
-      expect(resolveCarriedCosts([leg], historyOf([])).get('t')?.cost.toString()).toBe('10');
+      expect(
+        resolveCarriedCosts([leg], historyOf([]), NO_AMORTIZATION).get('t')?.cost.toString(),
+      ).toBe('10');
     });
 
     it('keeps the stored cost when the source can no longer carry one', () => {
       const leg = { ...transfer('t', 'A', 'B', '2026-03-10'), fallback: money('10') };
-      expect(resolveCarriedCosts([leg], historyOf([])).get('t')?.cost.toString()).toBe('10');
+      expect(
+        resolveCarriedCosts([leg], historyOf([]), NO_AMORTIZATION).get('t')?.cost.toString(),
+      ).toBe('10');
     });
 
     it('keeps the stored cost through a swap that never unblocks, and a downstream leg reads it', () => {
@@ -381,7 +422,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       // (1.200,00) = 3.200,00 ÷ 200 = 16,00.
       const bToC = transfer('b-to-c', 'B', 'C', '2026-03-20', '200');
 
-      const costs = resolveCarriedCosts([aToB, bToA, bToC], historyOf(history));
+      const costs = resolveCarriedCosts([aToB, bToA, bToC], historyOf(history), NO_AMORTIZATION);
 
       expect(costs.get('a-to-b')?.cost.toString()).toBe('12');
       expect(costs.has('b-to-a')).toBe(false);
@@ -409,6 +450,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       const costs = resolveCarriedCosts(
         [transfer('t', 'A', 'B', '2026-03-10', '120')],
         historyOf(history),
+        NO_AMORTIZATION,
       );
       expect(asStored(costs.get('t')?.cost as Money)).toBe('27.48333333');
       expect(costs.get('t')?.estimated).toBe(true);
@@ -422,6 +464,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       const costs = resolveCarriedCosts(
         [transfer('t', 'A', 'B', '2026-03-10')],
         historyOf(history),
+        NO_AMORTIZATION,
       );
       expect(costs.get('t')?.cost.toString()).toBe('10');
       expect(costs.get('t')?.estimated).toBe(false);
@@ -436,6 +479,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       const costs = resolveCarriedCosts(
         [transfer('t', 'A', 'B', '2026-03-10')],
         historyOf(history),
+        NO_AMORTIZATION,
       );
       expect(costs.get('t')?.cost.toString()).toBe('10');
       expect(costs.get('t')?.estimated).toBe(false);
@@ -451,7 +495,7 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
       ];
       const xToA = transfer('x-to-a', 'X', 'A', '2026-03-01', '20');
       const aToB = transfer('a-to-b', 'A', 'B', '2026-03-10', '120');
-      const costs = resolveCarriedCosts([aToB, xToA], historyOf(history));
+      const costs = resolveCarriedCosts([aToB, xToA], historyOf(history), NO_AMORTIZATION);
       expect(costs.get('x-to-a')?.cost.toString()).toBe('114.9');
       expect(costs.get('x-to-a')?.estimated).toBe(true);
       expect(asStored(costs.get('a-to-b')?.cost as Money)).toBe('27.48333333');
@@ -468,8 +512,12 @@ describe('#110 BR-005-20a — resolveCarriedCosts', () => {
         ...stored,
         credit: { ...stored.credit, costIsEstimate: true },
       };
-      expect(resolveCarriedCosts([marked], historyOf([])).get('t')?.estimated).toBe(true);
-      expect(resolveCarriedCosts([stored], historyOf([])).get('t')?.estimated).toBe(false);
+      expect(
+        resolveCarriedCosts([marked], historyOf([]), NO_AMORTIZATION).get('t')?.estimated,
+      ).toBe(true);
+      expect(
+        resolveCarriedCosts([stored], historyOf([]), NO_AMORTIZATION).get('t')?.estimated,
+      ).toBe(false);
     });
 
     it('withCarriedCost marks an estimated carry, with no close date', () => {

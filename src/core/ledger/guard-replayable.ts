@@ -1,6 +1,7 @@
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
 import { type Result, err, ok } from '@/core/shared/result';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
 import { replayPosition } from '@/core/positions/replay';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import type { Transaction } from '@/core/ledger/transaction';
@@ -37,7 +38,10 @@ export async function guardReplayable(
   project: (existing: readonly Transaction[]) => readonly Transaction[],
 ): Promise<Result<void, DomainError>> {
   const existing = await deps.transactions.listForPosition(key.assetId, key.institutionId);
-  const replayed = replayPosition(project(existing));
+  // SPEC-007 BR-007-05c: the projected rows may add this asset's first
+  // amortization, so its identity is asked for even when none is stored yet.
+  const amortization = await loadAmortizationTerms(deps.transactions, [key.assetId]);
+  const replayed = replayPosition(project(existing), { amortization });
   if (!replayed.ok) return err(replayed.error);
   return ok(undefined);
 }

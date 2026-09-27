@@ -2,6 +2,7 @@ import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId, TransactionId } from '@/core/shared/ids';
 import { type Result, err, ok } from '@/core/shared/result';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
 import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { PositionState } from '@/core/positions/position-state';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
@@ -76,8 +77,11 @@ export async function describeDeletionImpact(
   }
 
   const existing = await deps.transactions.listForPosition(target.assetId, target.institutionId);
+  // SPEC-007 BR-007-05c: an amortization among these rows moves the cost the
+  // preview shows, so it is replayed with its asset's terms.
+  const amortization = await loadAmortizationTerms(deps.transactions, [target.assetId]);
 
-  const current = replayPositionWithEstimate(existing);
+  const current = replayPositionWithEstimate(existing, { amortization });
   if (!current.ok) return current;
 
   // The same plan `deleteTransaction` executes (#144 re-review N3), so the
@@ -89,7 +93,7 @@ export async function describeDeletionImpact(
     without(ledger, removed),
   );
   const remaining = projectPosition(existing, removed, rederived, target);
-  const projected = replayPositionWithEstimate(remaining);
+  const projected = replayPositionWithEstimate(remaining, { amortization });
   // BR-006-15 again: deleting the buy a later sale drew on leaves a ledger
   // that cannot be replayed. The user is told that here, before confirming,
   // rather than after the row is already gone.

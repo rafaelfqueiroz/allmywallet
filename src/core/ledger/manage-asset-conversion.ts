@@ -8,6 +8,7 @@ import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
 import { guardReplayable, without } from '@/core/ledger/guard-replayable';
 import { recalculatePositionFrom } from '@/core/ledger/recalculate-from';
 import type { Transaction } from '@/core/ledger/transaction';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
 import { compareForReplay } from '@/core/positions/ordering';
 import {
   positionKeyString,
@@ -137,12 +138,18 @@ async function withSourceEstimate(
 ): Promise<readonly Transaction[]> {
   const removed = new Set<string>(existing.map((leg) => leg.id));
   let estimated = false;
+  // SPEC-007 BR-007-05c: a source with an amortization replays only with its
+  // terms; without them the prefix would fail and the marker be lost.
+  const amortization = await loadAmortizationTerms(
+    deps.transactions,
+    legs.map((leg) => leg.assetId),
+  );
   for (const out of legs.filter((leg) => leg.type === 'conversion_out')) {
     const ledger = await deps.transactions.listForPosition(out.assetId, out.institutionId);
     const before = without(ledger, removed).filter(
       (transaction) => compareForReplay(transaction, out) < 0,
     );
-    const replayed = replayPositionWithEstimate(before);
+    const replayed = replayPositionWithEstimate(before, { amortization });
     // `guardReplacement` has already replayed this position with the group
     // in place, so its prefix replays too.
     if (replayed.ok && replayed.value.costEstimated) estimated = true;

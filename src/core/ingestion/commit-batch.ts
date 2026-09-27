@@ -18,9 +18,10 @@ import {
   type PositionSnapshot,
   positionKeyString,
   type ReplayFailure,
-  replayPosition,
   replayPositionWithEstimate,
+  replayQuantity,
 } from '@/core/positions/replay';
+import { type AmortizationTerms, loadAmortizationTerms } from '@/core/positions/amortization';
 import { sortForReplay } from '@/core/positions/ordering';
 import type { CorporateEventFactor } from '@/core/quotes/corporate-event-factors';
 import type { PositionState } from '@/core/positions/position-state';
@@ -381,6 +382,13 @@ interface Reclassification {
 
 type StoredLedger = ((key: PositionKey) => readonly Transaction[]) & {
   prime(key: PositionKey, transactions: readonly Transaction[]): void;
+  /**
+   * SPEC-007 BR-007-05c — the amortization terms of every asset this commit
+   * can replay: each asset the stored ledger holds an amortization of, and
+   * each asset this batch's rows name. Loaded with the ledgers, so every
+   * replay of the commit — whichever ledger it reads — uses the same terms.
+   */
+  readonly amortization: AmortizationTerms;
 };
 
 export async function commitBatch(
@@ -716,7 +724,7 @@ export async function commitBatch(
       // the replay stops at, or the nearest before it (a grupamento that leaves
       // a later stored sale short). It stays `unclassified`; the next round
       // refuses it `conflicts_with_ledger` and re-walks what depends on it.
-      const culprit = corporateCulprit(group);
+      const culprit = corporateCulprit(group, stored.amortization);
       if (culprit !== undefined) {
         corporateDeclined.add(culprit);
         continue;
@@ -733,7 +741,7 @@ export async function commitBatch(
       // #117 BR-006-15: only the rows the replay cannot accept are excluded
       // (never written, surfaced as `invalid`); the group's proventos and every
       // other row still apply.
-      const refused = refusedCandidates(group);
+      const refused = refusedCandidates(group, stored.amortization);
       if (refused.length > 0) {
         for (const c of refused) excluded.add(c.row.id);
         continue;
@@ -1159,8 +1167,15 @@ async function loadLedgers(
     if (ledgers.has(key)) continue;
     ledgers.set(key, await deps.transactions.listForPosition(row.assetId, row.institutionId));
   }
-  const read = ((key: PositionKey) => ledgers.get(positionKeyString(key)) ?? []) as StoredLedger;
-  read.prime = (key, transactions) => ledgers.set(positionKeyString(key), transactions);
+  const amortization = await loadAmortizationTerms(deps.transactions, [
+    ...new Set(rows.map((row) => row.assetId)),
+  ]);
+  const read = Object.assign((key: PositionKey) => ledgers.get(positionKeyString(key)) ?? [], {
+    prime: (key: PositionKey, transactions: readonly Transaction[]) => {
+      ledgers.set(positionKeyString(key), transactions);
+    },
+    amortization,
+  });
   return read;
 }
 
@@ -1428,15 +1443,19 @@ function carriedTransactionsOf(
   stored: StoredLedger,
 ): readonly Transaction[] {
   const candidateTransactions = candidates.map((candidate) => candidate.transaction);
-  const carriedCosts = resolveCarriedCosts(carryLegs, (assetId, institutionId) => [
-    ...stored({ assetId, institutionId }).filter(
-      (transaction) => !carryLegs.some((leg) => leg.credit.id === transaction.id),
-    ),
-    ...candidateTransactions.filter(
-      (transaction) =>
-        transaction.assetId === assetId && transaction.institutionId === institutionId,
-    ),
-  ]);
+  const carriedCosts = resolveCarriedCosts(
+    carryLegs,
+    (assetId, institutionId) => [
+      ...stored({ assetId, institutionId }).filter(
+        (transaction) => !carryLegs.some((leg) => leg.credit.id === transaction.id),
+      ),
+      ...candidateTransactions.filter(
+        (transaction) =>
+          transaction.assetId === assetId && transaction.institutionId === institutionId,
+      ),
+    ],
+    stored.amortization,
+  );
   return carryLegs.flatMap((leg) => {
     const cost = carriedCosts.get(leg.id);
     return cost === undefined ? [] : [withCarriedCost(leg.credit, cost)];
@@ -1615,8 +1634,8 @@ async function planLiquidations(
 
       for (const source of definition.sources) {
         const heldBefore = (date: BusinessDate) => {
-          const replayed = replayPosition(historyOf(source.assetCode, date));
-          return replayed.ok ? replayed.value.quantity : null;
+          const replayed = replayQuantity(historyOf(source.assetCode, date));
+          return replayed.ok ? replayed.value : null;
         };
         const stateOf = (copy: Transaction) =>
           isLiquidationSale(copy, source.liquidationValue)
@@ -1706,8 +1725,8 @@ async function planLiquidations(
 
       // Target credits: on the receipt code until the liquidation moves them.
       const receiptBalanceBefore = (date: BusinessDate) => {
-        const replayed = replayPosition(historyOf(evidenceCode, date));
-        return replayed.ok ? replayed.value.quantity : null;
+        const replayed = replayQuantity(historyOf(evidenceCode, date));
+        return replayed.ok ? replayed.value : null;
       };
       const addedBy = (statement: Quantity, date: BusinessDate) => {
         const before = receiptBalanceBefore(date);
@@ -2050,8 +2069,8 @@ async function planSubscriptions(
       ...activations.filter(onPosition),
       ...liquidationWrites.map((write) => write.transaction).filter(onPosition),
     ]).filter((t) => BusinessDate.isBefore(t.tradeDate, date));
-    const replayed = replayPosition(history);
-    return replayed.ok ? replayed.value.quantity : null;
+    const replayed = replayQuantity(history);
+    return replayed.ok ? replayed.value : null;
   };
 
   for (const { issuerRoot, institutionId } of groups.values()) {
@@ -2346,8 +2365,8 @@ async function planPositionRefreshes(
       // must win the id collision, not the plain candidate.
       ...committedPositionChanges.filter(onPosition),
     ]).filter((t) => BusinessDate.isBefore(t.tradeDate, date));
-    const replayed = replayPosition(history);
-    return replayed.ok ? replayed.value.quantity : null;
+    const replayed = replayQuantity(history);
+    return replayed.ok ? replayed.value : null;
   };
 
   for (const row of rows) {
@@ -2840,7 +2859,7 @@ async function planAssetConversions(
         ) {
           return true;
         }
-        const before = replayPosition(
+        const before = replayQuantity(
           historyForCode(ref.evidence.assetCode).filter((transaction) =>
             isBeforeConversion(transaction, ref.evidence.tradeDate),
           ),
@@ -2850,7 +2869,7 @@ async function planAssetConversions(
           corroboratesSourceBalance(
             {
               ...ref.evidence,
-              beforeQuantity: before.value.quantity,
+              beforeQuantity: before.value,
               statementQuantity: ref.transaction.quantity,
             },
             [definition],
@@ -2872,7 +2891,7 @@ async function planAssetConversions(
         if (nearby.some((ref) => usedEvidence.has(ref.evidence.id))) continue;
         const enriched: ConversionEvidenceRef[] = [];
         for (const ref of nearby) {
-          const before = replayPosition(
+          const before = replayQuantity(
             historyForCode(ref.evidence.assetCode).filter((transaction) =>
               isBeforeConversion(transaction, ref.evidence.tradeDate),
             ),
@@ -2880,15 +2899,15 @@ async function planAssetConversions(
           if (!before.ok) continue;
           const statementQuantity =
             ref.evidence.movement === 'resgate' || ref.evidence.movement === 'transfer_out'
-              ? before.value.quantity.minus(ref.transaction.quantity)
+              ? before.value.minus(ref.transaction.quantity)
               : ref.evidence.movement === 'transfer_in'
-                ? before.value.quantity.plus(ref.transaction.quantity)
+                ? before.value.plus(ref.transaction.quantity)
                 : ref.transaction.quantity;
           enriched.push({
             ...ref,
             evidence: {
               ...ref.evidence,
-              beforeQuantity: before.value.quantity,
+              beforeQuantity: before.value,
               statementQuantity,
             },
           });
@@ -2906,6 +2925,7 @@ async function planAssetConversions(
             historyForCode(assetCode).filter((transaction) =>
               isBeforeConversion(transaction, asAt),
             ),
+            { amortization: stored.amortization },
           );
           if (replayed.ok && replayed.value.costEstimated) sourceEstimated = true;
           return {
@@ -3129,8 +3149,10 @@ function settle(
       outcome.status === 'refused' ? [] : [outcome.transaction],
     );
     costs = new Map(
-      resolveCarriedCosts(legs, (assetId, institutionId) =>
-        historyFor({ assetId, institutionId }, [], priorCorporate),
+      resolveCarriedCosts(
+        legs,
+        (assetId, institutionId) => historyFor({ assetId, institutionId }, [], priorCorporate),
+        stored.amortization,
       ),
     );
     const carried = legs.flatMap((leg) => {
@@ -3256,7 +3278,7 @@ function settle(
       ];
       // SPEC-007 BR-007-06: the marker from the same fold as the figures, so
       // the position this commit caches agrees with a rebuild on it (DM-4).
-      const replayed = replayPositionWithEstimate(ledger);
+      const replayed = replayPositionWithEstimate(ledger, { amortization: stored.amortization });
       return {
         ...group,
         ledger,
@@ -3437,7 +3459,7 @@ async function planCorporateEvents(
  * the row its replay stops at, or the nearest resolved one before it in replay
  * order. `undefined` when none precedes the failure — then it is not theirs.
  */
-function corporateCulprit(group: Group): string | undefined {
+function corporateCulprit(group: Group, amortization: AmortizationTerms): string | undefined {
   const resolved = new Map(
     group.corporate
       .filter((c) => c.status === 'resolved')
@@ -3445,7 +3467,7 @@ function corporateCulprit(group: Group): string | undefined {
   );
   if (resolved.size === 0) return undefined;
   // Only a failed group is asked, so its ledger has a first unreplayable row.
-  const failure = firstUnreplayable(group.ledger) as ReplayFailure;
+  const failure = firstUnreplayable(group.ledger, { amortization }) as ReplayFailure;
   const ordered = sortForReplay(group.ledger);
   for (let i = ordered.findIndex((t) => t.id === failure.transaction.id); i >= 0; i -= 1) {
     const id = resolved.get((ordered[i] as Transaction).id);
@@ -3464,14 +3486,14 @@ function corporateCulprit(group: Group): string | undefined {
  * Replayed here against the group alone, so a group with many refusals costs
  * one settling round rather than one per refusal.
  */
-function refusedCandidates(group: Group): readonly Candidate[] {
+function refusedCandidates(group: Group, amortization: AmortizationTerms): readonly Candidate[] {
   const byTransaction = new Map(group.candidates.map((c) => [c.transaction.id, c]));
   const refused: Candidate[] = [];
   let ledger = group.ledger;
   for (
-    let failure = firstUnreplayable(ledger);
+    let failure = firstUnreplayable(ledger, { amortization });
     failure !== null;
-    failure = firstUnreplayable(ledger)
+    failure = firstUnreplayable(ledger, { amortization })
   ) {
     const culprit =
       byTransaction.get(failure.transaction.id) ??
@@ -3887,12 +3909,12 @@ async function buildReconciliation(
   } of snapshots.values()) {
     const existing = await deps.transactions.listForPosition(assetId, institutionId);
     const active = existing.filter((t) => t.status === 'active');
-    const replayed = replayPosition(existing);
+    const replayed = replayQuantity(existing);
     // A ledger this reconciliation cannot replay is a defect upstream of it
     // (commit already refused to write anything unreplayable) — treated as
     // "nothing computed yet" rather than thrown, so one bad position never
     // blocks the reconciliation report for every other asset.
-    const computedQuantity = replayed.ok ? replayed.value.quantity : b3Quantity;
+    const computedQuantity = replayed.ok ? replayed.value : b3Quantity;
     const firstComputedTradeDate = active.reduce<BusinessDate | null>(
       (min, t) => (min === null || t.tradeDate < min ? t.tradeDate : min),
       null,

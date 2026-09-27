@@ -37,7 +37,9 @@ import type { PositionState } from '@/core/positions/position-state';
  * BR-007-05b), so the average it leaves is still the estimated one — they
  * neither set nor clear the marker. A split or grupamento moves quantity at
  * unchanged total cost (BR-007-04) and a bonificação fraction leaves at
- * unchanged total cost (BR-007-05a). Proventos never touch the position.
+ * unchanged total cost (BR-007-05a). An amortization only takes cost *out*
+ * (BR-007-05c), so what remains of an estimated cost is still an estimate.
+ * Other proventos never touch the position.
  */
 function addsCost(transaction: Transaction): boolean {
   switch (transaction.type) {

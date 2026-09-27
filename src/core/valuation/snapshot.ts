@@ -6,6 +6,7 @@ import { ok, type Result } from '@/core/shared/result';
 import Decimal from 'decimal.js';
 import { computeTotalValue, isEarnings, type Transaction } from '@/core/ledger/transaction';
 import { aggregateAcrossInstitutions } from '@/core/positions/aggregate';
+import { amortizationTermsOf } from '@/core/positions/amortization';
 import { replayPositions } from '@/core/positions/replay';
 import type { Asset, AssetCatalogPort } from '@/core/quotes/ports';
 import { listCalendarDays } from '@/core/valuation/business-days';
@@ -193,7 +194,17 @@ export function valuePortfolioAt(
   asOf: BusinessDate,
   mode: ListedValuationMode,
 ): Result<readonly ValuedPosition[], DomainError> {
-  const replayed = replayPositions(transactions, { asOf });
+  // SPEC-007 BR-007-05c: the context already holds every asset of the
+  // ledger it was loaded for, which is exactly what an amortization's
+  // principal depends on.
+  const amortization = amortizationTermsOf(
+    [...context.assets.values()].map((asset) => ({
+      assetId: asset.id,
+      code: asset.code,
+      assetClass: asset.assetClass,
+    })),
+  );
+  const replayed = replayPositions(transactions, { asOf, amortization });
   if (!replayed.ok) return replayed;
 
   // BR-007-08: positions are held per (asset, institution); a portfolio value
