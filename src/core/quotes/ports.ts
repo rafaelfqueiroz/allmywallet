@@ -276,6 +276,11 @@ export interface IndexSeriesProvider {
 }
 
 export interface TesouroPricePoint {
+  /**
+   * The catalogue code — B3's name for the title (`Tesouro Selic 2029`), so
+   * the price lands on the asset the ledger holds (#152,
+   * `core/quotes/tesouro-title.ts`).
+   */
   readonly ticker: string;
   readonly date: BusinessDate;
   readonly price: Money;

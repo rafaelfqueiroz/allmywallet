@@ -43,6 +43,36 @@ describe('parseTesouroCsv (BR-008-12; AR-06 comma-decimal parsing)', () => {
     expect(ipca?.price.toString()).not.toBe('3414.2'); // base price — overstates
   });
 
+  /**
+   * #152: the price must land on the asset the ledger holds, which B3 names
+   * by product and year. A product whose B3 name cannot be derived keeps
+   * Tesouro Transparente's product and maturity date.
+   */
+  it('catalogues each title under B3’s name, and a product with none under its maturity date', () => {
+    const csv = [
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha',
+      'Tesouro Selic;01/03/2029;16/03/2026;0,10;0,05;14.250,00;14.249,00;14.249,60',
+      'Tesouro IPCA+;15/05/2029;16/03/2026;5,79;5,84;3.415,00;3.413,70;3.414,20',
+      'Tesouro Educa+;15/12/2030;16/03/2026;6,10;6,20;3.100,00;3.090,00;3.095,00',
+    ].join('\n');
+    expect(parseTesouroCsv(csv, 'tesouro_transparente')?.map((p) => p.ticker)).toEqual([
+      'Tesouro Selic 2029',
+      'Tesouro IPCA+ 2029',
+      'Tesouro Educa+ 15/12/2030',
+    ]);
+  });
+
+  it('drops a title whose maturity date cannot be read, keeping the rest of the day', () => {
+    const csv = [
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha',
+      'Tesouro Selic;01/03/2029;16/03/2026;0,10;0,05;14.250,00;14.249,00;14.249,60',
+      'Tesouro IPCA+;31/02/2029;16/03/2026;5,79;5,84;3.415,00;3.413,70;3.414,20',
+    ].join('\n');
+    expect(parseTesouroCsv(csv, 'tesouro_transparente')?.map((p) => p.ticker)).toEqual([
+      'Tesouro Selic 2029',
+    ]);
+  });
+
   it('falls back to PU Base when a title is no longer offered for redemption', () => {
     // A real shape in the published file: the venda column is blank for a
     // title Tesouro no longer buys back. Dropping the row would silently

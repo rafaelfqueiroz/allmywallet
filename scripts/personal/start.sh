@@ -188,6 +188,17 @@ if ! IMAGE_TAG=$new_tag personal_compose run --rm --no-deps -T \
   log "position rebuild failed — starting anyway; report it and run it by hand (docs/runbooks/personal-instance.md)"
 fi
 
+# 3c. Rebuild every valuation snapshot from the ledger and the price history.
+#     A data migration may move a price series (#152 moved every Tesouro
+#     title's onto the asset the ledger holds), and catch-up rebuilds only
+#     from a missed day — so the reports would read the old figures until the
+#     evening `valuation.snapshot`. Snapshots are derived (BR-009-17): safe on
+#     every upgrade, and not fatal for the same reason as 3b.
+if ! IMAGE_TAG=$new_tag personal_compose run --rm --no-deps -T \
+  web node dist/ops.js rebuild-snapshots; then
+  log "snapshot rebuild failed — starting anyway; the evening valuation.snapshot rebuilds them (docs/runbooks/personal-instance.md)"
+fi
+
 # 4–5. Start the new image and let /api/health decide. #121's new ledger
 # values stay latched off until this image is last-known-good: if health fails,
 # the previous 15-type image can replay every row on the migrated schema.
