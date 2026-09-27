@@ -627,3 +627,174 @@ describe('TS-08 / DL-007-06 — rebuild equals incremental, including the BR-007
     expect(exactDespiteEstimate).toBeGreaterThan(0);
   });
 });
+
+/**
+ * SPEC-007 BR-007-05c / #166 — rebuild equals incremental (BR-007-14, TS-08)
+ * across a ledger that **returns capital**: listed restitutions, some above
+ * the remaining cost and some on a closed position, and an Educa+ title paid
+ * monthly through partial sales. Both paths must load the same amortization
+ * terms — the incremental one per write (`guardReplayable`,
+ * `recalculatePositionFrom`), the rebuild once (`rebuildPositions`) — and a
+ * disagreement between them is exactly the ordering-and-accumulation bug this
+ * property exists to catch.
+ */
+const EDUCA_2026 = 'Tesouro Educa+ 2026';
+const AMORTIZING_ASSETS = [
+  { code: 'VIVT3', assetClass: 'stock' },
+  { code: 'HGLG11', assetClass: 'fii' },
+  { code: EDUCA_2026, assetClass: 'tesouro_direto' },
+] as const;
+
+function generateAmortizingHistory(seed: number, length: number): Transaction[] {
+  const random = seededRandom(seed);
+  const pick = <T>(values: readonly T[]): T => {
+    const value = values[Math.floor(random() * values.length)];
+    if (value === undefined) throw new Error('generator: empty choice');
+    return value;
+  };
+  const held = new Map<string, number>();
+  const nextDay = new Map<string, number>();
+  const paidMonth = new Map<string, string>();
+  const rows: Transaction[] = [];
+
+  for (let i = 0; i < length; i += 1) {
+    const { code } = pick(AMORTIZING_ASSETS);
+    const institution = pick(['Clear', null] as const);
+    const key = `${code}|${institution ?? ''}`;
+    const quantity = held.get(key) ?? 0;
+    const titled = code === EDUCA_2026;
+    // Tesouro rows step ~monthly so a history spans many payments; every
+    // date from 2026-01-01 on lies inside Educa+ 2026's schedule.
+    const day = (nextDay.get(key) ?? 0) + 1 + Math.floor(random() * (titled ? 30 : 3));
+    nextDay.set(key, day);
+    const date = isoDate(day);
+    const base = aTransaction().of(code).at(institution).on(date);
+    const roll = random();
+
+    if (quantity >= 1 && roll < 0.25) {
+      const sold = 1 + Math.floor(random() * Math.floor(quantity));
+      held.set(key, quantity - sold);
+      rows.push(base.sell().quantity(String(sold)).price(price(random)).fees('0.97').build());
+    } else if (roll < 0.5 && (!titled || paidMonth.get(key) !== date.slice(0, 7))) {
+      // Paid on whatever is held — zero included, which is the closed-position
+      // case. A listed payment of 6,00 a share can exceed the remaining cost.
+      paidMonth.set(key, date.slice(0, 7));
+      rows.push(
+        base
+          .amortization()
+          .quantity(String(quantity))
+          .price(titled ? '55.37' : pick(['0.37', '1.2265', '0.33333333', '6.00']))
+          .build(),
+      );
+    } else {
+      const bought = 1 + Math.floor(random() * (titled ? 5 : 50));
+      held.set(key, quantity + bought);
+      rows.push(
+        base
+          .buy()
+          .quantity(String(bought))
+          .price(titled ? '2995.07' : price(random))
+          .fees('4.13')
+          .build(),
+      );
+    }
+  }
+  return rows;
+}
+
+function describeAmortizingAssets(repository: FakeTransactionRepository): void {
+  for (const { code, assetClass } of AMORTIZING_ASSETS) {
+    repository.describeAsset(assetIdFor(code), { code, name: code, assetClass });
+  }
+}
+
+describe('TS-08 / SPEC-007 BR-007-05c — rebuild equals incremental across amortizations', () => {
+  const clock = new FakeClock('2030-01-01T12:00:00Z');
+  const seeds = [5, 17, 166, 2027, 8675309];
+
+  it.each(seeds)('agrees on a generated history (seed %i), scrambled arrival', async (seed) => {
+    resetTransactionSequence();
+    const chronological = generateAmortizingHistory(seed, 150);
+    const arrival = shuffle(chronological, seededRandom(seed + 1));
+
+    const incremental = deps(clock);
+    describeAmortizingAssets(incremental.transactions);
+    expect(await enterInArrivalOrder(incremental, arrival)).toBe(arrival.length);
+
+    const rebuilt = await rebuildPositions({
+      transactions: incremental.transactions,
+      positions: new FakePositionRepository(),
+    });
+    expect(rebuilt.ok).toBe(true);
+    if (!rebuilt.ok) return;
+    expect(fingerprint(await incremental.positions.list())).toEqual(fingerprint(rebuilt.value));
+  });
+
+  it('the generated histories exercise every BR-007-05c path', async () => {
+    // Guards against a degenerate generator: across the seeds there is an
+    // Educa+ payment against cost, a listed payment against cost, a listed
+    // payment above the remaining cost (realized gain with no sale), and a
+    // payment on a closed position.
+    const paths = new Set<string>();
+    for (const seed of seeds) {
+      resetTransactionSequence();
+      const history = generateAmortizingHistory(seed, 150);
+      for (const row of history.filter((t) => t.type === 'amortization')) {
+        const repository = new FakeTransactionRepository(
+          history.filter(
+            (t) =>
+              t.assetId === row.assetId &&
+              t.institutionId === row.institutionId &&
+              t.tradeDate < row.tradeDate,
+          ),
+        );
+        describeAmortizingAssets(repository);
+        const before = await rebuildPositions({
+          transactions: repository,
+          positions: new FakePositionRepository(),
+        });
+        if (!before.ok) throw new Error('fixture');
+        const state = before.value[0]?.state;
+        const titled = row.assetId === assetIdFor(EDUCA_2026);
+        if (state === undefined || state.quantity.isZero()) paths.add('closed');
+        else if (titled) paths.add('installment');
+        else if (row.totalValue.comparedTo(state.totalCost) > 0) paths.add('above cost');
+        else paths.add('whole amount');
+      }
+    }
+    expect([...paths].sort()).toEqual(['above cost', 'closed', 'installment', 'whole amount']);
+  });
+
+  it('TS-07 — a backdated Educa+ payment reorders the months after it', async () => {
+    // 2 titles for 2 × 2.995,00 + 10,00 = 6.000,00 on 2025-06-10; payments
+    // for February and March entered first, January's last. In trade order:
+    //   2026-01-15: 6.000,00 ÷ 60 = 100,00 → 5.900,00
+    //   2026-02-16: 5.900,00 ÷ 59 = 100,00 → 5.800,00
+    //   2026-03-16: 5.800,00 ÷ 58 = 100,00 → 5.700,00, average 2.850,00
+    // Had January stayed missing, February would have divided 6.000,00 by 59.
+    resetTransactionSequence();
+    const state = deps(clock);
+    describeAmortizingAssets(state.transactions);
+    const title = aTransaction().of(EDUCA_2026);
+    const rows = [
+      title.buy().on('2025-06-10').quantity('2').price('2995.00').fees('10.00').build(),
+      title.amortization().on('2026-02-16').quantity('2').price('55.00').build(),
+      title.amortization().on('2026-03-16').quantity('2').price('55.00').build(),
+      title.amortization().on('2026-01-15').quantity('2').price('55.00').build(),
+    ];
+    expect(await enterInArrivalOrder(state, rows)).toBe(rows.length);
+
+    const [position] = await state.positions.list();
+    expect(position?.state.totalCost.toString()).toBe('5700');
+    expect(position?.state.averageCost.toString()).toBe('2850');
+    expect(position?.state.quantity.toString()).toBe('2');
+
+    const rebuilt = await rebuildPositions({
+      transactions: state.transactions,
+      positions: new FakePositionRepository(),
+    });
+    expect(rebuilt.ok && fingerprint(rebuilt.value)).toEqual(
+      fingerprint(await state.positions.list()),
+    );
+  });
+});

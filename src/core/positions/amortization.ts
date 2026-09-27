@@ -6,10 +6,7 @@ import { type Result, err, ok } from '@/core/shared/result';
 import type { AssetIdentity, TransactionRepository } from '@/core/ledger/ports';
 import { type PayoutSchedule, payoutScheduleOf } from '@/core/quotes/tesouro-title';
 import { makePosition, type PositionState } from '@/core/positions/position-state';
-import {
-  amortizationNotSupported,
-  amortizationOutsideSchedule,
-} from '@/core/positions/errors';
+import { amortizationNotSupported, amortizationOutsideSchedule } from '@/core/positions/errors';
 
 /**
  * SPEC-007 BR-007-05c / DL-007-13 — **an amortization returns capital.**

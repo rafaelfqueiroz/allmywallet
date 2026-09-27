@@ -133,7 +133,9 @@ export class DrizzleTransactionRepository implements TransactionRepository {
     const rows = await this.tx
       .select({ assetId: assets.id, code: assets.code, assetClass: assets.assetClass })
       .from(assets)
-      .where(including.length === 0 ? amortized : or(amortized, inArray(assets.id, [...including])));
+      .where(
+        including.length === 0 ? amortized : or(amortized, inArray(assets.id, [...including])),
+      );
     return rows.map((row) => ({
       assetId: AssetId.of(row.assetId),
       code: row.code,

@@ -1102,3 +1102,65 @@ describe('BR-009-18 / AC-15 — invalidate and rebuild forward from a date', () 
     ]);
   });
 });
+
+describe('SPEC-007 BR-007-05c — valuation replays amortizations with the context’s own catalogue', () => {
+  it('a restitution lowers cost basis, not value, and stays earnings rather than a flow', async () => {
+    // Buy 100 PETR4 @ 32,15 on 2026-03-16 → cost 3.215,00.
+    // Restitution 100 × 0,50 = 50,00 on 2026-03-18 → cost 3.165,00 (31,65).
+    // Close on 2026-03-20: 38,42 → value 100 × 38,42 = 3.842,00.
+    // Unrealized 3.842,00 − 3.165,00 = 677,00.
+    // Net contributions 3.215,00 (the restitution is not an external flow);
+    // earnings to date 50,00 (SPEC-014 BR-014-01 unchanged).
+    const h = harness();
+    h.prices.addClose(PETR4, '2026-03-20', '38.42');
+    const ledger = [
+      aTransaction().buy().of('PETR4').on('2026-03-16').quantity('100').price('32.15').build(),
+      aTransaction()
+        .amortization()
+        .of('PETR4')
+        .on('2026-03-18')
+        .quantity('100')
+        .price('0.50')
+        .build(),
+    ];
+    const context = await loadValuationContext(h.deps, ledger, d('2026-03-20'), d('2026-03-20'));
+    const valued = valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical');
+    expect(valued.ok).toBe(true);
+    if (!valued.ok) return;
+    const [petr4] = valued.value;
+    expect(to8(petr4?.value ?? Money.zero())).toBe('3842.00000000');
+    expect(to8(petr4?.costBasis ?? Money.zero())).toBe('3165.00000000');
+    expect(to8(petr4?.unrealizedGain ?? Money.zero())).toBe('677.00000000');
+
+    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+    expect(to8(snapshot.netContributions)).toBe('3215.00000000');
+    expect(to8(snapshot.earningsToDate)).toBe('50.00000000');
+  });
+
+  it('an amortization of a Tesouro title with no BR-007-05c rule fails the valuation', async () => {
+    // Tesouro IPCA+ 2035 is not NTN-B1: no principal is defined, so no
+    // figure is produced for the day rather than one resting on a guess.
+    const h = harness();
+    const ledger = [
+      aTransaction()
+        .buy()
+        .of('Tesouro IPCA+ 2035')
+        .on('2026-03-16')
+        .quantity('1')
+        .price('3400')
+        .build(),
+      aTransaction()
+        .amortization()
+        .of('Tesouro IPCA+ 2035')
+        .on('2026-03-18')
+        .quantity('1')
+        .price('50')
+        .build(),
+    ];
+    const context = await loadValuationContext(h.deps, ledger, d('2026-03-20'), d('2026-03-20'));
+    const valued = valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical');
+    expect(valued.ok).toBe(false);
+    if (valued.ok) return;
+    expect(valued.error.code).toBe('AMORTIZATION_NOT_SUPPORTED');
+  });
+});

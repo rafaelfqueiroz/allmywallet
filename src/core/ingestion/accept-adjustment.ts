@@ -80,9 +80,7 @@ export function adjustmentBlocker(
   const replayed = replayQuantity(ledger);
   // A ledger that no longer replays has no quantity to compare: not the one reported.
   if (!replayed.ok) return 'stale';
-  return replayed.value.equals(Quantity.fromString(discrepancy.computedQuantity))
-    ? null
-    : 'stale';
+  return replayed.value.equals(Quantity.fromString(discrepancy.computedQuantity)) ? null : 'stale';
 }
 
 const BLOCKER_ERROR: Readonly<Record<AdjustmentBlocker, IngestionUseCaseErrorCode>> = {

@@ -821,6 +821,103 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
     });
   });
 
+  describe('SPEC-007 BR-007-05c — an amortization returns capital (#166)', () => {
+    it('describeAmortizedAssets names every amortized asset plus the included ones', async () => {
+      const vivt3 = (await seedAsset(testDb.migrationUrl, 'VIVT3', 'Telefônica Brasil ON')).id;
+      const educa = (
+        await seedAsset(
+          testDb.migrationUrl,
+          'Tesouro Educa+ 2026',
+          'Tesouro Educa+ 2026',
+          'tesouro_direto',
+        )
+      ).id;
+      await asTenant(async (deps) => {
+        for (const [assetId, type] of [
+          [vivt3, 'buy'],
+          [vivt3, 'amortization'],
+          [petr4, 'buy'],
+        ] as const) {
+          const result = await createTransaction(deps, userId, {
+            assetId,
+            institutionId: clear,
+            type,
+            tradeDate: BusinessDate.of(type === 'buy' ? '2026-01-05' : '2026-02-10'),
+            quantity: Quantity.fromString('10'),
+            unitPrice: Money.fromString('1.00'),
+            fees: Money.zero(),
+          });
+          expect(result.ok, type).toBe(true);
+        }
+      });
+
+      const described = await asTenant((deps) =>
+        deps.transactions.describeAmortizedAssets([educa]),
+      );
+      // VIVT3 for its stored amortization, Educa+ because it was included;
+      // PETR4 is held but never amortized, so it is not asked for.
+      expect(
+        [...described].sort((a, b) => a.code.localeCompare(b.code)).map((a) => ({ ...a })),
+      ).toEqual([
+        { assetId: educa, code: 'Tesouro Educa+ 2026', assetClass: 'tesouro_direto' },
+        { assetId: vivt3, code: 'VIVT3', assetClass: 'stock' },
+      ]);
+      expect(
+        (await asTenant((deps) => deps.transactions.describeAmortizedAssets([]))).map(
+          (a) => a.code,
+        ),
+      ).toEqual(['VIVT3']);
+    });
+
+    it("the owner's VIVT3 shape: cache and rebuild agree through NUMERIC(20,8)", async () => {
+      //   buy 240 @ 23,70 + 9,02 fees      → 5.697,02
+      //   restitution 240 × 1,2265 = 294,36 → 5.402,66, average 22,51108333…
+      //   stored at eight places: 22,51108333; quantity 240; realized 0
+      const vivt3 = (await seedAsset(testDb.migrationUrl, 'VIVT3', 'Telefônica Brasil ON')).id;
+      await asTenant(async (deps) => {
+        const buy = await createTransaction(deps, userId, {
+          assetId: vivt3,
+          institutionId: clear,
+          type: 'buy',
+          tradeDate: BusinessDate.of('2024-03-01'),
+          quantity: Quantity.fromString('240'),
+          unitPrice: Money.fromString('23.70'),
+          fees: Money.fromString('9.02'),
+        });
+        expect(buy.ok).toBe(true);
+        const restitution = await createTransaction(deps, userId, {
+          assetId: vivt3,
+          institutionId: clear,
+          type: 'amortization',
+          tradeDate: BusinessDate.of('2024-07-10'),
+          quantity: Quantity.fromString('240'),
+          unitPrice: Money.fromString('1.2265'),
+          fees: Money.zero(),
+        });
+        expect(restitution.ok).toBe(true);
+      });
+
+      const incremental = await asTenant((deps) => deps.positions.list());
+      expect(incremental.map(serialize)).toEqual([
+        {
+          assetId: vivt3,
+          institutionId: clear,
+          quantity: '240',
+          totalCost: '5402.66',
+          averageCost: '22.51108333',
+          realizedGain: '0',
+        },
+      ]);
+
+      const rebuilt = await asTenant(async (deps) => {
+        const result = await rebuildPositions(deps);
+        expect(result.ok).toBe(true);
+        return deps.positions.list();
+      });
+      expect(rebuilt.map(serialize)).toEqual(incremental.map(serialize));
+    });
+  });
+
   it('BR-006-15 — refuses an oversell against real stored history', async () => {
     await asTenant(async (deps) => {
       await createTransaction(deps, userId, {

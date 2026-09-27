@@ -1170,15 +1170,12 @@ async function loadLedgers(
   const amortization = await loadAmortizationTerms(deps.transactions, [
     ...new Set(rows.map((row) => row.assetId)),
   ]);
-  const read = Object.assign(
-    (key: PositionKey) => ledgers.get(positionKeyString(key)) ?? [],
-    {
-      prime: (key: PositionKey, transactions: readonly Transaction[]) => {
-        ledgers.set(positionKeyString(key), transactions);
-      },
-      amortization,
+  const read = Object.assign((key: PositionKey) => ledgers.get(positionKeyString(key)) ?? [], {
+    prime: (key: PositionKey, transactions: readonly Transaction[]) => {
+      ledgers.set(positionKeyString(key), transactions);
     },
-  );
+    amortization,
+  });
   return read;
 }
 
@@ -3489,10 +3486,7 @@ function corporateCulprit(group: Group, amortization: AmortizationTerms): string
  * Replayed here against the group alone, so a group with many refusals costs
  * one settling round rather than one per refusal.
  */
-function refusedCandidates(
-  group: Group,
-  amortization: AmortizationTerms,
-): readonly Candidate[] {
+function refusedCandidates(group: Group, amortization: AmortizationTerms): readonly Candidate[] {
   const byTransaction = new Map(group.candidates.map((c) => [c.transaction.id, c]));
   const refused: Candidate[] = [];
   let ledger = group.ledger;
