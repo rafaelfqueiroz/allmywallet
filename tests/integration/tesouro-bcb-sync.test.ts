@@ -10,7 +10,8 @@ import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repos
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { DrizzleIndexSeriesRepository } from '@/adapters/db/index-series-repository';
 import { handleTesouroSync } from '@/worker/handlers/tesouro';
-import { TesouroErrorCode } from '@/adapters/quotes/tesouro';
+import { TesouroErrorCode, parseTesouroCsv } from '@/adapters/quotes/tesouro';
+import { DrizzleAssetResolver } from '@/adapters/db/ingestion-resolvers';
 import { handleBcbSync } from '@/worker/handlers/bcb';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 
@@ -86,6 +87,42 @@ describe('SPEC-008 tesouro.sync / bcb.sync handlers (integration)', () => {
     expect(close?.close.toString()).toBe('14249.6');
     // Tesouro has no intraday quote — never touches latest_quotes.
     expect(await repository.getLatestQuote(asset.id)).toBeNull();
+  });
+
+  /**
+   * #152: the importer creates the held title under B3's name; the sync must
+   * price that asset, not onboard a second one under Tesouro Transparente's
+   * product and maturity date that nothing holds.
+   */
+  it('prices the title the importer created under B3’s name, onboarding no second asset', async () => {
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const repository = new DrizzleQuoteRepository(db);
+    const heldId = await new DrizzleAssetResolver(db).resolve({
+      code: 'Tesouro IPCA+ 2029',
+      name: 'Tesouro IPCA+ 2029',
+      assetClass: 'tesouro_direto',
+      nameStated: true,
+      classStated: true,
+    });
+    const csv = [
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha',
+      'Tesouro IPCA+;15/05/2029;16/03/2026;5,79;5,84;3.415,00;3.413,70;3.414,20',
+    ].join('\n');
+    const points = parseTesouroCsv(csv, 'tesouro_transparente');
+    if (points === null) throw new Error('setup failed: fixture CSV did not parse');
+
+    await handleTesouroSync({
+      catalog,
+      repository,
+      provider: { fetchDailyPrices: async () => ok(points) },
+    });
+
+    const close = await repository.getClosePrice(heldId, BusinessDate.of('2026-03-16'));
+    expect(close?.close.toString()).toBe('3413.7');
+    const { rows } = await pool.query(
+      "SELECT code FROM assets WHERE class = 'tesouro_direto' ORDER BY code",
+    );
+    expect(rows.map((row) => row.code)).toEqual(['Tesouro IPCA+ 2029']);
   });
 
   it('AR-19: re-syncing the same title/date overwrites rather than duplicating the catalog row', async () => {

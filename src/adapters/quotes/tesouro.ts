@@ -3,6 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { domainError, type DomainError } from '@/core/shared/domain-error';
 import { err, ok, type Result } from '@/core/shared/result';
 import type { TesouroPricePoint, TesouroPriceProvider } from '@/core/quotes/ports';
+import { tesouroCatalogCodes } from '@/core/quotes/tesouro-title';
 
 /**
  * SPEC-008 BR-008-12 — Tesouro Transparente publishes one semicolon-delimited
@@ -101,7 +102,7 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     puBase: header.indexOf('PU Base Manha'),
   };
 
-  type Row = { ticker: string; date: string; price: string };
+  type Row = { product: string; maturity: string; date: string; price: string };
   const rows: Row[] = [];
   for (const line of lines.slice(1)) {
     const cols = line.split(';');
@@ -128,7 +129,7 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     const puBase = cols[idx.puBase]?.trim();
     const price = puVenda || puBase;
     if (!titulo || !vencimento || !dataBase || !price) continue;
-    rows.push({ ticker: `${titulo} ${vencimento}`, date: dataBase, price });
+    rows.push({ product: titulo, maturity: vencimento, date: dataBase, price });
   }
   if (rows.length === 0) return [];
 
@@ -142,12 +143,18 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
   if (!latest) return [];
   const latestDate: BusinessDate = latest;
 
-  return rows
-    .filter((row) => toBusinessDate(row.date) === latestDate)
-    .map((row) => ({
-      ticker: row.ticker,
-      date: latestDate,
-      price: Money.fromString(toDecimalString(row.price)),
-      source,
-    }));
+  const latestRows = rows.filter((row) => toBusinessDate(row.date) === latestDate);
+  // #152: catalogued under B3's name (`Tesouro Selic 2029`) — the asset the
+  // ledger already holds — rather than Tesouro Transparente's product and
+  // maturity date, which named an asset nothing held. The rule, and the
+  // products it declines to translate, live in `core/quotes/tesouro-title.ts`.
+  const codes = tesouroCatalogCodes(
+    latestRows.map((row) => ({ product: row.product, maturity: toBusinessDate(row.maturity) })),
+  );
+  return latestRows.map((row, index) => ({
+    ticker: codes[index] as string,
+    date: latestDate,
+    price: Money.fromString(toDecimalString(row.price)),
+    source,
+  }));
 }
