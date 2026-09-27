@@ -793,6 +793,10 @@
       "impactQuantity": "Quantidade",
       "impactAverageCost": "Preço médio",
       "impactAllocations": "Se alguma carteira ficar com mais cotas do que você passa a ter, o excesso é devolvido proporcionalmente para Não atribuído.",
+      "downstreamTitle": "Outras posições recalculadas",
+      "downstreamDescription": "Estas posições receberam custo desta por transferência ou conversão. O custo delas é relido da origem sem esta transação.",
+      "downstreamPosition": "{asset} em {institution}",
+      "downstreamPositionNoInstitution": "{asset}, sem instituição",
       "notFound": "Esta transação não existe mais."
     },
     "edit": {

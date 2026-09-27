@@ -5,7 +5,11 @@ import { serializePosition } from '@/core/positions/position-state';
 import { rebuildPositions } from '@/core/positions/rebuild';
 import { positionKeyString, replayPositions, type PositionSnapshot } from '@/core/positions/replay';
 import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
-import { planCarriedLegUpdates, rederiveCarriedLegs } from '@/core/ledger/carried-legs';
+import {
+  planCarriedLegUpdates,
+  positionsOf,
+  rederiveCarriedLegs,
+} from '@/core/ledger/carried-legs';
 import { deleteTransaction, describeDeletionImpact } from '@/core/ledger/delete-transaction';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { editTransaction, editTransactions } from '@/core/ledger/edit-transaction';
@@ -858,6 +862,19 @@ describe('rederiveCarriedLegs — the pure planner', () => {
       expect(byAsset('NEW4')).toBe('720');
       expect(byAsset('NEW5')).toBe('480');
     });
+  });
+});
+
+describe('positionsOf', () => {
+  it('one entry per position, dated its earliest leg whatever the order', () => {
+    const early = aTransaction().transferIn().at('B').on('2026-03-01').build();
+    const late = aTransaction().transferIn().at('B').on('2026-03-10').build();
+    const elsewhere = aTransaction().transferIn().at('C').on('2026-03-05').build();
+    expect(positionsOf([early, late, elsewhere]).map((p) => p.fromDate)).toEqual([
+      '2026-03-01',
+      '2026-03-05',
+    ]);
+    expect(positionsOf([late, early]).map((p) => p.fromDate)).toEqual(['2026-03-01']);
   });
 });
 
