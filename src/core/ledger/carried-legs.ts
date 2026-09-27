@@ -21,6 +21,7 @@ import { guardReplayable } from '@/core/ledger/guard-replayable';
 import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import { isActive, type Transaction } from '@/core/ledger/transaction';
+import type { PositionState } from '@/core/positions/position-state';
 
 /**
  * SPEC-007 BR-007-06 / DL-007-12 (#144 review F6) — a ledger write re-derives
@@ -432,4 +433,55 @@ export function positionsOf(
     }
   }
   return [...byKey.values()];
+}
+
+/**
+ * SPEC-006 BR-006-13 — one position a write will recalculate, before and
+ * after, as the confirmation states it. Both sides are replays, and the marker
+ * comes from the same fold as the figures (SPEC-007 BR-007-06).
+ */
+export interface PositionImpact extends PositionKey {
+  readonly currentPosition: PositionState;
+  readonly projectedPosition: PositionState;
+  readonly currentCostEstimated: boolean;
+  readonly projectedCostEstimated: boolean;
+}
+
+/**
+ * SPEC-006 BR-006-13 (#144 re-review N3) — every position **downstream** of a
+ * write that its re-derived legs (`planCarriedLegUpdates`) will recalculate,
+ * other than `exclude` (the write's own positions, which the caller states
+ * itself). Read from the very plan the write executes, never recomputed a
+ * second way, so the confirmation cannot name a different set of positions
+ * from the one the delete then changes.
+ *
+ * A projected position that cannot be replayed is returned as the error: the
+ * delete would be refused (`guardCarriedLegs`), and the user is told so
+ * before confirming.
+ */
+export async function describeCarriedImpact(
+  deps: LedgerDependencies,
+  legs: readonly Transaction[],
+  removed: ReadonlySet<string>,
+  exclude: readonly PositionKey[],
+): Promise<Result<readonly PositionImpact[], DomainError>> {
+  const skip = new Set(exclude.map(positionKeyString));
+  const impacts: PositionImpact[] = [];
+  for (const key of positionsOf(legs)) {
+    if (skip.has(positionKeyString(key))) continue;
+    const existing = await deps.transactions.listForPosition(key.assetId, key.institutionId);
+    const current = replayPositionWithEstimate(existing);
+    if (!current.ok) return current;
+    const projected = replayPositionWithEstimate(projectPosition(existing, removed, legs, key));
+    if (!projected.ok) return projected;
+    impacts.push({
+      assetId: key.assetId,
+      institutionId: key.institutionId,
+      currentPosition: current.value.state,
+      projectedPosition: projected.value.state,
+      currentCostEstimated: current.value.costEstimated,
+      projectedCostEstimated: projected.value.costEstimated,
+    });
+  }
+  return ok(impacts);
 }

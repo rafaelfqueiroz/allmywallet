@@ -6,7 +6,7 @@ import { rebuildPositions } from '@/core/positions/rebuild';
 import { positionKeyString, replayPositions, type PositionSnapshot } from '@/core/positions/replay';
 import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
 import { planCarriedLegUpdates, rederiveCarriedLegs } from '@/core/ledger/carried-legs';
-import { deleteTransaction } from '@/core/ledger/delete-transaction';
+import { deleteTransaction, describeDeletionImpact } from '@/core/ledger/delete-transaction';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { editTransaction, editTransactions } from '@/core/ledger/edit-transaction';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
@@ -621,6 +621,136 @@ describe('#144 F6 — what the downstream re-derivation guards and recalculates'
     expect(b?.state.totalCost.toString()).toBe('1200');
     expect(b?.costEstimated).toBe(false);
     await expectRebuildEqualsIncremental(state);
+  });
+});
+
+/**
+ * SPEC-006 BR-006-13 (#144 re-review N3): the confirmation states what will be
+ * recalculated — now including the positions downstream a delete re-derives,
+ * read from the same plan the delete executes.
+ */
+describe('#144 N3 — describeDeletionImpact names the downstream positions', () => {
+  it('states B before and after when deleting the estimated row A carried on', async () => {
+    //  A: buy 100 @ 10,00 + estimated subscription 20 @ 114,90 = 120, 3.298,00.
+    //  100 sent to B at 27,48333333 → B: 100, 2.748,333333, estimated.
+    //  Without the subscription A carries 10,00 → B: 100, 1.000,00, 10,00, exact.
+    //  A itself: 120 − 100 = 20 today; 100 − 100 = 0 after.
+    const sub = subscription('A');
+    const [debit, credit] = transferPair('A', 'B', '2026-03-10', '100', '27.48333333');
+    const state = await seeded([buy100('A'), sub, debit, { ...credit, costIsEstimate: true }]);
+
+    const impact = await describeDeletionImpact(state, sub.id);
+
+    expect(impact.ok).toBe(true);
+    if (!impact.ok) return;
+    expect(impact.value.currentPosition.quantity.toString()).toBe('20');
+    expect(impact.value.projectedPosition.quantity.toString()).toBe('0');
+    expect(impact.value.downstream).toHaveLength(1);
+    const [b] = impact.value.downstream;
+    expect(b?.assetId).toBe(assetIdFor('PETR4'));
+    expect(b?.institutionId).toBe(institutionIdFor('B'));
+    expect(b?.currentPosition.quantity.toString()).toBe('100');
+    expect(b?.currentPosition.totalCost.toString()).toBe('2748.333333');
+    expect(b?.currentPosition.averageCost.toString()).toBe('27.48333333');
+    expect(b?.currentCostEstimated).toBe(true);
+    expect(b?.projectedPosition.quantity.toString()).toBe('100');
+    expect(b?.projectedPosition.totalCost.toString()).toBe('1000');
+    expect(b?.projectedPosition.averageCost.toString()).toBe('10');
+    expect(b?.projectedCostEstimated).toBe(false);
+
+    // What it states is what the delete then does.
+    expect((await deleteTransaction(state, sub.id)).ok).toBe(true);
+    const after = position(await state.positions.list(), 'B');
+    expect(after?.state.totalCost.toString()).toBe(b?.projectedPosition.totalCost.toString());
+    expect(after?.costEstimated).toBe(b?.projectedCostEstimated);
+  });
+
+  it('names no downstream position when the row’s position sent nothing on', async () => {
+    const sub = subscription('A');
+    const state = await seeded([buy100('A'), sub]);
+
+    const impact = await describeDeletionImpact(state, sub.id);
+
+    expect(impact.ok && impact.value.downstream).toEqual([]);
+  });
+
+  it('projects a partial import conversion at the row’s own position, and its target', async () => {
+    //  The N1 shape: OLD3 100 @ 10,00 + estimated 20 @ 114,90; 60 converted
+    //  at 1.649,00 into 30 NEW3. Without the subscription the leg removes
+    //  1.000,00 × 60 ÷ 100 = 600,00: OLD3 40, 400,00; NEW3 30, 600,00, 20,00.
+    const group = '00000000-c0de-7000-8000-000000000047';
+    const sub = { ...subscription('A'), assetId: assetIdFor('OLD3') };
+    const state = await seeded([
+      aTransaction().buy().of('OLD3').at('A').on('2026-01-05').quantity('100').price('10').build(),
+      sub,
+      imported(
+        aTransaction()
+          .conversionOut(group, '1649')
+          .of('OLD3')
+          .at('A')
+          .on('2026-03-01')
+          .quantity('60'),
+      ),
+      {
+        ...imported(
+          aTransaction()
+            .conversionIn('1649', group)
+            .of('NEW3')
+            .at('A')
+            .on('2026-03-01')
+            .quantity('30'),
+        ),
+        costIsEstimate: true,
+      },
+    ]);
+
+    const impact = await describeDeletionImpact(state, sub.id);
+
+    expect(impact.ok).toBe(true);
+    if (!impact.ok) return;
+    expect(impact.value.projectedPosition.quantity.toString()).toBe('40');
+    expect(impact.value.projectedPosition.totalCost.toString()).toBe('400');
+    expect(impact.value.projectedCostEstimated).toBe(false);
+    const [new3] = impact.value.downstream;
+    expect(new3?.assetId).toBe(assetIdFor('NEW3'));
+    expect(new3?.currentPosition.totalCost.toString()).toBe('1649');
+    expect(new3?.currentCostEstimated).toBe(true);
+    expect(new3?.projectedPosition.totalCost.toString()).toBe('600');
+    expect(new3?.projectedPosition.averageCost.toString()).toBe('20');
+    expect(new3?.projectedCostEstimated).toBe(false);
+  });
+
+  it('reports the refusal when a downstream position would not replay', async () => {
+    // B converts its 100 by hand at 2.748,333333; re-carried at 10,00 B would
+    // hold 1.000,00 — the delete is refused, and the preview says so first.
+    const sub = subscription('A');
+    const [debit, credit] = transferPair('A', 'B', '2026-03-10', '100', '27.48333333');
+    const group = '00000000-c0de-7000-8000-000000000048';
+    const state = await seeded([
+      buy100('A'),
+      sub,
+      debit,
+      { ...credit, costIsEstimate: true },
+      aTransaction()
+        .conversionOut(group, '2748.333333')
+        .at('B')
+        .on('2026-04-01')
+        .quantity('100')
+        .build(),
+      aTransaction()
+        .conversionIn('2748.333333', group)
+        .of('NEW3')
+        .at('B')
+        .on('2026-04-01')
+        .quantity('50')
+        .build(),
+    ]);
+
+    const impact = await describeDeletionImpact(state, sub.id);
+
+    expect(impact.ok).toBe(false);
+    if (impact.ok) return;
+    expect(impact.error.code).toBe('INSUFFICIENT_QUANTITY');
   });
 });
 

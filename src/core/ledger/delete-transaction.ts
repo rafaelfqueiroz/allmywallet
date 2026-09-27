@@ -7,8 +7,11 @@ import type { PositionState } from '@/core/positions/position-state';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
 import {
+  describeCarriedImpact,
   guardCarriedLegs,
   planCarriedLegUpdates,
+  type PositionImpact,
+  projectPosition,
   recalculateCarriedPositions,
 } from '@/core/ledger/carried-legs';
 import { without } from '@/core/ledger/guard-replayable';
@@ -54,6 +57,13 @@ export interface DeletionImpact {
    */
   readonly currentCostEstimated: boolean;
   readonly projectedCostEstimated: boolean;
+  /**
+   * SPEC-006 BR-006-13 / SPEC-007 BR-007-06 (#144 re-review N3): the other
+   * positions this delete recalculates — each one a carried transfer or
+   * import conversion from this position lands in (`carried-legs.ts`) —
+   * before and after. Empty when the position sent nothing on that changes.
+   */
+  readonly downstream: readonly PositionImpact[];
 }
 
 export async function describeDeletionImpact(
@@ -70,12 +80,23 @@ export async function describeDeletionImpact(
   const current = replayPositionWithEstimate(existing);
   if (!current.ok) return current;
 
-  const remaining = without(existing, new Set([target.id]));
+  // The same plan `deleteTransaction` executes (#144 re-review N3), so the
+  // preview names exactly the positions the delete will change — and this
+  // position's own projection includes any of its legs the plan re-derives
+  // (a partial conversion's outgoing leg, N1).
+  const removed = new Set<string>([target.id]);
+  const rederived = await planCarriedLegUpdates(deps, [target], (ledger) =>
+    without(ledger, removed),
+  );
+  const remaining = projectPosition(existing, removed, rederived, target);
   const projected = replayPositionWithEstimate(remaining);
   // BR-006-15 again: deleting the buy a later sale drew on leaves a ledger
   // that cannot be replayed. The user is told that here, before confirming,
   // rather than after the row is already gone.
   if (!projected.ok) return projected;
+
+  const downstream = await describeCarriedImpact(deps, rederived, removed, [target]);
+  if (!downstream.ok) return downstream;
 
   return ok({
     transactionId: target.id,
@@ -87,6 +108,7 @@ export async function describeDeletionImpact(
     projectedPosition: projected.value.state,
     currentCostEstimated: current.value.costEstimated,
     projectedCostEstimated: projected.value.costEstimated,
+    downstream: downstream.value,
   });
 }
 
