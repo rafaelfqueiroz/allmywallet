@@ -165,10 +165,13 @@ export interface Transaction {
 }
 
 /**
- * Types that move quantity or cost basis. Everything else is recognised
- * elsewhere: dividends, JCP, rendimentos, amortizações and leilões de frações
- * are proventos (SPEC-014), recognised at pay date and never assumed
- * reinvested, so they leave the position untouched.
+ * Types that move quantity or cost basis. Dividends, JCP, rendimentos and
+ * leilões de frações are proventos only (SPEC-014), recognised at pay date and
+ * never assumed reinvested, so they leave the position untouched.
+ *
+ * An amortização is the one type that is both: a provento the Earnings report
+ * shows (SPEC-014 BR-014-01) and a return of capital that lowers total cost
+ * (SPEC-007 BR-007-05c).
  */
 const POSITION_AFFECTING_TYPES: ReadonlySet<TransactionType> = new Set<TransactionType>([
   'buy',
@@ -185,6 +188,8 @@ const POSITION_AFFECTING_TYPES: ReadonlySet<TransactionType> = new Set<Transacti
   // SPEC-007 BR-007-05b: both linked legs change positions without cash.
   'conversion_out',
   'conversion_in',
+  // SPEC-007 BR-007-05c: capital returned — total cost down, quantity kept.
+  'amortization',
 ]);
 
 export function affectsPosition(type: TransactionType): boolean {

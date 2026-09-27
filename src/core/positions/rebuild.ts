@@ -2,6 +2,7 @@ import type { DomainError } from '@/core/shared/domain-error';
 import { asStored } from '@/core/shared/money';
 import { type Result, ok } from '@/core/shared/result';
 import type { TransactionRepository } from '@/core/ledger/ports';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
 import type { PositionRepository } from '@/core/positions/ports';
 import {
   positionKeyString,
@@ -40,7 +41,10 @@ export async function rebuildPositions(
   deps: RebuildDependencies,
 ): Promise<Result<readonly PositionSnapshot[], DomainError>> {
   const transactions = await deps.transactions.listAll();
-  const replayed = replayPositions(transactions);
+  // SPEC-007 BR-007-05c: every stored amortization's asset — the whole ledger
+  // is replayed, so nothing beyond it needs including.
+  const amortization = await loadAmortizationTerms(deps.transactions, []);
+  const replayed = replayPositions(transactions, { amortization });
   if (!replayed.ok) return replayed;
 
   await deps.positions.replaceAll(replayed.value);
@@ -131,7 +135,8 @@ export async function verifyPositions(
   deps: RebuildDependencies,
 ): Promise<Result<PositionVerification, DomainError>> {
   const transactions = await deps.transactions.listAll();
-  const replayed = replayPositions(transactions);
+  const amortization = await loadAmortizationTerms(deps.transactions, []);
+  const replayed = replayPositions(transactions, { amortization });
   if (!replayed.ok) return replayed;
 
   const cached = new Map(

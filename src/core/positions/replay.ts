@@ -1,8 +1,10 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
+import type { Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { type Transaction, isActive } from '@/core/ledger/transaction';
+import type { AmortizationTerms } from '@/core/positions/amortization';
 import { applyTransaction } from '@/core/positions/apply-transaction';
 import { costEstimatedAfter } from '@/core/positions/cost-estimate';
 import { EMPTY_POSITION, type PositionState } from '@/core/positions/position-state';
@@ -37,6 +39,14 @@ export interface ReplayOptions {
    * position. Omitted means the whole ledger.
    */
   readonly asOf?: BusinessDate | undefined;
+  /**
+   * SPEC-007 BR-007-05c: what each asset's amortization returns as principal
+   * (`amortization.ts`). Required in practice by any ledger holding an
+   * `amortization` row — the fold fails on one whose asset it was not told
+   * about (`AMORTIZATION_TERMS_UNKNOWN`) rather than guess. Every writer of
+   * the position cache loads it with `loadAmortizationTerms`.
+   */
+  readonly amortization?: AmortizationTerms | undefined;
 }
 
 /**
@@ -114,6 +124,28 @@ export function replayPositionWithEstimate(
   return folded.ok ? folded : err(folded.error.error);
 }
 
+/**
+ * The quantity a position holds, for a caller that reads **nothing else**.
+ *
+ * SPEC-007 BR-007-05c: an amortization never moves quantity — it returns
+ * capital, not shares — so this fold leaves amortization rows out and needs
+ * no amortization terms. That is what lets the import's quantity-only reads
+ * (a corporate event's ratio, a balance before a conversion or liquidation, a
+ * reconciliation) stay free of the catalogue, and it is also why this returns
+ * a `Quantity` and not a state: a cost read from a fold that skipped the
+ * amortizations would be wrong, so none is offered.
+ */
+export function replayQuantity(
+  transactions: readonly Transaction[],
+  options: Pick<ReplayOptions, 'asOf'> = {},
+): Result<Quantity, DomainError> {
+  const folded = fold(
+    transactions.filter((transaction) => transaction.type !== 'amortization'),
+    options,
+  );
+  return folded.ok ? ok(folded.value.state.quantity) : err(folded.error.error);
+}
+
 /** The transaction a replay stopped at, and why (BR-006-15). */
 export interface ReplayFailure {
   readonly transaction: Transaction;
@@ -143,7 +175,7 @@ function fold(
   let state = EMPTY_POSITION;
   let costEstimated = false;
   for (const transaction of sortForReplay(selectForReplay(transactions, options))) {
-    const next = applyTransaction(state, transaction);
+    const next = applyTransaction(state, transaction, options.amortization);
     if (!next.ok) return err({ transaction, error: next.error });
     state = next.value;
     // SPEC-007 BR-007-06 / BR-007-07: decided in replay order, after the
@@ -189,7 +221,9 @@ export function replayPositions(
   for (const group of groups.values()) {
     // Already filtered above, so replay is handed the selected rows directly
     // rather than re-applying `asOf` to a subset it has already narrowed.
-    const replayed = replayPositionWithEstimate(group.transactions);
+    const replayed = replayPositionWithEstimate(group.transactions, {
+      amortization: options.amortization,
+    });
     if (!replayed.ok) return replayed;
     snapshots.push({ ...group.key, ...replayed.value });
   }

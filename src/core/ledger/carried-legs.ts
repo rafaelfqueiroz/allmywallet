@@ -1,5 +1,6 @@
 import { asStored, Money, type Quantity, sumMoney } from '@/core/shared/money';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
+import { type AmortizationTerms, loadAmortizationTerms } from '@/core/positions/amortization';
 import { compareForReplay } from '@/core/positions/ordering';
 import {
   positionKeyString,
@@ -114,6 +115,8 @@ export function rederiveCarriedLegs(
   ledger: readonly Transaction[],
   seeds: readonly PositionKey[],
   now: Date,
+  /** SPEC-007 BR-007-05c: a source's amortizations move the cost its legs carry. */
+  amortization: AmortizationTerms,
 ): readonly Transaction[] {
   const current = new Map(ledger.map((transaction) => [transaction.id, transaction]));
   const dirty = new Set(seeds.map(positionKeyString));
@@ -130,9 +133,9 @@ export function rederiveCarriedLegs(
   // leg, and there are fewer legs than rows.
   for (let round = 0; round <= ledger.length; round += 1) {
     const rows = [...current.values()];
-    const transfers = rederiveTransfers(rows, dirty);
+    const transfers = rederiveTransfers(rows, dirty, amortization);
     for (const next of transfers) replace(next);
-    const conversions = rederiveConversions([...current.values()], dirty);
+    const conversions = rederiveConversions([...current.values()], dirty, amortization);
     for (const next of conversions) replace(next);
     if (transfers.length + conversions.length === 0) return [...changed.values()];
   }
@@ -147,6 +150,7 @@ export function rederiveCarriedLegs(
 function rederiveTransfers(
   rows: readonly Transaction[],
   dirty: ReadonlySet<string>,
+  amortization: AmortizationTerms,
 ): readonly Transaction[] {
   const active = rows.filter(isActive);
   const legOf = (transaction: Transaction): TransferLeg => ({
@@ -178,7 +182,7 @@ function rederiveTransfers(
     rows.filter(
       (t) => t.assetId === assetId && t.institutionId === institutionId && !legIds.has(t.id),
     );
-  const carried = resolveCarriedCosts(legs, history);
+  const carried = resolveCarriedCosts(legs, history, amortization);
 
   const updates: Transaction[] = [];
   for (const leg of legs) {
@@ -199,6 +203,7 @@ function rederiveTransfers(
 function rederiveConversions(
   rows: readonly Transaction[],
   dirty: ReadonlySet<string>,
+  amortization: AmortizationTerms,
 ): readonly Transaction[] {
   const active = rows.filter(isActive);
   const groupIds = new Set(
@@ -209,7 +214,7 @@ function rederiveConversions(
   const updates: Transaction[] = [];
   for (const groupId of groupIds) {
     const legs = active.filter((t) => t.conversionGroupId === groupId);
-    updates.push(...rederiveConversionGroup(legs, rows));
+    updates.push(...rederiveConversionGroup(legs, rows, amortization));
   }
   return updates;
 }
@@ -241,6 +246,7 @@ function rederiveConversions(
 function rederiveConversionGroup(
   legs: readonly Transaction[],
   rows: readonly Transaction[],
+  amortization: AmortizationTerms,
 ): readonly Transaction[] {
   if (!legs.every(isImportOwned)) return [];
   const outgoing = legs.filter((leg) => leg.type === 'conversion_out');
@@ -255,7 +261,7 @@ function rederiveConversionGroup(
         t.institutionId === out.institutionId &&
         compareForReplay(t, out) < 0,
     );
-    const replayed = replayPositionWithEstimate(before);
+    const replayed = replayPositionWithEstimate(before, { amortization });
     if (!replayed.ok) return [];
     const { state, costEstimated } = replayed.value;
     const held = state.quantity.comparedTo(out.quantity);
@@ -344,7 +350,18 @@ export async function planCarriedLegUpdates(
     }
   }
   if (!sendsOn) return [];
-  return rederiveCarriedLegs(project(await deps.transactions.listAll()), seeds, deps.clock.now());
+  // SPEC-007 BR-007-05c: the seeds' own assets are included because the
+  // projection may add their first amortization.
+  const amortization = await loadAmortizationTerms(
+    deps.transactions,
+    seeds.map((seed) => seed.assetId),
+  );
+  return rederiveCarriedLegs(
+    project(await deps.transactions.listAll()),
+    seeds,
+    deps.clock.now(),
+    amortization,
+  );
 }
 
 /**
@@ -467,12 +484,18 @@ export async function describeCarriedImpact(
 ): Promise<Result<readonly PositionImpact[], DomainError>> {
   const skip = new Set(exclude.map(positionKeyString));
   const impacts: PositionImpact[] = [];
+  const amortization = await loadAmortizationTerms(
+    deps.transactions,
+    positionsOf(legs).map((key) => key.assetId),
+  );
   for (const key of positionsOf(legs)) {
     if (skip.has(positionKeyString(key))) continue;
     const existing = await deps.transactions.listForPosition(key.assetId, key.institutionId);
-    const current = replayPositionWithEstimate(existing);
+    const current = replayPositionWithEstimate(existing, { amortization });
     if (!current.ok) return current;
-    const projected = replayPositionWithEstimate(projectPosition(existing, removed, legs, key));
+    const projected = replayPositionWithEstimate(projectPosition(existing, removed, legs, key), {
+      amortization,
+    });
     if (!projected.ok) return projected;
     impacts.push({
       assetId: key.assetId,

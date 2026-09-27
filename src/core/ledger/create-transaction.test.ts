@@ -149,6 +149,13 @@ describe('SPEC-006 BR-006-11 — createTransaction', () => {
 
   it('AC — all fifteen types can be created', async () => {
     const state = deps();
+    // SPEC-007 BR-007-05c: an amortization's effect depends on what the asset
+    // is, so the catalogue must be able to say — a stock here.
+    state.transactions.describeAsset(assetIdFor('PETR4'), {
+      code: 'PETR4',
+      name: 'Petrobras PN',
+      assetClass: 'stock',
+    });
     // Opened first, so disposals have something to draw on.
     await createTransaction(
       state,

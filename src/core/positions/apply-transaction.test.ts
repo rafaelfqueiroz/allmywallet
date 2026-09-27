@@ -5,6 +5,7 @@ import {
   aTransaction,
   resetTransactionSequence,
 } from '@/core/ledger/test-support/transaction-builder';
+import type { AmortizationTerms } from '@/core/positions/amortization';
 import { applyTransaction } from '@/core/positions/apply-transaction';
 import { applyAcquisition } from '@/core/positions/average-cost';
 import { EMPTY_POSITION, type PositionState } from '@/core/positions/position-state';
@@ -15,6 +16,11 @@ const HOLDING: PositionState = applyAcquisition(EMPTY_POSITION, {
   unitPrice: Money.fromString('10.00'),
   fees: Money.zero(),
 });
+
+/** SPEC-007 BR-007-05c: the builder's default asset, described as a stock. */
+const PETR4_IS_LISTED: AmortizationTerms = new Map([
+  [aTransaction().build().assetId, { kind: 'whole_amount' }],
+]);
 
 describe('applyTransaction — the type → effect dispatch', () => {
   beforeEach(() => {
@@ -342,7 +348,7 @@ describe('applyTransaction — the type → effect dispatch', () => {
     // SPEC-014 recognises these at pay date, in cash, never reinvested. A
     // dividend row carries the share count it was paid on, which must NOT be
     // mistaken for shares acquired — that would double the position.
-    it.each(['dividend', 'jcp', 'rendimento', 'amortization', 'leilao_fracoes'] as const)(
+    it.each(['dividend', 'jcp', 'rendimento', 'leilao_fracoes'] as const)(
       'a %s changes nothing',
       (type) => {
         const row = { ...aTransaction().quantity('100').price('0.75').build(), type };
@@ -352,6 +358,39 @@ describe('applyTransaction — the type → effect dispatch', () => {
         expect(result.value).toBe(HOLDING);
       },
     );
+  });
+
+  describe('SPEC-007 BR-007-05c — an amortization returns capital', () => {
+    it('lowers total cost by the whole amount received for a listed asset', () => {
+      // 100 × 0,75 = 75,00 received, plus the row's 1,25 of fees — the
+      // amount `computeTotalValue` gives and the Earnings report shows:
+      // 76,25. Total cost 1.000,00 − 76,25 = 923,75, average 9,2375.
+      const row = aTransaction().amortization().quantity('100').price('0.75').fees('1.25').build();
+      const result = applyTransaction(HOLDING, row, PETR4_IS_LISTED);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.quantity.toString()).toBe('100');
+      expect(result.value.totalCost.toString()).toBe('923.75');
+      expect(result.value.averageCost.toString()).toBe('9.2375');
+      expect(result.value.realizedGain.toString()).toBe('0');
+    });
+
+    it('fails closed when the replay was given no terms at all', () => {
+      const row = aTransaction().amortization().on('2026-02-10').build();
+      const result = applyTransaction(HOLDING, row);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('AMORTIZATION_TERMS_UNKNOWN');
+      expect(result.error.context).toEqual({ date: '2026-02-10' });
+    });
+
+    it('fails closed when the terms do not describe this asset', () => {
+      const row = aTransaction().amortization().of('VIVT3').build();
+      const result = applyTransaction(HOLDING, row, PETR4_IS_LISTED);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.code).toBe('AMORTIZATION_TERMS_UNKNOWN');
+    });
   });
 
   it('covers all seventeen BR-006-05 types without a default case', () => {
@@ -387,7 +426,7 @@ describe('applyTransaction — the type → effect dispatch', () => {
             : type === 'conversion_out'
               ? aTransaction().conversionOut().quantity('1').build()
               : aTransaction().quantity('1').price('1').build();
-      const result = applyTransaction(HOLDING, { ...base, type });
+      const result = applyTransaction(HOLDING, { ...base, type }, PETR4_IS_LISTED);
       expect(result.ok, `type ${type} must be handled`).toBe(true);
     }
   });

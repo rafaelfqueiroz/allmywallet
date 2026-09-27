@@ -11,6 +11,10 @@ import {
 } from '@/core/ledger/test-support/transaction-builder';
 import type { ImportRow } from '@/core/ingestion/ports';
 import { explainRefusal } from '@/core/ingestion/refusal';
+import type { AmortizationTerms } from '@/core/positions/amortization';
+
+/** SPEC-007 BR-007-05c: these ledgers hold no amortization, so no asset needs terms. */
+const NO_AMORTIZATION: AmortizationTerms = new Map();
 
 const userId = UserId.generate();
 const now = new Date('2026-03-15T12:00:00-03:00');
@@ -61,6 +65,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
       userId,
       now,
       today,
+      NO_AMORTIZATION,
     );
     expect(refusal).toMatchObject({ kind: 'insufficient_quantity', date: '2026-02-01' });
     if (refusal.kind !== 'insufficient_quantity') return;
@@ -72,7 +77,14 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
   });
 
   it('a sale with no history at all held nothing, and traces to missing history', () => {
-    const refusal = explainRefusal(row('sell', '2026-02-01', '5'), [], userId, now, today);
+    const refusal = explainRefusal(
+      row('sell', '2026-02-01', '5'),
+      [],
+      userId,
+      now,
+      today,
+      NO_AMORTIZATION,
+    );
     expect(refusal.kind === 'insufficient_quantity' && refusal.held.toString()).toBe('0');
     expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe('missing_history');
   });
@@ -93,6 +105,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
         userId,
         now,
         today,
+        NO_AMORTIZATION,
       );
       expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
         'uncaptured_corporate_event',
@@ -106,6 +119,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
         userId,
         now,
         today,
+        NO_AMORTIZATION,
       );
       expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
         'uncaptured_corporate_event',
@@ -121,6 +135,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
         userId,
         now,
         today,
+        NO_AMORTIZATION,
       );
       expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
         'unclassified_rows',
@@ -140,7 +155,14 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
           .build(),
         naturalKey: '2026-01-01|PETR4|rendimento|0|0|cobranca de taxa semestral',
       };
-      const refusal = explainRefusal(row('sell', '2026-02-01', '5'), [fee], userId, now, today);
+      const refusal = explainRefusal(
+        row('sell', '2026-02-01', '5'),
+        [fee],
+        userId,
+        now,
+        today,
+        NO_AMORTIZATION,
+      );
       expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
         'missing_history',
       );
@@ -153,6 +175,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
         userId,
         now,
         today,
+        NO_AMORTIZATION,
       );
       expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
         'missing_history',
@@ -166,6 +189,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
         userId,
         now,
         today,
+        NO_AMORTIZATION,
       );
       expect(refusal.kind === 'insufficient_quantity' && refusal.likelyCause).toBe(
         'uncaptured_corporate_event',
@@ -182,20 +206,30 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
         userId,
         now,
         today,
+        NO_AMORTIZATION,
       ),
     ).toEqual({ kind: 'conflicts_with_ledger', date: '2026-03-01' });
   });
 
   it('once the history is in, the row is applicable', () => {
     expect(
-      explainRefusal(row('transfer_out', '2026-02-01', '10'), [held10()], userId, now, today),
+      explainRefusal(
+        row('transfer_out', '2026-02-01', '10'),
+        [held10()],
+        userId,
+        now,
+        today,
+        NO_AMORTIZATION,
+      ),
     ).toEqual({ kind: 'applicable' });
   });
 
   it('a row the ledger already holds under its key and occurrence is applied', () => {
     const refused = row('transfer_out', '2026-02-01', '10');
     const stored = { ...held10(), naturalKey: refused.naturalKey as string, occurrence: 1 };
-    expect(explainRefusal(refused, [stored], userId, now, today)).toEqual({ kind: 'applied' });
+    expect(explainRefusal(refused, [stored], userId, now, today, NO_AMORTIZATION)).toEqual({
+      kind: 'applied',
+    });
   });
 
   it('a superseded copy under the same key does not count as applied', () => {
@@ -206,7 +240,9 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
       occurrence: 1,
       status: 'superseded' as const,
     };
-    expect(explainRefusal(refused, [held10(), stored], userId, now, today)).toEqual({
+    expect(
+      explainRefusal(refused, [held10(), stored], userId, now, today, NO_AMORTIZATION),
+    ).toEqual({
       kind: 'applicable',
     });
   });
@@ -234,6 +270,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
           userId,
           now,
           today,
+          NO_AMORTIZATION,
         ),
       ).toEqual({ kind: 'unresolved_transfer_pair', date: '2026-02-01' });
     });
@@ -247,6 +284,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
           userId,
           now,
           today,
+          NO_AMORTIZATION,
         ),
       ).toEqual({ kind: 'applicable' });
     });
@@ -265,6 +303,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
         userId,
         now,
         today,
+        NO_AMORTIZATION,
       );
       expect(refusal.kind).toBe('insufficient_quantity');
       if (refusal.kind !== 'insufficient_quantity') return;
@@ -281,6 +320,7 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
           userId,
           now,
           today,
+          NO_AMORTIZATION,
         ).kind,
       ).toBe('applicable');
     });
@@ -288,14 +328,27 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
 
   it('a row dated after today is malformed', () => {
     expect(
-      explainRefusal(row('transfer_out', '2026-12-01', '1'), [held10()], userId, now, today).kind,
+      explainRefusal(
+        row('transfer_out', '2026-12-01', '1'),
+        [held10()],
+        userId,
+        now,
+        today,
+        NO_AMORTIZATION,
+      ).kind,
     ).toBe('malformed');
   });
 
   it('a grupamento with a zero ratio is malformed', () => {
     expect(
-      explainRefusal(row('grupamento', '2026-02-01', '0', '0'), [held10()], userId, now, today)
-        .kind,
+      explainRefusal(
+        row('grupamento', '2026-02-01', '0', '0'),
+        [held10()],
+        userId,
+        now,
+        today,
+        NO_AMORTIZATION,
+      ).kind,
     ).toBe('malformed');
   });
 });

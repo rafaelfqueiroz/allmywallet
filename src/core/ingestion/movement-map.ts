@@ -71,8 +71,9 @@ const MOVEMENT_MAP: ReadonlyMap<string, readonly MappedEntry[]> = new Map(
       ['resgate', [{ type: 'sell', direction: null }]],
       ['resgate antecipado/', [{ type: 'sell', direction: null }]],
       // Principal returned in cash, as `Amortização` is — no share count moves
-      // and v1 leaves cost basis alone (`core/positions/apply-transaction.ts`).
-      // `Restituição de Capital em Ações` is a different event and stays unmapped.
+      // and total cost falls by the amount (SPEC-007 BR-007-05c,
+      // `core/positions/amortization.ts`). `Restituição de Capital em Ações`
+      // is a different event and stays unmapped.
       ['restituicao de capital', [{ type: 'amortization', direction: null }]],
       // BR-007-04: split/grupamento are deliberately absent. Their ratio is
       // not something a single Movimentação row states — B3 shows only the

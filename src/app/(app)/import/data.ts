@@ -12,6 +12,7 @@ import {
 } from '@/core/ingestion/post-import-summary';
 import { adjustmentBlocker, type AdjustmentBlocker } from '@/core/ingestion/accept-adjustment';
 import { explainRefusal, type RowRefusal } from '@/core/ingestion/refusal';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
 import { positionKeyString } from '@/core/positions/replay';
 import { listPendingAllocations } from '@/core/wallets/pending';
 import { corporateEventMovementOf } from '@/core/ingestion/movement-map';
@@ -171,6 +172,11 @@ export async function loadImportBatchDetail(
       string,
       Awaited<ReturnType<typeof deps.transactions.listForPosition>>
     >();
+    // SPEC-007 BR-007-05c: a refused row's ledger may hold an amortization,
+    // which replays only with its asset's terms.
+    const amortization = await loadAmortizationTerms(deps.transactions, [
+      ...new Set(rows.filter((row) => row.classification === 'invalid').map((row) => row.assetId)),
+    ]);
     for (const row of rows) {
       if (row.classification !== 'invalid' || row.record.kind !== 'transaction') continue;
       const key = positionKeyString(row);
@@ -180,7 +186,7 @@ export async function loadImportBatchDetail(
       ledgers.set(key, ledger);
       refusals.set(
         row.id,
-        explainRefusal(row, ledger, userId, deps.clock.now(), deps.clock.today()),
+        explainRefusal(row, ledger, userId, deps.clock.now(), deps.clock.today(), amortization),
       );
     }
 

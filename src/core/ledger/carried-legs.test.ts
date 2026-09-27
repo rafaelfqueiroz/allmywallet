@@ -26,6 +26,10 @@ import {
   resetTransactionSequence,
   type TransactionBuilder,
 } from '@/core/ledger/test-support/transaction-builder';
+import type { AmortizationTerms } from '@/core/positions/amortization';
+
+/** SPEC-007 BR-007-05c: these ledgers hold no amortization, so no asset needs terms. */
+const NO_AMORTIZATION: AmortizationTerms = new Map();
 
 /**
  * SPEC-007 BR-007-06 (amended 2026-09-21) — #144 review F6. The AC: "A
@@ -767,25 +771,30 @@ describe('rederiveCarriedLegs — the pure planner', () => {
   it('touches nothing when no seed sends anything on', () => {
     const [debit, credit] = transferPair('A', 'B', '2026-03-10', '100', '99');
     const rows = [buy100('A'), debit, credit, buy100('C')];
-    expect(rederiveCarriedLegs(rows, [key('C')], NOW)).toEqual([]);
+    expect(rederiveCarriedLegs(rows, [key('C')], NOW, NO_AMORTIZATION)).toEqual([]);
   });
 
   it('keeps an ambiguous pair — two identical debits, one credit — as stored', () => {
     const [debit, credit] = transferPair('A', 'B', '2026-03-10', '50', '99');
     const [otherDebit] = transferPair('C', 'B', '2026-03-10', '50', '0');
     const rows = [buy100('A'), buy100('C'), debit, otherDebit, credit];
-    expect(rederiveCarriedLegs(rows, [key('A'), key('C')], NOW)).toEqual([]);
+    expect(rederiveCarriedLegs(rows, [key('A'), key('C')], NOW, NO_AMORTIZATION)).toEqual([]);
   });
 
   it('keeps a credit whose source can no longer carry — its stored figure is the fallback', () => {
     // The debit takes 100 from a source that never held them.
     const [debit, credit] = transferPair('A', 'B', '2026-03-10', '100', '12');
-    expect(rederiveCarriedLegs([debit, credit], [key('A')], NOW)).toEqual([]);
+    expect(rederiveCarriedLegs([debit, credit], [key('A')], NOW, NO_AMORTIZATION)).toEqual([]);
   });
 
   it('stamps what it rewrites with the time of the write', () => {
     const [debit, credit] = transferPair('A', 'B', '2026-03-10', '100', '99');
-    const [next] = rederiveCarriedLegs([buy100('A'), debit, credit], [key('A')], NOW);
+    const [next] = rederiveCarriedLegs(
+      [buy100('A'), debit, credit],
+      [key('A')],
+      NOW,
+      NO_AMORTIZATION,
+    );
     expect(next?.unitPrice.toString()).toBe('10');
     expect(next?.updatedAt).toEqual(NOW);
   });
@@ -810,7 +819,9 @@ describe('rederiveCarriedLegs — the pure planner', () => {
     const seed = [key('A', 'OLD3')];
 
     it('when the source held fewer shares than leave', () => {
-      expect(rederiveCarriedLegs([source(), out('150'), into('1000')], seed, NOW)).toEqual([]);
+      expect(
+        rederiveCarriedLegs([source(), out('150'), into('1000')], seed, NOW, NO_AMORTIZATION),
+      ).toEqual([]);
     });
 
     it('when the source prefix does not replay', () => {
@@ -822,13 +833,18 @@ describe('rederiveCarriedLegs — the pure planner', () => {
         .quantity('500')
         .build();
       expect(
-        rederiveCarriedLegs([source(), oversold, out('100'), into('1000')], seed, NOW),
+        rederiveCarriedLegs(
+          [source(), oversold, out('100'), into('1000')],
+          seed,
+          NOW,
+          NO_AMORTIZATION,
+        ),
       ).toEqual([]);
     });
 
     it('when several targets were given no cost to share it by', () => {
       const rows = [source(), out('100', '0'), into('0'), into('0', 'NEW4')];
-      expect(rederiveCarriedLegs(rows, seed, NOW)).toEqual([]);
+      expect(rederiveCarriedLegs(rows, seed, NOW, NO_AMORTIZATION)).toEqual([]);
     });
 
     it('but gives the whole cost to a single target that had none', () => {
@@ -837,6 +853,7 @@ describe('rederiveCarriedLegs — the pure planner', () => {
         [source(), out('100', '0'), into('0')],
         seed,
         NOW,
+        NO_AMORTIZATION,
       );
       expect(changedOut?.costBasis?.toString()).toBe('1000');
       expect(changedIn?.costBasis?.toString()).toBe('1000');
@@ -854,7 +871,7 @@ describe('rederiveCarriedLegs — the pure planner', () => {
         .price('12')
         .build();
       const rows = [dearer, out('100'), into('0'), into('600', 'NEW4'), into('400', 'NEW5')];
-      const changed = rederiveCarriedLegs(rows, seed, NOW);
+      const changed = rederiveCarriedLegs(rows, seed, NOW, NO_AMORTIZATION);
       const byAsset = (asset: string) =>
         changed.find((t) => t.assetId === assetIdFor(asset))?.costBasis?.toString();
       expect(byAsset('OLD3')).toBe('1200');

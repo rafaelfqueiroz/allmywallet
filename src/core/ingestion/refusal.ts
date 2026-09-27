@@ -3,6 +3,7 @@ import type { UserId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
 import { PositionErrorCode } from '@/core/positions/errors';
+import type { AmortizationTerms } from '@/core/positions/amortization';
 import { firstUnreplayable } from '@/core/positions/replay';
 import { buildCandidate } from '@/core/ingestion/commit-batch';
 import { corporateEventMovementOfKey } from '@/core/ingestion/corporate-event-resolution';
@@ -54,13 +55,18 @@ export type RowRefusal =
   /** The ledger already holds it, from another import. */
   | { readonly kind: 'applied' };
 
-/** `ledger` is the stored ledger of the row's `(asset, institution)` position. */
+/**
+ * `ledger` is the stored ledger of the row's `(asset, institution)` position;
+ * `amortization` the terms of its asset (SPEC-007 BR-007-05c), without which
+ * an amortization row there could not be replayed.
+ */
 export function explainRefusal(
   row: ImportRow,
   ledger: readonly Transaction[],
   userId: UserId,
   now: Date,
   today: BusinessDate,
+  amortization: AmortizationTerms,
 ): RowRefusal {
   if (
     ledger.some(
@@ -75,7 +81,7 @@ export function explainRefusal(
   const candidate = buildCandidate(row, row.batchId, userId, 'active', now, today);
   if (candidate === null) return { kind: 'malformed' };
 
-  const failure = firstUnreplayable([...ledger, candidate]);
+  const failure = firstUnreplayable([...ledger, candidate], { amortization });
   // BR-005-20a (#135): asked only of a row the ledger would otherwise accept,
   // because that is what a held-back debit is — it replays perfectly well, and
   // that is exactly the problem. A row refused for any other reason keeps the

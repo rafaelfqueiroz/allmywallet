@@ -69,6 +69,15 @@ export interface TransactionListItem {
   readonly institutionName: string | null;
 }
 
+/** SPEC-007 BR-007-05c: what replay needs to know about an asset, and no more. */
+export interface AssetIdentity {
+  readonly assetId: AssetId;
+  /** The catalogue code — `VIVT3`, `Tesouro Educa+ 2026`. */
+  readonly code: string;
+  /** The catalogue class — `stock`, `fii`, `tesouro_direto`… */
+  readonly assetClass: string;
+}
+
 export interface TransactionPage {
   readonly items: readonly TransactionListItem[];
   /** Total matching the filter, not the page — the list needs it to paginate. */
@@ -105,6 +114,24 @@ export interface TransactionRepository {
 
   /** DM-4: the whole ledger, for a full rebuild. */
   listAll(): Promise<readonly Transaction[]>;
+
+  /**
+   * SPEC-007 BR-007-05c — the catalogue identity of every asset this ledger
+   * holds an `amortization` row for, whatever the row's status, together with
+   * every asset in `including`.
+   *
+   * How much of an amortization is returned capital depends on what the asset
+   * is — the whole amount for a listed asset, remaining cost ÷ payments
+   * remaining for an NTN-B1 title — and a transaction names its asset by id
+   * only. Replay is pure (AR-01), so the answer is read here, once per use
+   * case, and handed to it (`core/positions/amortization.ts`).
+   *
+   * Every stored amortization is covered whichever subset of the ledger a
+   * caller then replays; `including` covers the rows it is about to add. A
+   * status filter here would be the wrong economy: reclassifying an
+   * `unclassified` amortization must find its asset described.
+   */
+  describeAmortizedAssets(including: readonly AssetId[]): Promise<readonly AssetIdentity[]>;
 
   /** BR-006-07/08/09: the paginated, filtered, searchable history. */
   search(filter: TransactionFilter, pagination: Pagination): Promise<TransactionPage>;

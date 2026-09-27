@@ -1,5 +1,6 @@
 import type { AssetId, ConversionGroupId, InstitutionId, TransactionId } from '@/core/shared/ids';
 import type {
+  AssetIdentity,
   OccurrenceTally,
   Pagination,
   TransactionFilter,
@@ -81,6 +82,24 @@ export class FakeTransactionRepository implements TransactionRepository {
 
   async listAll(): Promise<readonly Transaction[]> {
     return [...this.#rows];
+  }
+
+  /**
+   * Only assets a test has described are returned, like a catalogue that has
+   * no row for an id: a replay then fails closed on that asset's
+   * amortization (SPEC-007 BR-007-05c) instead of a fake inventing a class.
+   */
+  async describeAmortizedAssets(including: readonly AssetId[]): Promise<readonly AssetIdentity[]> {
+    const wanted = new Set<AssetId>(including);
+    for (const row of this.#rows) if (row.type === 'amortization') wanted.add(row.assetId);
+    const identities: AssetIdentity[] = [];
+    for (const assetId of wanted) {
+      const asset = this.#assets.get(assetId);
+      if (asset !== undefined) {
+        identities.push({ assetId, code: asset.code, assetClass: asset.assetClass });
+      }
+    }
+    return identities;
   }
 
   async search(_filter: TransactionFilter, pagination: Pagination): Promise<TransactionPage> {

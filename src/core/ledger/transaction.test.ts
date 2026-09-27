@@ -41,10 +41,13 @@ describe('SPEC-006 BR-006-05 — the seventeen supported types', () => {
     expect(isActive(aTransaction().status('superseded').build())).toBe(false);
   });
 
-  it('classifies each type as position-affecting or a provento, and never both', () => {
+  it('classifies each type as position-affecting or a provento — both only for amortization', () => {
+    // SPEC-007 BR-007-05c: an amortization lowers total cost *and* stays a
+    // provento (SPEC-014 BR-014-01). Every other type is exactly one.
     for (const type of TRANSACTION_TYPES) {
-      expect(affectsPosition(type) !== isEarnings(type)).toBe(true);
+      expect(affectsPosition(type) !== isEarnings(type)).toBe(type !== 'amortization');
     }
+    expect(affectsPosition('amortization')).toBe(true);
     expect(TRANSACTION_TYPES.filter(isEarnings)).toEqual([
       'dividend',
       'jcp',

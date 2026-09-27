@@ -60,6 +60,13 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
           : aTransaction().buy().on('2026-02-05').quantity('1').price('1.00')
       ).build();
       const state = deps([opening, { ...subject, type }]);
+      // SPEC-007 BR-007-05c: an amortization replays only for an asset the
+      // catalogue describes — a stock here.
+      state.transactions.describeAsset(subject.assetId, {
+        code: 'PETR4',
+        name: 'Petrobras PN',
+        assetClass: 'stock',
+      });
 
       const result = await editTransaction(state, subject.id, {
         // The one field every type shares and every type may change. Kept

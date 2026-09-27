@@ -10,6 +10,7 @@ import {
   UserId,
 } from '@/core/shared/ids';
 import type {
+  AssetIdentity,
   OccurrenceTally,
   Pagination,
   TransactionFilter,
@@ -114,6 +115,30 @@ export class DrizzleTransactionRepository implements TransactionRepository {
   async listAll(): Promise<readonly Transaction[]> {
     const rows = await this.tx.select().from(transactions);
     return rows.map(toDomain);
+  }
+
+  /**
+   * SPEC-007 BR-007-05c — see the port. The amortized assets come from a
+   * subquery on `transactions`, which RLS narrows to this tenant (AR-11);
+   * `assets` is the shared catalogue.
+   */
+  async describeAmortizedAssets(including: readonly AssetId[]): Promise<readonly AssetIdentity[]> {
+    const amortized = inArray(
+      assets.id,
+      this.tx
+        .selectDistinct({ assetId: transactions.assetId })
+        .from(transactions)
+        .where(eq(transactions.type, 'amortization')),
+    );
+    const rows = await this.tx
+      .select({ assetId: assets.id, code: assets.code, assetClass: assets.assetClass })
+      .from(assets)
+      .where(including.length === 0 ? amortized : or(amortized, inArray(assets.id, [...including])));
+    return rows.map((row) => ({
+      assetId: AssetId.of(row.assetId),
+      code: row.code,
+      assetClass: row.assetClass,
+    }));
   }
 
   async search(filter: TransactionFilter, pagination: Pagination): Promise<TransactionPage> {

@@ -32,6 +32,10 @@ import {
   buildFakeIngestionDeps,
   type FakeIngestionDeps,
 } from '@/core/ingestion/test-support/build-deps';
+import type { AmortizationTerms } from '@/core/positions/amortization';
+
+/** SPEC-007 BR-007-05c: these ledgers hold no amortization, so no asset needs terms. */
+const NO_AMORTIZATION: AmortizationTerms = new Map();
 
 const userId = UserId.generate();
 
@@ -4730,7 +4734,14 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       // The fee is unclassified but moves nothing, so the cause is the
       // history before the extract, not the fee.
       expect(
-        explainRefusal(refused, ledger, userId, new Date(), BusinessDate.of('2026-03-15')),
+        explainRefusal(
+          refused,
+          ledger,
+          userId,
+          new Date(),
+          BusinessDate.of('2026-03-15'),
+          NO_AMORTIZATION,
+        ),
       ).toMatchObject({ kind: 'insufficient_quantity', likelyCause: 'missing_history' });
 
       // The owner enters the opening position by hand (an Ajuste).

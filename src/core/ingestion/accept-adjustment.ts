@@ -5,7 +5,8 @@ import { Money, Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import { createTransaction, type CreateTransactionResult } from '@/core/ledger/create-transaction';
 import type { Transaction } from '@/core/ledger/transaction';
-import { replayPosition, selectForReplay } from '@/core/positions/replay';
+import { loadAmortizationTerms } from '@/core/positions/amortization';
+import { replayPosition, replayQuantity, selectForReplay } from '@/core/positions/replay';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportBatch } from '@/core/ingestion/ports';
@@ -76,10 +77,10 @@ export function adjustmentBlocker(
 ): AdjustmentBlocker | null {
   if (discrepancy.cause === 'absent_from_b3_snapshot') return 'absent_from_snapshot';
   if (selectForReplay(ledger, { asOf }).length === 0) return 'no_history';
-  const replayed = replayPosition(ledger);
+  const replayed = replayQuantity(ledger);
   // A ledger that no longer replays has no quantity to compare: not the one reported.
   if (!replayed.ok) return 'stale';
-  return replayed.value.quantity.equals(Quantity.fromString(discrepancy.computedQuantity))
+  return replayed.value.equals(Quantity.fromString(discrepancy.computedQuantity))
     ? null
     : 'stale';
 }
@@ -126,7 +127,10 @@ export async function acceptReconciliationAdjustment(
     );
   }
 
-  const replayed = replayPosition(existing);
+  // SPEC-007 BR-007-05c: the adjustment is priced at the average an
+  // amortization may already have lowered.
+  const amortization = await loadAmortizationTerms(deps.transactions, [input.assetId]);
+  const replayed = replayPosition(existing, { amortization });
   const unitPrice = replayed.ok ? replayed.value.averageCost : Money.zero();
 
   const result = await createTransaction(deps, userId, {
