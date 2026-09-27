@@ -2,11 +2,19 @@ import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId, TransactionId } from '@/core/shared/ids';
 import { type Result, err, ok } from '@/core/shared/result';
-import { replayPosition } from '@/core/positions/replay';
+import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { PositionState } from '@/core/positions/position-state';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
-import { guardReplayable, without } from '@/core/ledger/guard-replayable';
+import {
+  describeCarriedImpact,
+  guardCarriedLegs,
+  planCarriedLegUpdates,
+  type PositionImpact,
+  projectPosition,
+  recalculateCarriedPositions,
+} from '@/core/ledger/carried-legs';
+import { without } from '@/core/ledger/guard-replayable';
 import type { Transaction } from '@/core/ledger/transaction';
 import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
 
@@ -39,6 +47,23 @@ export interface DeletionImpact {
   readonly subsequentTransactionCount: number;
   readonly currentPosition: PositionState;
   readonly projectedPosition: PositionState;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — whether the
+   * position, before and after the deletion, carries an estimated cost.
+   * Folded by `replayPositionWithEstimate`, the same fold every position
+   * writer uses, rather than decided here: a page showing "before" and
+   * "after" figures that disagreed with the position cache about which one
+   * is an estimate would be worse than showing neither.
+   */
+  readonly currentCostEstimated: boolean;
+  readonly projectedCostEstimated: boolean;
+  /**
+   * SPEC-006 BR-006-13 / SPEC-007 BR-007-06 (#144 re-review N3): the other
+   * positions this delete recalculates — each one a carried transfer or
+   * import conversion from this position lands in (`carried-legs.ts`) —
+   * before and after. Empty when the position sent nothing on that changes.
+   */
+  readonly downstream: readonly PositionImpact[];
 }
 
 export async function describeDeletionImpact(
@@ -52,15 +77,26 @@ export async function describeDeletionImpact(
 
   const existing = await deps.transactions.listForPosition(target.assetId, target.institutionId);
 
-  const current = replayPosition(existing);
+  const current = replayPositionWithEstimate(existing);
   if (!current.ok) return current;
 
-  const remaining = without(existing, new Set([target.id]));
-  const projected = replayPosition(remaining);
+  // The same plan `deleteTransaction` executes (#144 re-review N3), so the
+  // preview names exactly the positions the delete will change — and this
+  // position's own projection includes any of its legs the plan re-derives
+  // (a partial conversion's outgoing leg, N1).
+  const removed = new Set<string>([target.id]);
+  const rederived = await planCarriedLegUpdates(deps, [target], (ledger) =>
+    without(ledger, removed),
+  );
+  const remaining = projectPosition(existing, removed, rederived, target);
+  const projected = replayPositionWithEstimate(remaining);
   // BR-006-15 again: deleting the buy a later sale drew on leaves a ledger
   // that cannot be replayed. The user is told that here, before confirming,
   // rather than after the row is already gone.
   if (!projected.ok) return projected;
+
+  const downstream = await describeCarriedImpact(deps, rederived, removed, [target]);
+  if (!downstream.ok) return downstream;
 
   return ok({
     transactionId: target.id,
@@ -68,14 +104,24 @@ export async function describeDeletionImpact(
     institutionId: target.institutionId,
     fromDate: target.tradeDate,
     subsequentTransactionCount: countOnOrAfter(remaining, target.tradeDate),
-    currentPosition: current.value,
-    projectedPosition: projected.value,
+    currentPosition: current.value.state,
+    projectedPosition: projected.value.state,
+    currentCostEstimated: current.value.costEstimated,
+    projectedCostEstimated: projected.value.costEstimated,
+    downstream: downstream.value,
   });
 }
 
 export interface DeleteTransactionResult {
   readonly deletedCount: number;
   readonly recalculation: RecalculationOutcome;
+  /**
+   * SPEC-007 BR-007-06 (#144 F6): the carried legs downstream of the deleted
+   * row's position, re-derived without it, and a recalculation for every
+   * position they sit in.
+   */
+  readonly rederived: readonly Transaction[];
+  readonly downstream: readonly RecalculationOutcome[];
 }
 
 export async function deleteTransaction(
@@ -87,12 +133,19 @@ export async function deleteTransaction(
     return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { transactionId: id }));
   }
 
-  const guard = await guardReplayable(deps, target, (existing) =>
-    without(existing, new Set([target.id])),
+  // SPEC-007 BR-007-06 (#144 F6): deleting an estimated row at A re-derives
+  // what A carried on, exactly as correcting its price does. Planned first so
+  // BR-006-15's guard sees A — and everything downstream — with the
+  // re-derived legs in place, as the edit path does (#144 re-review N1).
+  const removed = new Set<string>([target.id]);
+  const rederived = await planCarriedLegUpdates(deps, [target], (ledger) =>
+    without(ledger, removed),
   );
+  const guard = await guardCarriedLegs(deps, rederived, removed, [target]);
   if (!guard.ok) return guard;
 
   const deletedCount = await deps.transactions.deleteByIds([target.id]);
+  for (const leg of rederived) await deps.transactions.update(leg);
 
   const recalculation = await recalculatePositionFrom(deps, {
     assetId: target.assetId,
@@ -101,7 +154,15 @@ export async function deleteTransaction(
   });
   if (!recalculation.ok) return recalculation;
 
-  return ok({ deletedCount, recalculation: recalculation.value });
+  const downstream = await recalculateCarriedPositions(deps, rederived, [target]);
+  if (!downstream.ok) return downstream;
+
+  return ok({
+    deletedCount,
+    recalculation: recalculation.value,
+    rederived,
+    downstream: downstream.value,
+  });
 }
 
 function countOnOrAfter(transactions: readonly Transaction[], date: BusinessDate): number {

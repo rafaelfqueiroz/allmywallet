@@ -1,8 +1,11 @@
+import { and, eq, ilike, inArray, isNull } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { assets, institutions } from '@/db/schema/assets';
+import { transactions } from '@/db/schema/transactions';
 import { AssetId, InstitutionId } from '@/core/shared/ids';
 import { canonicalAssetCode } from '@/core/ingestion/asset-identity';
+import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import {
   canonicalInstitutionName,
   institutionIdentityKey,
@@ -11,7 +14,10 @@ import type {
   AssetResolveInput,
   AssetResolverPort,
   InstitutionResolverPort,
+  SubscriptionEvidenceReader,
+  SubscriptionEvidenceRow,
 } from '@/core/ingestion/ports';
+import { toDomain as transactionRowToDomain } from '@/adapters/db/transaction-repository';
 
 /**
  * SPEC-005 — resolves the free-text product/institution names a B3 extract
@@ -135,5 +141,57 @@ export class DrizzleInstitutionResolver implements InstitutionResolverPort {
     }
     this.#byIdentity = byIdentity;
     return byIdentity;
+  }
+}
+
+/**
+ * SPEC-005 BR-005-20d — `SubscriptionEvidenceReader`. Finds every stored
+ * transaction that could be exercise or credit evidence for a subscription,
+ * across whichever assets share a B3 issuer root — a set staging cannot
+ * enumerate in advance, since a right ticker (`XPML12`) and its main code
+ * (`XPML11`) are two different catalog rows with no column linking them.
+ *
+ * `code LIKE '<root>%'` narrows the catalog scan to a handful of candidates
+ * (issuer roots are four characters, `assets.code` is indexed); `issuerCodeOf`
+ * then confirms the match precisely in application code, since the SQL LIKE
+ * alone would also catch a ticker that merely starts with the same letters
+ * (`XPMLG`, which is not a class of this issuer at all).
+ *
+ * AR-11: constructed on the same `Tx` the rest of a commit runs on —
+ * `transactions` carries RLS, unlike `assets` (AR-15, no tenant column).
+ */
+export class DrizzleSubscriptionEvidenceReader implements SubscriptionEvidenceReader {
+  constructor(private readonly tx: Tx) {}
+
+  async evidenceForIssuer(
+    issuerRoot: string,
+    institutionId: InstitutionId | null,
+  ): Promise<readonly SubscriptionEvidenceRow[]> {
+    const candidates = await this.tx
+      .select({ id: assets.id, code: assets.code })
+      .from(assets)
+      .where(ilike(assets.code, `${issuerRoot}%`));
+    const matching = candidates.filter((asset) => issuerCodeOf(asset.code) === issuerRoot);
+    if (matching.length === 0) return [];
+
+    const codeById = new Map(matching.map((asset) => [asset.id, asset.code]));
+    const rows = await this.tx
+      .select()
+      .from(transactions)
+      .where(
+        and(
+          inArray(
+            transactions.assetId,
+            matching.map((asset) => asset.id),
+          ),
+          institutionId === null
+            ? isNull(transactions.institutionId)
+            : eq(transactions.institutionId, institutionId),
+        ),
+      );
+    return rows.map((row) => ({
+      transaction: transactionRowToDomain(row),
+      assetCode: codeById.get(row.assetId) as string,
+    }));
   }
 }

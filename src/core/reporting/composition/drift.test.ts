@@ -43,6 +43,7 @@ function aSlice(assetClass: string, share: string | null): CompositionSlice {
       costBasis: money('1'),
       quantity: qty('1'),
       estimated: false,
+      costEstimated: false,
     },
     share: share === null ? null : money(share),
   };

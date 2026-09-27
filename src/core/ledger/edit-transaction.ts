@@ -5,6 +5,7 @@ import type { Money, Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
+import { planCarriedLegUpdates } from '@/core/ledger/carried-legs';
 import { guardReplayable, type PositionLookupKey, without } from '@/core/ledger/guard-replayable';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import {
@@ -68,6 +69,17 @@ export interface EditTransactionInput {
    * flagging.
    */
   readonly flagUserModified?: boolean | undefined;
+  /**
+   * SPEC-007 BR-007-06 / SPEC-005 BR-005-20d — sets the cost-estimate marker
+   * explicitly: an object marks the row an estimate (with the close date its
+   * price was read from, or null when it was read from none), `null` marks it
+   * exact. For import's own in-place writes, which recompute the marker with
+   * the figure (a re-carried transfer, BR-005-20a).
+   *
+   * Omitted, the marker is kept — except that a user edit changing the price
+   * clears it (see `estimateAfterEdit`).
+   */
+  readonly costEstimate?: { readonly closeDate: BusinessDate | null } | null | undefined;
 }
 
 export interface EditTransactionResult {
@@ -80,6 +92,8 @@ export interface EditTransactionResult {
    * rebuild disagrees with it (DM-4).
    */
   readonly recalculations: readonly RecalculationOutcome[];
+  /** SPEC-007 BR-007-06 (#144 F6): carried legs downstream, re-derived with the edit. */
+  readonly rederived: readonly Transaction[];
 }
 
 export async function editTransaction(
@@ -94,6 +108,7 @@ export async function editTransaction(
   return ok({
     transaction: transaction as Transaction,
     recalculations: result.value.recalculations,
+    rederived: result.value.rederived,
   });
 }
 
@@ -105,8 +120,25 @@ export interface TransactionEdit {
 export interface EditTransactionsResult {
   /** The edited transactions, in the order the edits were given. */
   readonly transactions: readonly Transaction[];
-  /** One per position any edit touched — each recalculated once. */
+  /**
+   * One per position any edit touched — each recalculated once — including
+   * every position a re-derived carried leg sits in (`carried-legs.ts`).
+   */
   readonly recalculations: readonly RecalculationOutcome[];
+  /** SPEC-007 BR-007-06 (#144 F6): carried legs downstream, re-derived with the edit. */
+  readonly rederived: readonly Transaction[];
+}
+
+export interface EditTransactionsOptions {
+  /**
+   * SPEC-007 BR-007-06 (#144 F6): re-derive the carried transfer credits and
+   * import-resolved conversion legs downstream of the edited positions
+   * (`carried-legs.ts`). Default on. Import's own in-place writes turn it off:
+   * a commit resolves carries itself, over the ledger *and* its batch
+   * (SPEC-005 BR-005-20a), and a second derivation over the stored ledger alone
+   * could disagree with it mid-commit.
+   */
+  readonly rederiveCarriedLegs?: boolean;
 }
 
 /**
@@ -124,6 +156,7 @@ export interface EditTransactionsResult {
 export async function editTransactions(
   deps: LedgerDependencies,
   edits: readonly TransactionEdit[],
+  options: EditTransactionsOptions = {},
 ): Promise<Result<EditTransactionsResult, DomainError>> {
   const now = deps.clock.now();
   const today = deps.clock.today();
@@ -179,22 +212,42 @@ export async function editTransactions(
     }
   }
 
+  const removed = new Set<string>(pairs.map((pair) => pair.original.id));
+  const edited = pairs.map((pair) => pair.updated);
+
+  /**
+   * SPEC-007 BR-007-06 (#144 F6): the carried legs downstream of every
+   * position the edits touched, re-derived over the ledger as the edits leave
+   * it — so correcting an estimated price at A clears the marker, and the cost
+   * read from the estimate, on what A carried to B. Planned before anything is
+   * written, so the guard below covers the positions they land in too.
+   */
+  const rederived =
+    options.rederiveCarriedLegs === false
+      ? []
+      : await planCarriedLegUpdates(deps, [...scopes.values()], (ledger) => [
+          ...without(ledger, removed),
+          ...edited,
+        ]);
+  for (const leg of rederived) touch(leg, leg.tradeDate);
+  const replacing = new Set<string>([...removed, ...rederived.map((leg) => leg.id)]);
+  const writes = [...edited.filter((t) => !rederived.some((leg) => leg.id === t.id)), ...rederived];
+
   // BR-006-15: each ledger must hold together with every edit in place.
   // `without` first, because an edit that only changes the quantity is a
   // replace, not an addition; a row moved away is simply absent from the
   // position it left, which is what can strand a sale there.
-  const removed = new Set<string>(pairs.map((pair) => pair.original.id));
   for (const scope of scopes.values()) {
     const guard = await guardReplayable(deps, scope, (existing) => [
-      ...without(existing, removed),
-      ...pairs
-        .map((pair) => pair.updated)
-        .filter((t) => t.assetId === scope.assetId && t.institutionId === scope.institutionId),
+      ...without(existing, replacing),
+      ...writes.filter(
+        (t) => t.assetId === scope.assetId && t.institutionId === scope.institutionId,
+      ),
     ]);
     if (!guard.ok) return guard;
   }
 
-  for (const { updated } of pairs) await deps.transactions.update(updated);
+  for (const row of writes) await deps.transactions.update(row);
 
   const recalculations: RecalculationOutcome[] = [];
   for (const scope of scopes.values()) {
@@ -203,7 +256,13 @@ export async function editTransactions(
     recalculations.push(recalculated.value);
   }
 
-  return ok({ transactions: pairs.map((pair) => pair.updated), recalculations });
+  return ok({
+    transactions: pairs.map(
+      (pair) => rederived.find((leg) => leg.id === pair.updated.id) ?? pair.updated,
+    ),
+    recalculations,
+    rederived,
+  });
 }
 
 function applyEdit(original: Transaction, input: EditTransactionInput, now: Date): Transaction {
@@ -246,8 +305,40 @@ function applyEdit(original: Transaction, input: EditTransactionInput, now: Date
      * this value, but only on rows we happened to import".
      */
     isUserModified: input.flagUserModified === false ? original.isUserModified : true,
+    ...estimateAfterEdit(original, input, unitPrice),
     updatedAt: now,
   };
+}
+
+/**
+ * SPEC-007 BR-007-06 / SPEC-005 BR-005-20d: "a user edit of the price clears
+ * it". The price is the only thing the marker is about, so:
+ *
+ *   - an explicit `costEstimate` wins (import's own in-place writes);
+ *   - a **user** edit (`flagUserModified` not `false`) that **changes** the
+ *     price is the user stating it — the row becomes exact and its close date
+ *     goes with the marker (the database CHECK pairs them);
+ *   - anything else keeps the row's marker. The edit form submits every
+ *     field, so a fees-only or date-only correction resubmits the estimated
+ *     price unchanged; clearing on that would let an estimate the user never
+ *     looked at read as exact — the failure DL-007-12 names. Nor does an
+ *     import's own edit (a classification, a promotion) clear it: no one
+ *     stated a price.
+ */
+function estimateAfterEdit(
+  original: Transaction,
+  input: EditTransactionInput,
+  unitPrice: Money,
+): Pick<Transaction, 'costIsEstimate' | 'estimateCloseDate'> {
+  if (input.costEstimate !== undefined) {
+    return input.costEstimate === null
+      ? { costIsEstimate: false, estimateCloseDate: null }
+      : { costIsEstimate: true, estimateCloseDate: input.costEstimate.closeDate };
+  }
+  if (input.flagUserModified !== false && !unitPrice.equals(original.unitPrice)) {
+    return { costIsEstimate: false, estimateCloseDate: null };
+  }
+  return { costIsEstimate: original.costIsEstimate, estimateCloseDate: original.estimateCloseDate };
 }
 
 /**

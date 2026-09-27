@@ -305,6 +305,7 @@ describe('SPEC-011 reporting framework (integration)', () => {
       quantity: 'Quantidade',
       value: 'Valor',
       costBasis: 'Custo',
+      costEstimated: 'Custo estimado',
       estimated: 'Estimado',
       unassigned: 'Não atribuído',
       notClassified: 'Não classificado',

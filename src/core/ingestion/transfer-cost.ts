@@ -3,7 +3,7 @@ import type { AssetId, InstitutionId } from '@/core/shared/ids';
 import { asStored, Money, type Quantity } from '@/core/shared/money';
 import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { compareForReplay } from '@/core/positions/ordering';
-import { replayPosition } from '@/core/positions/replay';
+import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { ImportRow } from '@/core/ingestion/ports';
 
 /**
@@ -149,6 +149,17 @@ export interface CarryLeg {
 }
 
 /**
+ * SPEC-005 BR-005-20a — what a credit carries from its source: the source's
+ * *preço médio* immediately before the debit, and whether that average was an
+ * estimate at that moment (SPEC-007 BR-007-06: the marker travels with a
+ * carried transfer).
+ */
+export interface CarriedCost {
+  readonly cost: Money;
+  readonly estimated: boolean;
+}
+
+/**
  * The credit at the carried cost, **at the scale the column holds** (#135).
  *
  * A carried cost is a division, so it repeats as often as not: the owner's
@@ -163,12 +174,28 @@ export interface CarryLeg {
  * anything (#112): a repeating average is compared at the column's scale,
  * because that is the only figure that survives a round trip.
  */
-export function withCarriedCost(credit: Transaction, cost: Money): Transaction {
-  const stored = Money.fromString(asStored(cost));
+export function withCarriedCost(credit: Transaction, carried: CarriedCost): Transaction {
+  const stored = Money.fromString(asStored(carried.cost));
   return {
     ...credit,
     unitPrice: stored,
     totalValue: computeTotalValue(credit.type, credit.quantity, stored, credit.fees),
+    /**
+     * SPEC-007 BR-007-06 / DL-007-12: a credit carrying an estimated average
+     * is itself an estimate, so the destination lot reads as one. Set both
+     * ways — a re-carry from a source whose estimate has since been corrected
+     * clears a mark an earlier import wrote.
+     *
+     * `estimateCloseDate` stays null. SPEC-005 BR-005-20d gives it one
+     * meaning — the date of the stored close an estimated *price* was read
+     * from — and a carried cost was read from no close: it is an average
+     * over the source's whole open lot, which may blend several estimates of
+     * different dates with exact buys. Naming any one of those dates would
+     * state a provenance the figure does not have. The database CHECK allows
+     * null with the marker set.
+     */
+    costIsEstimate: carried.estimated,
+    estimateCloseDate: null,
   };
 }
 
@@ -190,6 +217,10 @@ export function withCarriedCost(credit: Transaction, cost: Money): Transaction {
  * the debit and is still unresolved *blocks* the debit until it is. What never
  * unblocks (a same-day A→B / B→A swap) carries nothing.
  *
+ * The carry also says whether that average was an estimate at that cut
+ * (SPEC-007 BR-007-06), read from the same replay. A `fallback` keeps the
+ * marker its stored credit already has.
+ *
  * No carry — the credit stays `unclassified` (BR-005-19), or keeps its
  * `fallback` — when the debit is not in the ledger, the source prefix cannot
  * be replayed, it held fewer shares than leave, or it held them at no cost.
@@ -203,15 +234,15 @@ export function withCarriedCost(credit: Transaction, cost: Money): Transaction {
 export function resolveCarriedCosts(
   legs: readonly CarryLeg[],
   history: (assetId: AssetId, institutionId: InstitutionId | null) => readonly Transaction[],
-): ReadonlyMap<string, Money> {
-  const resolved = new Map<string, Money>();
+): ReadonlyMap<string, CarriedCost> {
+  const resolved = new Map<string, CarriedCost>();
   const pending = new Map(legs.map((leg) => [leg.id, leg]));
 
   let progressed = true;
-  const settleLeg = (leg: CarryLeg, cost: Money | null) => {
+  const settleLeg = (leg: CarryLeg, carried: CarriedCost | null) => {
     pending.delete(leg.id);
     progressed = true;
-    const final = cost ?? leg.fallback;
+    const final = carried ?? fallbackOf(leg);
     if (final !== null) resolved.set(leg.id, final);
   };
 
@@ -270,20 +301,40 @@ export function resolveCarriedCosts(
       const before = [...history(debit.assetId, debit.institutionId), ...carriedIn].filter(
         (t) => !siblingDebits.has(t.id) && compareForReplay(t, debit) < 0,
       );
-      const replayed = replayPosition(before);
+      const replayed = replayPositionWithEstimate(before);
       const carriable =
         replayed.ok &&
-        replayed.value.quantity.comparedTo(debit.quantity) >= 0 &&
-        replayed.value.averageCost.isPositive();
-      settleLeg(leg, carriable ? replayed.value.averageCost : null);
+        replayed.value.state.quantity.comparedTo(debit.quantity) >= 0 &&
+        replayed.value.state.averageCost.isPositive();
+      settleLeg(
+        leg,
+        carriable
+          ? {
+              cost: replayed.value.state.averageCost,
+              estimated: replayed.value.costEstimated,
+            }
+          : null,
+      );
     }
   }
 
   // What never unblocked (a same-day swap) keeps whatever it already had.
   for (const leg of pending.values()) {
-    if (leg.fallback !== null) resolved.set(leg.id, leg.fallback);
+    const kept = fallbackOf(leg);
+    if (kept !== null) resolved.set(leg.id, kept);
   }
   return resolved;
+}
+
+/**
+ * #112 — a stored credit's own cost, kept when the carry cannot be resolved
+ * now, with the marker that credit already carries (SPEC-007 BR-007-06): a
+ * re-import that cannot re-read the source must not make an estimate exact.
+ */
+function fallbackOf(leg: CarryLeg): CarriedCost | null {
+  return leg.fallback === null
+    ? null
+    : { cost: leg.fallback, estimated: leg.credit.costIsEstimate };
 }
 
 /**

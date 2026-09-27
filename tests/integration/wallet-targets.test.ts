@@ -106,6 +106,7 @@ describe('SPEC-017 — wallet targets (integration)', () => {
               averageCost: Money.fromString(averageCost),
               realizedGain: Money.zero(),
             },
+            costEstimated: false,
           },
         ]);
       },
@@ -344,6 +345,7 @@ describe('SPEC-017 — wallet targets (integration)', () => {
               averageCost: Money.fromString('30'),
               realizedGain: Money.zero(),
             },
+            costEstimated: false,
           },
           {
             assetId: vale3,
@@ -354,6 +356,7 @@ describe('SPEC-017 — wallet targets (integration)', () => {
               averageCost: Money.fromString('60'),
               realizedGain: Money.zero(),
             },
+            costEstimated: false,
           },
         ]);
       },

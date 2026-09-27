@@ -114,3 +114,113 @@ describe('SPEC-006 BR-006-05 — atomic conversion group management', () => {
     expect(await deps.transactions.listByConversionGroup(ConversionGroupId.of(group))).toEqual([]);
   });
 });
+
+/**
+ * SPEC-007 BR-007-06 / DL-007-12 — the estimate marker travels through a
+ * conversion: an incoming leg's cost is carried from the sources' lots.
+ */
+describe('SPEC-007 BR-007-06 — conversion carries the estimate marker', () => {
+  const group = '00000000-c0de-7000-8000-000000000031';
+
+  /**
+   * OLD3: buy 100 @ 10,00 (1.000,00) + estimated subscription 20 @ 114,90
+   * (2.298,00) = 120 shares, 3.298,00, estimated. The conversion removes all
+   * 120 at 3.298,00 and adds 60 NEW3 at 3.298,00: 54,9666… each, an estimate.
+   */
+  function estimatedSource(subscriptionDate = '2026-01-15') {
+    resetTransactionSequence();
+    return {
+      transactions: new FakeTransactionRepository([
+        aTransaction().buy().of('OLD3').on('2026-01-01').quantity('100').price('10').build(),
+        aTransaction()
+          .subscription()
+          .of('OLD3')
+          .on(subscriptionDate)
+          .quantity('20')
+          .price('114.90')
+          .costEstimate(subscriptionDate)
+          .build(),
+      ]),
+      positions: new FakePositionRepository(),
+      clock,
+    };
+  }
+
+  function wholeConversion() {
+    return [
+      aTransaction()
+        .conversionOut(group, '3298')
+        .of('OLD3')
+        .on('2026-02-01')
+        .quantity('120')
+        .build(),
+      aTransaction().conversionIn('3298', group).of('NEW3').on('2026-02-01').quantity('60').build(),
+    ];
+  }
+
+  it('marks the incoming leg and its position when the source was estimated', async () => {
+    const deps = estimatedSource();
+    const created = await createAssetConversionGroup(deps, wholeConversion());
+    expect(created.ok).toBe(true);
+
+    const legs = await deps.transactions.listByConversionGroup(ConversionGroupId.of(group));
+    const incoming = legs.find((leg) => leg.type === 'conversion_in');
+    const outgoing = legs.find((leg) => leg.type === 'conversion_out');
+    expect(incoming?.costIsEstimate).toBe(true);
+    // A carried cost was read from no close (SPEC-005 BR-005-20d).
+    expect(incoming?.estimateCloseDate).toBeNull();
+    expect(outgoing?.costIsEstimate).toBe(false);
+
+    const positions = await deps.positions.list();
+    const target = positions.find((p) => p.state.quantity.toString() === '60');
+    const source = positions.find((p) => p.state.quantity.isZero());
+    expect(target?.state.totalCost.toString()).toBe('3298');
+    expect(target?.costEstimated).toBe(true);
+    // The source closed: its lot resets (BR-007-07).
+    expect(source?.costEstimated).toBe(false);
+  });
+
+  it('leaves the incoming leg exact when the source’s estimate lands after the conversion', async () => {
+    // Only the 100 @ 10,00 precede the outgoing leg.
+    const deps = estimatedSource('2026-03-01');
+    const legs = [
+      aTransaction()
+        .conversionOut(group, '1000')
+        .of('OLD3')
+        .on('2026-02-01')
+        .quantity('100')
+        .build(),
+      aTransaction().conversionIn('1000', group).of('NEW3').on('2026-02-01').quantity('50').build(),
+    ];
+    expect((await createAssetConversionGroup(deps, legs)).ok).toBe(true);
+    const stored = await deps.transactions.listByConversionGroup(ConversionGroupId.of(group));
+    expect(stored.every((leg) => !leg.costIsEstimate)).toBe(true);
+  });
+
+  it('cannot be told a leg is estimated when its source is exact', async () => {
+    const deps = depsWithSource();
+    const [out, incoming] = groupLegs(group);
+    // A form cannot invent the marker: it is decided from the ledger.
+    const claimed = { ...incoming, costIsEstimate: true };
+    expect((await createAssetConversionGroup(deps, [out, claimed])).ok).toBe(true);
+    const stored = await deps.transactions.listByConversionGroup(ConversionGroupId.of(group));
+    expect(stored.every((leg) => !leg.costIsEstimate)).toBe(true);
+    expect((await deps.positions.list()).every((p) => !p.costEstimated)).toBe(true);
+  });
+
+  it('recomputes the marker on replacement, so a re-allocation cannot drop it', async () => {
+    const deps = estimatedSource();
+    expect((await createAssetConversionGroup(deps, wholeConversion())).ok).toBe(true);
+
+    // The replacement arrives unmarked, as a form submission would.
+    const replacement = wholeConversion().map((leg) => ({ ...leg, costIsEstimate: false }));
+    const replaced = await replaceAssetConversionGroup(
+      deps,
+      ConversionGroupId.of(group),
+      replacement,
+    );
+    expect(replaced.ok).toBe(true);
+    const stored = await deps.transactions.listByConversionGroup(ConversionGroupId.of(group));
+    expect(stored.find((leg) => leg.type === 'conversion_in')?.costIsEstimate).toBe(true);
+  });
+});

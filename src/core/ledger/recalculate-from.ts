@@ -3,7 +3,7 @@ import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
 import { type Result, ok } from '@/core/shared/result';
 import type { PositionSnapshot } from '@/core/positions/replay';
-import { replayPosition } from '@/core/positions/replay';
+import { replayPositionWithEstimate } from '@/core/positions/replay';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 
 /**
@@ -67,13 +67,15 @@ export async function recalculatePositionFrom(
     return ok({ scope, position: null });
   }
 
-  const replayed = replayPosition(transactions);
+  // SPEC-007 BR-007-06: the cost-estimate marker comes from the same fold as
+  // the figures, so this cache row agrees with a rebuild on it (DM-4).
+  const replayed = replayPositionWithEstimate(transactions);
   if (!replayed.ok) return replayed;
 
   const position: PositionSnapshot = {
     assetId: scope.assetId,
     institutionId: scope.institutionId,
-    state: replayed.value,
+    ...replayed.value,
   };
   await deps.positions.upsertMany([position]);
   return ok({ scope, position });

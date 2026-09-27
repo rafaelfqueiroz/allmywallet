@@ -11,6 +11,13 @@ import type { PositionSnapshot } from '@/core/positions/replay';
 export interface AssetPosition {
   readonly assetId: AssetId;
   readonly state: PositionState;
+  /**
+   * SPEC-007 BR-007-06 / DL-007-12: the aggregate average is cost-weighted
+   * over every institution's lot, so one institution's estimated lot makes
+   * the aggregate an estimate too. A closed institution position is never
+   * marked (BR-007-07), so it cannot mark the aggregate.
+   */
+  readonly costEstimated: boolean;
 }
 
 /**
@@ -39,18 +46,23 @@ export interface AssetPosition {
 export function aggregateAcrossInstitutions(
   snapshots: readonly PositionSnapshot[],
 ): readonly AssetPosition[] {
-  const byAsset = new Map<AssetId, { quantity: Quantity; totalCost: Money; realizedGain: Money }>();
+  const byAsset = new Map<
+    AssetId,
+    { quantity: Quantity; totalCost: Money; realizedGain: Money; costEstimated: boolean }
+  >();
 
   for (const snapshot of snapshots) {
     const running = byAsset.get(snapshot.assetId) ?? {
       quantity: Quantity.zero(),
       totalCost: Money.zero(),
       realizedGain: Money.zero(),
+      costEstimated: false,
     };
     byAsset.set(snapshot.assetId, {
       quantity: running.quantity.plus(snapshot.state.quantity),
       totalCost: running.totalCost.plus(snapshot.state.totalCost),
       realizedGain: running.realizedGain.plus(snapshot.state.realizedGain),
+      costEstimated: running.costEstimated || snapshot.costEstimated,
     });
   }
 
@@ -59,6 +71,7 @@ export function aggregateAcrossInstitutions(
       .map(([assetId, totals]) => ({
         assetId,
         state: makePosition(totals.quantity, totals.totalCost, totals.realizedGain),
+        costEstimated: totals.costEstimated,
       }))
       // No "equal" arm: `byAsset` is a Map keyed on `assetId`, so two entries
       // are never equal here and that branch could never be exercised.

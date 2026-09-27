@@ -46,5 +46,30 @@ describe('SPEC-010 BR-010-21 — compareWallets', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.assetCount).toBe(0);
     expect(rows[0]?.totalCostBasis.isZero()).toBe(true);
+    expect(rows[0]?.costEstimated).toBe(false);
+  });
+
+  it('SPEC-007 BR-007-06 / DL-007-12 — marks a wallet holding an estimated-cost position, and only that one', async () => {
+    const deps = buildFakeDeps();
+    const PETR4 = AssetId.generate();
+    deps.positionQuery.set(ITSA4, Quantity.fromString('100'), Money.fromString('10'), true);
+    deps.positionQuery.set(PETR4, Quantity.fromString('50'), Money.fromString('20'), false);
+    const withEstimate = await createWallet(deps, USER, { name: 'Com estimativa' });
+    const exact = await createWallet(deps, USER, { name: 'Exata' });
+    if (!withEstimate.ok || !exact.ok) throw new Error('setup failed');
+    await allocateToWallet(deps, USER, {
+      walletId: withEstimate.value.id,
+      assetId: ITSA4,
+      quantity: Quantity.fromString('100'),
+    });
+    await allocateToWallet(deps, USER, {
+      walletId: exact.value.id,
+      assetId: PETR4,
+      quantity: Quantity.fromString('50'),
+    });
+
+    const rows = await compareWallets(deps, USER);
+    expect(rows.find((r) => r.wallet.id === withEstimate.value.id)?.costEstimated).toBe(true);
+    expect(rows.find((r) => r.wallet.id === exact.value.id)?.costEstimated).toBe(false);
   });
 });

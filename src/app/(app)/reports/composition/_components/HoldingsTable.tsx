@@ -77,6 +77,13 @@ export interface HoldingRow {
   /** BR-015-09 — accrued rather than observed. */
   readonly estimated: boolean;
   /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — this asset's
+   * *preço médio* includes an estimated acquisition cost. A different fact
+   * from `estimated` above (SPEC-009's valuation estimate) — see
+   * `core/reporting/ports.ts`'s `ReportHolding.costEstimated`.
+   */
+  readonly costEstimated: boolean;
+  /**
    * SPEC-018 BR-018-19 — the same buy/hold/sell/unknown state `/watch` shows,
    * `null` only when this asset carries no opportunity rule at all (most
    * holdings). A rule's `unknown` state (BR-018-16 — no usable quote) still
@@ -108,6 +115,9 @@ export interface HoldingsTableLabels {
   readonly concentratedTitle: string;
   readonly estimated: string;
   readonly estimatedTitle: string;
+  /** SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12. */
+  readonly costEstimated: string;
+  readonly costEstimatedTitle: string;
   /** A template — "Ordenar por {column}". */
   readonly sortBy: string;
   /** The card rendering's sort control, for viewports with no column headers. */
@@ -220,7 +230,29 @@ export function HoldingsTable({
           ),
       },
       numeric('quantity', labels.quantity),
-      numeric('averagePrice', labels.averagePrice),
+      /*
+       * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — *preço médio* is
+       * exactly the figure this column shows, so the marker sits next to it
+       * rather than back on the `code` column above: "wherever its cost or
+       * preço médio is shown" (the acceptance criterion's own wording), and a
+       * reader scanning this column is looking at the number the marker
+       * qualifies.
+       */
+      {
+        ...numeric('averagePrice', labels.averagePrice),
+        cell: ({ row }) => (
+          <Cluster gap="sm" justify="end" align="baseline">
+            <Text as="span" className="tabular-nums">
+              {row.original.averagePrice.text}
+            </Text>
+            {row.original.costEstimated && (
+              <Badge variant="outline" title={labels.costEstimatedTitle}>
+                {labels.costEstimated}
+              </Badge>
+            )}
+          </Cluster>
+        ),
+      },
       numeric('currentPrice', labels.currentPrice),
       numeric('value', labels.value),
       numeric('share', labels.share),

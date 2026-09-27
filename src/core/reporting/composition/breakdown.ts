@@ -176,6 +176,9 @@ function foldOneAsset(slices: readonly ReportHolding[]): Omit<UnflaggedRow, 'sha
     // path, so these are equal wherever they are set at all.
     needsAttention: slices.find((slice) => slice.needsAttention !== null)?.needsAttention ?? null,
     basis: slices.find((slice) => slice.basis !== null)?.basis ?? null,
+    // SPEC-007 BR-007-06 / BR-015-09 / BR-011-15: one estimated-cost
+    // institution is enough to mark the folded row.
+    costEstimated: slices.some((slice) => slice.costEstimated),
   };
 }
 

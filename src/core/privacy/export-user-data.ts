@@ -129,6 +129,10 @@ export function exportUserDataAsCsv(data: PersonalDataExport): string {
         'fees',
         'total_value',
         'is_manual',
+        // SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — "an estimated
+        // cost is carried and shown, never hidden."
+        'cost_is_estimate',
+        'estimate_close_date',
       ],
       data.transactions.map((t) => [
         t.id,
@@ -143,6 +147,8 @@ export function exportUserDataAsCsv(data: PersonalDataExport): string {
         t.fees.toString(),
         t.totalValue.toString(),
         t.isManual ? 'true' : 'false',
+        t.costIsEstimate ? 'true' : 'false',
+        t.estimateCloseDate ?? '',
       ]),
     ),
   );

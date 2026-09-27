@@ -33,6 +33,8 @@ function seedFullExport(deps: ReturnType<typeof buildFakeDeps>): void {
       fees: Money.fromString('1.50'),
       totalValue: Money.fromString('3216.50'),
       isManual: false,
+      costIsEstimate: false,
+      estimateCloseDate: null,
     },
   ];
   deps.exportData.wallets = [
@@ -183,6 +185,36 @@ describe('exportUserDataAsCsv — AC', () => {
     expect(csv).toContain('product_analytics');
     // \r\n line endings — RFC 4180, matches core/ledger/export-transactions.ts.
     expect(csv).toContain('\r\n');
+  });
+
+  it('SPEC-007 BR-007-06 / DL-007-12 — the transactions section carries the cost-estimate marker and close date', async () => {
+    const deps = buildFakeDeps();
+    seedFullExport(deps);
+    deps.exportData.transactions = [
+      {
+        id: 'tx-1',
+        tradeDate: BusinessDate.of('2026-01-10'),
+        assetCode: 'PETR4',
+        assetName: 'Petrobras PN',
+        institutionName: 'XP Investimentos',
+        type: 'subscription',
+        status: 'active',
+        quantity: Quantity.fromString('100'),
+        unitPrice: Money.fromString('32.15'),
+        fees: Money.fromString('1.50'),
+        totalValue: Money.fromString('3216.50'),
+        isManual: false,
+        costIsEstimate: true,
+        estimateCloseDate: BusinessDate.of('2024-02-22'),
+      },
+    ];
+    const data = await exportUserData(deps, USER);
+    if (data === null) throw new Error('setup failed');
+
+    const csv = exportUserDataAsCsv(data);
+    expect(csv).toContain('cost_is_estimate');
+    expect(csv).toContain('estimate_close_date');
+    expect(csv).toContain('2024-02-22');
   });
 
   it('neutralises a formula-injection attempt in a free-text field (SPEC-003 BR-003-13)', async () => {

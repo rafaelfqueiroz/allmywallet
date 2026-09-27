@@ -143,6 +143,23 @@ export interface Transaction {
    * overwrite the correction (SPEC-005 consumes this).
    */
   readonly isUserModified: boolean;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / SPEC-005 BR-005-20d: this row's
+   * `unitPrice`/`costBasis` is an estimate rather than a figure B3 stated — a
+   * subscription priced at a stored close, or a transfer or conversion leg
+   * carrying the average of a source lot that included one. A position whose
+   * open lot includes such an acquisition is itself marked
+   * (`core/positions/cost-estimate.ts`). A user edit changing the price
+   * clears it (`core/ledger/edit-transaction.ts`).
+   */
+  readonly costIsEstimate: boolean;
+  /**
+   * SPEC-005 BR-005-20d: the date of the stored close an estimated price was
+   * read from. Null whenever `costIsEstimate` is false — the database CHECK
+   * enforces the pairing (AR-30), matching `ratio`'s precedent — and null on
+   * a carried estimate, which was read from no close.
+   */
+  readonly estimateCloseDate: BusinessDate | null;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }

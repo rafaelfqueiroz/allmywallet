@@ -60,6 +60,7 @@ const DEFAULT_HOLDING: ReportHolding = {
   priceDate: BusinessDate.of('2026-03-20'),
   needsAttention: null,
   basis: null,
+  costEstimated: false,
 };
 
 export function aHolding(overrides: Partial<ReportHolding>): ReportHolding {
@@ -80,6 +81,7 @@ const DEFAULT_POSITION: ReportPosition = {
   priceDate: BusinessDate.of('2026-03-20'),
   needsAttention: null,
   basis: null,
+  costEstimated: false,
 };
 
 export function aPosition(overrides: Partial<ReportPosition>): ReportPosition {

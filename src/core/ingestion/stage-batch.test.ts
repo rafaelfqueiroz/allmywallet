@@ -245,6 +245,73 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
     });
   });
 
+  describe('SPEC-005 BR-005-18 v6 / BR-005-19 (#144) — subscription paperwork', () => {
+    // Generated fixtures only (DV-24) — no real B3 extract.
+    const paperworkTypes = [
+      'Direito de Subscrição',
+      'Solicitação de Subscrição',
+      'Direitos de Subscrição - Não Exercido',
+      'Direito Sobras de Subscrição - Não Exercido',
+      'Cessão de Direitos',
+      'Cessão de Direitos - Solicitada',
+      'Recibo de Subscrição',
+    ];
+
+    it('stages every paperwork type ignored, outside Needs attention', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await seedPendingBatch(deps);
+      const extract: ParsedExtract = {
+        extractType: 'b3_movimentacao',
+        records: paperworkTypes.map((b3Type) =>
+          transactionRecord({ b3Type, priceStated: false, direction: null }),
+        ),
+      };
+
+      const result = await stageBatch(deps, userId, { batchId, extract });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rows.map((row) => row.classification)).toEqual(
+        paperworkTypes.map(() => 'ignored'),
+      );
+      expect(result.value.counts).toMatchObject({
+        read: paperworkTypes.length,
+        new: 0,
+        needsAttention: 0,
+        ignored: paperworkTypes.length,
+      });
+      expect(result.value.unmappedTypes).toEqual([]);
+    });
+
+    it('BR-005-18 v6: keeps Direitos de Subscrição - Exercido as unclassified subscription evidence, not ignored', async () => {
+      const deps = buildFakeIngestionDeps();
+      const batchId = await seedPendingBatch(deps);
+      const extract: ParsedExtract = {
+        extractType: 'b3_movimentacao',
+        records: [
+          transactionRecord({
+            b3Type: 'Direitos de Subscrição - Exercido',
+            priceStated: false,
+            direction: 'debit',
+          }),
+        ],
+      };
+
+      const result = await stageBatch(deps, userId, { batchId, extract });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rows).toHaveLength(1);
+      expect(result.value.rows[0]).toMatchObject({ classification: 'unclassified' });
+      expect(result.value.counts).toMatchObject({
+        read: 1,
+        new: 0,
+        needsAttention: 1,
+        ignored: 0,
+      });
+    });
+  });
+
   describe('#110 — BR-005-17 across key forms', () => {
     async function seedLedgerRow(
       deps: ReturnType<typeof buildFakeIngestionDeps>,
@@ -508,6 +575,8 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
         importBatchId: null,
         isManual: false,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });

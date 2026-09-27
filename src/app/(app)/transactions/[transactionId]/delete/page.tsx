@@ -8,13 +8,20 @@ import { deleteTransactionAction } from '@/app/(app)/transactions/actions';
 import { withTransactionWriteDeps } from '@/app/(app)/transactions/composition';
 import { tryUserId } from '@/lib/session';
 import { DeleteConfirm } from '@/app/(app)/transactions/_components/DeleteConfirm';
+import {
+  DeletionDownstreamImpact,
+  type DownstreamImpactRow,
+} from '@/app/(app)/transactions/_components/DeletionDownstreamImpact';
+import { listInstitutionOptions } from '@/app/(app)/transactions/data';
 import { PageShell } from '@/components/patterns/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Note } from '@/components/patterns/note';
 import { Money } from '@/components/patterns/money';
+import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
+import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
 import {
   Table,
@@ -54,6 +61,10 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
   const tTable = await getTranslations('transactions.table');
   const tSignedOut = await getTranslations('transactions');
   const tErrors = await getTranslations('errors');
+  // SPEC-007 BR-007-06 / DL-007-12 — the position-level marker reuses
+  // `reports.markers.costEstimated`, the same catalogue entry every other
+  // Custo/preço médio surface reads, rather than a transactions-scoped copy.
+  const tReports = await getTranslations('reports');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -70,20 +81,30 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
   // A read, through the write composition root: `describeDeletionImpact`
   // replays the position, so it needs the ledger deps rather than the
   // repository alone. Nothing here writes.
-  const { impact, target, conversionGroup } = await withTransactionWriteDeps(
+  const { impact, target, conversionGroup, assetCodes } = await withTransactionWriteDeps(
     userId,
     async (deps) => {
       const target = await deps.ledger.transactions.findById(id);
+      const impact =
+        target?.conversionGroupId === null || target === null
+          ? await describeDeletionImpact(deps.ledger, id)
+          : null;
+      // #144 N3: the downstream positions are named by asset code.
+      const downstreamAssets =
+        impact === null || !impact.ok ? [] : impact.value.downstream.map((row) => row.assetId);
       return {
         target,
         conversionGroup:
           target?.conversionGroupId === null || target === null
             ? []
             : await deps.ledger.transactions.listByConversionGroup(target.conversionGroupId),
-        impact:
-          target?.conversionGroupId === null || target === null
-            ? await describeDeletionImpact(deps.ledger, id)
-            : null,
+        impact,
+        assetCodes: new Map(
+          (downstreamAssets.length === 0
+            ? []
+            : await deps.assign.assetCatalog.findByIds(downstreamAssets)
+          ).map((asset) => [asset.id as string, asset.code]),
+        ),
       };
     },
   );
@@ -110,6 +131,33 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
       </PageShell>
     );
   }
+
+  // SPEC-006 BR-006-13 (#144 N3): every other position the delete
+  // recalculates, labelled. `institutions` is shared reference data (AR-15).
+  const institutionNames =
+    impact !== null && impact.ok && impact.value.downstream.some((row) => row.institutionId)
+      ? new Map(
+          (await listInstitutionOptions()).map((option) => [
+            option.institutionId as string,
+            option.name,
+          ]),
+        )
+      : new Map<string, string>();
+  const downstreamRows: readonly DownstreamImpactRow[] =
+    impact === null || !impact.ok
+      ? []
+      : impact.value.downstream.map((row) => ({
+          key: `${row.assetId}|${row.institutionId ?? ''}`,
+          assetLabel: assetCodes.get(row.assetId) ?? row.assetId,
+          institutionLabel:
+            row.institutionId === null
+              ? null
+              : (institutionNames.get(row.institutionId) ?? row.institutionId),
+          currentPosition: row.currentPosition,
+          projectedPosition: row.projectedPosition,
+          currentCostEstimated: row.currentCostEstimated,
+          projectedCostEstimated: row.projectedCostEstimated,
+        }));
 
   return (
     <PageShell title={t('title')} description={t('description')}>
@@ -165,10 +213,25 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
               <TableRow>
                 <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
                 <TableCell className="py-row text-right">
-                  <Money value={impact.value.currentPosition.averageCost} />
+                  <Cluster gap="sm" justify="end" align="baseline">
+                    <Money value={impact.value.currentPosition.averageCost} />
+                    {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
+                    <CostEstimateMarker
+                      shown={impact.value.currentCostEstimated}
+                      label={tReports('markers.costEstimated.badge')}
+                      title={tReports('markers.costEstimated.explanation')}
+                    />
+                  </Cluster>
                 </TableCell>
                 <TableCell className="py-row text-right">
-                  <Money value={impact.value.projectedPosition.averageCost} />
+                  <Cluster gap="sm" justify="end" align="baseline">
+                    <Money value={impact.value.projectedPosition.averageCost} />
+                    <CostEstimateMarker
+                      shown={impact.value.projectedCostEstimated}
+                      label={tReports('markers.costEstimated.badge')}
+                      title={tReports('markers.costEstimated.explanation')}
+                    />
+                  </Cluster>
                 </TableCell>
               </TableRow>
               <TableRow>
@@ -182,6 +245,8 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
               </TableRow>
             </TableBody>
           </Table>
+
+          <DeletionDownstreamImpact rows={downstreamRows} />
 
           {/* SPEC-010 BR-010-05 — the other derived thing that moves. */}
           <Note>{t('impactAllocations')}</Note>

@@ -16,10 +16,18 @@ import { failBatch } from '@/core/ingestion/fail-batch';
 import type { Transaction } from '@/core/ledger/transaction';
 import { corporateEventMovementOf } from '@/core/ingestion/movement-map';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
+import { planSubscriptionCloseRequests } from '@/core/ingestion/subscription-close-requests';
 import type { CorporateEventFactorSource } from '@/core/quotes/corporate-event-factors';
 import { refreshCorporateEventFactors } from '@/core/quotes/refresh-corporate-event-factors';
+import { fetchClosesForDates } from '@/core/quotes/fetch-closes-for-dates';
+import type { QuoteProvider } from '@/core/quotes/ports';
 import { DrizzleCorporateEventFactorRepository } from '@/adapters/db/corporate-event-factor-repository';
 import { B3ListedCompaniesFactorSource } from '@/adapters/market-data/b3-listed-companies';
+import {
+  buildQuoteProvider,
+  buildQuotesComposition,
+  resolveQuoteBudgetConfig,
+} from '@/worker/handlers/composition';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
 import type { SnapshotJobPayload } from '@/worker/handlers/valuation';
@@ -32,7 +40,9 @@ import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import {
   DrizzleAssetResolver,
   DrizzleInstitutionResolver,
+  DrizzleSubscriptionEvidenceReader,
 } from '@/adapters/db/ingestion-resolvers';
+import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleFixedIncomeContractRepository } from '@/adapters/db/fixed-income-contract-repository';
 import {
@@ -81,6 +91,14 @@ export interface ImportHandlerDeps {
    * tests never reach B3 and can simulate an outage.
    */
   readonly corporateEventFactorSource?: CorporateEventFactorSource;
+  /**
+   * SPEC-005 BR-005-20d (#144) — the quote provider
+   * `backfillSubscriptionClosesForBatch` fetches from, when not overridden
+   * (`quotes.provider`, the same `BrapiQuoteProvider` the poller uses). A
+   * seam so integration tests never reach brapi for real; #151 tracks the
+   * missing token this defaults to needing in production.
+   */
+  readonly quoteProvider?: QuoteProvider;
 }
 
 function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps {
@@ -95,6 +113,7 @@ function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps 
     ...(overrides?.corporateEventFactorSource === undefined
       ? {}
       : { corporateEventFactorSource: overrides.corporateEventFactorSource }),
+    ...(overrides?.quoteProvider === undefined ? {} : { quoteProvider: overrides.quoteProvider }),
   };
 }
 
@@ -110,6 +129,13 @@ export function buildIngestionDeps(tx: Tx, userId: UserId, clock: Clock): Ingest
     fixedIncomeContracts: new DrizzleFixedIncomeContractRepository(tx, userId),
     // AR-15: shared market data, read through the tenant's handle like `assets`.
     corporateEventFactors: new DrizzleCorporateEventFactorRepository(tx),
+    // SPEC-005 BR-005-20d: `price_quotes` is shared reference data (AR-15,
+    // no tenant column) — read through the tenant's handle like `assets`,
+    // but with no RLS behind it either way.
+    closePrices: new DrizzleQuoteRepository(tx),
+    // SPEC-005 BR-005-20d: `transactions` is tenant-scoped (AR-11), so this
+    // one runs on the same `Tx` as the rest of the commit.
+    subscriptionEvidence: new DrizzleSubscriptionEvidenceReader(tx),
     clock,
   };
 }
@@ -291,7 +317,20 @@ export async function handleImportCommit(
   const assetConversionWindowDays = (
     await resolveConfig('import.asset_conversion_window_days', { db: deps.database })
   ).value;
+  const subscriptionCreditWindowDays = (
+    await resolveConfig('import.subscription_credit_window_days', { db: deps.database })
+  ).value;
   await refreshFactorsForBatch(deps, userId, batchId);
+  const subscriptionCloseLookbackDays = (
+    await resolveConfig('import.subscription_close_lookback_days', { db: deps.database })
+  ).value;
+  await backfillSubscriptionClosesForBatch(
+    deps,
+    userId,
+    batchId,
+    subscriptionCreditWindowDays,
+    subscriptionCloseLookbackDays,
+  );
 
   const result = await withTenant(
     userId,
@@ -300,6 +339,7 @@ export async function handleImportCommit(
         batchId,
         corporateEventWindows,
         assetConversionWindowDays,
+        subscriptionCreditWindowDays,
         assetConversionsEnabled: env().ASSET_CONVERSIONS_ENABLED,
         ...(payload.asOf === undefined ? {} : { asOf: BusinessDate.of(payload.asOf) }),
       });
@@ -386,6 +426,8 @@ export async function handleImportCommit(
       resolvedAssetConversions: result.value.resolvedAssetConversions,
       committedConversionLegs: result.value.committedConversionLegs,
       resolvedLiquidations: result.value.resolvedLiquidations,
+      resolvedSubscriptions: result.value.resolvedSubscriptions,
+      resolvedPositionRefreshes: result.value.resolvedPositionRefreshes,
       reconciliationStatus: result.value.batch.reconciliation?.status ?? null,
       rebuildFrom,
     },
@@ -450,6 +492,71 @@ async function refreshFactorsForBatch(
     logger.error(
       { err: error, queue: 'import.commit', batchId },
       'SPEC-008 BR-008-29: could not refresh corporate-event factors; rows stay unconfirmed',
+    );
+  }
+}
+
+/**
+ * SPEC-005 BR-005-20d / DL-005-22 (#144) — fetch the closes a subscription
+ * resolution needs, **before** the commit transaction, modelled on
+ * `refreshFactorsForBatch` immediately above for the same two reasons: the
+ * commit would otherwise hold ledger row locks across an HTTP call, and a
+ * pg-boss retry of `import.commit` would then depend on brapi being up.
+ *
+ * #144 review F1 — which pairs to fetch for is decided by
+ * `planSubscriptionCloseRequests`, the same pure resolver `commitBatch`'s own
+ * `planSubscriptions` runs, over this batch's own rows **and** the stored
+ * ledger (`SubscriptionEvidenceReader`) — not a bare scan of this batch's
+ * `unclassified` rows, which missed a pair split across two imports (the
+ * exercise already committed) and a re-import of an already-staged, still-
+ * unresolved pair (both rows now stage `duplicate`, so neither is
+ * `unclassified` in *this* batch at all).
+ *
+ * Never fatal: an outage, an exhausted budget, or any failure to record one
+ * leaves the pair unpriced and `unclassified`; `commitBatch` resolves it on a
+ * later import once a close exists. Without a brapi token (#151) this fails
+ * in production today, which is expected.
+ */
+async function backfillSubscriptionClosesForBatch(
+  deps: ImportHandlerDeps,
+  userId: UserId,
+  batchId: ImportBatchId,
+  subscriptionCreditWindowDays: number,
+  lookbackDays: number,
+): Promise<void> {
+  try {
+    const requests = await withTenant(
+      userId,
+      async (tx) => {
+        const ingestionDeps = buildIngestionDeps(tx, userId, deps.clock);
+        const rows = await ingestionDeps.rows.listByBatch(batchId);
+        return planSubscriptionCloseRequests(ingestionDeps, rows, subscriptionCreditWindowDays);
+      },
+      deps.database,
+    );
+    if (requests.length === 0) return;
+
+    const provider = deps.quoteProvider ?? (await buildQuoteProvider(deps.database));
+    const { repository, budgetCounter } = buildQuotesComposition(deps.database);
+    const { monthlyQuota, ondemandReservePct } = await resolveQuoteBudgetConfig(deps.database);
+    const summary = await fetchClosesForDates(
+      { repository, provider, budgetCounter, clock: deps.clock },
+      requests,
+      { monthlyQuota, ondemandReservePct, lookbackDays },
+    );
+    logger.info(
+      {
+        queue: 'import.commit',
+        batchId,
+        fetched: summary.fetched.length,
+        requests: summary.requests,
+      },
+      'SPEC-005 BR-005-20d: subscription closes backfilled',
+    );
+  } catch (error) {
+    logger.error(
+      { err: error, queue: 'import.commit', batchId },
+      'SPEC-005 BR-005-20d: could not backfill subscription closes; unpriced pairs stay unclassified',
     );
   }
 }

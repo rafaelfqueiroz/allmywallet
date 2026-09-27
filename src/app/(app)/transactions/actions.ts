@@ -207,6 +207,9 @@ export async function createAssetConversionGroupAction(
       importBatchId: null,
       isManual: true,
       isUserModified: true,
+      // SPEC-007 BR-007-06: a manual conversion leg's cost is exact.
+      costIsEstimate: false,
+      estimateCloseDate: null,
       createdAt: now,
       updatedAt: now,
     };

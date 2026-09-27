@@ -6,11 +6,13 @@ import {
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import {
   FakeAssetResolver,
+  FakeClosePriceReader,
   FakeCorporateEventFactorReader,
   FakeFixedIncomeContractWriter,
   FakeImportBatchRepository,
   FakeImportRowRepository,
   FakeInstitutionResolver,
+  FakeSubscriptionEvidenceReader,
 } from '@/core/ingestion/test-support/fakes';
 
 export interface FakeIngestionDeps extends IngestionDependencies {
@@ -23,6 +25,8 @@ export interface FakeIngestionDeps extends IngestionDependencies {
   readonly fixedIncomeContracts: FakeFixedIncomeContractWriter;
   readonly clock: FakeClock;
   readonly corporateEventFactors: FakeCorporateEventFactorReader;
+  readonly closePrices: FakeClosePriceReader;
+  readonly subscriptionEvidence: FakeSubscriptionEvidenceReader;
 }
 
 /** TS-02/TS-22: a builder with sensible defaults, so a test states only what it cares about. */
@@ -38,6 +42,8 @@ export function buildFakeIngestionDeps(today = '2026-03-15'): FakeIngestionDeps 
     fixedIncomeContracts: new FakeFixedIncomeContractWriter(),
     clock: new FakeClock(`${today}T12:00:00-03:00`),
     corporateEventFactors: new FakeCorporateEventFactorReader(),
+    closePrices: new FakeClosePriceReader(),
+    subscriptionEvidence: new FakeSubscriptionEvidenceReader(transactions),
   };
 }
 

@@ -19,6 +19,7 @@ const LABELS: CsvLabels = {
   quantity: 'Quantidade',
   value: 'Valor',
   costBasis: 'Custo',
+  costEstimated: 'Custo estimado',
   estimated: 'Estimado',
   unassigned: 'Não atribuído',
   notClassified: 'Não classificado',
@@ -60,11 +61,11 @@ describe('exportGroupedCsv — BR-011-12', () => {
     const csv = exportGroupedCsv(report, LABELS, defaultGroupLabeller(LABELS, names));
     const lines = csv.split('\r\n');
 
-    expect(lines[0]).toBe('Grupo,Ativo,Nome,Quantidade,Valor,Custo,Estimado');
-    expect(lines[1]).toBe('Aposentadoria,ITSA4,Itausa PN,60,600,480,Não');
+    expect(lines[0]).toBe('Grupo,Ativo,Nome,Quantidade,Valor,Custo,Custo estimado,Estimado');
+    expect(lines[1]).toBe('Aposentadoria,ITSA4,Itausa PN,60,600,480,Não,Não');
     // BR-011-09: the Unassigned bucket exports under its i18n label, not its
     // sentinel id, and not as an empty cell.
-    expect(lines[2]).toBe('Não atribuído,CDB BANCO X,CDB 110% CDI,1,1050.55,1000,Sim');
+    expect(lines[2]).toBe('Não atribuído,CDB BANCO X,CDB 110% CDI,1,1050.55,1000,Não,Sim');
   });
 
   it('appends the scope total so the export is self-checking', () => {
@@ -73,7 +74,33 @@ describe('exportGroupedCsv — BR-011-12', () => {
       '\r\n',
     );
     // 600 + 1050.55 = 1650.55; quantity 60 + 1 = 61; cost 480 + 1000 = 1480.
-    expect(lines.at(-1)).toBe('Total,,,61,1650.55,1480,Sim');
+    // Neither holding is cost-estimated, so the total column reads "Não"
+    // even though the (unrelated) valuation-estimate total reads "Sim".
+    expect(lines.at(-1)).toBe('Total,,,61,1650.55,1480,Não,Sim');
+  });
+
+  it('SPEC-007 BR-007-06 / DL-007-12 — the cost-estimate column is separate from the valuation-estimate one', () => {
+    const costEstimated = [
+      aHolding({
+        assetId: assetIdOf('1'),
+        assetCode: 'XPML11',
+        assetName: 'XP Malls',
+        assetClass: 'fii',
+        walletId: walletIdOf('1'),
+        quantity: qty('10'),
+        value: money('1200'),
+        costBasis: money('1129'),
+        costEstimated: true,
+      }),
+    ];
+    const report = aggregate(costEstimated, 'wallet');
+    const lines = exportGroupedCsv(report, LABELS, defaultGroupLabeller(LABELS, names)).split(
+      '\r\n',
+    );
+    // Cost-estimated but not accrued: the two columns disagree, which is
+    // exactly the point of keeping them apart.
+    expect(lines[1]).toBe('Aposentadoria,XPML11,XP Malls,10,1200,1129,Sim,Não');
+    expect(lines.at(-1)).toBe('Total,,,10,1200,1129,Sim,Não');
   });
 
   it('labels the Not classified bucket under a non-wallet dimension', () => {
@@ -114,7 +141,7 @@ describe('exportGroupedCsv — BR-011-12', () => {
     const csv = exportGroupedCsv(aggregate([], 'asset_class'), LABELS, () => '');
     const lines = csv.split('\r\n');
     expect(lines).toHaveLength(2);
-    expect(lines[1]).toBe('Total,,,0,0,0,Não');
+    expect(lines[1]).toBe('Total,,,0,0,0,Não,Não');
   });
 });
 

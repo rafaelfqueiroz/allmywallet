@@ -46,6 +46,11 @@ const HEADER = [
   'ratio',
   'provenance',
   'user_modified',
+  // SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — "an estimated cost
+  // is carried and shown, never hidden", and the export is a place a figure
+  // is read as much as the screen is.
+  'cost_is_estimate',
+  'estimate_close_date',
 ] as const;
 
 /**
@@ -85,6 +90,9 @@ export function toCsvRows(items: readonly TransactionListItem[]): readonly (read
         provenanceOf(item),
         // BR-006-16: whether a human has corrected this row.
         t.isUserModified ? 'true' : 'false',
+        // SPEC-007 BR-007-06 / DL-007-12 — see the header comment above.
+        t.costIsEstimate ? 'true' : 'false',
+        t.estimateCloseDate ?? '',
       ];
     }),
   ];

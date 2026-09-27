@@ -266,6 +266,41 @@ export const REGISTRY = {
       'Days within which complete, unique asset-conversion evidence may form one group (SPEC-005 BR-005-20c).',
     range: 'integer days, 0–365',
   },
+  /**
+   * SPEC-005 BR-005-20d (#144) — how many days on or after an exercised
+   * subscription's date a price-less `Atualização` credit on the main asset
+   * may fall and still pair with it. No default in `core/ingestion` (SPEC-002):
+   * the caller (`worker/handlers/import.ts`) resolves this and hands it to
+   * `commitBatch` as
+   * `CommitBatchInput.subscriptionCreditWindowDays`, exactly as the other
+   * `import.*` windows are resolved and passed.
+   */
+  'import.subscription_credit_window_days': {
+    key: 'import.subscription_credit_window_days',
+    schema: z.number().int().min(0).max(730),
+    default: 120,
+    levels: ['deployment'],
+    description:
+      'Days on or after an exercised subscription that its Atualização credit may fall and still pair with it (SPEC-005 BR-005-20d).',
+    range: 'integer days, 0–730',
+  } /**
+   * SPEC-005 BR-005-20d (#144) — calendar days of history the pre-commit close
+   * backfill requests before a subscription credit's date, and how recent a
+   * stored close must be for that date to count as already covered (DL-005-22).
+   * It never bounds which close prices the subscription: that is the nearest
+   * earlier stored close however old (#144 D2). Resolved by
+   * `worker/handlers/import.ts` and handed to `fetchClosesForDates`.
+   */,
+  'import.subscription_close_lookback_days': {
+    key: 'import.subscription_close_lookback_days',
+    schema: z.number().int().min(1).max(60),
+    default: 10,
+    levels: ['deployment'],
+    description:
+      'Days of price history fetched before a subscription credit, and how recent a stored close must be to skip the fetch (SPEC-005 BR-005-20d).',
+    range: 'integer days, 1–60',
+  },
+
   'reports.concentration_threshold_pct': {
     key: 'reports.concentration_threshold_pct',
     schema: z.number().int().min(1).max(100),

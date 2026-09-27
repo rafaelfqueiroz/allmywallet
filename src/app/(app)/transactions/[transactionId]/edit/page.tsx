@@ -14,6 +14,7 @@ import {
 import { tryUserId } from '@/lib/session';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
 import { ConversionGroupForm } from '@/app/(app)/transactions/_components/ConversionGroupForm';
+import { TransactionCostEstimateMarker } from '@/app/(app)/transactions/_components/TransactionCostEstimateMarker';
 import { PageShell } from '@/components/patterns/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 
@@ -84,6 +85,15 @@ export default async function EditTransactionPage({ params }: PageProps) {
 
   return (
     <PageShell width="wide" title={t('form.editTitle')} description={t('form.editDescription')}>
+      {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden: the transaction being
+          edited is exactly the one whose own price the marker is about. */}
+      <TransactionCostEstimateMarker
+        costIsEstimate={tx.costIsEstimate}
+        estimateCloseDate={tx.estimateCloseDate}
+        label={t('markers.costEstimated.badge')}
+        closeExplanation={(date) => t('markers.costEstimated.closeExplanation', { date })}
+        carriedExplanation={t('markers.costEstimated.carriedExplanation')}
+      />
       <TransactionForm
         action={editTransactionAction}
         mode="edit"

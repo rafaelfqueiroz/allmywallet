@@ -42,8 +42,13 @@ describe('registry', () => {
     // `import.fraction_auction_window_days` (SPEC-005 BR-005-20b, the three
     // day-windows the commit-time ratio confirmation and fraction-auction
     // pairing are bounded by, per decision log #11); plus #121's
-    // `import.asset_conversion_window_days` (SPEC-005 BR-005-20c).
-    expect(CONFIG_KEYS).toHaveLength(36);
+    // `import.asset_conversion_window_days` (SPEC-005 BR-005-20c); plus
+    // #144's `import.subscription_credit_window_days` (SPEC-005 BR-005-20d,
+    // how many days after an exercised subscription its `Atualização` credit
+    // may fall and still pair with it) and
+    // `import.subscription_close_lookback_days` (how much close history the
+    // pre-commit backfill fetches before each credit).
+    expect(CONFIG_KEYS).toHaveLength(38);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {

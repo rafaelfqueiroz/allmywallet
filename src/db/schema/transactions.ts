@@ -171,6 +171,28 @@ export const transactions = pgTable(
     isManual: boolean('is_manual').notNull().default(false),
     /** BR-006-16: a re-import must not revert a correction. */
     isUserModified: boolean('is_user_modified').notNull().default(false),
+    /**
+     * SPEC-007 BR-007-06 (amended 2026-09-21) / SPEC-005 BR-005-20d: a cost
+     * basis reconciliation could not resolve exactly — a corporate event or a
+     * carried-forward B3 row priced provisionally — so the stored
+     * `unit_price`/`cost_basis` is the best available figure, not a settled
+     * one. Defaults `false`: every row the previous application version wrote
+     * is an exact cost, unchanged by this column's addition (AR-69).
+     */
+    costIsEstimate: boolean('cost_is_estimate').notNull().default(false),
+    /**
+     * SPEC-005 BR-005-20d (#144 review F8) — the date of the stored market
+     * close an estimated *price* was read from, not a date the estimate is
+     * expected to resolve by: B3 never states a subscription's price, so the
+     * cost is the close on the day the shares were credited, and that day
+     * never becomes more exact later (`transfer-cost.ts`'s own comment on
+     * this same field). Null whenever `cost_is_estimate` is false (see the
+     * CHECK below), for a carried estimate with no single close of its own
+     * (an average over a lot that may blend several), and for every
+     * pre-existing row, which the previous application version never wrote
+     * (AR-69).
+     */
+    estimateCloseDate: date('estimate_close_date'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -234,5 +256,14 @@ export const transactions = pgTable(
             AND ${table.costBasis} IS NULL)`,
     ),
     check('transactions_occurrence_positive_check', sql`${table.occurrence} >= 1`),
+    // SPEC-007 BR-007-06 (amended 2026-09-21) / SPEC-005 BR-005-20d: an
+    // estimate close date implies the row is actually an estimate — a settled
+    // row cannot carry one. The migration adds this NOT VALID then validates
+    // it (AR-69's rehearsal step), so it never takes a table-wide lock; it is
+    // stated here as the end state the schema and migration must agree on.
+    check(
+      'transactions_estimate_close_date_check',
+      sql`${table.estimateCloseDate} IS NULL OR ${table.costIsEstimate}`,
+    ),
   ],
 );

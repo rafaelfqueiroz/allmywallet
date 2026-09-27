@@ -10,7 +10,7 @@ import type {
 } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { Result } from '@/core/shared/result';
-import type { TransactionType } from '@/core/ledger/transaction';
+import type { Transaction, TransactionType } from '@/core/ledger/transaction';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { FixedIncomeIndexer } from '@/core/valuation/ports';
@@ -336,6 +336,52 @@ export interface AssetResolveInput {
 /** The institution-catalog counterpart — B3 extracts name a broker/bank in free text. */
 export interface InstitutionResolverPort {
   resolve(name: string): Promise<InstitutionId>;
+}
+
+/**
+ * SPEC-005 BR-005-20d — the main asset's stored close, for pricing a resolved
+ * subscription. Declared here rather than reused from `core/quotes/ports.ts`'s
+ * `QuoteRepositoryPort` because the use case needs exactly this one read
+ * (AR-02: a port exists only where the seam is real).
+ */
+export interface ClosePriceReader {
+  /**
+   * DL-005-22 — the close on `date` itself, or the nearest earlier stored
+   * close however old (D2: no lookback limit). `null` when no close is
+   * stored at all — the pair then stays `unclassified` for a later import,
+   * once `fetch-closes-for-dates.ts`'s worker backfill (or the ordinary
+   * quote poller) has supplied one.
+   */
+  closeOnOrBefore(
+    assetId: AssetId,
+    date: BusinessDate,
+  ): Promise<{ readonly date: BusinessDate; readonly close: Money } | null>;
+}
+
+/** SPEC-005 BR-005-20d — one stored transaction the subscription resolver may pair, on one asset of a B3 issuer. */
+export interface SubscriptionEvidenceRow {
+  readonly transaction: Transaction;
+  readonly assetCode: string;
+}
+
+/**
+ * SPEC-005 BR-005-20d — every stored transaction across every asset whose
+ * code shares a B3 issuer root (`core/ingestion/issuer-code.ts`), at one
+ * institution, that may be exercise or credit evidence for a subscription:
+ * a `subscription`-typed row (any status) or a price-less `Atualização`-keyed
+ * row. Reading by issuer root rather than by a fixed pair of codes is what
+ * lets an exercise staged in one import and a credit staged in a later one —
+ * or the reverse — still find each other: neither staging knows the other
+ * extract's code in advance, only that both belong to the same issuer.
+ *
+ * AR-11: implemented on the same tenant transaction as the rest of the
+ * commit (`transactions` is tenant-scoped, unlike `price_quotes` above).
+ */
+export interface SubscriptionEvidenceReader {
+  evidenceForIssuer(
+    issuerRoot: string,
+    institutionId: InstitutionId | null,
+  ): Promise<readonly SubscriptionEvidenceRow[]>;
 }
 
 /**

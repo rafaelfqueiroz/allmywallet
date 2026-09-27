@@ -398,6 +398,9 @@ export class DrizzlePositionQueryRepository implements PositionQueryPort {
       assetId,
       quantity: aggregate?.state.quantity ?? Quantity.zero(),
       averageCost: aggregate?.state.averageCost ?? Money.zero(),
+      // SPEC-007 BR-007-06 / DL-007-12 — an asset never held has no estimated
+      // cost to carry: `false`, not an invented positive.
+      costEstimated: aggregate?.costEstimated ?? false,
     };
   }
 
@@ -413,6 +416,7 @@ export class DrizzlePositionQueryRepository implements PositionQueryPort {
         assetId: position.assetId,
         quantity: position.state.quantity,
         averageCost: position.state.averageCost,
+        costEstimated: position.costEstimated,
       }));
   }
 }
@@ -427,6 +431,7 @@ function toSnapshot(row: typeof positions.$inferSelect): PositionSnapshot {
       averageCost: row.averageCost,
       realizedGain: row.realizedGain,
     },
+    costEstimated: row.costEstimated,
   };
 }
 

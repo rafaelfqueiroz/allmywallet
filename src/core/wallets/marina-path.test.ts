@@ -62,6 +62,8 @@ describe('SPEC-010 AC-010-19 — Marina assigns six payers and imports again', (
       importBatchId: null,
       isManual: false,
       isUserModified: false,
+      costIsEstimate: false,
+      estimateCloseDate: null,
       createdAt: new Date('2026-04-01T12:00:00Z'),
       updatedAt: new Date('2026-04-01T12:00:00Z'),
     };

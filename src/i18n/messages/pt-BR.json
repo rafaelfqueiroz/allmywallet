@@ -391,7 +391,13 @@
     "goalsLink": "Objetivos",
     "needsAttentionOutOfBalance": "{wallet}: ao menos um ativo passou da tolerância que você definiu.",
     "needsAttentionNeedsReview": "{wallet}: as metas não somam 100%.",
-    "needsAttentionBalanceOpen": "Ver metas e desvio"
+    "needsAttentionBalanceOpen": "Ver metas e desvio",
+    "markers": {
+      "costEstimated": {
+        "badge": "Preço estimado",
+        "explanation": "O custo desta carteira inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
+      }
+    }
   },
   "import": {
     "title": "Importar extratos B3",
@@ -429,9 +435,9 @@
     "countIgnored": "Ignoradas",
     "ignored": {
       "title": "Ignoradas",
-      "description": "Linhas que repetem um registro de outro extrato — liquidações de negócios que a Negociação já traz e proventos transferidos entre corretoras. Ficam guardadas, mas não entram nos cálculos.",
+      "description": "Linhas que não entram nos cálculos, por dois motivos possíveis: repetem um registro que outro extrato já traz — liquidações de negócios que a Negociação registra e proventos transferidos entre corretoras — ou são papelada de um evento de subscrição que, por si só, não move a posição (aviso, pedido, direitos ou sobras não exercidos, cessão de direitos, recibo). Ficam guardadas, mas fora dos cálculos.",
       "show": "Ver {count} linha(s) ignorada(s)",
-      "classifyHint": "Só classifique se você não importa a Negociação; senão, o negócio conta duas vezes."
+      "classifyHint": "Classifique à mão só se tiver certeza do que a linha representa: uma liquidação ou um provento repassado deve virar lançamento apenas se você não importa a Negociação, senão o negócio conta duas vezes. Papelada de subscrição normalmente não deve ser classificada — o exercício em si chega como uma linha própria."
     },
     "needsAttentionTitle": "Precisa de atenção",
     "needsAttentionEmpty": "Nada esperando classificação nesta importação.",
@@ -612,6 +618,7 @@
       "quantity": "Quantidade",
       "value": "Valor",
       "costBasis": "Custo",
+      "costEstimated": "Custo estimado",
       "estimated": "Estimado",
       "total": "Total",
       "share": "Participação",
@@ -662,6 +669,10 @@
         "cdi_percent": "% do CDI",
         "prefixado": "taxa prefixada",
         "ipca_spread": "IPCA + juros"
+      },
+      "costEstimated": {
+        "badge": "Preço estimado",
+        "explanation": "O custo desta posição inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
       }
     },
     "attentionTitle": "Precisam de atenção",
@@ -782,6 +793,10 @@
       "impactQuantity": "Quantidade",
       "impactAverageCost": "Preço médio",
       "impactAllocations": "Se alguma carteira ficar com mais cotas do que você passa a ter, o excesso é devolvido proporcionalmente para Não atribuído.",
+      "downstreamTitle": "Outras posições recalculadas",
+      "downstreamDescription": "Estas posições receberam custo desta por transferência ou conversão. O custo delas é relido da origem sem esta transação.",
+      "downstreamPosition": "{asset} em {institution}",
+      "downstreamPositionNoInstitution": "{asset}, sem instituição",
       "notFound": "Esta transação não existe mais."
     },
     "edit": {
@@ -822,6 +837,13 @@
       "assigned": "{assigned} ativo(s) atribuído(s) à carteira.",
       "assignedPartial": "{assigned} ativo(s) atribuído(s). {skipped} não entrou(aram): já estava(m) em outra carteira ou a seleção não deixou cotas livres.",
       "assignedNone": "Nada foi atribuído: os ativos selecionados já estão em alguma carteira ou a seleção não deixou cotas livres."
+    },
+    "markers": {
+      "costEstimated": {
+        "badge": "Preço estimado",
+        "closeExplanation": "Preço estimado pelo fechamento de {date}. A B3 não informa o preço da subscrição — o custo usa o preço de fechamento no dia em que os ativos foram creditados.",
+        "carriedExplanation": "Custo herdado de uma posição com preço estimado."
+      }
     }
   },
   "privacy": {

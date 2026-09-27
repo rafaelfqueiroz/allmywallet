@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, lte, max } from 'drizzle-orm';
 import type { Database } from '@/db/client';
+import type { Tx } from '@/db/tenant';
 import { latestQuotes, priceQuoteGaps, priceQuotes } from '@/db/schema/market';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
@@ -10,6 +11,7 @@ import type {
   QuoteRepositoryPort,
 } from '@/core/quotes/ports';
 import type { PriceHistoryPort } from '@/core/valuation/ports';
+import type { ClosePriceReader } from '@/core/ingestion/ports';
 
 /**
  * SPEC-008 BR-008-10 — the two tables below are queried and written
@@ -24,9 +26,13 @@ import type { PriceHistoryPort } from '@/core/valuation/ports';
  * on the two methods it uses rather than on the write surface it must not.
  */
 export class DrizzleQuoteRepository
-  implements QuoteRepositoryPort, PriceHistoryPort, LatestCloseDatePort
+  implements QuoteRepositoryPort, PriceHistoryPort, LatestCloseDatePort, ClosePriceReader
 {
-  constructor(private readonly db: Database) {}
+  // AR-15: `price_quotes`/`latest_quotes` are shared reference tables with no
+  // tenant column (see the class doc above) — `Tx | Database` lets
+  // `worker/handlers/import.ts` pass the same tenant transaction the rest of
+  // a commit runs on (SPEC-005 BR-005-20d) without a second `withTenant`.
+  constructor(private readonly db: Tx | Database) {}
 
   /**
    * SPEC-021 BR-021-28 — "the last recorded close capture", measured over the
@@ -121,6 +127,19 @@ export class DrizzleQuoteRepository
       )
       .orderBy(asc(priceQuotes.date));
     return rows.map(toPriceQuote);
+  }
+
+  /**
+   * SPEC-005 BR-005-20d — `ClosePriceReader`. Same query as
+   * `getCloseOnOrBefore` above, under the name that port declares; kept as a
+   * thin delegation rather than a second implementation so the two callers
+   * (SPEC-009's carry-forward and this one) can never read a different close.
+   */
+  async closeOnOrBefore(
+    assetId: AssetId,
+    date: BusinessDate,
+  ): Promise<{ readonly date: BusinessDate; readonly close: PriceQuote['close'] } | null> {
+    return this.getCloseOnOrBefore(assetId, date);
   }
 
   /**

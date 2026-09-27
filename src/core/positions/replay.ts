@@ -4,6 +4,7 @@ import type { AssetId, InstitutionId } from '@/core/shared/ids';
 import { type Result, err, ok } from '@/core/shared/result';
 import { type Transaction, isActive } from '@/core/ledger/transaction';
 import { applyTransaction } from '@/core/positions/apply-transaction';
+import { costEstimatedAfter } from '@/core/positions/cost-estimate';
 import { EMPTY_POSITION, type PositionState } from '@/core/positions/position-state';
 import { sortForReplay } from '@/core/positions/ordering';
 
@@ -38,9 +39,22 @@ export interface ReplayOptions {
   readonly asOf?: BusinessDate | undefined;
 }
 
-export interface PositionSnapshot extends PositionKey {
+/**
+ * A replayed position together with its cost-estimate marker — the two
+ * outputs of one fold (`cost-estimate.ts`).
+ */
+export interface ReplayedPosition {
   readonly state: PositionState;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12: the open lot
+   * includes an acquisition whose cost is an estimate, so its cost and
+   * *preço médio* are estimates too. Resets when the position closes
+   * (BR-007-07).
+   */
+  readonly costEstimated: boolean;
 }
+
+export interface PositionSnapshot extends PositionKey, ReplayedPosition {}
 
 /**
  * SPEC-007 BR-007-16 / SPEC-006 BR-006-03: only `active` rows participate.
@@ -83,6 +97,20 @@ export function replayPosition(
   options: ReplayOptions = {},
 ): Result<PositionState, DomainError> {
   const folded = fold(transactions, options);
+  return folded.ok ? ok(folded.value.state) : err(folded.error.error);
+}
+
+/**
+ * `replayPosition` with the SPEC-007 BR-007-06 cost-estimate marker. Every
+ * writer of the position cache — a rebuild, a ledger write's recalculation,
+ * an import commit — goes through this, so all of them decide the marker by
+ * the one fold that decides the average (DL-007-06).
+ */
+export function replayPositionWithEstimate(
+  transactions: readonly Transaction[],
+  options: ReplayOptions = {},
+): Result<ReplayedPosition, DomainError> {
+  const folded = fold(transactions, options);
   return folded.ok ? folded : err(folded.error.error);
 }
 
@@ -111,14 +139,18 @@ export function firstUnreplayable(
 function fold(
   transactions: readonly Transaction[],
   options: ReplayOptions,
-): Result<PositionState, ReplayFailure> {
+): Result<ReplayedPosition, ReplayFailure> {
   let state = EMPTY_POSITION;
+  let costEstimated = false;
   for (const transaction of sortForReplay(selectForReplay(transactions, options))) {
     const next = applyTransaction(state, transaction);
     if (!next.ok) return err({ transaction, error: next.error });
     state = next.value;
+    // SPEC-007 BR-007-06 / BR-007-07: decided in replay order, after the
+    // transaction has moved the position — see `costEstimatedAfter`.
+    costEstimated = costEstimatedAfter(costEstimated, state, transaction);
   }
-  return ok(state);
+  return ok({ state, costEstimated });
 }
 
 /**
@@ -157,9 +189,9 @@ export function replayPositions(
   for (const group of groups.values()) {
     // Already filtered above, so replay is handed the selected rows directly
     // rather than re-applying `asOf` to a subset it has already narrowed.
-    const replayed = replayPosition(group.transactions);
+    const replayed = replayPositionWithEstimate(group.transactions);
     if (!replayed.ok) return replayed;
-    snapshots.push({ ...group.key, state: replayed.value });
+    snapshots.push({ ...group.key, ...replayed.value });
   }
 
   /**

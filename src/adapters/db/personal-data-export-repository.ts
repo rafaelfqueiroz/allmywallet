@@ -60,6 +60,9 @@ export class DrizzlePersonalDataExportRepository implements PersonalDataExportPo
         fees: transactions.fees,
         totalValue: transactions.totalValue,
         isManual: transactions.isManual,
+        // SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12.
+        costIsEstimate: transactions.costIsEstimate,
+        estimateCloseDate: transactions.estimateCloseDate,
       })
       .from(transactions)
       .innerJoin(assets, eq(transactions.assetId, assets.id))
@@ -79,6 +82,12 @@ export class DrizzlePersonalDataExportRepository implements PersonalDataExportPo
       fees: row.fees,
       totalValue: row.totalValue,
       isManual: row.isManual,
+      costIsEstimate: row.costIsEstimate,
+      // AR-29: the CHECK on `transactions` guarantees this is null unless
+      // `costIsEstimate` is set, matching `transaction-repository.ts`'s own
+      // mapping.
+      estimateCloseDate:
+        row.estimateCloseDate === null ? null : BusinessDate.of(row.estimateCloseDate),
     }));
   }
 

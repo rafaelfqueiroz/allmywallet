@@ -173,6 +173,8 @@ export class DrizzleTransactionRepository implements TransactionRepository {
         costBasis: row.costBasis,
         naturalKey: row.naturalKey,
         isUserModified: row.isUserModified,
+        costIsEstimate: row.costIsEstimate,
+        estimateCloseDate: row.estimateCloseDate,
         updatedAt: row.updatedAt,
       })
       .where(eq(transactions.id, transaction.id));
@@ -320,7 +322,7 @@ function escapeLike(term: string): string {
   return term.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 }
 
-type TransactionRow = typeof transactions.$inferSelect;
+export type TransactionRow = typeof transactions.$inferSelect;
 
 function toRow(transaction: Transaction, userId: UserId): typeof transactions.$inferInsert {
   return {
@@ -347,12 +349,14 @@ function toRow(transaction: Transaction, userId: UserId): typeof transactions.$i
     importBatchId: transaction.importBatchId,
     isManual: transaction.isManual,
     isUserModified: transaction.isUserModified,
+    costIsEstimate: transaction.costIsEstimate,
+    estimateCloseDate: transaction.estimateCloseDate,
     createdAt: transaction.createdAt,
     updatedAt: transaction.updatedAt,
   };
 }
 
-function toDomain(row: TransactionRow): Transaction {
+export function toDomain(row: TransactionRow): Transaction {
   return {
     id: TransactionId.of(row.id),
     userId: UserId.of(row.userId),
@@ -379,6 +383,10 @@ function toDomain(row: TransactionRow): Transaction {
     importBatchId: row.importBatchId === null ? null : ImportBatchId.of(row.importBatchId),
     isManual: row.isManual,
     isUserModified: row.isUserModified,
+    costIsEstimate: row.costIsEstimate,
+    // AR-29: the CHECK guarantees this is null unless `costIsEstimate` is set.
+    estimateCloseDate:
+      row.estimateCloseDate === null ? null : BusinessDate.of(row.estimateCloseDate),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

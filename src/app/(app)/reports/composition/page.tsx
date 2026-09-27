@@ -199,6 +199,8 @@ export default async function CompositionPage({ searchParams }: PageProps) {
                 }),
                 estimated: t('estimate.badge'),
                 estimatedTitle: t('estimate.explanation'),
+                costEstimated: t('markers.costEstimated.badge'),
+                costEstimatedTitle: t('markers.costEstimated.explanation'),
                 sortBy: tc('holdings.sortBy', { column: '{column}' }),
                 sortField: tc('holdings.sortField'),
                 sortAscending: tc('holdings.sortAscending'),
@@ -508,6 +510,7 @@ function holdingRows(
     unrealizedGain: cell(row.unrealizedGain, formatCurrency, unrealizedGain[index]),
     concentrated: row.concentrated,
     estimated: row.estimated,
+    costEstimated: row.costEstimated,
     /*
      * BR-018-19 — `null` for a holding with no rule, which is most of them.
      * The label and the title are resolved here, on the server, from the same

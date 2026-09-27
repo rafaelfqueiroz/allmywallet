@@ -528,3 +528,116 @@ describe('editTransactions — several edits, one guard per position', () => {
     ]);
   });
 });
+
+/**
+ * SPEC-007 BR-007-06 / SPEC-005 BR-005-20d — "a user edit of the price clears
+ * it". The estimated subscription below is the XPML11 shape: 20 quotas priced
+ * at the 114,90 close, where the real subscription price was 112,95.
+ */
+describe('SPEC-007 BR-007-06 — editing an estimated price', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  const estimatedSubscription = () =>
+    aTransaction()
+      .subscription()
+      .imported()
+      .on('2026-03-10')
+      .quantity('20')
+      .price('114.90')
+      .costEstimate('2026-03-09')
+      .build();
+
+  it('a user edit changing the price clears the marker, its close date and the position’s', async () => {
+    const subscription = estimatedSubscription();
+    const state = deps([subscription]);
+
+    const result = await editTransaction(state, subscription.id, {
+      unitPrice: Money.fromString('112.95'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.transaction.costIsEstimate).toBe(false);
+    expect(result.value.transaction.estimateCloseDate).toBeNull();
+    // 20 × 112,95 = 2.259,00 — now exact.
+    const [position] = await state.positions.list();
+    expect(position?.state.totalCost.toString()).toBe('2259');
+    expect(position?.costEstimated).toBe(false);
+  });
+
+  it('a user edit resubmitting the same price keeps the marker (the form sends every field)', async () => {
+    const subscription = estimatedSubscription();
+    const state = deps([subscription]);
+
+    const result = await editTransaction(state, subscription.id, {
+      unitPrice: Money.fromString('114.9'),
+      fees: Money.fromString('1.00'),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.transaction.costIsEstimate).toBe(true);
+    expect(result.value.transaction.estimateCloseDate).toBe(BusinessDate.of('2026-03-09'));
+    // 20 × 114,90 + 1,00 = 2.299,00 — still an estimate.
+    const [position] = await state.positions.list();
+    expect(position?.state.totalCost.toString()).toBe('2299');
+    expect(position?.costEstimated).toBe(true);
+  });
+
+  it('an edit that does not touch the price keeps the marker', async () => {
+    const subscription = estimatedSubscription();
+    const state = deps([subscription]);
+
+    const result = await editTransaction(state, subscription.id, {
+      tradeDate: BusinessDate.of('2026-03-11'),
+    });
+
+    expect(result.ok && result.value.transaction.costIsEstimate).toBe(true);
+  });
+
+  it('an import edit changing the price is not a user stating it, and keeps the marker', async () => {
+    const subscription = estimatedSubscription();
+    const state = deps([subscription]);
+
+    const result = await editTransaction(state, subscription.id, {
+      unitPrice: Money.fromString('113.00'),
+      flagUserModified: false,
+    });
+
+    expect(result.ok && result.value.transaction.costIsEstimate).toBe(true);
+  });
+
+  it('an explicit costEstimate marks a row (a carried cost: no close date)', async () => {
+    const credit = aTransaction().transferIn().imported().quantity('20').price('10').build();
+    const state = deps([credit]);
+
+    const result = await editTransaction(state, credit.id, {
+      unitPrice: Money.fromString('27.48333333'),
+      flagUserModified: false,
+      costEstimate: { closeDate: null },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.transaction.costIsEstimate).toBe(true);
+    expect(result.value.transaction.estimateCloseDate).toBeNull();
+    expect((await state.positions.list())[0]?.costEstimated).toBe(true);
+  });
+
+  it('an explicit null clears a row whatever else the edit does', async () => {
+    const subscription = estimatedSubscription();
+    const state = deps([subscription]);
+
+    const result = await editTransaction(state, subscription.id, {
+      flagUserModified: false,
+      costEstimate: null,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.transaction.costIsEstimate).toBe(false);
+    expect(result.value.transaction.estimateCloseDate).toBeNull();
+  });
+});

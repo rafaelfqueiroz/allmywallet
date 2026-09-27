@@ -194,6 +194,23 @@ export interface ReportPosition {
    * then dropped at a boundary is indistinguishable from one never computed.
    */
   readonly basis: EstimateBasis | null;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — the position's open
+   * lot includes an acquisition whose cost B3 states no price for, so its
+   * cost and *preço médio* are an estimate too, until it closes (BR-007-07).
+   *
+   * **Deliberately not folded into `estimated` above.** That field is
+   * SPEC-009's *valuation* estimate — a price accrued from an indexer rather
+   * than observed in the market. This one is about where the *cost* came
+   * from, not how the *current value* was priced, and the two can disagree in
+   * either direction: a CDB's accrued value is always `estimated` and never
+   * `costEstimated` (its rate is contracted, not guessed), while a subscribed
+   * FII trading normally today is never `estimated` and can still be
+   * `costEstimated` (BR-007-06). Merging them would tell one holder their
+   * subscription price is a market estimate and the other that their CDB's
+   * accrual is a guess about what they paid.
+   */
+  readonly costEstimated: boolean;
 }
 
 /** SPEC-010 DM-2 — one row per `(wallet, asset)`, stored by quantity. */
@@ -247,6 +264,13 @@ export interface ReportHolding {
   readonly needsAttention: NeedsAttentionReason | null;
   /** SPEC-009 AC-9 — what an accrued figure was computed from. */
   readonly basis: EstimateBasis | null;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — see
+   * `ReportPosition.costEstimated`. Carried onto every wallet slice of a
+   * position unsplit, the same way `carriedForward` is: it describes how the
+   * cost was obtained, not an amount, so there is nothing to apportion.
+   */
+  readonly costEstimated: boolean;
 }
 
 /**
@@ -281,6 +305,13 @@ export interface ReportTotals {
   readonly quantity: Quantity;
   /** BR-011-15 / AC-15: true when any constituent figure is accrued rather than observed. */
   readonly estimated: boolean;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — true when any
+   * constituent holding's cost is an estimate. One accrued/subscribed slice
+   * is enough to mark the whole total (DL-007-12: *preço médio* is an
+   * average, so one estimated lot makes the whole figure an estimate).
+   */
+  readonly costEstimated: boolean;
 }
 
 // ---------------------------------------------------------------------------

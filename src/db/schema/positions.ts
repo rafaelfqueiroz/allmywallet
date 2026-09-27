@@ -1,4 +1,4 @@
-import { check, index, pgTable, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, index, pgTable, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 import { money, quantity } from '@/db/numeric';
 import { assets, institutions } from '@/db/schema/assets';
@@ -35,6 +35,16 @@ export const positions = pgTable(
     averageCost: money('average_cost').notNull(),
     totalCost: money('total_cost').notNull(),
     realizedGain: money('realized_gain').notNull(),
+    /**
+     * SPEC-007 BR-007-06 (amended 2026-09-21): set when any transaction
+     * folded into this cached position carries `cost_is_estimate`, so the
+     * report surface can flag a *preço médio* that is provisional. The cache
+     * is derived (BR-006-01) — this is a replay output like every other
+     * column here, never adjusted in place. Defaults `false`: every row the
+     * previous application version wrote or writes is an exact figure,
+     * unchanged by this column's addition (AR-69).
+     */
+    costEstimated: boolean('cost_estimated').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

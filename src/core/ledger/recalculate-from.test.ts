@@ -79,6 +79,7 @@ describe('SPEC-006 BR-006-14 / DL-006-03 — recalculatePositionFrom', () => {
           averageCost: aTransaction().build().unitPrice,
           realizedGain: aTransaction().build().fees,
         },
+        costEstimated: false,
       },
     ]);
 

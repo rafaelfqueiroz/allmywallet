@@ -176,6 +176,32 @@ describe('AC — deleting shows what will be recalculated, before confirming', (
     expect(result.value.projectedPosition.realizedGain.toString()).toBe('1000');
   });
 
+  it('SPEC-007 BR-007-06 / DL-007-12 — discloses whether the position is cost-estimated, before and after', async () => {
+    // The January buy is exact; the February buy is the estimated one. The
+    // current position (both lots open) is therefore estimated; deleting the
+    // estimated buy leaves only the exact January lot.
+    const rows = [
+      aTransaction().buy().on('2026-01-05').quantity('100').price('10.00').build(),
+      aTransaction()
+        .buy()
+        .on('2026-02-05')
+        .quantity('100')
+        .price('20.00')
+        .costEstimate('2026-02-05')
+        .build(),
+    ];
+    const state = deps(rows);
+    const target = rows[1];
+    if (!target) return;
+
+    const result = await describeDeletionImpact(state, target.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.currentCostEstimated).toBe(true);
+    expect(result.value.projectedCostEstimated).toBe(false);
+  });
+
   it('discloses nothing and deletes nothing when the deletion is impossible', async () => {
     // The user is told before confirming, rather than after the row is gone.
     const rows = [

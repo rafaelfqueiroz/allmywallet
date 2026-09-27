@@ -125,6 +125,11 @@ export class DrizzleReportDataPort implements ReportDataPort {
         institutionId: positions.institutionId,
         quantity: positions.quantity,
         averageCost: positions.averageCost,
+        // SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — read
+        // alongside the average it qualifies, and carried through unchanged:
+        // `valueHoldingsAt` prices a position, it does not decide whether the
+        // cost behind that price is an estimate.
+        costEstimated: positions.costEstimated,
       })
       .from(positions)
       // A position closed to zero is worth nothing, carries no price, and
@@ -194,6 +199,11 @@ export class DrizzleReportDataPort implements ReportDataPort {
         priceDate: position.priceDate,
         needsAttention: position.needsAttention,
         basis: position.basis,
+        // SPEC-007 BR-007-06 / DL-007-12 — read straight off the position
+        // cache row at the same index, not from `valueHoldingsAt`: it is a
+        // fact about the cost SPEC-007 already decided, not something a
+        // valuation computes.
+        costEstimated: rows[index]?.costEstimated ?? false,
       };
     });
   }

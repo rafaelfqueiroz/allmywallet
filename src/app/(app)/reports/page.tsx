@@ -18,6 +18,7 @@ import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Money } from '@/components/patterns/money';
+import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Badge } from '@/components/ui/badge';
@@ -185,7 +186,17 @@ export default async function ReportsPage({ searchParams }: PageProps) {
                   <Money value={result.value.report.total.value} />
                 </TableCell>
                 <TableCell className="py-row text-right">
-                  <Money value={result.value.report.total.costBasis} />
+                  <Cluster gap="sm" justify="end" align="baseline">
+                    <Money value={result.value.report.total.costBasis} />
+                    {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden, so the
+                        grand total carries the marker exactly like each group's
+                        own Custo cell below does. */}
+                    <CostEstimateMarker
+                      shown={result.value.report.total.costEstimated}
+                      label={t('markers.costEstimated.badge')}
+                      title={t('markers.costEstimated.explanation')}
+                    />
+                  </Cluster>
                 </TableCell>
               </TableRow>
             </TableFooter>
@@ -291,7 +302,16 @@ async function GroupRow({
         <Money value={group.totals.value} />
       </TableCell>
       <TableCell className="py-row text-right">
-        <Money value={group.totals.costBasis} />
+        <Cluster gap="sm" justify="end" align="baseline">
+          <Money value={group.totals.costBasis} />
+          {/* SPEC-007 BR-007-06 / DL-007-12 — one estimated-cost holding is
+              enough to mark the group's own Custo cell. */}
+          <CostEstimateMarker
+            shown={group.totals.costEstimated}
+            label={t('markers.costEstimated.badge')}
+            title={t('markers.costEstimated.explanation')}
+          />
+        </Cluster>
       </TableCell>
     </TableRow>
   );

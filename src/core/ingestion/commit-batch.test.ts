@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
-import { ImportBatchId, TransactionId, UserId } from '@/core/shared/ids';
+import { type AssetId, ImportBatchId, TransactionId, UserId } from '@/core/shared/ids';
 import { Money, Quantity, asStored } from '@/core/shared/money';
 import { editTransaction } from '@/core/ledger/edit-transaction';
+import { recalculatePositionFrom } from '@/core/ledger/recalculate-from';
 import {
   computeTotalValue,
   type Transaction,
   type TransactionType,
 } from '@/core/ledger/transaction';
-import { replayPosition } from '@/core/positions/replay';
+import { replayPosition, replayPositionWithEstimate } from '@/core/positions/replay';
 import { externalFlow } from '@/core/valuation/snapshot';
 import {
   type CorporateEventFactor,
@@ -52,6 +53,28 @@ function buy(overrides: Partial<NormalizedTransactionRecord> = {}) {
     ...overrides,
   };
   return { raw: { Movimentação: record.b3Type }, record };
+}
+
+/** SPEC-005 BR-005-18 v6 — a `Direitos de Subscrição - Exercido` debit: the right ticker, no price. */
+function subscriptionExercise(overrides: Partial<NormalizedTransactionRecord> = {}) {
+  return buy({
+    b3Type: 'Direitos de Subscrição - Exercido',
+    priceStated: false,
+    unitPrice: Money.zero(),
+    fees: Money.zero(),
+    ...overrides,
+  });
+}
+
+/** SPEC-005 BR-005-18 v5 — a price-less `Atualização` credit: the main asset, no price. */
+function atualizacaoCredit(overrides: Partial<NormalizedTransactionRecord> = {}) {
+  return buy({
+    b3Type: 'Atualização',
+    priceStated: false,
+    unitPrice: Money.zero(),
+    fees: Money.zero(),
+    ...overrides,
+  });
 }
 
 async function stagedBatch(
@@ -572,6 +595,81 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(deps.transactions.rows).toHaveLength(transactionCount);
   });
 
+  it('SPEC-007 BR-007-06: an estimated source marks the conversion_in leg and its position', async () => {
+    // ELET3: buy 220 @ 10,00 (2.200,00) + estimated subscription 40 @ 12,00
+    // (480,00) = 260 shares, 2.680,00, estimated. The conversion removes all
+    // 260 at 2.680,00 and AXIA3 opens 260 at 2.680,00 — an estimate too.
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('220'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    const source = deps.transactions.rows[0] as Transaction;
+    const price = Money.fromString('12');
+    const quantity = Quantity.fromString('40');
+    await deps.transactions.insertMany([
+      {
+        ...source,
+        id: TransactionId.generate(),
+        type: 'subscription',
+        tradeDate: BusinessDate.of('2025-01-10'),
+        quantity,
+        unitPrice: price,
+        totalValue: computeTotalValue('subscription', quantity, price, Money.zero()),
+        naturalKey: 'estimated-subscription',
+        costIsEstimate: true,
+        estimateCloseDate: BusinessDate.of('2025-01-09'),
+      },
+    ]);
+
+    const result = await importRows(deps, [evidence('Atualização', 'AXIA3', '2025-02-03', '260')]);
+
+    expect(result.outcome).toMatchObject({ resolvedAssetConversions: 1 });
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    const incoming = legs.find((row) => row.type === 'conversion_in');
+    const outgoing = legs.find((row) => row.type === 'conversion_out');
+    expect(incoming?.costBasis?.toString()).toBe('2680');
+    expect(incoming).toMatchObject({ costIsEstimate: true, estimateCloseDate: null });
+    expect(outgoing).toMatchObject({ costIsEstimate: false });
+    const positions = await deps.positions.list();
+    const axia = positions.find((p) => p.assetId === incoming?.assetId);
+    const elet = positions.find((p) => p.assetId === outgoing?.assetId);
+    expect(axia?.state.totalCost.toString()).toBe('2680');
+    expect(axia?.costEstimated).toBe(true);
+    expect(elet?.state.quantity.isZero() && elet.costEstimated).toBe(false);
+    for (const snapshot of positions) {
+      const replayed = replayPositionWithEstimate(
+        await deps.transactions.listForPosition(snapshot.assetId, snapshot.institutionId),
+      );
+      expect(replayed.ok && replayed.value.costEstimated).toBe(snapshot.costEstimated);
+    }
+  });
+
+  it('an exact source leaves the conversion legs exact', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importRows(deps, [
+      buy({
+        assetCode: 'ELET3',
+        assetName: 'ELET3',
+        tradeDate: BusinessDate.of('2025-01-02'),
+        quantity: Quantity.fromString('260'),
+        unitPrice: Money.fromString('10'),
+        fees: Money.zero(),
+      }),
+    ]);
+    await importRows(deps, [evidence('Atualização', 'AXIA3', '2025-02-03', '260')]);
+    const legs = deps.transactions.rows.filter((row) => row.conversionGroupId !== null);
+    expect(legs).toHaveLength(2);
+    expect(legs.every((row) => !row.costIsEstimate)).toBe(true);
+    expect((await deps.positions.list()).every((p) => !p.costEstimated)).toBe(true);
+  });
+
   it('promotes stored evidence in place, keeps its key and inserts its companion exactly once', async () => {
     const deps = buildFakeIngestionDeps();
     const file = [evidence('Atualização', 'AXIA3', '2025-02-03', '260')];
@@ -902,8 +1000,10 @@ describe('SPEC-005 BR-005-20c — asset-conversion commit', () => {
     expect(byDate('2026-03-19')?.totalValue.toString()).toBe('19.90326');
 
     // A pure balance statement: 68 restates what the ledger already holds, no
-    // target asset appears beside it, and nothing may be invented for it.
-    expect(byDate('2026-06-22')).toMatchObject({ status: 'unclassified' });
+    // target asset appears beside it, and nothing may be invented for it —
+    // BR-005-20e (#144) now resolves this as a position refresh rather than
+    // leaving it in Needs Attention with no correct hand-classification.
+    expect(byDate('2026-06-22')).toMatchObject({ status: 'superseded' });
     expect(byDate('2026-06-22')?.conversionGroupId).toBeNull();
 
     // 4 × 53,71 = 214,84 of proceeds against 0,00 of carried cost.
@@ -1683,18 +1783,157 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
         };
   }
 
-  /** DM-4 / TS-08: every cached position equals a replay of the ledger behind it. */
+  /**
+   * DM-4 / TS-08: every cached position equals a replay of the ledger behind
+   * it — the SPEC-007 BR-007-06 cost-estimate marker included.
+   */
   async function expectRebuildEqualsIncremental(deps: FakeIngestionDeps) {
     for (const snapshot of await deps.positions.list()) {
-      const replayed = replayPosition(
+      const replayed = replayPositionWithEstimate(
         await deps.transactions.listForPosition(snapshot.assetId, snapshot.institutionId),
       );
       if (!replayed.ok) throw new Error('ledger does not replay');
-      expect(replayed.value.quantity.toString()).toBe(snapshot.state.quantity.toString());
-      expect(replayed.value.totalCost.toString()).toBe(snapshot.state.totalCost.toString());
-      expect(replayed.value.averageCost.toString()).toBe(snapshot.state.averageCost.toString());
+      const { state, costEstimated } = replayed.value;
+      expect(state.quantity.toString()).toBe(snapshot.state.quantity.toString());
+      expect(state.totalCost.toString()).toBe(snapshot.state.totalCost.toString());
+      expect(state.averageCost.toString()).toBe(snapshot.state.averageCost.toString());
+      expect(costEstimated).toBe(snapshot.costEstimated);
     }
   }
+
+  /**
+   * SPEC-005 BR-005-20d's estimated subscription, written straight into the
+   * ledger (the resolver that writes it is a separate piece of #144): 20 at
+   * ORIGEM priced at a 114,90 close, marked, recalculated as any write is.
+   */
+  async function subscribeEstimated(
+    deps: FakeIngestionDeps,
+    tradeDate: string,
+    unitPrice = '114.90',
+    quantity = '20',
+  ): Promise<Transaction> {
+    const source = deps.transactions.rows.find((t) => t.type === 'buy') as Transaction;
+    const price = Money.fromString(unitPrice);
+    const amount = Quantity.fromString(quantity);
+    const subscription: Transaction = {
+      ...source,
+      id: TransactionId.generate(),
+      type: 'subscription',
+      tradeDate: BusinessDate.of(tradeDate),
+      quantity: amount,
+      unitPrice: price,
+      fees: Money.zero(),
+      totalValue: computeTotalValue('subscription', amount, price, Money.zero()),
+      naturalKey: `estimated-subscription-${tradeDate}`,
+      occurrence: 1,
+      costIsEstimate: true,
+      estimateCloseDate: BusinessDate.of(tradeDate),
+    };
+    await deps.transactions.insertMany([subscription]);
+    const recalculated = await recalculatePositionFrom(deps, {
+      assetId: subscription.assetId,
+      institutionId: subscription.institutionId,
+      fromDate: subscription.tradeDate,
+    });
+    if (!recalculated.ok) throw new Error('fixture: subscription does not replay');
+    return subscription;
+  }
+
+  async function markerAt(deps: FakeIngestionDeps, institution: string) {
+    const id = await deps.institutions.resolve(institution);
+    return (await deps.positions.list()).find((p) => p.institutionId === id)?.costEstimated;
+  }
+
+  describe('SPEC-007 BR-007-06 — the estimate marker travels with the carry', () => {
+    it('an estimated source carries an estimated credit: (1.000,00 + 2.298,00) ÷ 120 = 27,48333…', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await subscribeEstimated(deps, '2026-02-10');
+      const moved = { quantity: Quantity.fromString('120') };
+
+      const { outcome } = await importFile(deps, [credit(moved), debit(moved)]);
+
+      expect(outcome.applied).toBe(2);
+      const [carried] = transfersIn(deps);
+      expect(asStored((carried as Transaction).unitPrice)).toBe('27.48333333');
+      expect(carried).toMatchObject({ costIsEstimate: true, estimateCloseDate: null });
+      expect(await markerAt(deps, DESTINO)).toBe(true);
+      // ORIGEM sent all 120: closed, so its lot resets (BR-007-07).
+      expect(await markerAt(deps, ORIGEM)).toBe(false);
+      await expectRebuildEqualsIncremental(deps);
+    });
+
+    it('an exact source carries an exact credit', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [credit(), debit()]);
+      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: false });
+      expect(await markerAt(deps, DESTINO)).toBe(false);
+    });
+
+    it('a re-carry follows the marker even when the figure does not move', async () => {
+      // ORIGEM 100 @ 10,00 carried at 10,00, exact. An estimated subscription
+      // of 20 @ 10,00 lands before the transfer: (1.000,00 + 200,00) ÷ 120 is
+      // still 10,00 — only the marker changed, and it must still re-carry.
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      await importFile(deps, [credit(), debit()]);
+      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: false });
+
+      await subscribeEstimated(deps, '2026-02-10', '10');
+      const again = await importFile(deps, [credit(), debit()]);
+
+      expect(again.outcome).toMatchObject({ applied: 0, recarried: 1 });
+      expect(transfersIn(deps)[0]?.unitPrice.toString()).toBe('10');
+      expect(transfersIn(deps)[0]).toMatchObject({
+        costIsEstimate: true,
+        estimateCloseDate: null,
+        isUserModified: false,
+      });
+      expect(await markerAt(deps, DESTINO)).toBe(true);
+      await expectRebuildEqualsIncremental(deps);
+
+      // Unchanged the next time: figure and marker both already stored.
+      const third = await importFile(deps, [credit(), debit()]);
+      expect(third.outcome).toMatchObject({ recarried: 0, committed: [] });
+    });
+
+    it('#144 F6: a user correcting the source price re-carries at once, clearing the marker', async () => {
+      const deps = buildFakeIngestionDeps();
+      await importFile(deps, [history()]);
+      const subscription = await subscribeEstimated(deps, '2026-02-10');
+      await importFile(deps, [credit(), debit()]);
+      // ORIGEM before the debit: 3.298,00 ÷ 120 = 27,48333…, estimated.
+      expect(transfersIn(deps)[0]).toMatchObject({ costIsEstimate: true });
+
+      // The user states the real price: 112,95. ORIGEM before the debit is now
+      // (1.000,00 + 2.259,00) ÷ 120 = 3.259,00 ÷ 120 = 27,158333…, exact.
+      const edited = await editTransaction(deps, subscription.id, {
+        unitPrice: Money.fromString('112.95'),
+      });
+      expect(edited.ok && edited.value.transaction.costIsEstimate).toBe(false);
+
+      // SPEC-007 BR-007-06 (#144 F6): the edit itself re-carries — a real
+      // import-written credit, found by its price-less key — without waiting
+      // for a re-import, and without marking the credit as the user's.
+      expect(edited.ok && edited.value.rederived.map((t) => t.id)).toEqual([
+        transfersIn(deps)[0]?.id,
+      ]);
+      expect(asStored((transfersIn(deps)[0] as Transaction).unitPrice)).toBe('27.15833333');
+      expect(transfersIn(deps)[0]).toMatchObject({
+        costIsEstimate: false,
+        estimateCloseDate: null,
+        isUserModified: false,
+      });
+      expect(await markerAt(deps, DESTINO)).toBe(false);
+      await expectRebuildEqualsIncremental(deps);
+
+      // A re-import agrees: the figure and marker it would carry are stored.
+      const again = await importFile(deps, [credit(), debit()]);
+      expect(again.outcome).toMatchObject({ recarried: 0, committed: [] });
+      await expectRebuildEqualsIncremental(deps);
+    });
+  });
 
   /**
    * The owner's real state after #108: the file committed with the credit
@@ -1728,6 +1967,8 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
         importBatchId: batchId,
         isManual: false,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -1740,7 +1981,12 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
       );
       if (!replayed.ok) throw new Error('#108 state does not replay');
       await deps.positions.upsertMany([
-        { assetId: t.assetId, institutionId: t.institutionId, state: replayed.value },
+        {
+          assetId: t.assetId,
+          institutionId: t.institutionId,
+          state: replayed.value,
+          costEstimated: false,
+        },
       ]);
     }
     await deps.rows.attachTransactions(
@@ -2631,6 +2877,8 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         importBatchId: batchId,
         isManual: false,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: now,
         updatedAt: now,
       };
@@ -2696,6 +2944,61 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
     const current = await deps.rows.listByBatch(again.batchId);
     expect(current.map((row) => row.classification)).toEqual(['duplicate']);
     expect(await deps.positions.list()).toHaveLength(0);
+  });
+
+  /**
+   * SPEC-005 BR-005-18 v6 / BR-005-19 (#144) — the same mirror path the test
+   * above exercises for `Transferência - Liquidação` also covers the
+   * subscription paperwork the v6 map newly names: a copy an older map
+   * version stored `unclassified` is `superseded` and its origin row turns
+   * `ignored`, through the untouched `planReclassifications` mirror branch
+   * (`isIgnoredMovement`) — no new code, since the row's `b3Type` alone
+   * decides the branch.
+   */
+  const cessaoDeDireitos = () => buy({ b3Type: 'Cessão de Direitos', direction: null });
+
+  it('a subscription paperwork row an older map stored unclassified is superseded and its origin row ignored', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [cessaoDeDireitos()]);
+    const [stored] = transactions as [Transaction];
+
+    const again = await importFile(deps, [cessaoDeDireitos()]);
+
+    expect(again.outcome).toMatchObject({
+      applied: 0,
+      superseded: 1,
+      reclassified: 0,
+      skippedDuplicates: 1,
+      committed: [],
+    });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      status: 'superseded',
+      naturalKey: stored.naturalKey,
+      isUserModified: false,
+    });
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('ignored');
+    // 1 needing attention − 1 = 0; 0 ignored + 1 = 1 (countNeedsAttentionByBatch drops).
+    expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+      new: 0,
+      needsAttention: 0,
+      ignored: 1,
+    });
+    expect(await deps.positions.list()).toHaveLength(0);
+  });
+
+  it('leaves a user-modified copy of a subscription paperwork row alone (BR-006-16)', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [cessaoDeDireitos()]);
+    const [stored] = transactions as [Transaction];
+    await deps.transactions.update({ ...stored, isUserModified: true });
+
+    const again = await importFile(deps, [cessaoDeDireitos()]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, superseded: 0, reclassified: 0 });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      status: 'unclassified',
+      isUserModified: true,
+    });
   });
 
   it('an APLICAÇÃO is activated in place as a buy and the position recalculated', async () => {
@@ -4025,11 +4328,24 @@ describe('#138 — the four Movimentação rows that refused on every import', (
         .reduce((sum, row) => sum.plus(externalFlow(row)), Money.zero());
       expect(liquidationFlow.toString()).toBe('-340.5659961');
 
-      // The three restated balances are no evidence: left `unclassified`, and
-      // nothing is left on the receipt code.
+      // The three restated balances carry no evidence of their own — nothing
+      // is left on the receipt code either — and, BR-005-20e (#144): each one
+      // restates exactly the balance the ledger already holds, so all three
+      // resolve as position refreshes (superseded), not left unclassified.
       expect(
         deps.transactions.rows
           .filter((row) => row.status === 'unclassified')
+          .map((row) => [codeOf.get(row.assetId), row.tradeDate, row.quantity.toString()])
+          .sort(),
+      ).toEqual([]);
+      expect(
+        deps.transactions.rows
+          .filter(
+            (row) =>
+              row.status === 'superseded' &&
+              (row.tradeDate === '2025-10-06' || row.tradeDate === '2025-10-17') &&
+              ['BPFF11', 'HGFF11', 'RVBI11'].includes(codeOf.get(row.assetId) ?? ''),
+          )
           .map((row) => [codeOf.get(row.assetId), row.tradeDate, row.quantity.toString()])
           .sort(),
       ).toEqual([
@@ -4112,16 +4428,18 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       const first = await importFile(deps, file());
 
       expect(first.outcome).toMatchObject({
-        // 2 buys, 3 unclassified restatements, 2 subscriptions, 2 sales, the
-        // fraction's sale, and the rename's 2 legs; the auction is inserted
-        // `superseded`, outside `applied`.
-        applied: 12,
+        // 2 buys, 2 subscriptions, 2 sales, the fraction's sale, and the
+        // rename's 2 legs; the auction is inserted `superseded`, outside
+        // `applied`. #144 review F4: the 3 restated balances resolve as
+        // position refreshes (BR-005-20e), counted separately.
+        applied: 9,
         invalid: 0,
         resolvedLiquidations: 1,
         resolvedAssetConversions: 1,
         committedConversionLegs: 2,
         resolvedCorporateEvents: 1,
         consumedAuctions: 1,
+        resolvedPositionRefreshes: 3,
       });
       await expectEndState(deps);
       await expectNoOpReimport(deps);
@@ -4436,6 +4754,8 @@ describe('#138 — the four Movimentação rows that refused on every import', (
         importBatchId: null,
         isManual: true,
         isUserModified: false,
+        costIsEstimate: false,
+        estimateCloseDate: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -4448,5 +4768,914 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       // 1,05 × 10.541,80 = 11.068,89; − 10.500,00 opening cost = 568,89.
       expect(position.realizedGain.toString()).toBe('568.89');
     });
+  });
+});
+
+describe('SPEC-005 BR-005-20d (#144) — an exercised subscription pairs with its Atualização credit', () => {
+  async function assetIdForCode(
+    deps: FakeIngestionDeps,
+    batchId: ImportBatchId,
+    code: string,
+  ): Promise<AssetId> {
+    const rows = await deps.rows.listByBatch(batchId);
+    const row = rows.find((r) => r.record.kind === 'transaction' && r.record.assetCode === code);
+    if (row === undefined) throw new Error(`no staged row for ${code}`);
+    return row.assetId;
+  }
+
+  async function rowForCode(deps: FakeIngestionDeps, batchId: ImportBatchId, code: string) {
+    const rows = await deps.rows.listByBatch(batchId);
+    const row = rows.find((r) => r.record.kind === 'transaction' && r.record.assetCode === code);
+    if (row === undefined) throw new Error(`no staged row for ${code}`);
+    return row;
+  }
+
+  it('resolves an FII right (generated fixture, DV-24) as one subscription on the main asset, priced at the stored close and marked an estimate', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'XXXX12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-22'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'XXXX11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-02-22'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const mainAssetId = await assetIdForCode(deps, batchId, 'XXXX11');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-22'), Money.fromString('114.90'));
+
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(1);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    const credit = mainLedger.find((t) => t.type === 'subscription' && t.status === 'active');
+    expect(credit).toMatchObject({
+      status: 'active',
+      type: 'subscription',
+      tradeDate: '2024-02-22',
+      costIsEstimate: true,
+      estimateCloseDate: '2024-02-22',
+    });
+    expect(credit?.quantity.toString()).toBe('3');
+    expect(asStored((credit as Transaction).unitPrice)).toBe('114.90000000');
+    expect((credit as Transaction).fees.isZero()).toBe(true);
+
+    const rightAssetId = await assetIdForCode(deps, batchId, 'XXXX12');
+    const rightLedger = (await deps.transactions.listAll()).filter(
+      (t) => t.assetId === rightAssetId,
+    );
+    const exercise = rightLedger.find((t) => t.type === 'subscription');
+    expect(exercise?.status).toBe('superseded');
+
+    const exerciseRow = await rowForCode(deps, batchId, 'XXXX12');
+    const updatedRow = await deps.rows.findById(exerciseRow.id);
+    expect(updatedRow?.classification).toBe('ignored');
+  });
+
+  it('resolves a stock right (generated fixture, DV-24) whose credit falls 78 days later', async () => {
+    const deps = buildFakeIngestionDeps('2024-04-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'YYYY2',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('78'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'YYYY4',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('78'),
+          tradeDate: BusinessDate.of('2024-03-19'), // +78 days
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const mainAssetId = await assetIdForCode(deps, batchId, 'YYYY4');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-03-19'), Money.fromString('22.30'));
+
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(1);
+  });
+
+  it('pairs an exercise staged in an earlier batch with a credit staged now, across the issuer catalogue', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const firstBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'XXXX12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('9'),
+          tradeDate: BusinessDate.of('2024-01-18'),
+        }),
+      ],
+    });
+    const first = await commitBatch(deps, userId, { batchId: firstBatch });
+    expect(first.ok).toBe(true);
+
+    const secondBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'XXXX11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('9'),
+          tradeDate: BusinessDate.of('2024-02-26'),
+        }),
+      ],
+    });
+    const mainAssetId = await assetIdForCode(deps, secondBatch, 'XXXX11');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-26'), Money.fromString('90.10'));
+
+    const second = await commitBatch(deps, userId, { batchId: secondBatch });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.resolvedSubscriptions).toBe(1);
+
+    const rightAssetId = await assetIdForCode(deps, firstBatch, 'XXXX12');
+    const rightLedger = (await deps.transactions.listAll()).filter(
+      (t) => t.assetId === rightAssetId,
+    );
+    expect(rightLedger.find((t) => t.type === 'subscription')?.status).toBe('superseded');
+
+    // #144 review — the exercise's row sits in `firstBatch`, which this
+    // commit never otherwise touches; it must still leave Needs Attention.
+    const exerciseRow = await rowForCode(deps, firstBatch, 'XXXX12');
+    const updatedExerciseRow = await deps.rows.findById(exerciseRow.id);
+    expect(updatedExerciseRow?.classification).toBe('ignored');
+  });
+
+  it('leaves both rows unclassified with no stored close, and resolves them on re-import once one exists (DL-005-22)', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'XXXX12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-22'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'XXXX11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-02-22'),
+        }),
+      ],
+    };
+    const firstBatchId = await stagedBatch(deps, extract);
+    const first = await commitBatch(deps, userId, { batchId: firstBatchId });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(0);
+
+    const mainAssetId = await assetIdForCode(deps, firstBatchId, 'XXXX11');
+    const mainLedgerBefore = (await deps.transactions.listAll()).filter(
+      (t) => t.assetId === mainAssetId,
+    );
+    expect(mainLedgerBefore.every((t) => t.status === 'unclassified')).toBe(true);
+
+    // A close becomes available, and the same file is re-imported.
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-22'), Money.fromString('114.90'));
+    const secondBatchId = await stagedBatch(deps, extract);
+    const second = await commitBatch(deps, userId, { batchId: secondBatchId });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.resolvedSubscriptions).toBe(1);
+
+    const mainLedgerAfter = (await deps.transactions.listAll()).filter(
+      (t) => t.assetId === mainAssetId,
+    );
+    expect(
+      mainLedgerAfter.find((t) => t.type === 'subscription' && t.status === 'active'),
+    ).toMatchObject({ costIsEstimate: true });
+  });
+
+  it('a second re-import after resolution is a no-op (D7 — never repriced)', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'XXXX12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-22'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'XXXX11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-02-22'),
+        }),
+      ],
+    };
+    const firstBatchId = await stagedBatch(deps, extract);
+    const mainAssetId = await assetIdForCode(deps, firstBatchId, 'XXXX11');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-22'), Money.fromString('114.90'));
+    const first = await commitBatch(deps, userId, { batchId: firstBatchId });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(1);
+
+    // A close at a different price is stored later — must never move the written figure.
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-22'), Money.fromString('999.00'));
+
+    const secondBatchId = await stagedBatch(deps, extract);
+    const second = await commitBatch(deps, userId, { batchId: secondBatchId });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.resolvedSubscriptions).toBe(0);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    const active = mainLedger.filter((t) => t.type === 'subscription' && t.status === 'active');
+    expect(active).toHaveLength(1);
+    expect(asStored((active[0] as Transaction).unitPrice)).toBe('114.90000000');
+  });
+
+  it('never pairs a credit on a code an asset-conversion definition already names (elet3-to-axia3)', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    // AXIA3 is `ASSET_CONVERSION_DEFINITIONS`'s target for `elet3-to-axia3` —
+    // named here as a plain string (DV-24: no real definition data besides
+    // the ticker itself is used) so this test does not depend on that table's
+    // shape, only on the fact that AXIA3 is in it.
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'AXIA2',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'AXIA3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const mainAssetId = await assetIdForCode(deps, batchId, 'AXIA3');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-01'), Money.fromString('50.00'));
+
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    expect(mainLedger.some((t) => t.type === 'subscription')).toBe(false);
+  });
+
+  it('refuses to pair when no close is stored, leaving both rows unclassified', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'ZZZZ2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('5'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'ZZZZ1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('5'),
+          tradeDate: BusinessDate.of('2024-01-15'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const mainAssetId = await assetIdForCode(deps, batchId, 'ZZZZ1');
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    expect(mainLedger.every((t) => t.status === 'unclassified')).toBe(true);
+  });
+
+  it('BR-005-20d D8, through commitBatch: refuses when the position already held exactly the credited quantity', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'YYYY1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('40'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        subscriptionExercise({
+          assetCode: 'YYYY2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('40'),
+          tradeDate: BusinessDate.of('2024-01-10'),
+        }),
+        // Credits exactly the balance already held (40) — D8: the
+        // Atualização may be a balance statement, not an acquisition.
+        atualizacaoCredit({
+          assetCode: 'YYYY1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('40'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const mainAssetId = await assetIdForCode(deps, batchId, 'YYYY1');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-01'), Money.fromString('30.00'));
+
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    expect(mainLedger.some((t) => t.type === 'subscription')).toBe(false);
+  });
+
+  it('a hand-classified exercise, through commitBatch: a credit that arrives later never pairs with it', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const exerciseBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'WWWW2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2024-01-05'),
+        }),
+      ],
+    });
+    const committedFirst = await commitBatch(deps, userId, { batchId: exerciseBatch });
+    expect(committedFirst.ok).toBe(true);
+    if (!committedFirst.ok) return;
+    expect(committedFirst.value.resolvedSubscriptions).toBe(0);
+
+    const exerciseRows = await deps.rows.listByBatch(exerciseBatch);
+    const exerciseRow = exerciseRows[0] as ImportRow;
+    // The owner classifies it by hand as something else — BR-005-20d must
+    // never touch a row a person decided, however a later credit shapes up.
+    const classified = await classifyImportRow(deps, {
+      rowId: exerciseRow.id,
+      type: 'bonificacao',
+    });
+    expect(classified.ok).toBe(true);
+
+    const creditBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'WWWW1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2024-02-05'),
+        }),
+      ],
+    });
+    const mainAssetId = await assetIdForCode(deps, creditBatch, 'WWWW1');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-05'), Money.fromString('55.00'));
+
+    const result = await commitBatch(deps, userId, { batchId: creditBatch });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    expect(mainLedger.every((t) => t.status === 'unclassified')).toBe(true);
+  });
+
+  it('#144 review F7 — an applied credit never misreads as an exercise and steals a later, unrelated pair on the same issuer', async () => {
+    const deps = buildFakeIngestionDeps('2024-07-01');
+    // Round 1: resolves and applies, on main asset VVVV3. Its exercise
+    // (Jan 22) is deliberately more than the 120-day window before round
+    // 2's credit (Jun 15) below, so it is never itself a candidate there —
+    // only round 1's *credit* (Feb 22, 114 days before Jun 15, still inside
+    // the window) is close enough to collide. Before the fix, that credit's
+    // `type: 'subscription'` read as a second exercise: a different main
+    // asset (VVVV4) and the same quantity (3) is exactly what
+    // `resolveSubscriptions`'s shape match asks for, so it collided with
+    // round 2's own exercise and made round 2 wrongly `ambiguous`.
+    const roundOne = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'VVVV2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-22'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'VVVV3',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-02-22'),
+        }),
+      ],
+    });
+    const roundOneAssetId = await assetIdForCode(deps, roundOne, 'VVVV3');
+    deps.closePrices.seed(
+      roundOneAssetId,
+      BusinessDate.of('2024-02-22'),
+      Money.fromString('100.00'),
+    );
+    const first = await commitBatch(deps, userId, { batchId: roundOne });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(1);
+
+    // Round 2: a genuinely separate exercise/credit pair on the same
+    // issuer's OTHER main asset (VVVV4, never touched before — so D8's
+    // balance check cannot be what saves this test), same quantity (3).
+    const roundTwo = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'VVVV6',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-05-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'VVVV4',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-06-15'),
+        }),
+      ],
+    });
+    const roundTwoAssetId = await assetIdForCode(deps, roundTwo, 'VVVV4');
+    deps.closePrices.seed(
+      roundTwoAssetId,
+      BusinessDate.of('2024-06-15'),
+      Money.fromString('105.00'),
+    );
+    const second = await commitBatch(deps, userId, { batchId: roundTwo });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.resolvedSubscriptions).toBe(1);
+
+    const roundTwoLedger = (await deps.transactions.listAll()).filter(
+      (t) => t.assetId === roundTwoAssetId,
+    );
+    const credit = roundTwoLedger.find((t) => t.type === 'subscription' && t.status === 'active');
+    expect(credit).toBeDefined();
+    expect(asStored((credit as Transaction).unitPrice)).toBe('105.00000000');
+  });
+
+  it('#144 review F3 — an applied subscription never blocks a later whole-position refresh (XPML11-shaped)', async () => {
+    // Before the fix, BR-005-20e's own nearby-exercise guard read
+    // `item.transaction.type === 'subscription'` — true for the credit half
+    // of an *applied* pair forever after, since resolution never changes its
+    // type. A refresh landing on the same main asset within the window was
+    // wrongly refused no matter how long ago the pair applied. The guard
+    // must fire only for an evidence row still `open` and unpaired.
+    const deps = buildFakeIngestionDeps('2024-05-01');
+    const roundOne = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'XPML11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('50'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        subscriptionExercise({
+          assetCode: 'XPML13',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-01-15'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'XPML11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-02-22'),
+        }),
+      ],
+    });
+    const mainAssetId = await assetIdForCode(deps, roundOne, 'XPML11');
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-22'), Money.fromString('90.00'));
+    const first = await commitBatch(deps, userId, { batchId: roundOne });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(1);
+    // The position now stands at 50 + 10 = 60, and the exercise/credit pair
+    // is applied — the exercise superseded, the credit an active, estimated
+    // subscription. Both are still well inside a 120-day window of the
+    // refresh below (39 and 68 days), so only the fix, not distance, is what
+    // lets this resolve.
+
+    const refreshBatch = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'XPML11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('60'),
+          tradeDate: BusinessDate.of('2024-04-01'),
+        }),
+      ],
+    });
+    const second = await commitBatch(deps, userId, { batchId: refreshBatch });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value.resolvedPositionRefreshes).toBe(1);
+
+    const mainLedger = (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId);
+    const refreshRow = (await deps.rows.listByBatch(refreshBatch))[0] as ImportRow;
+    const refreshTransaction = mainLedger.find((t) => t.id === refreshRow.transactionId);
+    expect(refreshTransaction?.status).toBe('superseded');
+    const replayed = replayPosition(mainLedger);
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('60');
+  });
+});
+
+describe('SPEC-005 BR-005-20e (#144) — a whole-position Atualização credit is a refresh, not a movement', () => {
+  it('supersedes a price-less Atualização whose quantity equals the position it lands on, and ignores its row', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'REFR3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'REFR3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedPositionRefreshes).toBe(1);
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const rows = await deps.rows.listByBatch(batchId);
+    const creditRow = rows.find(
+      (r) => r.record.kind === 'transaction' && r.record.b3Type === 'Atualização',
+    );
+    expect(creditRow).toBeDefined();
+    const updatedRow = await deps.rows.findById((creditRow as ImportRow).id);
+    expect(updatedRow?.classification).toBe('ignored');
+
+    const ledger = await deps.transactions.listAll();
+    const credit = ledger.find((t) => t.id === updatedRow?.transactionId);
+    expect(credit?.status).toBe('superseded');
+
+    // The position is exactly the buy's 46 — the refresh moved nothing.
+    const buyTx = ledger.find((t) => t.type === 'buy');
+    const replayed = replayPosition(ledger.filter((t) => t.assetId === buyTx?.assetId));
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('46');
+  });
+
+  it('never treats an Atualização on a position that does not yet exist (balance zero) as a refresh', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'NEWX3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('5'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const ledger = await deps.transactions.listAll();
+    expect(ledger.every((t) => t.status === 'unclassified')).toBe(true);
+  });
+
+  it('never resolves a credit whose quantity simply does not equal the balance it lands on', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'REFR4',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('100'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'REFR4',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('7'), // neither the balance (100) nor a subscription
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+  });
+
+  it('never fires on a credit a subscription pairing already claims — row identity, not the built transaction id, is what the two resolvers share (#144 review)', async () => {
+    // BR-005-20d's own D8 refusal (balance-before equal to the credited
+    // quantity) and BR-005-20e's acceptance condition (balance-before equal
+    // to the credit's quantity) are mutually exclusive by construction, so a
+    // credit a subscription genuinely resolves can never *also* satisfy this
+    // resolver's balance check. What this proves instead is that the two
+    // resolvers agree on *which row* a subscription already claimed —
+    // `planPositionRefreshes` calls `buildCandidate` on the same `ImportRow`
+    // independently of `planSubscriptions`, which generates a fresh
+    // `TransactionId` every call, so the shared claim key must be the row's
+    // own id, never the built transaction's.
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'XXXX12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-10'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'XXXX11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('3'),
+          tradeDate: BusinessDate.of('2024-01-20'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const rows = await deps.rows.listByBatch(batchId);
+    const mainAssetId = (
+      rows.find(
+        (r) => r.record.kind === 'transaction' && r.record.assetCode === 'XXXX11',
+      ) as ImportRow
+    ).assetId;
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-01-20'), Money.fromString('50.00'));
+
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(1);
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const ledger = await deps.transactions.listAll();
+    const credit = ledger.find(
+      (t) => t.assetId === mainAssetId && t.type === 'subscription' && t.status === 'active',
+    );
+    expect(credit).toBeDefined();
+    expect(credit?.status).not.toBe('superseded');
+  });
+
+  it('refuses a coincidental balance match when a same-issuer exercise sits nearby, even at a mismatched quantity C never pairs', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'ZZZZ1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        // A genuine right on the same issuer, but for a different quantity —
+        // BR-005-20d never pairs it (46 ≠ 5), so it stays `unclassified`.
+        subscriptionExercise({
+          assetCode: 'ZZZZ2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('5'),
+          tradeDate: BusinessDate.of('2024-01-10'),
+        }),
+        // Coincidentally restates the balance already held (46) — the exact
+        // shape BR-005-20e's own check would otherwise take as a refresh.
+        atualizacaoCredit({
+          assetCode: 'ZZZZ1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('46'),
+          tradeDate: BusinessDate.of('2024-01-20'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const ledger = await deps.transactions.listAll();
+    const credit = ledger.find((t) => t.type === 'rendimento' && t.quantity.toString() === '46');
+    expect(credit?.status).toBe('unclassified');
+  });
+
+  async function stockIdOf(deps: FakeIngestionDeps, code: string) {
+    return deps.assets.resolve({
+      code,
+      name: code,
+      assetClass: 'stock',
+      classStated: false,
+      nameStated: false,
+    });
+  }
+
+  it('#144 review F4 — resolves on a definition-named code with no conversion evidence in the batch', async () => {
+    // ELET3 names a real conversion (`elet3-to-axia3`), so the old
+    // `SUBSCRIPTION_EXCLUDED_CODES` blanket refused a refresh on it forever,
+    // whether or not this batch (or any batch) ever actually converted it.
+    // With nothing else in this batch touching ELET3, nothing claims the
+    // row, and it must resolve like any other whole-position restatement.
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const setup = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'ELET3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('100'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+      ],
+    });
+    expect((await commitBatch(deps, userId, { batchId: setup })).ok).toBe(true);
+
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'ELET3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('100'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    });
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedAssetConversions).toBe(0);
+    expect(result.value.resolvedPositionRefreshes).toBe(1);
+
+    const eletId = await stockIdOf(deps, 'ELET3');
+    const ledger = await deps.transactions.listAll();
+    const refreshed = ledger.find((t) => t.assetId === eletId && t.tradeDate === '2024-02-01');
+    expect(refreshed?.status).toBe('superseded');
+    const replayed = replayPosition(ledger.filter((t) => t.assetId === eletId));
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('100');
+  });
+
+  it('#144 review F4 — never fires on a definition-named code the conversion itself consumes in the same batch', async () => {
+    // The same shape as "moves ELET3 260 ... to AXIA3" above: a single
+    // target-only Atualização is the *only* candidate row in this batch, and
+    // the conversion consumes it whole. Before the fix this was already safe
+    // by construction — AXIA3 held nothing before, so the old exclusion and
+    // the balance-zero guard both happened to agree — but the assertion is
+    // exactly BR-005-20e's own contract: a row a conversion resolves must
+    // never also fire as a position refresh.
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const setup = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'ELET3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('260'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+          unitPrice: Money.fromString('10'),
+        }),
+      ],
+    });
+    expect((await commitBatch(deps, userId, { batchId: setup })).ok).toBe(true);
+
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        atualizacaoCredit({
+          assetCode: 'AXIA3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('260'),
+          tradeDate: BusinessDate.of('2024-02-01'),
+        }),
+      ],
+    });
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedAssetConversions).toBe(1);
+    expect(result.value.committedConversionLegs).toBe(2);
+    expect(result.value.resolvedPositionRefreshes).toBe(0);
+
+    const eletId = await stockIdOf(deps, 'ELET3');
+    const axiaId = await stockIdOf(deps, 'AXIA3');
+    const ledger = await deps.transactions.listAll();
+    const eletReplayed = replayPosition(ledger.filter((t) => t.assetId === eletId));
+    expect(eletReplayed.ok && eletReplayed.value.quantity.toString()).toBe('0');
+    const axiaReplayed = replayPosition(ledger.filter((t) => t.assetId === axiaId));
+    expect(axiaReplayed.ok && axiaReplayed.value.quantity.toString()).toBe('260');
+  });
+
+  it('#144 review F5 — a split then a whole-position refresh to the new balance resolves in the same import, and a re-import is a no-op', async () => {
+    // Before the fix, `planPositionRefreshes`'s own balance-before replay
+    // never saw this commit's *own* just-resolved subscription credit — only
+    // the stored ledger, which does not have it yet — so a refresh landing
+    // on the balance the subscription itself just produced needed a second
+    // import to see what the first one had already written.
+    // BR-005-20e's own nearby-exercise guard (#144 review F3) is deliberately
+    // out of play here: the exercise (2023-09-01) sits 182 days before the
+    // refresh (2024-03-01) — outside the 120-day window — while still inside
+    // it relative to its own credit (61 days), so the pair still resolves.
+    const deps = buildFakeIngestionDeps('2024-05-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'UUUU1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('50'),
+          tradeDate: BusinessDate.of('2023-01-01'),
+        }),
+        subscriptionExercise({
+          assetCode: 'UUUU2',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2023-09-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'UUUU1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2023-11-01'),
+        }),
+        // Restates the balance the subscription above is about to produce
+        // (50 + 10 = 60) — not the balance already stored (50).
+        atualizacaoCredit({
+          assetCode: 'UUUU1',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('60'),
+          tradeDate: BusinessDate.of('2024-03-01'),
+        }),
+      ],
+    };
+    const batchId = await stagedBatch(deps, extract);
+    const rows = await deps.rows.listByBatch(batchId);
+    const mainAssetId = (
+      rows.find(
+        (r) => r.record.kind === 'transaction' && r.record.assetCode === 'UUUU1',
+      ) as ImportRow
+    ).assetId;
+    deps.closePrices.seed(mainAssetId, BusinessDate.of('2023-11-01'), Money.fromString('80.00'));
+
+    const first = await commitBatch(deps, userId, { batchId });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.value.resolvedSubscriptions).toBe(1);
+    expect(first.value.resolvedPositionRefreshes).toBe(1);
+
+    const ledger = await deps.transactions.listAll();
+    const replayed = replayPosition(ledger.filter((t) => t.assetId === mainAssetId));
+    expect(replayed.ok && replayed.value.quantity.toString()).toBe('60');
+
+    const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
+    const secondBatch = await stagedBatch(deps, extract);
+    const second = await commitBatch(deps, userId, { batchId: secondBatch });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.value).toMatchObject({
+      applied: 0,
+      invalid: 0,
+      resolvedSubscriptions: 0,
+      resolvedPositionRefreshes: 0,
+    });
+    expect(deps.transactions.rows).toEqual(snapshot);
   });
 });

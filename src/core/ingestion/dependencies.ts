@@ -4,10 +4,12 @@ import type { PositionRepository } from '@/core/positions/ports';
 import type { CorporateEventFactorReader } from '@/core/quotes/corporate-event-factors';
 import type {
   AssetResolverPort,
+  ClosePriceReader,
   FixedIncomeContractWriterPort,
   ImportBatchRepository,
   ImportRowRepository,
   InstitutionResolverPort,
+  SubscriptionEvidenceReader,
 } from '@/core/ingestion/ports';
 
 /**
@@ -30,4 +32,8 @@ export interface IngestionDependencies {
    * from B3 happens before the commit transaction, in the handler.
    */
   readonly corporateEventFactors: CorporateEventFactorReader;
+  /** SPEC-005 BR-005-20d — the main asset's stored close, for pricing a resolved subscription. */
+  readonly closePrices: ClosePriceReader;
+  /** SPEC-005 BR-005-20d — stored exercise/credit evidence across one issuer's assets. */
+  readonly subscriptionEvidence: SubscriptionEvidenceReader;
 }

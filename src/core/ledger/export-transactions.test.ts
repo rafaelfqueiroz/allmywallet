@@ -75,6 +75,18 @@ describe('CSV export', () => {
     );
   });
 
+  it('SPEC-007 BR-007-06 / DL-007-12 — records the cost-estimate marker and its close date', () => {
+    const exact = toCsvRows([item()])[1];
+    expect(exact?.[14]).toBe('false');
+    expect(exact?.[15]).toBe('');
+
+    const estimated = toCsvRows([
+      item({ transaction: aTransaction().buy().costEstimate('2024-02-22').build() }),
+    ])[1];
+    expect(estimated?.[14]).toBe('true');
+    expect(estimated?.[15]).toBe('2024-02-22');
+  });
+
   it('leaves the ratio column empty except on a share-base event', () => {
     expect(toCsvRows([item()])[1]?.[11]).toBe('');
     expect(

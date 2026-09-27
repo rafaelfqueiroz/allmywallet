@@ -119,6 +119,13 @@ export interface CompositionRow {
   readonly needsAttention: NeedsAttentionReason | null;
   /** SPEC-009 AC-9 — what an accrued figure was computed from. */
   readonly basis: EstimateBasis | null;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — this asset's cost
+   * basis or *preço médio* (across every institution folded into this row)
+   * includes an estimate. Distinct from `estimated` above, which is SPEC-009's
+   * valuation estimate — see `ReportPosition.costEstimated`.
+   */
+  readonly costEstimated: boolean;
 }
 
 /**

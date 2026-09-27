@@ -113,6 +113,7 @@ export async function classifyImportRow(
     return ok({
       transaction: created.value.transaction,
       recalculations: [created.value.recalculation],
+      rederived: [],
     });
   }
 

@@ -48,6 +48,7 @@ export class DrizzlePositionRepository implements PositionRepository {
             averageCost: snapshot.state.averageCost,
             totalCost: snapshot.state.totalCost,
             realizedGain: snapshot.state.realizedGain,
+            costEstimated: snapshot.costEstimated,
             updatedAt: new Date(),
           },
         });
@@ -104,6 +105,7 @@ function toRow(snapshot: PositionSnapshot, userId: UserId): typeof positions.$in
     averageCost: snapshot.state.averageCost,
     totalCost: snapshot.state.totalCost,
     realizedGain: snapshot.state.realizedGain,
+    costEstimated: snapshot.costEstimated,
   };
 }
 
@@ -116,5 +118,6 @@ function toDomain(row: typeof positions.$inferSelect): PositionSnapshot {
     // is normalised on read to the same state a replay would produce — the
     // cache can then never disagree with the ledger about a closed position.
     state: makePosition(row.quantity, row.totalCost, row.realizedGain, row.averageCost),
+    costEstimated: row.costEstimated,
   };
 }

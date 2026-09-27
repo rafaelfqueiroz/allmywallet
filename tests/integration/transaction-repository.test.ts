@@ -135,6 +135,8 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
           importBatchId: null,
           isManual: false,
           isUserModified: false,
+          costIsEstimate: false,
+          estimateCloseDate: null,
           createdAt: now,
           updatedAt: now,
         } as const;

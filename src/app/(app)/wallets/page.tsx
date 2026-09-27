@@ -14,6 +14,7 @@ import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
+import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Field } from '@/components/patterns/field';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
@@ -112,7 +113,15 @@ export default async function WalletsPage() {
                     <Money value={row.totalQuantity} kind="quantity" />
                   </TableCell>
                   <TableCell className="py-row">
-                    <Money value={row.totalCostBasis} />
+                    <Cluster gap="sm" align="baseline">
+                      <Money value={row.totalCostBasis} />
+                      {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
+                      <CostEstimateMarker
+                        shown={row.costEstimated}
+                        label={t('markers.costEstimated.badge')}
+                        title={t('markers.costEstimated.explanation')}
+                      />
+                    </Cluster>
                   </TableCell>
                   <TableCell className="py-row">
                     <Button asChild variant="link" size="sm">

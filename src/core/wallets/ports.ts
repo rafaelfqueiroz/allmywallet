@@ -180,6 +180,14 @@ export interface AssetPositionQuery {
   readonly assetId: AssetId;
   readonly quantity: Quantity;
   readonly averageCost: Money;
+  /**
+   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — the position's cost
+   * or *preço médio* is an estimate. Wallets never compute this — it is
+   * carried straight off `core/positions/aggregate.ts`'s own fold, the same
+   * one every report reads, so a wallet's marker cannot disagree with
+   * Composição's.
+   */
+  readonly costEstimated: boolean;
 }
 
 /**
