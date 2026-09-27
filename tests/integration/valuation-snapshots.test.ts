@@ -30,7 +30,11 @@ import {
 } from '@/core/valuation/snapshot';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import { aContract, FakeFixedIncomeContracts } from '@/core/valuation/test-support';
-import { handleFixedIncomeAccrue, handleValuationSnapshot } from '@/worker/handlers/valuation';
+import {
+  handleFixedIncomeAccrue,
+  handleValuationSnapshot,
+  parseSnapshotJobPayload,
+} from '@/worker/handlers/valuation';
 import { withTenant } from '@/db/tenant';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { resetLedger, resetUsers } from '../support/reset';
@@ -541,6 +545,35 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
         'SELECT min(date)::text AS min FROM daily_valuation_snapshots',
       );
       expect(rows[0]?.min).toBe('2026-03-16');
+    });
+
+    it('BR-009-18: a { userId, from } job rebuilds only that tenant, only from that date', async () => {
+      await seedPrices();
+      await seedCdi();
+      const other = UserId.generate();
+      await seedUser(database.migrationUrl, other);
+      await seedLedgerRows(threeMethodLedger());
+      await seedLedgerRows(threeMethodLedger().map((row) => ({ ...row, userId: other })));
+
+      // The payload exactly as pg-boss hands it to the registration: JSON.
+      const summary = await handleValuationSnapshot(
+        parseSnapshotJobPayload(JSON.parse(JSON.stringify({ userId, from: '2026-03-18' }))),
+        {
+          database: db,
+          clock: new FakeClock('2026-03-20T22:00:00Z'),
+          calendar,
+          contracts: contracts(),
+        },
+      );
+      expect(summary).toEqual({ tenants: 1, snapshots: 3, failures: 0 });
+
+      const { rows } = await migratorPool.query<{ user_id: string; date: string }>(
+        'SELECT user_id, date::text AS date FROM daily_valuation_snapshots ORDER BY date',
+      );
+      // 18..20 March for the named tenant; nothing before `from`, nothing for
+      // the other tenant even though their ledger is identical.
+      expect(rows.map((row) => row.date)).toEqual(['2026-03-18', '2026-03-19', '2026-03-20']);
+      expect(new Set(rows.map((row) => row.user_id))).toEqual(new Set([userId]));
     });
 
     it('a tenant with no transactions gets no snapshots — not a row of zeroes', async () => {

@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Only the rebuild is replaced — `parseSnapshotJobPayload` stays real, so the
+// test below proves the registration validates what pg-boss hands it.
+vi.mock('@/worker/handlers/valuation', async (importOriginal) => ({
+  ...(await importOriginal<typeof ValuationModule>()),
+  handleValuationSnapshot: vi.fn(),
+}));
+
 import { REGISTRATIONS } from '@/worker/registrations';
 import { QUEUE } from '@/worker/queues';
+import { handleValuationSnapshot } from '@/worker/handlers/valuation';
+import type * as ValuationModule from '@/worker/handlers/valuation';
 
 /**
  * AR-16/17/18 — this test asserts the *registration shape* (which SPEC-008
@@ -44,5 +54,51 @@ describe('worker registrations (SPEC-008)', () => {
     // rung (30/60/120 min default), because AR-18 puts the actual session/
     // cadence decision in the handler, not in an unexpressable cron holiday rule.
     expect(poll?.cron).toBe('*/5 * * * *');
+  });
+});
+
+/**
+ * SPEC-009 BR-009-18 — `startWorker` hands each registration `job.data`
+ * unchanged. The scoped rebuild an import or fixed-income edit enqueues must
+ * reach `handleValuationSnapshot`; the daily cron's `null` must not narrow it.
+ */
+describe('worker registrations (SPEC-009 valuation.snapshot)', () => {
+  const USER = '01920000-0000-7000-8000-000000000009';
+  // `startWorker` casts to `JobHandler<object>` and passes `job.data`, which
+  // pg-boss delivers as `null` for a cron job — hence `unknown` here.
+  const handler = REGISTRATIONS.find((r) => r.queue === QUEUE.VALUATION_SNAPSHOT)?.handler as (
+    data: unknown,
+  ) => Promise<void>;
+
+  beforeEach(() => {
+    vi.mocked(handleValuationSnapshot).mockReset();
+    vi.mocked(handleValuationSnapshot).mockResolvedValue({ tenants: 1, snapshots: 3, failures: 0 });
+  });
+
+  it('BR-009-18: a { userId, from } job rebuilds that tenant from that date', async () => {
+    await handler({ userId: USER, from: '2026-03-18' });
+    expect(handleValuationSnapshot).toHaveBeenCalledExactlyOnceWith({
+      userId: USER,
+      from: '2026-03-18',
+    });
+  });
+
+  it('a { from } job rebuilds every tenant from that date', async () => {
+    await handler({ from: '2026-03-18' });
+    expect(handleValuationSnapshot).toHaveBeenCalledExactlyOnceWith({ from: '2026-03-18' });
+  });
+
+  it('the daily cron’s null data rebuilds every tenant’s whole history', async () => {
+    await handler(null);
+    expect(handleValuationSnapshot).toHaveBeenCalledExactlyOnceWith({});
+  });
+
+  it('AR-21: a malformed payload fails the job instead of widening to a full rebuild', async () => {
+    await expect(handler({ userId: USER, from: '18/03/2026' })).rejects.toThrow(TypeError);
+    expect(handleValuationSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('discards the run summary — pg-boss gets nothing back', async () => {
+    await expect(handler({})).resolves.toBeUndefined();
   });
 });
