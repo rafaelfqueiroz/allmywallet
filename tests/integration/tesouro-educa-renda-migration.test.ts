@@ -163,19 +163,23 @@ describe('migration 0030 — Tesouro Educa+ and Renda+ identity (integration)', 
     ]);
   });
 
+  /**
+   * The rename sorts first and runs before the clash is met, so this proves
+   * the rollback rather than an early exit.
+   */
   it('aborts, writing nothing, when a tenant row names the full-date asset', async () => {
-    const held = await addAsset('Tesouro Educa+ 2026');
-    const priced = await addAsset('Tesouro Educa+ 15/12/2030');
-    const renamed = await addAsset('Tesouro Renda+ Aposentadoria Extra 15/12/2049');
+    const renamed = await addAsset('Tesouro Educa+ 15/12/2030');
+    const held = await addAsset('Tesouro Renda+ Aposentadoria Extra 2030');
+    const priced = await addAsset('Tesouro Renda+ Aposentadoria Extra 15/12/2049');
     await addBuy(held);
     await addBuy(priced, otherUserId);
 
     await expect(migration()).rejects.toThrow(/#164/);
 
     expect((await assetsNow()).map((row) => [row.id, row.code])).toEqual([
-      [priced, 'Tesouro Educa+ 15/12/2030'],
-      [held, 'Tesouro Educa+ 2026'],
-      [renamed, 'Tesouro Renda+ Aposentadoria Extra 15/12/2049'],
+      [renamed, 'Tesouro Educa+ 15/12/2030'],
+      [priced, 'Tesouro Renda+ Aposentadoria Extra 15/12/2049'],
+      [held, 'Tesouro Renda+ Aposentadoria Extra 2030'],
     ]);
   });
 

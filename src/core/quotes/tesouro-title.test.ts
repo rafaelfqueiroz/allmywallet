@@ -4,6 +4,7 @@ import {
   b3TesouroCode,
   canonicalTesouroCode,
   fullTesouroCode,
+  TESOURO_PRODUCTS,
   tesouroCatalogCodes,
   type TesouroTitle,
 } from '@/core/quotes/tesouro-title';
@@ -69,6 +70,8 @@ describe('#152 SPEC-008 BR-008-12 — a Tesouro title’s catalogue code', () =>
     ['Tesouro Selic com Juros Semestrais', '2029-03-01'],
     ['Tesouro IGPM+', '2031-01-01'],
     ['Tesouro Selic IPCA+', '2029-03-01'],
+    ['Tesouro Prefixado com', '2029-01-01'],
+    ['Tesouro Prefixado Juros', '2029-01-01'],
   ])('%s is no product the table knows, so it has no B3 code', (product, maturity) => {
     expect(b3TesouroCode(title(product, maturity))).toBeNull();
   });
@@ -109,13 +112,15 @@ describe('#164 SPEC-005 BR-005-14 — canonicalTesouroCode, B3’s Produto on im
   });
 
   /** The two sides must meet: whatever the sync writes, the importer resolves to it. */
-  it('agrees with the sync on every product', () => {
-    for (const [product, maturity] of [
-      ['Tesouro Selic', '2029-03-01'],
-      ['Tesouro Prefixado com Juros Semestrais', '2031-01-01'],
-      ['Tesouro Educa+', '2030-12-15'],
-      ['Tesouro Renda+ Aposentadoria Extra', '2049-12-15'],
-    ] as const) {
+  it('agrees with the sync on every product in the table', () => {
+    const maturities: Record<string, string> = {
+      'Tesouro Educa+': '2030-12-15',
+      'Tesouro Renda+ Aposentadoria Extra': '2049-12-15',
+    };
+    expect(TESOURO_PRODUCTS).toHaveLength(8);
+    for (const { name } of TESOURO_PRODUCTS) {
+      const product = name;
+      const maturity = maturities[name] ?? '2031-01-01';
       const code = b3TesouroCode(title(product, maturity));
       expect(code).not.toBeNull();
       expect(canonicalTesouroCode(code as string)).toBe(code);
@@ -150,6 +155,16 @@ describe('#152 — tesouroCatalogCodes over the published file', () => {
       'Tesouro Prefixado 01/07/2010',
       'Tesouro Prefixado 2011',
     ]);
+  });
+
+  /** Two published products read to one: neither is priced from the other. */
+  it('keeps the full date for both where two published products read to one B3 code', () => {
+    expect(
+      tesouroCatalogCodes([
+        title('Tesouro Renda+ Aposentadoria Extra', '2049-12-15'),
+        title('Tesouro Renda+', '2049-12-15'),
+      ]),
+    ).toEqual(['Tesouro Renda+ Aposentadoria Extra 15/12/2049', 'Tesouro Renda+ 15/12/2049']);
   });
 
   it('a title repeated in the file is still one title', () => {

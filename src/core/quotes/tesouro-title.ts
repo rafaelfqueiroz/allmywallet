@@ -34,7 +34,7 @@ import type { BusinessDate } from '@/core/shared/clock';
  * **Reading a name** is by its words, not its exact spelling: case, accents
  * and whitespace are ignored, and a product is recognised by exactly one
  * indexer word (`selic`, `prefixado`, `ipca+`, `igpm+`, `educa+`, `renda+`),
- * the coupon words (`com juros semestrais`, `c/ juros semestrais`, `js`) and
+ * the coupon stated as `juros semestrais` (with `com` or `c/`) or `js`, and
  * the words its own name carries (`aposentadoria extra`). **Any other word
  * means no match**: a product this table does not know keeps its own code and
  * stays unpriced visibly (DL-009-05's cost floor, flagged) instead of being
@@ -79,7 +79,12 @@ function product(name: string, indexer: string, coupon: boolean): TesouroProduct
 }
 
 const INDEXERS = new Set(TESOURO_PRODUCTS.map((entry) => entry.indexer));
+/** A coupon is stated by `juros semestrais` or `js`; `com` / `c/` only join the phrase. */
 const COUPON_WORDS = new Set(['com', 'c/', 'juros', 'semestrais', 'js']);
+
+function statesCoupon(words: readonly string[]): boolean {
+  return words.includes('js') || (words.includes('juros') && words.includes('semestrais'));
+}
 
 /** Case, accents and whitespace carry no meaning; `IPCA +` is `ipca+`. */
 function wordsOf(text: string): readonly string[] {
@@ -98,13 +103,17 @@ function productOf(text: string): TesouroProduct | null {
   if (first !== 'tesouro') return null;
   const indexers = rest.filter((word) => INDEXERS.has(word));
   if (indexers.length !== 1) return null;
-  const coupon = rest.some((word) => COUPON_WORDS.has(word));
+  const coupon = statesCoupon(rest);
   const match = TESOURO_PRODUCTS.find(
     (entry) => entry.indexer === indexers[0] && entry.coupon === coupon,
   );
   if (match === undefined) return null;
+  // Coupon words on a product without one (`Tesouro Prefixado com 2029`) are
+  // not that product's words, so they are no match rather than ignored.
   const known = (word: string) =>
-    INDEXERS.has(word) || COUPON_WORDS.has(word) || match.nameWords.includes(word);
+    INDEXERS.has(word) ||
+    (match.coupon && COUPON_WORDS.has(word)) ||
+    match.nameWords.includes(word);
   return rest.every(known) ? match : null;
 }
 
@@ -157,26 +166,29 @@ export function fullTesouroCode(title: TesouroTitle): string {
 /**
  * The catalogue code for each row of the published file, in order.
  *
- * B3's name where one exists **and no other maturity in the file shares it**.
- * Two maturities of one product in one year did happen before 2014 (the
- * quarterly Prefixados of 2005–2011), and pricing one B3 name from both
- * titles would interleave two price series under one asset with nothing to
- * say so. Both keep their full-date codes instead. The sync passes the whole
- * history (#161), so a code means the same maturity on every day.
+ * B3's name where one exists **and no other title in the file shares it** —
+ * another maturity, or another published product read to the same one. Two
+ * maturities of one product in one year did happen before 2014 (the quarterly
+ * Prefixados of 2005–2011), and a product published under a second name
+ * (#164 review: a `Tesouro Renda+` beside `Tesouro Renda+ Aposentadoria
+ * Extra`) would read the same way; pricing one B3 name from both would
+ * interleave two price series under one asset with nothing to say so. Both
+ * keep their full-date codes instead. The sync passes the whole history
+ * (#161), so a code means the same title on every day.
  */
 export function tesouroCatalogCodes(titles: readonly TesouroTitle[]): readonly string[] {
   const b3Codes = titles.map(b3TesouroCode);
-  // Distinct maturities, not rows: a title repeated in the file is still one title.
-  const maturities = new Map<string, Set<BusinessDate>>();
+  // Distinct titles, not rows: a title repeated in the file is still one title.
+  const sources = new Map<string, Set<string>>();
   titles.forEach((title, index) => {
     const code = b3Codes[index];
     if (code === null || code === undefined) return;
-    const known = maturities.get(code) ?? new Set<BusinessDate>();
-    known.add(title.maturity);
-    maturities.set(code, known);
+    const known = sources.get(code) ?? new Set<string>();
+    known.add(fullTesouroCode(title));
+    sources.set(code, known);
   });
   return titles.map((title, index) => {
     const code = b3Codes[index] ?? null;
-    return code !== null && maturities.get(code)?.size === 1 ? code : fullTesouroCode(title);
+    return code !== null && sources.get(code)?.size === 1 ? code : fullTesouroCode(title);
   });
 }
