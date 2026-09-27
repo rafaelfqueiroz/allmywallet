@@ -1,3 +1,5 @@
+import { canonicalTesouroCode } from '@/core/quotes/tesouro-title';
+
 /**
  * SPEC-005 BR-005-14 (#135) — the explicit, reviewable **asset code** alias
  * table: the codes B3 writes for one instrument, and which of them the ledger
@@ -62,9 +64,11 @@ function normalizeAssetCode(code: string): string {
 
 /**
  * The code an asset is **created and matched** under. An aliased code becomes
- * its canonical one; every other code is returned as it was written, so a
- * `Produto` this table does not know is never reshaped on a guess.
+ * its canonical one, and a Tesouro Direto title its catalogue code — the one
+ * `tesouro.sync` prices (#164, `core/quotes/tesouro-title.ts`), whichever way
+ * B3 spelled the product. Every other code is returned as it was written, so a
+ * `Produto` neither table knows is never reshaped on a guess.
  */
 export function canonicalAssetCode(code: string): string {
-  return CANONICAL_BY_CODE.get(normalizeAssetCode(code)) ?? code;
+  return CANONICAL_BY_CODE.get(normalizeAssetCode(code)) ?? canonicalTesouroCode(code) ?? code;
 }

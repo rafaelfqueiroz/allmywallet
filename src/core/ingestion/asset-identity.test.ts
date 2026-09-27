@@ -26,6 +26,19 @@ describe('#135 SPEC-005 BR-005-14 — canonicalAssetCode', () => {
     },
   );
 
+  /**
+   * #164: a Tesouro title resolves to the catalogue code `tesouro.sync`
+   * prices, whichever way B3 spelled the product — the spelling of Educa+ and
+   * Renda+ in a B3 extract has not been seen yet.
+   */
+  it.each([
+    ['TESOURO SELIC 2029', 'Tesouro Selic 2029'],
+    ['Tesouro Renda+ 2030', 'Tesouro Renda+ Aposentadoria Extra 2030'],
+    ['Tesouro Educa+ 2026', 'Tesouro Educa+ 2026'],
+  ])('#164: resolves the Tesouro title %s to %s', (code, canonical) => {
+    expect(canonicalAssetCode(code)).toBe(canonical);
+  });
+
   it('is total: an empty code is not an alias', () => {
     expect(canonicalAssetCode('')).toBe('');
   });
