@@ -397,6 +397,59 @@ describe('#144 F6 — an import-resolved conversion is re-derived with its sourc
     await expectRebuildEqualsIncremental(state);
   });
 
+  describe('#144 re-review N1 — deleting the source row of a partial import conversion', () => {
+    //  OLD3 at A: buy 100 @ 10,00 + estimated subscription 20 @ 114,90
+    //  = 120, 3.298,00. 2026-03-01: 60 leave, 3.298,00 × 60 ÷ 120 = 1.649,00,
+    //  into 30 NEW3, estimated.
+    //
+    //  Without the subscription A holds 100 @ 10,00 = 1.000,00 when the 60
+    //  leave. The stored leg would remove 1.649,00 of 1.000,00 — refused as
+    //  insufficient — but re-derived it removes 1.000,00 × 60 ÷ 100 = 600,00:
+    //    OLD3: 40, 400,00, 10,00, exact;  NEW3: 30, 600,00, 20,00, exact.
+    const partial = () => ledger('60', '1649', [['30', '1649']]);
+
+    async function expectResolved(state: ReturnType<typeof deps>) {
+      const legs = (await state.transactions.listAll()).filter((t) => t.conversionGroupId !== null);
+      expect(legs.find((t) => t.type === 'conversion_out')?.costBasis?.toString()).toBe('600');
+      const into = legs.find((t) => t.type === 'conversion_in');
+      expect(into?.costBasis?.toString()).toBe('600');
+      expect(into?.costIsEstimate).toBe(false);
+      const positions = await state.positions.list();
+      const old3 = position(positions, 'A', 'OLD3');
+      expect(old3?.state.quantity.toString()).toBe('40');
+      expect(old3?.state.totalCost.toString()).toBe('400');
+      expect(old3?.state.averageCost.toString()).toBe('10');
+      expect(old3?.costEstimated).toBe(false);
+      const new3 = position(positions, 'A', 'NEW3');
+      expect(new3?.state.totalCost.toString()).toBe('600');
+      expect(new3?.state.averageCost.toString()).toBe('20');
+      expect(new3?.costEstimated).toBe(false);
+      await expectRebuildEqualsIncremental(state);
+    }
+
+    it('deleteTransaction guards the source with its re-derived leg in place', async () => {
+      const { sub, rows } = partial();
+      const state = await seeded(rows);
+
+      const result = await deleteTransaction(state, sub.id);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rederived).toHaveLength(2);
+      await expectResolved(state);
+    });
+
+    it('bulkDeleteTransactions does the same', async () => {
+      const { sub, rows } = partial();
+      const state = await seeded(rows);
+
+      const result = await bulkDeleteTransactions(state, [sub.id]);
+
+      expect(result.ok).toBe(true);
+      await expectResolved(state);
+    });
+  });
+
   it('leaves a manual conversion group to the user', async () => {
     // A manual group's allocation is the user's; its marker is recomputed
     // when they edit the group. Raising the price keeps the ledger replayable.

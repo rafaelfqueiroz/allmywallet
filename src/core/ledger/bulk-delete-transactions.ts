@@ -10,7 +10,7 @@ import {
   planCarriedLegUpdates,
   recalculateCarriedPositions,
 } from '@/core/ledger/carried-legs';
-import { guardReplayable, without } from '@/core/ledger/guard-replayable';
+import { without } from '@/core/ledger/guard-replayable';
 import type { Transaction } from '@/core/ledger/transaction';
 import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
 
@@ -63,17 +63,14 @@ export async function bulkDeleteTransactions(
   const removed = new Set<string>(targets.map((transaction) => transaction.id));
   const groups = groupByPosition(targets);
 
-  for (const group of groups.values()) {
-    const guard = await guardReplayable(deps, group.key, (existing) => without(existing, removed));
-    if (!guard.ok) return guard;
-  }
-
   // SPEC-007 BR-007-06 (#144 F6): what the selected positions carried on is
-  // re-derived without the selection, and guarded with it, before anything goes.
+  // re-derived without the selection, then every position — selected or
+  // downstream — is guarded with the re-derived legs in place, before
+  // anything goes (#144 re-review N1).
   const keys = [...groups.values()].map((group) => group.key);
   const rederived = await planCarriedLegUpdates(deps, keys, (ledger) => without(ledger, removed));
-  const guardDownstream = await guardCarriedLegs(deps, rederived, removed);
-  if (!guardDownstream.ok) return guardDownstream;
+  const guard = await guardCarriedLegs(deps, rederived, removed, keys);
+  if (!guard.ok) return guard;
 
   const deletedCount = await deps.transactions.deleteByIds([...removed] as TransactionId[]);
   for (const leg of rederived) await deps.transactions.update(leg);

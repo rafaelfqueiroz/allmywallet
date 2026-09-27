@@ -17,7 +17,7 @@ import {
 import type { DomainError } from '@/core/shared/domain-error';
 import { type Result, ok } from '@/core/shared/result';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
-import { guardReplayable, without } from '@/core/ledger/guard-replayable';
+import { guardReplayable } from '@/core/ledger/guard-replayable';
 import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import { isActive, type Transaction } from '@/core/ledger/transaction';
@@ -347,21 +347,48 @@ export async function planCarriedLegUpdates(
 }
 
 /**
- * BR-006-15 for the positions re-derived legs land in: each must replay with
- * the triggering write's removals and every re-derived leg in place. Run
- * before anything is written, so a refused write leaves nothing behind.
+ * A position's ledger as a write leaves it: the write's removals gone and
+ * every re-derived leg that lands there in place of its stored copy. The one
+ * projection the guard, the deletion preview and the edit path all agree on.
+ */
+export function projectPosition(
+  existing: readonly Transaction[],
+  removed: ReadonlySet<string>,
+  legs: readonly Transaction[],
+  key: PositionKey,
+): readonly Transaction[] {
+  const legIds = new Set(legs.map((leg) => leg.id));
+  return [
+    ...existing.filter((t) => !removed.has(t.id) && !legIds.has(t.id)),
+    ...legs.filter((leg) => positionKeyString(leg) === positionKeyString(key)),
+  ];
+}
+
+/**
+ * BR-006-15 for every position a write touches — its own (`seeds`) and every
+ * one a re-derived leg lands in — each replayed with the write's removals and
+ * **every re-derived leg in place**. Run before anything is written, so a
+ * refused write leaves nothing behind.
+ *
+ * The seeds are guarded here too, not before planning (#144 re-review N1):
+ * a seed can hold a re-derived leg of its own — the `conversion_out` that
+ * removes its cost — and guarded against the stored copy, a valid delete was
+ * refused. Deleting OLD3's estimated subscription left 100 @ 10,00 = 1.000,00
+ * before an import conversion whose stored leg still removed 1.649,00;
+ * re-derived it removes 1.000,00 × 60 ÷ 100 = 600,00, and the delete holds.
  */
 export async function guardCarriedLegs(
   deps: LedgerDependencies,
   legs: readonly Transaction[],
   removed: ReadonlySet<string>,
+  seeds: readonly PositionKey[],
 ): Promise<Result<void, DomainError>> {
-  const replacing = new Set<string>([...removed, ...legs.map((leg) => leg.id)]);
-  for (const key of positionsOf(legs)) {
-    const guard = await guardReplayable(deps, key, (existing) => [
-      ...without(existing, replacing),
-      ...legs.filter((leg) => positionKeyString(leg) === positionKeyString(key)),
-    ]);
+  const keys = new Map<string, PositionKey>();
+  for (const key of [...seeds, ...positionsOf(legs)]) keys.set(positionKeyString(key), key);
+  for (const key of keys.values()) {
+    const guard = await guardReplayable(deps, key, (existing) =>
+      projectPosition(existing, removed, legs, key),
+    );
     if (!guard.ok) return guard;
   }
   return ok(undefined);
@@ -389,7 +416,7 @@ export async function recalculateCarriedPositions(
 }
 
 /** One entry per position, dated its earliest leg. */
-function positionsOf(
+export function positionsOf(
   legs: readonly Transaction[],
 ): readonly (PositionKey & { readonly fromDate: Transaction['tradeDate'] })[] {
   const byKey = new Map<string, PositionKey & { fromDate: Transaction['tradeDate'] }>();

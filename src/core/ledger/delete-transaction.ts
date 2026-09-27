@@ -11,7 +11,7 @@ import {
   planCarriedLegUpdates,
   recalculateCarriedPositions,
 } from '@/core/ledger/carried-legs';
-import { guardReplayable, without } from '@/core/ledger/guard-replayable';
+import { without } from '@/core/ledger/guard-replayable';
 import type { Transaction } from '@/core/ledger/transaction';
 import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
 
@@ -111,17 +111,16 @@ export async function deleteTransaction(
     return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { transactionId: id }));
   }
 
-  const removed = new Set<string>([target.id]);
-  const guard = await guardReplayable(deps, target, (existing) => without(existing, removed));
-  if (!guard.ok) return guard;
-
   // SPEC-007 BR-007-06 (#144 F6): deleting an estimated row at A re-derives
-  // what A carried on, exactly as correcting its price does.
+  // what A carried on, exactly as correcting its price does. Planned first so
+  // BR-006-15's guard sees A — and everything downstream — with the
+  // re-derived legs in place, as the edit path does (#144 re-review N1).
+  const removed = new Set<string>([target.id]);
   const rederived = await planCarriedLegUpdates(deps, [target], (ledger) =>
     without(ledger, removed),
   );
-  const guardDownstream = await guardCarriedLegs(deps, rederived, removed);
-  if (!guardDownstream.ok) return guardDownstream;
+  const guard = await guardCarriedLegs(deps, rederived, removed, [target]);
+  if (!guard.ok) return guard;
 
   const deletedCount = await deps.transactions.deleteByIds([target.id]);
   for (const leg of rederived) await deps.transactions.update(leg);
