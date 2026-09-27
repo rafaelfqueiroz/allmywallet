@@ -262,7 +262,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
         clock,
         calendar,
         provider,
-        syncMarketSeries: async () => null,
+        syncMarketSeries: async () => {},
         rebuildSnapshotsFrom: async (from) => {
           const summary = await handleValuationSnapshot(
             { from },
@@ -436,7 +436,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
         clock: new FakeClock('2026-03-17T20:02:00Z'),
         calendar,
         provider,
-        syncMarketSeries: async () => null,
+        syncMarketSeries: async () => {},
         rebuildSnapshotsFrom: async () => {},
       }),
     );
@@ -484,10 +484,11 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
   /**
    * #161: the Tesouro sync runs at 18:30, the equity capture at 17:05. A
    * laptop closed in between captures every close and misses every Tesouro
-   * day, so catch-up must sync on a start that found no close missing, and
-   * rebuild from whatever the sync filled.
+   * day, so catch-up must sync on a start that found no close missing. The
+   * sync queues the rebuild for what it fills itself, so catch-up rebuilds
+   * nothing of its own here.
    */
-  it('#161: a start with no close missed still syncs, and rebuilds from the earliest Tesouro day it filled', async () => {
+  it('#161: a start with no close missed still syncs the market series, and rebuilds nothing itself', async () => {
     await catchUp(scenarioProvider());
     let synced = 0;
     const rebuilt: BusinessDate[] = [];
@@ -495,7 +496,6 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     const summary = await catchUp(scenarioProvider(), [], {
       syncMarketSeries: async () => {
         synced += 1;
-        return BusinessDate.of('2026-03-05');
       },
       rebuildSnapshotsFrom: async (from) => {
         rebuilt.push(from);
@@ -503,23 +503,23 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     });
 
     expect(synced).toBe(1);
-    expect(summary.days).toEqual([]);
-    expect(rebuilt).toEqual(['2026-03-05']);
-    expect(summary.rebuiltFrom).toBe('2026-03-05');
+    expect(rebuilt).toEqual([]);
+    expect(summary.rebuiltFrom).toBeNull();
   });
 
-  it('#161: one rebuild, from the missed close or the Tesouro day, whichever is earlier', async () => {
-    const rebuilt: BusinessDate[] = [];
+  /** A tenant holding only Tesouro polls nothing, and must still be synced. */
+  it('#161: a start with nothing polled still syncs the market series', async () => {
+    let synced = 0;
 
     const summary = await catchUp(scenarioProvider(), [], {
-      syncMarketSeries: async () => BusinessDate.of('2026-03-13'),
-      rebuildSnapshotsFrom: async (from) => {
-        rebuilt.push(from);
+      heldAssets: { listDistinctHeldAssetIds: async () => [] },
+      syncMarketSeries: async () => {
+        synced += 1;
       },
     });
 
-    expect(rebuilt).toEqual(['2026-03-12']);
-    expect(summary.rebuiltFrom).toBe('2026-03-12');
+    expect(synced).toBe(1);
+    expect(summary.days).toEqual([]);
   });
 
   it('AC/BR-021-33: catch-up sends no opportunity email for recovered days; a live crossing afterwards sends exactly one', async () => {

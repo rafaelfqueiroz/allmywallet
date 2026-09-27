@@ -1,7 +1,7 @@
 import { logger } from '@/lib/logger';
 import { db as globalDb, type Database } from '@/db/client';
 import { resolveConfig } from '@/config/resolve';
-import { BusinessDate } from '@/core/shared/clock';
+import type { BusinessDate } from '@/core/shared/clock';
 import { computePollingSet } from '@/core/quotes/polling-set';
 import { enumerateCatchUpDays } from '@/core/quotes/catch-up-days';
 import { backfillMissedCloses } from '@/core/quotes/backfill-missed-closes';
@@ -24,7 +24,7 @@ import {
   resolveQuoteBudgetConfig,
 } from '@/worker/handlers/composition';
 import { handleBcbSync } from '@/worker/handlers/bcb';
-import { syncTesouroPrices } from '@/worker/handlers/tesouro';
+import { handleTesouroSync } from '@/worker/handlers/tesouro';
 import { handleValuationSnapshot } from '@/worker/handlers/valuation';
 
 /**
@@ -65,10 +65,11 @@ export interface CatchUpDeps {
    * two schedules are independent — a laptop open at 17:05 and closed by
    * 18:30 captures every close and never runs `tesouro.sync` — so a start
    * that found no equity close missing may still find Tesouro days missing.
-   * Returns the earliest day a Tesouro close was newly stored for, which the
-   * rebuild must then start from; `null` when nothing was missing.
+   * The Tesouro sync queues the snapshot rebuild for the days it fills
+   * itself (`handlers/tesouro.ts`), so catch-up rebuilds only for the closes
+   * it recovered.
    */
-  readonly syncMarketSeries: () => Promise<BusinessDate | null>;
+  readonly syncMarketSeries: () => Promise<void>;
   /** BR-021-30 — the existing `valuation.snapshot` rebuild-from-date path. */
   readonly rebuildSnapshotsFrom: (from: BusinessDate) => Promise<void>;
 }
@@ -92,7 +93,7 @@ const NOTHING_MISSED: CatchUpSummary = {
   rebuiltFrom: null,
 };
 
-async function defaultSyncMarketSeries(): Promise<BusinessDate | null> {
+async function defaultSyncMarketSeries(): Promise<void> {
   // Each guarded on its own: an unreachable BCB must not cost the rebuild its
   // Tesouro prices, and neither may stop the worker from starting.
   try {
@@ -101,10 +102,9 @@ async function defaultSyncMarketSeries(): Promise<BusinessDate | null> {
     logger.error({ queue: 'catch-up', err: error }, 'catch-up: bcb.sync failed');
   }
   try {
-    return await syncTesouroPrices();
+    await handleTesouroSync();
   } catch (error) {
     logger.error({ queue: 'catch-up', err: error }, 'catch-up: tesouro.sync failed');
-    return null;
   }
 }
 
@@ -165,34 +165,28 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
 
   // #161: every start, whether or not an equity close was missed — see
   // `syncMarketSeries`. After the equity backfill, before the rebuild.
-  const tesouroFrom = await deps.syncMarketSeries();
+  await deps.syncMarketSeries();
 
-  // BR-021-30: one rebuild from the earliest day anything was recovered for.
-  // The snapshot engine walks dates ascending and each day's figures rest on
-  // the day before, so a single call *is* "in date order"; a rebuild per day
-  // would rewrite every later day once per earlier one for the same result.
-  const rebuildFrom = earliestOf(first ?? null, tesouroFrom);
-  if (rebuildFrom === null) {
-    logger.info({ queue: 'catch-up' }, 'catch-up: nothing was missed');
+  if (window === null || first === undefined || backfill === null) {
+    logger.info({ queue: 'catch-up' }, 'catch-up: no close was missed');
     return NOTHING_MISSED;
   }
-  await deps.rebuildSnapshotsFrom(rebuildFrom);
+
+  // BR-021-30: one rebuild from the earliest missed day forward. The snapshot
+  // engine walks dates ascending and each day's figures rest on the day
+  // before, so a single call *is* "in date order"; a rebuild per day would
+  // rewrite every later day once per earlier one for the same result.
+  await deps.rebuildSnapshotsFrom(first);
 
   const summary: CatchUpSummary = {
-    days: window?.days ?? [],
-    beyondCap: window?.beyondCap ?? 0,
-    recovered: backfill?.recovered.length ?? 0,
-    gaps: backfill?.gaps.length ?? 0,
-    requests: backfill?.requests ?? 0,
-    rebuiltFrom: rebuildFrom,
+    days: window.days,
+    beyondCap: window.beyondCap,
+    recovered: backfill.recovered.length,
+    gaps: backfill.gaps.length,
+    requests: backfill.requests,
+    rebuiltFrom: first,
   };
   // AR-39: dates and counts only — no asset, no figure.
   logger.info({ queue: 'catch-up', ...summary }, 'catch-up complete');
   return summary;
-}
-
-function earliestOf(a: BusinessDate | null, b: BusinessDate | null): BusinessDate | null {
-  if (a === null) return b;
-  if (b === null) return a;
-  return BusinessDate.isBefore(a, b) ? a : b;
 }

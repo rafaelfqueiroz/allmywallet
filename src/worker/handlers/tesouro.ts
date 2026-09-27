@@ -1,4 +1,5 @@
 import { logger } from '@/lib/logger';
+import { enqueue } from '@/lib/queue';
 import type { BusinessDate } from '@/core/shared/clock';
 import type { AssetId } from '@/core/shared/ids';
 import type {
@@ -6,12 +7,16 @@ import type {
   CloseHistoryWriterPort,
   TesouroPriceProvider,
 } from '@/core/quotes/ports';
+import { QUEUE } from '@/worker/queues';
+import type { SnapshotJobPayload } from '@/worker/handlers/valuation';
 import { buildQuotesComposition, buildTesouroProvider } from './composition';
 
 export interface TesouroSyncDeps {
   readonly catalog: AssetCatalogPort;
   readonly repository: CloseHistoryWriterPort;
   readonly provider: TesouroPriceProvider;
+  /** Durable: a queued `valuation.snapshot` job, never a rebuild run in-line. */
+  readonly enqueueSnapshotRebuild: (from: BusinessDate) => Promise<void>;
 }
 
 /**
@@ -30,31 +35,32 @@ export interface TesouroSyncDeps {
  * are catalogued and priced too: a title held until it matured
  * (`Tesouro Selic 2025`) has a value on every day it was held.
  *
+ * **Snapshots for the filled days** (BR-021-30, BR-009-18): the run queues a
+ * `valuation.snapshot` from the earliest day it filled, for every tenant. A
+ * queued job, not a rebuild in-line and not the 19:40 cron: a filled day is
+ * missing from no later run, so the one run that filled it is the only one
+ * that knows to rebuild — and pg-boss keeps a queued job across a sleeping
+ * laptop and a killed worker, where it drops a missed cron and loses an
+ * in-flight rebuild. The job is queued after the closes commit, so it never
+ * reads a history without them.
+ *
  * AR-19: only missing `(asset, date)` closes are inserted, so a retried or
- * repeated sync writes nothing.
+ * repeated sync writes nothing and queues nothing.
  */
 export async function handleTesouroSync(overrides?: Partial<TesouroSyncDeps>): Promise<void> {
-  await syncTesouroPrices(overrides);
-}
-
-/**
- * The sync itself, returning the earliest day it stored a close for (`null`
- * when nothing was missing or the fetch failed). Worker-start catch-up rebuilds
- * snapshots from there (SPEC-021 BR-021-30); the cron has no use for it, since
- * the evening `valuation.snapshot` rebuilds the whole history anyway.
- */
-export async function syncTesouroPrices(
-  overrides?: Partial<TesouroSyncDeps>,
-): Promise<BusinessDate | null> {
   const composition = buildQuotesComposition();
   const catalog = overrides?.catalog ?? composition.catalog;
   const repository = overrides?.repository ?? composition.repository;
   const provider = overrides?.provider ?? buildTesouroProvider();
+  const enqueueSnapshotRebuild =
+    overrides?.enqueueSnapshotRebuild ??
+    ((from: BusinessDate) =>
+      enqueue(QUEUE.VALUATION_SNAPSHOT, { from } satisfies SnapshotJobPayload));
 
   const fetched = await provider.fetchDailyPrices();
   if (!fetched.ok) {
     logger.error({ queue: 'tesouro.sync', err: fetched.error }, 'tesouro.sync fetch failed');
-    return null;
+    return;
   }
 
   // One catalogue upsert per title, not per published day.
@@ -77,10 +83,10 @@ export async function syncTesouroPrices(
       source: point.source,
     })),
   );
+  if (earliest !== null) await enqueueSnapshotRebuild(earliest);
 
   logger.info(
-    { queue: 'tesouro.sync', titles: idByCode.size, closes: inserted, earliest },
+    { queue: 'tesouro.sync', titles: idByCode.size, closes: inserted, rebuildFrom: earliest },
     'tesouro.sync cycle complete',
   );
-  return earliest;
 }
