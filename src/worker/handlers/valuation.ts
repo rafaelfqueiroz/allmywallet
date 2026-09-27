@@ -110,6 +110,39 @@ export interface SnapshotJobPayload {
   readonly userId?: string;
 }
 
+/**
+ * The `valuation.snapshot` job's `data`, validated. AR-21: a payload is JSON
+ * that crossed a process boundary, so its shape is checked here rather than
+ * cast — a malformed `from` or `userId` would otherwise reach `withTenant` or
+ * the date comparisons as whatever arrived.
+ *
+ * `null`, `undefined` and `{}` all mean "every tenant, whole history": the
+ * daily cron is scheduled with no data and pg-boss delivers it as `null`.
+ *
+ * A malformed payload throws rather than widening to a full rebuild. The
+ * enqueuer is what is broken, and a failed job reaches the dead-letter alert
+ * (AR-20) where a silent full rebuild would hide it.
+ */
+export function parseSnapshotJobPayload(data: unknown): SnapshotJobPayload {
+  if (data === null || data === undefined) return {};
+  if (typeof data !== 'object' || Array.isArray(data)) {
+    throw new TypeError('valuation.snapshot: payload is not an object');
+  }
+  const { from, userId } = data as Record<string, unknown>;
+  if (from !== undefined && typeof from !== 'string') {
+    throw new TypeError('valuation.snapshot: payload.from is not a string');
+  }
+  if (userId !== undefined && typeof userId !== 'string') {
+    throw new TypeError('valuation.snapshot: payload.userId is not a string');
+  }
+  // Both throw on a malformed value — the same validators every other entry
+  // point uses, so "valid" means one thing across the codebase.
+  return {
+    ...(from === undefined ? {} : { from: BusinessDate.of(from) }),
+    ...(userId === undefined ? {} : { userId: UserId.of(userId) }),
+  };
+}
+
 export interface SnapshotRunSummary {
   readonly tenants: number;
   readonly snapshots: number;

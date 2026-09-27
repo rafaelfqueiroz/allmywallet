@@ -3,7 +3,11 @@ import { handleQuotesCloseCapture, handleQuotesPoll } from '@/worker/handlers/qu
 import { handleTesouroSync } from '@/worker/handlers/tesouro';
 import { handleBcbSync } from '@/worker/handlers/bcb';
 import { handleBudgetCheck } from '@/worker/handlers/budget';
-import { handleFixedIncomeAccrue, handleValuationSnapshot } from '@/worker/handlers/valuation';
+import {
+  handleFixedIncomeAccrue,
+  handleValuationSnapshot,
+  parseSnapshotJobPayload,
+} from '@/worker/handlers/valuation';
 import { handleImportCommit, handleImportStage } from '@/worker/handlers/import';
 import {
   handleAccountDeletionSweep,
@@ -128,8 +132,12 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
   },
   {
     queue: QUEUE.VALUATION_SNAPSHOT,
-    handler: async () => {
-      await handleValuationSnapshot();
+    // BR-009-18: the payload is passed through, so an import commit or a
+    // fixed-income edit (`{ userId, from }`) rebuilds that tenant from that
+    // date only. The daily cron carries no data, which parses to a full
+    // rebuild of every tenant.
+    handler: async (data: unknown) => {
+      await handleValuationSnapshot(parseSnapshotJobPayload(data));
     },
     // Daily rather than weekdays-only: a Saturday snapshot is a real chart
     // point, valued from Friday's carried-forward close (BR-009-03).
