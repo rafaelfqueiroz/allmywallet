@@ -62,6 +62,17 @@ describe('parseTesouroCsv (BR-008-12; AR-06 comma-decimal parsing)', () => {
     ]);
   });
 
+  it('drops a title whose maturity date cannot be read, keeping the rest of the day', () => {
+    const csv = [
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha',
+      'Tesouro Selic;01/03/2029;16/03/2026;0,10;0,05;14.250,00;14.249,00;14.249,60',
+      'Tesouro IPCA+;31/02/2029;16/03/2026;5,79;5,84;3.415,00;3.413,70;3.414,20',
+    ].join('\n');
+    expect(parseTesouroCsv(csv, 'tesouro_transparente')?.map((p) => p.ticker)).toEqual([
+      'Tesouro Selic 2029',
+    ]);
+  });
+
   it('falls back to PU Base when a title is no longer offered for redemption', () => {
     // A real shape in the published file: the venda column is blank for a
     // title Tesouro no longer buys back. Dropping the row would silently

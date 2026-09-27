@@ -3,6 +3,7 @@ import { db, closePool } from '@/db/client';
 import { backupRuns } from '@/db/schema/observability';
 import { resolveConfig } from '@/config/resolve';
 import { rebuildAll } from '@/ops/rebuild-positions';
+import { handleValuationSnapshot } from '@/worker/handlers/valuation';
 import { logger } from '@/lib/logger';
 
 /**
@@ -20,6 +21,8 @@ import { logger } from '@/lib/logger';
  *   backup-record failed <reason>  records a failure, shown until the next success
  *   rebuild-positions              replays every tenant's ledger into the
  *                                  position cache (SPEC-007 BR-007-14, DM-4)
+ *   rebuild-snapshots              rebuilds every tenant's whole valuation
+ *                                  history (SPEC-009 BR-009-17/18)
  *
  * `rebuild-positions` is `pnpm positions:rebuild --all` made runnable where it
  * is actually needed. The pnpm script needs the repository, a toolchain and a
@@ -60,8 +63,20 @@ export async function runPersonalCommand(argv: readonly string[]): Promise<strin
     );
   }
 
+  // #152: a data migration that moves a price series changes every snapshot
+  // since that series began, and catch-up rebuilds only from a missed day — so
+  // without this the dashboard reads the old figures until the evening
+  // `valuation.snapshot`. The same full rebuild that job runs (no `from`).
+  if (command === 'rebuild-snapshots') {
+    const summary = await handleValuationSnapshot();
+    if (summary.failures > 0) {
+      throw new Error(`rebuild-snapshots: ${summary.failures} tenant(s) failed`);
+    }
+    return `rebuilt ${summary.snapshots} snapshot(s) for ${summary.tenants} tenant(s)`;
+  }
+
   throw new Error(
-    `unknown command "${command ?? ''}" — expected backup-retain-count, backup-record or rebuild-positions`,
+    `unknown command "${command ?? ''}" — expected backup-retain-count, backup-record, rebuild-positions or rebuild-snapshots`,
   );
 }
 

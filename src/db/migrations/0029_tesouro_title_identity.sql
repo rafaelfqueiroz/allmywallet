@@ -32,13 +32,15 @@
 --
 -- Data only, no DDL, so the previous image runs on it unchanged (AR-69). That
 -- previous image's sync still writes the full-date code, so a sync run while
--- rolled back re-creates an unpriced full-date asset beside the merged one;
--- the next forward sync prices the B3-named asset again, and the stray asset
--- is inert.
+-- rolled back writes that day's price to a re-created full-date asset nothing
+-- holds. The held title carries its last price forward (BR-009-03) until the
+-- next forward sync, and the rolled-back days are never backfilled onto it —
+-- the sync writes only the latest published date, and this migration does not
+-- run again.
 --
--- `positions` is untouched — the ledger does not move — and valuation
--- snapshots are rebuilt over the whole history by the next daily
--- `valuation.snapshot` (no `from`), which reads the moved series.
+-- `positions` is untouched — the ledger does not move. Valuation snapshots are
+-- rebuilt over the whole history by `start.sh`'s `rebuild-snapshots` step,
+-- which reads the moved series.
 DO $$
 DECLARE
   legacy record;

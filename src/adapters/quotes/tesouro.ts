@@ -39,6 +39,14 @@ function toBusinessDate(brDate: string): BusinessDate {
   return BusinessDate.of(`${year}-${month}-${day}`);
 }
 
+function tryBusinessDate(brDate: string): BusinessDate | null {
+  try {
+    return toBusinessDate(brDate);
+  } catch {
+    return null;
+  }
+}
+
 function toDecimalString(brNumber: string): string {
   return brNumber.trim().replace(/\./g, '').replace(',', '.');
 }
@@ -102,7 +110,7 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     puBase: header.indexOf('PU Base Manha'),
   };
 
-  type Row = { product: string; maturity: string; date: string; price: string };
+  type Row = { product: string; maturity: BusinessDate; date: string; price: string };
   const rows: Row[] = [];
   for (const line of lines.slice(1)) {
     const cols = line.split(';');
@@ -129,7 +137,11 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     const puBase = cols[idx.puBase]?.trim();
     const price = puVenda || puBase;
     if (!titulo || !vencimento || !dataBase || !price) continue;
-    rows.push({ product: titulo, maturity: vencimento, date: dataBase, price });
+    // #152: the maturity now names the asset, so an unreadable one drops that
+    // title rather than throwing away the whole day's batch.
+    const maturity = tryBusinessDate(vencimento);
+    if (maturity === null) continue;
+    rows.push({ product: titulo, maturity, date: dataBase, price });
   }
   if (rows.length === 0) return [];
 
@@ -149,7 +161,7 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
   // maturity date, which named an asset nothing held. The rule, and the
   // products it declines to translate, live in `core/quotes/tesouro-title.ts`.
   const codes = tesouroCatalogCodes(
-    latestRows.map((row) => ({ product: row.product, maturity: toBusinessDate(row.maturity) })),
+    latestRows.map((row) => ({ product: row.product, maturity: row.maturity })),
   );
   return latestRows.map((row, index) => ({
     ticker: codes[index] as string,
