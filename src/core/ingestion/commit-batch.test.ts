@@ -243,6 +243,92 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
     expect(invalidRow?.record.assetCode).toBe('PETR4');
   });
 
+  /**
+   * SPEC-007 BR-007-05c (#166): the owner's VIVT3 shape, through the import.
+   * 240 @ 23,70 + 9,02 fees = 5.697,02; a `Restituição de Capital` of
+   * 240 × 1,2265 = 294,36 returns capital: 5.697,02 − 294,36 = 5.402,66, and
+   * 5.402,66 ÷ 240 = 22,5110833… — quantity unchanged, nothing realized.
+   */
+  it('#166: a Restituição de Capital lowers the imported position’s cost by the amount received', async () => {
+    const deps = buildFakeIngestionDeps();
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          assetCode: 'VIVT3',
+          assetName: 'Telefônica Brasil ON',
+          tradeDate: BusinessDate.of('2024-06-19'),
+          quantity: Quantity.fromString('240'),
+          unitPrice: Money.fromString('23.70'),
+          fees: Money.fromString('9.02'),
+        }),
+        buy({
+          b3Type: 'Restituição de Capital',
+          direction: 'credit',
+          assetCode: 'VIVT3',
+          assetName: 'Telefônica Brasil ON',
+          tradeDate: BusinessDate.of('2025-07-15'),
+          quantity: Quantity.fromString('240'),
+          unitPrice: Money.fromString('1.2265'),
+          fees: Money.zero(),
+        }),
+      ],
+    });
+
+    const result = await commitBatch(deps, userId, { batchId });
+
+    expect(result.ok && result.value.applied).toBe(2);
+    const [position] = await deps.positions.list();
+    expect(position?.state.quantity.toString()).toBe('240');
+    expect(position?.state.totalCost.toString()).toBe('5402.66');
+    expect(position?.state.realizedGain.toString()).toBe('0');
+  });
+
+  /**
+   * SPEC-007 BR-007-05c (#166): an amortization on a Tesouro title that is not
+   * an Educa+/Renda+ has no defined principal — refused, not applied at a
+   * guessed amount, while the rest of the batch still commits.
+   */
+  it('#166: an amortization with no defined principal is refused, and the rest of the batch commits', async () => {
+    const deps = buildFakeIngestionDeps();
+    const tesouro = {
+      assetCode: 'Tesouro IPCA+ 2029',
+      assetName: 'Tesouro IPCA+ 2029',
+      assetClass: 'tesouro_direto' as const,
+    };
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        buy({
+          ...tesouro,
+          quantity: Quantity.fromString('2'),
+          unitPrice: Money.fromString('3000'),
+          fees: Money.zero(),
+        }),
+        buy({
+          ...tesouro,
+          b3Type: 'Amortização',
+          direction: 'credit',
+          tradeDate: BusinessDate.of('2026-02-15'),
+          quantity: Quantity.fromString('2'),
+          unitPrice: Money.fromString('50'),
+          fees: Money.zero(),
+        }),
+      ],
+    });
+
+    const result = await commitBatch(deps, userId, { batchId });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.applied).toBe(1);
+    expect(result.value.invalid).toBe(1);
+    const refused = deps.rows.all.find((r) => r.classification === 'invalid');
+    expect(refused?.ledgerType).toBe('amortization');
+    const [position] = await deps.positions.list();
+    expect(position?.state.totalCost.toString()).toBe('6000');
+  });
+
   it('BR-005-06/22: a Posição batch writes fixed-income contracts and produces a reconciliation report', async () => {
     const deps = buildFakeIngestionDeps();
     const batchId = await stagedBatch(deps, {

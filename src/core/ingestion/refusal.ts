@@ -50,6 +50,19 @@ export type RowRefusal =
    * empties the position; the two legs are written together or not at all.
    */
   | { readonly kind: 'unresolved_transfer_pair'; readonly date: BusinessDate }
+  /**
+   * SPEC-007 BR-007-05c (#166) — an amortization on an asset with no defined
+   * principal (another Tesouro title, CDB, LCI, LCA): refused rather than
+   * applied at a guessed amount.
+   */
+  | { readonly kind: 'amortization_not_supported'; readonly date: BusinessDate }
+  /** SPEC-007 BR-007-05c (#166) — an Educa+/Renda+ payment outside the title's schedule. */
+  | {
+      readonly kind: 'amortization_outside_schedule';
+      readonly date: BusinessDate;
+      readonly firstPayment: BusinessDate;
+      readonly lastPayment: BusinessDate;
+    }
   /** The ledger now accepts it: importing the file again applies it. */
   | { readonly kind: 'applicable' }
   /** The ledger already holds it, from another import. */
@@ -95,6 +108,20 @@ export function explainRefusal(
   }
   if (failure.transaction.id !== candidate.id) {
     return { kind: 'conflicts_with_ledger', date: failure.transaction.tradeDate };
+  }
+  // SPEC-007 BR-007-05c (#166): an amortization refused for want of a defined
+  // principal says so, with the schedule where there is one — not "malformed",
+  // which reads as a broken row when the row is exactly what B3 wrote.
+  if (failure.error.code === PositionErrorCode.AMORTIZATION_NOT_SUPPORTED) {
+    return { kind: 'amortization_not_supported', date: candidate.tradeDate };
+  }
+  if (failure.error.code === PositionErrorCode.AMORTIZATION_OUTSIDE_SCHEDULE) {
+    return {
+      kind: 'amortization_outside_schedule',
+      date: candidate.tradeDate,
+      firstPayment: failure.error.context['firstPayment'] as BusinessDate,
+      lastPayment: failure.error.context['lastPayment'] as BusinessDate,
+    };
   }
   if (failure.error.code !== PositionErrorCode.INSUFFICIENT_QUANTITY) return { kind: 'malformed' };
   return {

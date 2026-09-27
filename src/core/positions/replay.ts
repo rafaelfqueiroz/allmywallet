@@ -157,8 +157,10 @@ export interface ReplayFailure {
  * transaction in replay order that cannot be applied. `null` when the whole
  * ledger replays.
  *
- * An import refuses only that row rather than every row of its position:
- * proventos never change a quantity, so they are never the row at fault.
+ * An import refuses only that row rather than every row of its position.
+ * Proventos never change a quantity, so a shortfall is never theirs — but an
+ * amortization with no defined principal, or outside its NTN-B1 schedule, is
+ * the row at fault itself (SPEC-007 BR-007-05c, #166).
  */
 export function firstUnreplayable(
   transactions: readonly Transaction[],

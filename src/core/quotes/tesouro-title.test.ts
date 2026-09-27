@@ -106,6 +106,7 @@ describe('#164 SPEC-005 BR-005-14 — canonicalTesouroCode, B3’s Produto on im
     'Tesouro Selic',
     'Tesouro Novo Produto 2040',
     'Tesouro IPCA+ Educacional 2040',
+    'NTN-B1 2030',
     'CDB - BANCO TESTE S/A',
     '',
   ])('“%s” names no Tesouro title the table knows', (produto) => {

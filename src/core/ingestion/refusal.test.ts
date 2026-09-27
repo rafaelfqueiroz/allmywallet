@@ -57,6 +57,8 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
   });
 
   const held10 = () => aTransaction().buy().on('2026-01-05').quantity('10').price('10').build();
+  const held10Before = () =>
+    aTransaction().buy().on('2025-06-02').quantity('10').price('10').build();
 
   it('a debit larger than the holding names what was held, what it removes, and when', () => {
     const refusal = explainRefusal(
@@ -323,6 +325,49 @@ describe('SPEC-005 #117 — explainRefusal, why a committed row is invalid', () 
           NO_AMORTIZATION,
         ).kind,
       ).toBe('applicable');
+    });
+  });
+
+  /**
+   * SPEC-007 BR-007-05c (#166): an amortization with no defined principal is
+   * refused and says why — "malformed" would read as a broken row when the row
+   * is exactly what B3 wrote.
+   */
+  describe('#166 — an amortization with no defined principal', () => {
+    const amortization = (date: string) => row('amortization', date, '10');
+
+    it('on an asset with no capital-return rule names that, and the date', () => {
+      const terms: AmortizationTerms = new Map([[assetIdFor('PETR4'), { kind: 'unsupported' }]]);
+      expect(
+        explainRefusal(amortization('2026-01-15'), [held10()], userId, now, today, terms),
+      ).toEqual({ kind: 'amortization_not_supported', date: '2026-01-15' });
+    });
+
+    it('outside an Educa+ schedule names the schedule', () => {
+      const terms: AmortizationTerms = new Map([
+        [
+          assetIdFor('PETR4'),
+          {
+            kind: 'installments',
+            schedule: { firstPayment: BusinessDate.of('2026-01-15'), installments: 60 },
+          },
+        ],
+      ]);
+      expect(
+        explainRefusal(amortization('2025-12-15'), [held10Before()], userId, now, today, terms),
+      ).toEqual({
+        kind: 'amortization_outside_schedule',
+        date: '2025-12-15',
+        firstPayment: '2026-01-15',
+        lastPayment: '2030-12-15',
+      });
+    });
+
+    it('on a listed asset applies, so it is not refused', () => {
+      const terms: AmortizationTerms = new Map([[assetIdFor('PETR4'), { kind: 'whole_amount' }]]);
+      expect(
+        explainRefusal(amortization('2026-01-15'), [held10()], userId, now, today, terms),
+      ).toEqual({ kind: 'applicable' });
     });
   });
 

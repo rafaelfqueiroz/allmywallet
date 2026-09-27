@@ -99,6 +99,15 @@ export default async function ImportBatchDetailPage({
       // SPEC-005 BR-005-20a (#135): one leg of a same-position transfer pair.
       case 'unresolved_transfer_pair':
         return t('refusal.unresolved_transfer_pair', { date: formatBusinessDate(refusal.date) });
+      // SPEC-007 BR-007-05c (#166): an amortization with no defined principal.
+      case 'amortization_not_supported':
+        return t('refusal.amortization_not_supported', { date: formatBusinessDate(refusal.date) });
+      case 'amortization_outside_schedule':
+        return t('refusal.amortization_outside_schedule', {
+          date: formatBusinessDate(refusal.date),
+          firstPayment: formatBusinessDate(refusal.firstPayment),
+          lastPayment: formatBusinessDate(refusal.lastPayment),
+        });
       default:
         return t(`refusal.${refusal.kind}`);
     }

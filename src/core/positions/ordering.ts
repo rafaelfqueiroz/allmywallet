@@ -73,8 +73,18 @@ import type { Transaction, TransactionType } from '@/core/ledger/transaction';
  * held".
  *
  * **7 — proventos.** Dividends, JCP, rendimentos, amortizações and leilões de
- * frações change no quantity, so their rank cannot affect a figure. They are
- * ranked anyway, because a *total* order is what makes the fold reproducible.
+ * frações change no quantity. All but one leave the position untouched, so
+ * their rank affects no figure; they are ranked anyway, because a *total*
+ * order is what makes the fold reproducible.
+ *
+ * The exception is the amortization, which returns capital and lowers cost
+ * basis (SPEC-007 BR-007-05c, #166). Last is still its place, and now a
+ * decided one: the amount received reduces the cost of what is held once it
+ * is received — after the day's purchases and sales — exactly as it does when
+ * the sale falls on an earlier day. A sale on the payment date realizes
+ * against the average before the capital came back, and the capital lowers
+ * the cost of the shares that remain. That is also the practice of
+ * subtracting the amount received from the position's acquisition cost.
  *
  * #113 inserted rank 2 by shifting adjustments, disposals and proventos up by
  * one, so no pre-existing pair of types changed its relative order
