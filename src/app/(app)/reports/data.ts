@@ -389,7 +389,11 @@ export class DrizzleReportDataPort implements ReportDataPort {
     const ledger = await repository.listForAssetsUpTo([...new Set(assetIds)], upTo);
     // SPEC-007 BR-007-05c: an amortization in these ledgers replays only with
     // its asset's terms; without them the fold would fail and this throw.
-    const amortization = await loadAmortizationTerms(repository, [...new Set(assetIds)]);
+    // Asked only when a leilão was paid, like the ledger read above.
+    const amortization =
+      assetIds.length === 0
+        ? new Map()
+        : await loadAmortizationTerms(repository, [...new Set(assetIds)]);
     const byAsset = new Map<AssetId, Transaction[]>();
     for (const transaction of ledger) {
       const rows = byAsset.get(transaction.assetId) ?? [];

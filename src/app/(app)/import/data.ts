@@ -173,10 +173,15 @@ export async function loadImportBatchDetail(
       Awaited<ReturnType<typeof deps.transactions.listForPosition>>
     >();
     // SPEC-007 BR-007-05c: a refused row's ledger may hold an amortization,
-    // which replays only with its asset's terms.
-    const amortization = await loadAmortizationTerms(deps.transactions, [
+    // which replays only with its asset's terms. Asked only when a row was
+    // refused, the one case the loop below replays anything.
+    const refusedAssets = [
       ...new Set(rows.filter((row) => row.classification === 'invalid').map((row) => row.assetId)),
-    ]);
+    ];
+    const amortization =
+      refusedAssets.length === 0
+        ? new Map()
+        : await loadAmortizationTerms(deps.transactions, refusedAssets);
     for (const row of rows) {
       if (row.classification !== 'invalid' || row.record.kind !== 'transaction') continue;
       const key = positionKeyString(row);
