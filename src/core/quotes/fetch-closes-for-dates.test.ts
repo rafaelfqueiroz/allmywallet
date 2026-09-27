@@ -23,7 +23,7 @@ const d = (value: string): BusinessDate => BusinessDate.of(value);
 
 const XPML11 = AssetId.generate();
 const HSML11 = AssetId.generate();
-const OPTIONS = { monthlyQuota: 15000, ondemandReservePct: 10 };
+const OPTIONS = { monthlyQuota: 15000, ondemandReservePct: 10, lookbackDays: 10 };
 
 function history(ticker: string, closes: Record<string, string>) {
   return () =>
@@ -291,7 +291,7 @@ describe('fetchClosesForDates (SPEC-005 BR-005-20d)', () => {
         { assetId: XPML11, assetCode: 'XPML11', upTo: d('2024-01-01') },
         { assetId: XPML11, assetCode: 'XPML11', upTo: d('2024-02-22') },
       ],
-      { monthlyQuota: 10, ondemandReservePct: 10 },
+      { monthlyQuota: 10, ondemandReservePct: 10, lookbackDays: 10 },
     );
 
     expect(summary.requests).toBe(1);
@@ -306,7 +306,7 @@ describe('fetchClosesForDates (SPEC-005 BR-005-20d)', () => {
     const summary = await fetchClosesForDates(
       p,
       [{ assetId: XPML11, assetCode: 'XPML11', upTo: d('2024-02-22') }],
-      { monthlyQuota: 10, ondemandReservePct: 10 },
+      { monthlyQuota: 10, ondemandReservePct: 10, lookbackDays: 10 },
     );
 
     expect(summary.requests).toBe(0);

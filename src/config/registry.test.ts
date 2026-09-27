@@ -45,8 +45,10 @@ describe('registry', () => {
     // `import.asset_conversion_window_days` (SPEC-005 BR-005-20c); plus
     // #144's `import.subscription_credit_window_days` (SPEC-005 BR-005-20d,
     // how many days after an exercised subscription its `Atualização` credit
-    // may fall and still pair with it).
-    expect(CONFIG_KEYS).toHaveLength(37);
+    // may fall and still pair with it) and
+    // `import.subscription_close_lookback_days` (how much close history the
+    // pre-commit backfill fetches before each credit).
+    expect(CONFIG_KEYS).toHaveLength(38);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {

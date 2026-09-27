@@ -49,8 +49,12 @@ export interface FetchClosesForDatesPorts {
 export interface FetchClosesForDatesOptions {
   readonly monthlyQuota: number;
   readonly ondemandReservePct: number;
-  /** Calendar days of history requested before each date (default 10 — comfortably past a long holiday run). */
-  readonly lookbackDays?: number;
+  /**
+   * `import.subscription_close_lookback_days` (SPEC-002): calendar days of
+   * history requested before each date, and how recent a stored close must be
+   * for a date to count as already covered. No default here.
+   */
+  readonly lookbackDays: number;
 }
 
 export interface FetchClosesForDatesSummary {
@@ -59,8 +63,6 @@ export interface FetchClosesForDatesSummary {
   /** Provider requests made — each charged to the scheduled budget (BR-021-32's pattern, reused here). */
   readonly requests: number;
 }
-
-const DEFAULT_LOOKBACK_DAYS = 10;
 
 function dayNumber(date: BusinessDate): number {
   return Date.parse(`${date}T00:00:00Z`) / 86_400_000;
@@ -104,7 +106,7 @@ export async function fetchClosesForDates(
   const fetched: PriceQuote[] = [];
   let requestsMade = 0;
   const yearMonth = ports.clock.today().slice(0, 7);
-  const lookbackDays = options.lookbackDays ?? DEFAULT_LOOKBACK_DAYS;
+  const { lookbackDays } = options;
 
   // Group by asset, keeping every distinct date needed — not only the latest.
   const byAsset = new Map<string, AssetGroup>();

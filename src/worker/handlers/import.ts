@@ -321,7 +321,16 @@ export async function handleImportCommit(
     await resolveConfig('import.subscription_credit_window_days', { db: deps.database })
   ).value;
   await refreshFactorsForBatch(deps, userId, batchId);
-  await backfillSubscriptionClosesForBatch(deps, userId, batchId, subscriptionCreditWindowDays);
+  const subscriptionCloseLookbackDays = (
+    await resolveConfig('import.subscription_close_lookback_days', { db: deps.database })
+  ).value;
+  await backfillSubscriptionClosesForBatch(
+    deps,
+    userId,
+    batchId,
+    subscriptionCreditWindowDays,
+    subscriptionCloseLookbackDays,
+  );
 
   const result = await withTenant(
     userId,
@@ -513,6 +522,7 @@ async function backfillSubscriptionClosesForBatch(
   userId: UserId,
   batchId: ImportBatchId,
   subscriptionCreditWindowDays: number,
+  lookbackDays: number,
 ): Promise<void> {
   try {
     const requests = await withTenant(
@@ -532,7 +542,7 @@ async function backfillSubscriptionClosesForBatch(
     const summary = await fetchClosesForDates(
       { repository, provider, budgetCounter, clock: deps.clock },
       requests,
-      { monthlyQuota, ondemandReservePct },
+      { monthlyQuota, ondemandReservePct, lookbackDays },
     );
     logger.info(
       {
