@@ -58,7 +58,16 @@ export const TesouroErrorCode = {
 export interface TesouroConfig {
   readonly url?: string;
   readonly source: string;
+  /**
+   * #161: worker-start catch-up now runs this sync on every start, before any
+   * schedule is registered, so a server that accepts the connection and never
+   * answers must not hold the worker back. Covers the body read too — the
+   * file is the whole history, several megabytes.
+   */
+  readonly timeoutMs?: number;
 }
+
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 const DEFAULT_URL =
   'https://www.tesourotransparente.gov.br/ckan/dataset/df56aa42-484a-4a59-8184-7676580c81e3/resource/796d2059-14e9-44e3-80c9-2d9e30b405c1/download/PrecoTaxaTesouroDireto.csv';
@@ -73,7 +82,8 @@ export class TesouroTransparenteProvider implements TesouroPriceProvider {
   async fetchDailyPrices(): Promise<Result<readonly TesouroPricePoint[], DomainError>> {
     let csv: string;
     try {
-      const response = await fetch(this.url, { method: 'GET' });
+      const signal = AbortSignal.timeout(this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      const response = await fetch(this.url, { method: 'GET', signal });
       if (response.status >= 500) {
         return err(domainError(TesouroErrorCode.UNAVAILABLE, { status: response.status }));
       }
@@ -91,9 +101,12 @@ export class TesouroTransparenteProvider implements TesouroPriceProvider {
 }
 
 /**
- * Parses the CSV and keeps only rows for the **most recent `Data Base`**
- * present — the file otherwise carries the entire history, and BR-008-12
- * only wants "today's" batch. Exported for the contract test (TS-26).
+ * Parses the CSV into **every** published close, for every title and every
+ * `Data Base` the file carries — its whole history. #161: keeping only the
+ * latest date lost for good every day the sync did not run on, and never
+ * loaded anything before its first run. `tesouro.sync` writes only the closes
+ * not already stored, so the whole file is cheap to offer every time.
+ * Exported for the contract test (TS-26).
  */
 export function parseTesouroCsv(csv: string, source: string): readonly TesouroPricePoint[] | null {
   const lines = csv.split(/\r?\n/).filter((line) => line.trim().length > 0);
@@ -110,7 +123,7 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     puBase: header.indexOf('PU Base Manha'),
   };
 
-  type Row = { product: string; maturity: BusinessDate; date: string; price: string };
+  type Row = { product: string; maturity: BusinessDate; date: BusinessDate; price: string };
   const rows: Row[] = [];
   for (const line of lines.slice(1)) {
     const cols = line.split(';');
@@ -137,35 +150,27 @@ export function parseTesouroCsv(csv: string, source: string): readonly TesouroPr
     const puBase = cols[idx.puBase]?.trim();
     const price = puVenda || puBase;
     if (!titulo || !vencimento || !dataBase || !price) continue;
-    // #152: the maturity now names the asset, so an unreadable one drops that
-    // title rather than throwing away the whole day's batch.
+    // #152/#161: both dates name what is stored — the maturity the asset, the
+    // base date the close — so an unreadable one drops that row rather than
+    // throwing away the whole file.
     const maturity = tryBusinessDate(vencimento);
-    if (maturity === null) continue;
-    rows.push({ product: titulo, maturity, date: dataBase, price });
+    const date = tryBusinessDate(dataBase);
+    if (maturity === null || date === null) continue;
+    rows.push({ product: titulo, maturity, date, price });
   }
-  if (rows.length === 0) return [];
 
-  // "Most recent" compared as BusinessDate strings (lexicographic, per
-  // BusinessDate.compare) after normalising DD/MM/YYYY -> YYYY-MM-DD.
-  let latest: BusinessDate | null = null;
-  for (const row of rows) {
-    const date = toBusinessDate(row.date);
-    if (!latest || BusinessDate.isAfter(date, latest)) latest = date;
-  }
-  if (!latest) return [];
-  const latestDate: BusinessDate = latest;
-
-  const latestRows = rows.filter((row) => toBusinessDate(row.date) === latestDate);
   // #152: catalogued under B3's name (`Tesouro Selic 2029`) — the asset the
   // ledger already holds — rather than Tesouro Transparente's product and
   // maturity date, which named an asset nothing held. The rule, and the
   // products it declines to translate, live in `core/quotes/tesouro-title.ts`.
+  // Applied to the whole history at once, so a code means one maturity on
+  // every day it was ever published.
   const codes = tesouroCatalogCodes(
-    latestRows.map((row) => ({ product: row.product, maturity: row.maturity })),
+    rows.map((row) => ({ product: row.product, maturity: row.maturity })),
   );
-  return latestRows.map((row, index) => ({
+  return rows.map((row, index) => ({
     ticker: codes[index] as string,
-    date: latestDate,
+    date: row.date,
     price: Money.fromString(toDecimalString(row.price)),
     source,
   }));

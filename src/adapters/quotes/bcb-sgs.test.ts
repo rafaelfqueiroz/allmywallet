@@ -13,6 +13,19 @@ function stubFetch(status: number, body: string): void {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status, text: () => Promise.resolve(body) }));
 }
 
+/** A server that accepts the request and never answers — only the abort signal ends it. */
+function stubHangingFetch(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      (_url: unknown, init?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    ),
+  );
+}
+
 describe('BcbSgsIndexSeriesProvider (SPEC-008 — CDI/IPCA/Selic)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -43,6 +56,13 @@ describe('BcbSgsIndexSeriesProvider (SPEC-008 — CDI/IPCA/Selic)', () => {
     stubFetch(500, 'error');
     const provider = new BcbSgsIndexSeriesProvider({ source: 'bcb_sgs' });
     const result = await provider.fetchSeries('IPCA', BusinessDate.of('2026-03-01'));
+    expect(result.ok).toBe(false);
+  });
+
+  it('#161: a server that never answers is UNAVAILABLE after the timeout, not a hang', async () => {
+    stubHangingFetch();
+    const provider = new BcbSgsIndexSeriesProvider({ source: 'bcb_sgs', timeoutMs: 20 });
+    const result = await provider.fetchSeries('CDI', BusinessDate.of('2026-03-01'));
     expect(result.ok).toBe(false);
   });
 

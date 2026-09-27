@@ -46,9 +46,16 @@ function toBusinessDate(brDate: string): BusinessDate {
 export interface BcbSgsConfig {
   readonly baseUrl?: string;
   readonly source: string;
+  /**
+   * #161: worker-start catch-up runs this sync on every start, before any
+   * schedule is registered, so an unanswering server must not hold the worker
+   * back. Covers the body read too.
+   */
+  readonly timeoutMs?: number;
 }
 
 const DEFAULT_BASE_URL = 'https://api.bcb.gov.br/dados/serie/bcdata.sgs';
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class BcbSgsIndexSeriesProvider implements IndexSeriesProvider {
   private readonly baseUrl: string;
@@ -72,7 +79,8 @@ export class BcbSgsIndexSeriesProvider implements IndexSeriesProvider {
 
     let rawBody: string;
     try {
-      const response = await fetch(url, { method: 'GET' });
+      const signal = AbortSignal.timeout(this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      const response = await fetch(url, { method: 'GET', signal });
       if (response.status >= 500) {
         return err(domainError(BcbSgsErrorCode.UNAVAILABLE, { code, status: response.status }));
       }

@@ -69,13 +69,14 @@ export function fullTesouroCode(title: TesouroTitle): string {
 }
 
 /**
- * The catalogue code for each title in one published batch, in order.
+ * The catalogue code for each row of the published file, in order.
  *
- * B3's name where one exists **and no other title in the batch shares it**.
+ * B3's name where one exists **and no other maturity in the file shares it**.
  * Two maturities of one product in one year did happen before 2014 (the
- * quarterly Prefixados of 2005–2011), and pricing one B3 name from whichever
- * of two titles came last would be a wrong price with nothing to say so. Both
- * keep their full-date codes instead, and the held title reads unpriced.
+ * quarterly Prefixados of 2005–2011), and pricing one B3 name from both
+ * titles would interleave two price series under one asset with nothing to
+ * say so. Both keep their full-date codes instead. The sync passes the whole
+ * history (#161), so a code means the same maturity on every day.
  */
 export function tesouroCatalogCodes(titles: readonly TesouroTitle[]): readonly string[] {
   const b3Codes = titles.map(b3TesouroCode);

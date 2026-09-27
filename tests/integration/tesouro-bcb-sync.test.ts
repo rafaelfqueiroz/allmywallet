@@ -9,7 +9,7 @@ import { domainError } from '@/core/shared/domain-error';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { DrizzleIndexSeriesRepository } from '@/adapters/db/index-series-repository';
-import { handleTesouroSync } from '@/worker/handlers/tesouro';
+import { handleTesouroSync, syncTesouroPrices } from '@/worker/handlers/tesouro';
 import { TesouroErrorCode, parseTesouroCsv } from '@/adapters/quotes/tesouro';
 import { DrizzleAssetResolver } from '@/adapters/db/ingestion-resolvers';
 import { handleBcbSync } from '@/worker/handlers/bcb';
@@ -143,6 +143,79 @@ describe('SPEC-008 tesouro.sync / bcb.sync handlers (integration)', () => {
       'Tesouro Selic 2029',
     ]);
     expect(rows.rows[0]?.n).toBe(1);
+  });
+
+  /**
+   * #161: the file is every title's whole history, and a run stores whatever
+   * of it is missing — so a day an earlier run never saw (21/09 here) is
+   * filled by the next one, a stored close is left as it is, and the run
+   * reports the earliest day it filled for catch-up to rebuild from.
+   */
+  it('#161: fills every published day not yet stored, keeps what is, and clears the gap it covers', async () => {
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const repository = new DrizzleQuoteRepository(db);
+    const header =
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha';
+    const firstRun = parseTesouroCsv(
+      [header, 'Tesouro Selic;01/03/2029;18/09/2026;0,03;0,04;19.890,00;19.885,68;19.885,68'].join(
+        '\n',
+      ),
+      'tesouro_transparente',
+    );
+    const history = parseTesouroCsv(
+      [
+        header,
+        'Tesouro Selic;01/03/2029;18/09/2026;0,03;0,04;19.890,00;11.111,11;11.111,11',
+        'Tesouro Selic;01/03/2029;21/09/2026;0,03;0,04;19.910,62;19.895,62;19.895,62',
+        'Tesouro Selic;01/03/2029;22/09/2026;0,03;0,04;19.920,00;19.905,00;19.905,00',
+        // Held until it matured: the whole of its history is a value to show.
+        'Tesouro Selic;01/03/2025;14/02/2025;0,03;0,04;15.900,00;15.890,10;15.890,10',
+      ].join('\n'),
+      'tesouro_transparente',
+    );
+    if (firstRun === null || history === null) throw new Error('setup failed: fixture CSV');
+
+    await syncTesouroPrices({
+      catalog,
+      repository,
+      provider: { fetchDailyPrices: async () => ok(firstRun) },
+    });
+    const selic = await catalog.findByCode('Tesouro Selic 2029');
+    if (!selic) throw new Error('setup failed: title not onboarded');
+    await pool.query(
+      "INSERT INTO price_quote_gaps (asset_id, date, reason) VALUES ($1, '2026-09-21', 'not_supplied')",
+      [selic.id],
+    );
+
+    const earliest = await syncTesouroPrices({
+      catalog,
+      repository,
+      provider: { fetchDailyPrices: async () => ok(history) },
+    });
+
+    expect(earliest).toBe('2025-02-14');
+    const { rows } = await pool.query(
+      `SELECT a.code, to_char(q.date, 'YYYY-MM-DD') AS date, q.close::text AS close
+         FROM price_quotes q JOIN assets a ON a.id = q.asset_id ORDER BY a.code, q.date`,
+    );
+    expect(rows).toEqual([
+      { code: 'Tesouro Selic 2025', date: '2025-02-14', close: '15890.10000000' },
+      // Stored before: kept, not overwritten by the later file.
+      { code: 'Tesouro Selic 2029', date: '2026-09-18', close: '19885.68000000' },
+      { code: 'Tesouro Selic 2029', date: '2026-09-21', close: '19895.62000000' },
+      { code: 'Tesouro Selic 2029', date: '2026-09-22', close: '19905.00000000' },
+    ]);
+    const gaps = await pool.query('SELECT 1 FROM price_quote_gaps WHERE asset_id = $1', [selic.id]);
+    expect(gaps.rowCount).toBe(0);
+
+    // AR-19: nothing left to fill, nothing written, nothing to rebuild.
+    expect(
+      await syncTesouroPrices({
+        catalog,
+        repository,
+        provider: { fetchDailyPrices: async () => ok(history) },
+      }),
+    ).toBeNull();
   });
 
   it('a failed Tesouro fetch writes nothing', async () => {

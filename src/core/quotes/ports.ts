@@ -104,6 +104,31 @@ export interface QuoteRepositoryPort {
   upsertClosePrice(quote: PriceQuote): Promise<void>;
 }
 
+/**
+ * #161 — the Tesouro sync's write. Tesouro Transparente republishes every
+ * title's whole history daily, so the sync offers all of it and this stores
+ * only the `(asset, date)` closes not already held: a day any earlier run
+ * missed is filled by the next one, and a day already stored is left exactly
+ * as it is (the file publishes one morning price per day). A close that now
+ * exists is not a gap (SPEC-021 BR-021-31), so a gap row it covers is cleared.
+ *
+ * AR-19: inserting what is missing is idempotent — a retried or repeated run
+ * inserts nothing.
+ */
+export interface CloseHistoryWriterPort {
+  insertMissingCloses(quotes: readonly PriceQuote[]): Promise<InsertedCloses>;
+}
+
+export interface InsertedCloses {
+  readonly inserted: number;
+  /**
+   * The earliest date a close was inserted for, or `null` when nothing was
+   * missing — every snapshot from there on read a carried-forward or cost
+   * figure, and needs rebuilding (SPEC-021 BR-021-30).
+   */
+  readonly earliest: BusinessDate | null;
+}
+
 export type IndexSeriesCode = 'CDI' | 'IPCA' | 'SELIC' | 'IBOV';
 
 export interface IndexSeriesPointRecord {
