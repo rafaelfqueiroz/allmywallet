@@ -56,10 +56,18 @@ export interface CatchUpDeps {
   readonly provider: QuoteProvider;
   readonly gaps: CloseGapRepositoryPort;
   /**
-   * BR-021-29 — BCB and Tesouro already backfill from their latest stored
-   * value; catch-up relies on that rather than reimplementing it, and only
-   * makes sure it has happened before the rebuild, so a recovered day's
-   * fixed-income accrual reads the CDI published for it (BR-021-30).
+   * BR-021-29 — BCB and Tesouro backfill themselves; catch-up relies on that
+   * rather than reimplementing it, and only makes sure it has happened before
+   * the rebuild, so a recovered day's fixed-income accrual reads the CDI
+   * published for it (BR-021-30).
+   *
+   * #161: run on **every** start, not only after a missed equity close. The
+   * two schedules are independent — a laptop open at 17:05 and closed by
+   * 18:30 captures every close and never runs `tesouro.sync` — so a start
+   * that found no equity close missing may still find Tesouro days missing.
+   * The Tesouro sync queues the snapshot rebuild for the days it fills
+   * itself (`handlers/tesouro.ts`), so catch-up rebuilds only for the closes
+   * it recovered.
    */
   readonly syncMarketSeries: () => Promise<void>;
   /** BR-021-30 — the existing `valuation.snapshot` rebuild-from-date path. */
@@ -136,31 +144,34 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
   const { monthlyQuota, ondemandReservePct } = await resolveQuoteBudgetConfig(deps.database);
 
   const pollingSetIds = await computePollingSet(deps);
-  if (pollingSetIds.length === 0) {
-    logger.info({ queue: 'catch-up' }, 'catch-up: nothing held is polled, nothing to recover');
-    return NOTHING_MISSED;
-  }
+  const window =
+    pollingSetIds.length === 0
+      ? null
+      : enumerateCatchUpDays({
+          calendar: deps.calendar,
+          now: deps.clock.now(),
+          today: deps.clock.today(),
+          lastCapturedClose: await deps.repository.latestCloseDateAmong(pollingSetIds),
+          maxDays,
+        });
+  const first = window?.days[0];
+  const backfill =
+    window === null || first === undefined
+      ? null
+      : await backfillMissedCloses(deps, await deps.catalog.findByIds(pollingSetIds), window.days, {
+          monthlyQuota,
+          ondemandReservePct,
+        });
 
-  const window = enumerateCatchUpDays({
-    calendar: deps.calendar,
-    now: deps.clock.now(),
-    today: deps.clock.today(),
-    lastCapturedClose: await deps.repository.latestCloseDateAmong(pollingSetIds),
-    maxDays,
-  });
-  const first = window.days[0];
-  if (first === undefined) {
+  // #161: every start, whether or not an equity close was missed — see
+  // `syncMarketSeries`. After the equity backfill, before the rebuild.
+  await deps.syncMarketSeries();
+
+  if (window === null || first === undefined || backfill === null) {
     logger.info({ queue: 'catch-up' }, 'catch-up: no close was missed');
     return NOTHING_MISSED;
   }
 
-  const assets = await deps.catalog.findByIds(pollingSetIds);
-  const backfill = await backfillMissedCloses(deps, assets, window.days, {
-    monthlyQuota,
-    ondemandReservePct,
-  });
-
-  await deps.syncMarketSeries();
   // BR-021-30: one rebuild from the earliest missed day forward. The snapshot
   // engine walks dates ascending and each day's figures rest on the day
   // before, so a single call *is* "in date order"; a rebuild per day would

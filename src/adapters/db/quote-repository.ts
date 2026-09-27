@@ -1,10 +1,12 @@
-import { and, asc, desc, eq, gte, inArray, lte, max } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, max, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { latestQuotes, priceQuoteGaps, priceQuotes } from '@/db/schema/market';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
 import type {
+  CloseHistoryWriterPort,
+  InsertedCloses,
   LatestCloseDatePort,
   LatestQuote,
   PriceQuote,
@@ -26,7 +28,12 @@ import type { ClosePriceReader } from '@/core/ingestion/ports';
  * on the two methods it uses rather than on the write surface it must not.
  */
 export class DrizzleQuoteRepository
-  implements QuoteRepositoryPort, PriceHistoryPort, LatestCloseDatePort, ClosePriceReader
+  implements
+    QuoteRepositoryPort,
+    PriceHistoryPort,
+    LatestCloseDatePort,
+    ClosePriceReader,
+    CloseHistoryWriterPort
 {
   // AR-15: `price_quotes`/`latest_quotes` are shared reference tables with no
   // tenant column (see the class doc above) — `Tx | Database` lets
@@ -171,7 +178,57 @@ export class DrizzleQuoteRepository
         .where(and(eq(priceQuoteGaps.assetId, quote.assetId), eq(priceQuoteGaps.date, quote.date)));
     });
   }
+
+  /**
+   * #161 — `CloseHistoryWriterPort`. `ON CONFLICT DO NOTHING` in chunks, so
+   * the whole published history costs one index probe per row and writes only
+   * what is missing; one transaction, so a crash leaves either every missing
+   * close or none. Gap rows are cleared for every close the offered assets now
+   * have, not only the inserted ones — a close stored before a gap was ever
+   * recorded is no less a close (BR-021-31).
+   */
+  async insertMissingCloses(quotes: readonly PriceQuote[]): Promise<InsertedCloses> {
+    if (quotes.length === 0) return { inserted: 0, earliest: null };
+    const assetIds = [...new Set(quotes.map((quote) => quote.assetId))];
+    return this.db.transaction(async (tx) => {
+      let inserted = 0;
+      let earliest: BusinessDate | null = null;
+      for (let start = 0; start < quotes.length; start += INSERT_CHUNK) {
+        const rows = await tx
+          .insert(priceQuotes)
+          .values(
+            quotes.slice(start, start + INSERT_CHUNK).map((quote) => ({
+              assetId: quote.assetId,
+              date: quote.date,
+              close: quote.close,
+              source: quote.source,
+            })),
+          )
+          .onConflictDoNothing({ target: [priceQuotes.assetId, priceQuotes.date] })
+          .returning({ date: priceQuotes.date });
+        inserted += rows.length;
+        for (const row of rows) {
+          const date = BusinessDate.of(row.date);
+          if (earliest === null || BusinessDate.isBefore(date, earliest)) earliest = date;
+        }
+      }
+      await tx.execute(sql`
+        DELETE FROM ${priceQuoteGaps} g
+         USING ${priceQuotes} q
+         WHERE g.asset_id = q.asset_id
+           AND g.date = q.date
+           AND g.asset_id IN (${sql.join(
+             assetIds.map((id) => sql`${id}::uuid`),
+             sql`, `,
+           )})
+      `);
+      return { inserted, earliest };
+    });
+  }
 }
+
+/** Four parameters a row, well under Postgres's 65 535 bind parameters a statement. */
+const INSERT_CHUNK = 2_000;
 
 // AR-06/AR-07: the `money` custom type (src/db/numeric.ts) already parses
 // NUMERIC -> Money at the driver boundary via `Money.fromString`, so `row.price`

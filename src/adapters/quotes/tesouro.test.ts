@@ -16,15 +16,47 @@ const RECORDED_CSV = [
 ].join('\n');
 
 describe('parseTesouroCsv (BR-008-12; AR-06 comma-decimal parsing)', () => {
-  it('keeps only the most recent Data Base per title, converting Brazilian decimals correctly', () => {
+  /**
+   * #161: the file is every title's whole history, and all of it is returned
+   * — keeping only the latest date lost every day the sync did not run on.
+   */
+  it('returns every published close, every date, converting Brazilian decimals correctly', () => {
     const points = parseTesouroCsv(RECORDED_CSV, 'tesouro_transparente');
-    expect(points).not.toBeNull();
-    expect(points).toHaveLength(2); // only 16/03/2026 rows
-    const selic = points?.find((p) => p.ticker.startsWith('Tesouro Selic'));
-    // Hand-verified: "14.249,00" -> thousands separator stripped, comma -> dot -> "14249.00"
-    expect(selic?.price.toString()).toBe('14249');
-    expect(selic?.date).toBe('2026-03-16');
-    expect(selic?.source).toBe('tesouro_transparente');
+    expect(points?.map((p) => [p.ticker, p.date, p.price.toString()])).toEqual([
+      // Hand-verified: "14.229,80" -> thousands separator stripped, comma -> dot.
+      ['Tesouro Selic 2029', '2026-03-14', '14229.8'],
+      ['Tesouro IPCA+ 2035', '2026-03-14', '3408.9'],
+      ['Tesouro Selic 2029', '2026-03-16', '14249'],
+      ['Tesouro IPCA+ 2035', '2026-03-16', '3413.7'],
+    ]);
+    expect(points?.every((p) => p.source === 'tesouro_transparente')).toBe(true);
+  });
+
+  /**
+   * The quarterly Prefixados of 2005–2011: across the whole history, one B3
+   * name would cover two maturities, so neither gets it — on any date.
+   */
+  it('keeps the full date for a B3 name two maturities share anywhere in the history', () => {
+    const csv = [
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha',
+      'Tesouro Prefixado;01/01/2010;05/01/2009;11,20;11,30;900,10;899,00;899,50',
+      'Tesouro Prefixado;01/07/2010;06/01/2009;11,20;11,30;850,10;849,00;849,50',
+    ].join('\n');
+    expect(parseTesouroCsv(csv, 'tesouro_transparente')?.map((p) => p.ticker)).toEqual([
+      'Tesouro Prefixado 01/01/2010',
+      'Tesouro Prefixado 01/07/2010',
+    ]);
+  });
+
+  it('drops a row whose base date cannot be read, keeping the rest of the file', () => {
+    const csv = [
+      'Tipo Titulo;Data Vencimento;Data Base;Taxa Compra Manha;Taxa Venda Manha;PU Compra Manha;PU Venda Manha;PU Base Manha',
+      'Tesouro Selic;01/03/2029;16/03/2026;0,10;0,05;14.250,00;14.249,00;14.249,60',
+      'Tesouro Selic;01/03/2029;32/03/2026;0,10;0,05;14.250,00;14.249,00;14.249,60',
+    ].join('\n');
+    expect(parseTesouroCsv(csv, 'tesouro_transparente')?.map((p) => p.date)).toEqual([
+      '2026-03-16',
+    ]);
   });
 
   /**
@@ -36,7 +68,9 @@ describe('parseTesouroCsv (BR-008-12; AR-06 comma-decimal parsing)', () => {
    */
   it('BR-009-06: reads PU Venda Manhã, not PU Compra or PU Base', () => {
     const points = parseTesouroCsv(RECORDED_CSV, 'tesouro_transparente');
-    const ipca = points?.find((p) => p.ticker.startsWith('Tesouro IPCA+'));
+    const ipca = points?.find(
+      (p) => p.ticker.startsWith('Tesouro IPCA+') && p.date === '2026-03-16',
+    );
     // Row for 16/03/2026: compra 3.415,00 | venda 3.413,70 | base 3.414,20
     expect(ipca?.price.toString()).toBe('3413.7');
     expect(ipca?.price.toString()).not.toBe('3415'); // buy price — overstates
@@ -96,6 +130,19 @@ describe('parseTesouroCsv (BR-008-12; AR-06 comma-decimal parsing)', () => {
   });
 });
 
+/** A server that accepts the request and never answers — only the abort signal ends it. */
+function stubHangingFetch(): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      (_url: unknown, init?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    ),
+  );
+}
+
 describe('TesouroTransparenteProvider (SPEC-008 BR-008-12)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -109,7 +156,17 @@ describe('TesouroTransparenteProvider (SPEC-008 BR-008-12)', () => {
     const provider = new TesouroTransparenteProvider({ source: 'tesouro_transparente' });
     const result = await provider.fetchDailyPrices();
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toHaveLength(2);
+    if (result.ok) expect(result.value).toHaveLength(4);
+  });
+
+  it('#161: a server that never answers is UNAVAILABLE after the timeout, not a hang', async () => {
+    stubHangingFetch();
+    const provider = new TesouroTransparenteProvider({
+      source: 'tesouro_transparente',
+      timeoutMs: 20,
+    });
+    const result = await provider.fetchDailyPrices();
+    expect(result.ok).toBe(false);
   });
 
   it('a 5xx response is UNAVAILABLE', async () => {

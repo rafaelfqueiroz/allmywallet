@@ -481,6 +481,47 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     expect(again.callCount).toBe(0);
   });
 
+  /**
+   * #161: the Tesouro sync runs at 18:30, the equity capture at 17:05. A
+   * laptop closed in between captures every close and misses every Tesouro
+   * day, so catch-up must sync on a start that found no close missing. The
+   * sync queues the rebuild for what it fills itself, so catch-up rebuilds
+   * nothing of its own here.
+   */
+  it('#161: a start with no close missed still syncs the market series, and rebuilds nothing itself', async () => {
+    await catchUp(scenarioProvider());
+    let synced = 0;
+    const rebuilt: BusinessDate[] = [];
+
+    const summary = await catchUp(scenarioProvider(), [], {
+      syncMarketSeries: async () => {
+        synced += 1;
+      },
+      rebuildSnapshotsFrom: async (from) => {
+        rebuilt.push(from);
+      },
+    });
+
+    expect(synced).toBe(1);
+    expect(rebuilt).toEqual([]);
+    expect(summary.rebuiltFrom).toBeNull();
+  });
+
+  /** A tenant holding only Tesouro polls nothing, and must still be synced. */
+  it('#161: a start with nothing polled still syncs the market series', async () => {
+    let synced = 0;
+
+    const summary = await catchUp(scenarioProvider(), [], {
+      heldAssets: { listDistinctHeldAssetIds: async () => [] },
+      syncMarketSeries: async () => {
+        synced += 1;
+      },
+    });
+
+    expect(synced).toBe(1);
+    expect(summary.days).toEqual([]);
+  });
+
   it('AC/BR-021-33: catch-up sends no opportunity email for recovered days; a live crossing afterwards sends exactly one', async () => {
     const provider = scenarioProvider();
     // The live quote the first poll after start will receive: 29,50, below 30,00.
