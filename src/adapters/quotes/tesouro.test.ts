@@ -88,11 +88,13 @@ describe('parseTesouroCsv (BR-008-12; AR-06 comma-decimal parsing)', () => {
       'Tesouro Selic;01/03/2029;16/03/2026;0,10;0,05;14.250,00;14.249,00;14.249,60',
       'Tesouro IPCA+;15/05/2029;16/03/2026;5,79;5,84;3.415,00;3.413,70;3.414,20',
       'Tesouro Educa+;15/12/2030;16/03/2026;6,10;6,20;3.100,00;3.090,00;3.095,00',
+      'Tesouro Novo Produto;15/12/2030;16/03/2026;6,10;6,20;3.100,00;3.090,00;3.095,00',
     ].join('\n');
     expect(parseTesouroCsv(csv, 'tesouro_transparente')?.map((p) => p.ticker)).toEqual([
       'Tesouro Selic 2029',
       'Tesouro IPCA+ 2029',
-      'Tesouro Educa+ 15/12/2030',
+      'Tesouro Educa+ 2026',
+      'Tesouro Novo Produto 15/12/2030',
     ]);
   });
 

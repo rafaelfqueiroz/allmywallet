@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
 import {
   b3TesouroCode,
+  canonicalTesouroCode,
   fullTesouroCode,
   tesouroCatalogCodes,
   type TesouroTitle,
@@ -36,40 +37,101 @@ describe('#152 SPEC-008 BR-008-12 — a Tesouro title’s catalogue code', () =>
     expect(b3TesouroCode(title(product, maturity))).toBe(code);
   });
 
-  it('ignores surrounding whitespace in the published product name', () => {
-    expect(b3TesouroCode(title(' Tesouro Selic ', '2029-03-01'))).toBe('Tesouro Selic 2029');
+  it('ignores case, accents and surrounding whitespace in the published product name', () => {
+    expect(b3TesouroCode(title(' tesouro SELIC ', '2029-03-01'))).toBe('Tesouro Selic 2029');
   });
 
   /**
-   * Named for the year payments start, not the year they mature: the Educa+
-   * maturing 15/12/2030 is the 2026 title. Reading the maturity year would
-   * price one title from another.
+   * #164: named for the year payments start. Educa+ pays 60 months and
+   * matures on 15/12 four years on; Renda+ pays 240 months and matures on
+   * 15/12 nineteen years on. The pairs are Tesouro Transparente's own.
    */
   it.each([
-    ['Tesouro Educa+', '2030-12-15'],
-    ['Tesouro Renda+ Aposentadoria Extra', '2049-12-15'],
+    ['Tesouro Educa+', '2030-12-15', 'Tesouro Educa+ 2026'],
+    ['Tesouro Educa+', '2048-12-15', 'Tesouro Educa+ 2044'],
+    ['Tesouro Renda+ Aposentadoria Extra', '2049-12-15', 'Tesouro Renda+ Aposentadoria Extra 2030'],
+    ['Tesouro Renda+ Aposentadoria Extra', '2084-12-15', 'Tesouro Renda+ Aposentadoria Extra 2065'],
+  ])('#164: %s maturing %s is %s', (product, maturity, code) => {
+    expect(b3TesouroCode(title(product, maturity))).toBe(code);
+  });
+
+  /** A maturity off the product's structure is not renamed onto a title that fits it. */
+  it.each([
+    ['Tesouro Educa+', '2030-06-15'],
+    ['Tesouro Renda+ Aposentadoria Extra', '2049-12-01'],
+  ])('#164: %s maturing %s does not fit the structure and has no B3 code', (product, maturity) => {
+    expect(b3TesouroCode(title(product, maturity))).toBeNull();
+  });
+
+  it.each([
     ['Tesouro Novo Produto', '2040-01-01'],
-    ['tesouro selic', '2029-03-01'],
-  ])('%s has no B3 code it can derive', (product, maturity) => {
+    ['Tesouro IPCA+ Educacional', '2040-05-15'],
+    ['Tesouro Selic com Juros Semestrais', '2029-03-01'],
+    ['Tesouro IGPM+', '2031-01-01'],
+    ['Tesouro Selic IPCA+', '2029-03-01'],
+  ])('%s is no product the table knows, so it has no B3 code', (product, maturity) => {
     expect(b3TesouroCode(title(product, maturity))).toBeNull();
   });
 
   it('writes the full-date code in the form Tesouro Transparente publishes', () => {
-    expect(fullTesouroCode(title('Tesouro Educa+ ', '2030-12-15'))).toBe(
-      'Tesouro Educa+ 15/12/2030',
-    );
+    expect(fullTesouroCode(title('Tesouro Novo ', '2030-12-15'))).toBe('Tesouro Novo 15/12/2030');
   });
 });
 
-describe('#152 — tesouroCatalogCodes over one published batch', () => {
+describe('#164 SPEC-005 BR-005-14 — canonicalTesouroCode, B3’s Produto on import', () => {
+  it.each([
+    ['Tesouro Selic 2029', 'Tesouro Selic 2029'],
+    ['TESOURO SELIC 2029', 'Tesouro Selic 2029'],
+    ['  Tesouro   IPCA+ 2029 ', 'Tesouro IPCA+ 2029'],
+    ['Tesouro IPCA + 2029', 'Tesouro IPCA+ 2029'],
+    ['Tesouro IPCA+ com Juros Semestrais 2035', 'Tesouro IPCA+ com Juros Semestrais 2035'],
+    ['Tesouro IPCA+ c/ Juros Semestrais 2035', 'Tesouro IPCA+ com Juros Semestrais 2035'],
+    ['Tesouro Prefixado JS 2031', 'Tesouro Prefixado com Juros Semestrais 2031'],
+    ['Tesouro Educa+ 2026', 'Tesouro Educa+ 2026'],
+    ['TESOURO EDUCA+ 2026', 'Tesouro Educa+ 2026'],
+    ['Tesouro Renda+ Aposentadoria Extra 2030', 'Tesouro Renda+ Aposentadoria Extra 2030'],
+    ['Tesouro Renda+ 2030', 'Tesouro Renda+ Aposentadoria Extra 2030'],
+    ['Tesouro RendA+ Aposentadoria 2030', 'Tesouro Renda+ Aposentadoria Extra 2030'],
+  ])('%s resolves to %s', (produto, code) => {
+    expect(canonicalTesouroCode(produto)).toBe(code);
+  });
+
+  /** Keeps its own code and stays unpriced, visibly, rather than borrowing a price. */
+  it.each([
+    'PETR4',
+    'Tesouro Selic',
+    'Tesouro Novo Produto 2040',
+    'Tesouro IPCA+ Educacional 2040',
+    'CDB - BANCO TESTE S/A',
+    '',
+  ])('“%s” names no Tesouro title the table knows', (produto) => {
+    expect(canonicalTesouroCode(produto)).toBeNull();
+  });
+
+  /** The two sides must meet: whatever the sync writes, the importer resolves to it. */
+  it('agrees with the sync on every product', () => {
+    for (const [product, maturity] of [
+      ['Tesouro Selic', '2029-03-01'],
+      ['Tesouro Prefixado com Juros Semestrais', '2031-01-01'],
+      ['Tesouro Educa+', '2030-12-15'],
+      ['Tesouro Renda+ Aposentadoria Extra', '2049-12-15'],
+    ] as const) {
+      const code = b3TesouroCode(title(product, maturity));
+      expect(code).not.toBeNull();
+      expect(canonicalTesouroCode(code as string)).toBe(code);
+    }
+  });
+});
+
+describe('#152 — tesouroCatalogCodes over the published file', () => {
   it('gives each title its B3 code, and a product with none its full-date code, in order', () => {
     expect(
       tesouroCatalogCodes([
         title('Tesouro Selic', '2029-03-01'),
+        title('Tesouro Novo', '2030-12-15'),
         title('Tesouro Educa+', '2030-12-15'),
-        title('Tesouro IPCA+', '2029-05-15'),
       ]),
-    ).toEqual(['Tesouro Selic 2029', 'Tesouro Educa+ 15/12/2030', 'Tesouro IPCA+ 2029']);
+    ).toEqual(['Tesouro Selic 2029', 'Tesouro Novo 15/12/2030', 'Tesouro Educa+ 2026']);
   });
 
   /**
@@ -99,7 +161,7 @@ describe('#152 — tesouroCatalogCodes over one published batch', () => {
     ).toEqual(['Tesouro Selic 2029', 'Tesouro Selic 2029']);
   });
 
-  it('an empty batch has no codes', () => {
+  it('an empty file has no codes', () => {
     expect(tesouroCatalogCodes([])).toEqual([]);
   });
 });

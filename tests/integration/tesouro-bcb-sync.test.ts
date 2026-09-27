@@ -132,6 +132,44 @@ describe('SPEC-008 tesouro.sync / bcb.sync handlers (integration)', () => {
     expect(rows.map((row) => row.code)).toEqual(['Tesouro IPCA+ 2029']);
   });
 
+  /**
+   * #164: no B3 extract holding a Renda+ has been seen, so the importer must
+   * meet the sync's asset whichever way B3 spells the product.
+   */
+  it('#164: a Renda+ imported under another spelling is the title the sync prices', async () => {
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const repository = new DrizzleQuoteRepository(db);
+    const heldId = await new DrizzleAssetResolver(db).resolve({
+      code: 'TESOURO RENDA+ 2030',
+      name: 'TESOURO RENDA+ 2030',
+      assetClass: 'tesouro_direto',
+      nameStated: true,
+      classStated: true,
+    });
+    const points = parseTesouroCsv(
+      [
+        CSV_HEADER,
+        'Tesouro Renda+ Aposentadoria Extra;15/12/2049;16/03/2026;6,90;7,02;1.410,00;1.402,55;1.402,55',
+      ].join('\n'),
+      'tesouro_transparente',
+    );
+    if (points === null) throw new Error('setup failed: fixture CSV did not parse');
+
+    await handleTesouroSync({
+      catalog,
+      repository,
+      provider: { fetchDailyPrices: async () => ok(points) },
+      enqueueSnapshotRebuild: noRebuild,
+    });
+
+    const close = await repository.getClosePrice(heldId, BusinessDate.of('2026-03-16'));
+    expect(close?.close.toString()).toBe('1402.55');
+    const { rows } = await pool.query(
+      "SELECT code FROM assets WHERE class = 'tesouro_direto' ORDER BY code",
+    );
+    expect(rows.map((row) => row.code)).toEqual(['Tesouro Renda+ Aposentadoria Extra 2030']);
+  });
+
   it('AR-19: re-syncing the same title/date keeps one catalog row', async () => {
     const catalog = new DrizzleAssetCatalogRepository(db);
     const repository = new DrizzleQuoteRepository(db);
