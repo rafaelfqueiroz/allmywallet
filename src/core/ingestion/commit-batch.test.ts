@@ -4555,16 +4555,6 @@ describe('#138 — the four Movimentação rows that refused on every import', (
       const deps = buildFakeIngestionDeps('2026-09-21');
       await importFile(deps, file());
       const snapshot = deps.transactions.rows.map((row) => ({ ...row }));
-      console.log(
-        'DEBUG snapshot after first import',
-        snapshot
-          .filter(
-            (r) =>
-              r.type === 'rendimento' ||
-              (r.quantity && ['90', '70', '159.25'].includes(r.quantity.toString())),
-          )
-          .map((r) => [r.status, r.type, r.quantity?.toString(), r.tradeDate, r.naturalKey]),
-      );
 
       // Each half finds the other already applied in the ledger — the sales by
       // their liquidation value, the subscriptions on the ledger code.
