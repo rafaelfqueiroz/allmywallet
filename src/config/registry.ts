@@ -146,6 +146,51 @@ export const REGISTRY = {
       'Days a stored B3 corporate-event-factor fetch stays fresh before refresh; a failed fetch is always retried (SPEC-008 BR-008-29).',
     range: 'integer days, 1–90',
   },
+  /**
+   * SPEC-008 BR-008-09, DL-008-14 (#171) — when `quotes.close-capture` runs,
+   * São Paulo local time, and from when worker-start catch-up counts today's
+   * close as due. B3 publishes each day's COTAHIST file in the evening: in
+   * September 2026 between 20:08 and 21:05 on most days, and as late as 00:23
+   * the next day. A day not yet published at this time is fetched by the next
+   * run or the next worker start.
+   */
+  'quotes.close_capture_time': {
+    key: 'quotes.close_capture_time',
+    schema: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+    default: '22:00',
+    levels: ['deployment'],
+    description:
+      "São Paulo time the daily official-close job runs, after B3 publishes the day's COTAHIST file (SPEC-008 BR-008-09).",
+    range: "'HH:MM', 24-hour",
+  },
+  /**
+   * SPEC-008 BR-008-30 (#171) — how many days of one year a single run must
+   * need before it downloads that year's annual COTAHIST file (~80 MB) instead
+   * of one daily file (~0.5 MB) per day.
+   */
+  'quotes.cotahist_annual_min_days': {
+    key: 'quotes.cotahist_annual_min_days',
+    schema: z.number().int().min(1).max(366),
+    default: 100,
+    levels: ['deployment'],
+    description:
+      "Days of one year needed before closes are read from B3's annual COTAHIST file rather than daily files (SPEC-008 BR-008-30).",
+    range: 'integer days, 1–366',
+  },
+  /**
+   * SPEC-008 BR-008-30 (#171) — the request timeout for a COTAHIST download,
+   * body included. Worker-start catch-up runs before any schedule is
+   * registered, so a server that never answers must not hold the worker back.
+   */
+  'quotes.cotahist_timeout_ms': {
+    key: 'quotes.cotahist_timeout_ms',
+    schema: z.number().int().min(5000).max(900000),
+    default: 300000,
+    levels: ['deployment'],
+    description:
+      'Request timeout for one B3 COTAHIST file download, body included (SPEC-008 BR-008-30).',
+    range: 'integer milliseconds, 5000–900000',
+  },
   'market.trading_calendar': {
     key: 'market.trading_calendar',
     // The calendar *data* (B3 holidays) is out of this spec's scope — this key

@@ -304,6 +304,60 @@ export interface CloseGapRepositoryPort {
   clearGap(assetId: AssetId, date: BusinessDate): Promise<void>;
 }
 
+/**
+ * SPEC-008 BR-008-09/BR-008-30, DL-008-14 (#171) — one official close as B3's
+ * COTAHIST states it: `PREULT` of the spot-market (`TPMERC` 010) row for
+ * `CODNEG`, divided by `FATCOT` so it is always a per-unit price.
+ */
+export interface OfficialClose {
+  /** `CODNEG`, trimmed — the catalog's `code` for a listed asset (`PETR4`). */
+  readonly ticker: string;
+  readonly date: BusinessDate;
+  readonly close: Money;
+}
+
+export interface OfficialClosesFile {
+  /** Rows for the requested tickers only, in no particular order. */
+  readonly closes: readonly OfficialClose[];
+  /**
+   * The latest `DATPRE` among **all** quote rows of the file, not only the
+   * requested ones — `null` for a file with no quote rows. A requested date
+   * after it is not yet published; a requested date on or before it with no
+   * row for a ticker is a day that ticker has no close for.
+   */
+  readonly lastDate: BusinessDate | null;
+}
+
+export const OfficialCloseSourceErrorCode = {
+  /** The file does not exist yet (HTTP 404) — retried later, never a gap (BR-008-09). */
+  NOT_PUBLISHED: 'OFFICIAL_CLOSES_NOT_PUBLISHED',
+  /** Network failure, a non-404 error status, a timeout, or a file that does not parse. */
+  UNAVAILABLE: 'OFFICIAL_CLOSES_UNAVAILABLE',
+} as const;
+export type OfficialCloseSourceErrorCode =
+  (typeof OfficialCloseSourceErrorCode)[keyof typeof OfficialCloseSourceErrorCode];
+
+/**
+ * SPEC-008 BR-008-30 — B3's public historical-quotes files, fetched without
+ * credentials (SPEC-003 BR-003-08). The daily file (`COTAHIST_DddMMyyyy.ZIP`)
+ * serves recent days; the annual file (`COTAHIST_Aaaaa.ZIP`) serves many days
+ * of one year in a single request. Named for the role, not the vendor (DV-11).
+ *
+ * BR-008-31: what comes back values and charts the user's own portfolio only.
+ */
+export interface OfficialCloseSource {
+  /** Persisted as `price_quotes.source` for every close this source supplies. */
+  readonly source: string;
+  fetchDay(
+    date: BusinessDate,
+    tickers: ReadonlySet<string>,
+  ): Promise<Result<OfficialClosesFile, DomainError>>;
+  fetchYear(
+    year: number,
+    tickers: ReadonlySet<string>,
+  ): Promise<Result<OfficialClosesFile, DomainError>>;
+}
+
 /** BCB SGS series 12 (CDI), 433 (IPCA), 11 (Selic), plus IBOV (FR-6.x). */
 export interface IndexSeriesProvider {
   /**
