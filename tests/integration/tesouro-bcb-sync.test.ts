@@ -13,6 +13,7 @@ import { handleTesouroSync } from '@/worker/handlers/tesouro';
 import { TesouroErrorCode, parseTesouroCsv } from '@/adapters/quotes/tesouro';
 import { DrizzleAssetResolver } from '@/adapters/db/ingestion-resolvers';
 import { handleBcbSync } from '@/worker/handlers/bcb';
+import { BcbSgsErrorCode } from '@/adapters/quotes/bcb-sgs';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 
 /**
@@ -309,67 +310,171 @@ describe('SPEC-008 tesouro.sync / bcb.sync handlers (integration)', () => {
     expect(await catalog.findByCode('Tesouro Selic 2029')).toBeNull();
   });
 
-  it('backfills from scratch on first load, then fetches only since the latest stored point', async () => {
-    const indexSeriesRepository = new DrizzleIndexSeriesRepository(db);
-    const seenSince: BusinessDate[] = [];
-    const provider = {
-      fetchSeries: async (code: 'CDI' | 'IPCA' | 'SELIC' | 'IBOV', since: BusinessDate) => {
-        seenSince.push(since);
+  const ibovQuoteProvider = {
+    fetchQuote: async () =>
+      ok({
+        ticker: '^BVSP',
+        price: Money.fromString('130000.00'),
+        quotedAt: new Date(),
+        source: 'brapi_free',
+      }),
+    // SPEC-021 BR-021-29 extended the port; `bcb.sync` never asks for history.
+    fetchHistoricalCloses: async () =>
+      err(domainError('QUOTE_PROVIDER_UNAVAILABLE', { reason: 'not used by bcb.sync' })),
+  };
+
+  const clockOn = (day: string) => ({
+    now: () => new Date(`${day}T21:00:00Z`),
+    today: () => BusinessDate.of(day),
+  });
+
+  type SgsCode = 'CDI' | 'IPCA' | 'SELIC' | 'IBOV';
+  interface SeenRequest {
+    readonly code: SgsCode;
+    readonly since: BusinessDate;
+    readonly until: BusinessDate;
+  }
+
+  /** One CDI point on each window's last day; every other series empty. */
+  function recordingProvider(
+    seen: SeenRequest[],
+    fail?: (request: SeenRequest) => ReturnType<typeof domainError> | null,
+  ) {
+    return {
+      fetchSeries: async (code: SgsCode, since: BusinessDate, until: BusinessDate) => {
+        const request = { code, since, until };
+        seen.push(request);
+        const failure = fail?.(request) ?? null;
+        if (failure) return err(failure);
         if (code !== 'CDI') return ok([]);
         return ok([
-          {
-            code,
-            date: BusinessDate.of('2026-03-16'),
-            value: Quantity.fromString('11.65'),
-            source: 'bcb_sgs',
-          },
+          { code, date: until, value: Quantity.fromString('0.050788'), source: 'bcb_sgs' },
         ]);
       },
     };
-    const quoteProvider = {
-      fetchQuote: async () =>
-        ok({
-          ticker: '^BVSP',
-          price: Money.fromString('130000.00'),
-          quotedAt: new Date(),
-          source: 'brapi_free',
-        }),
-      // SPEC-021 BR-021-29 extended the port; `bcb.sync` never asks for history.
-      fetchHistoricalCloses: async () =>
-        err(domainError('QUOTE_PROVIDER_UNAVAILABLE', { reason: 'not used by bcb.sync' })),
-    };
+  }
+
+  const years = (since: BusinessDate, until: BusinessDate): number =>
+    (Date.parse(until) - Date.parse(since)) / (365.25 * 86_400_000);
+
+  it('backfills from scratch on first load, then fetches only since the latest stored point', async () => {
+    const indexSeriesRepository = new DrizzleIndexSeriesRepository(db);
+    const seen: SeenRequest[] = [];
+    const provider = recordingProvider(seen);
 
     await handleBcbSync({
-      clock: {
-        now: () => new Date('2026-03-16T21:00:00Z'),
-        today: () => BusinessDate.of('2026-03-16'),
-      },
+      clock: clockOn('2026-03-16'),
       indexSeriesRepository,
       provider,
-      quoteProvider,
+      quoteProvider: ibovQuoteProvider,
     });
 
     expect(await indexSeriesRepository.latestDate('CDI')).toBe('2026-03-16');
     // First run for CDI had nothing stored — backfilled from the far-past default.
-    expect(seenSince[0]).toBe('2000-01-01');
+    expect(seen[0]).toEqual({ code: 'CDI', since: '2000-01-01', until: '2009-12-31' });
 
+    seen.length = 0;
     await handleBcbSync({
-      clock: {
-        now: () => new Date('2026-03-17T21:00:00Z'),
-        today: () => BusinessDate.of('2026-03-17'),
-      },
+      clock: clockOn('2026-03-17'),
       indexSeriesRepository,
       provider,
-      quoteProvider,
+      quoteProvider: ibovQuoteProvider,
     });
 
     // Second run fetches only since the point already stored — not a full re-backfill.
-    expect(seenSince[3]).toBe('2026-03-16');
+    expect(seen.filter((r) => r.code === 'CDI')).toEqual([
+      { code: 'CDI', since: '2026-03-16', until: '2026-03-17' },
+    ]);
 
     // IBOV, fetched via QuoteProvider, also lands in index_series.
     const ibovRows = await pool.query(
       `SELECT count(*)::int AS n FROM index_series WHERE code = 'IBOV'`,
     );
     expect(ibovRows.rows[0]?.n).toBeGreaterThan(0);
+  });
+
+  it('#123: a 26-year backfill is several requests of at most 10 years, in order, each stored', async () => {
+    const indexSeriesRepository = new DrizzleIndexSeriesRepository(db);
+    const seen: SeenRequest[] = [];
+
+    await handleBcbSync({
+      clock: clockOn('2026-09-28'),
+      indexSeriesRepository,
+      provider: recordingProvider(seen),
+      quoteProvider: ibovQuoteProvider,
+    });
+
+    for (const code of ['CDI', 'IPCA', 'SELIC'] as const) {
+      expect(seen.filter((r) => r.code === code)).toEqual([
+        { code, since: '2000-01-01', until: '2009-12-31' },
+        { code, since: '2010-01-01', until: '2019-12-31' },
+        { code, since: '2020-01-01', until: '2026-09-28' },
+      ]);
+    }
+    expect(seen.every((r) => years(r.since, r.until) < 10)).toBe(true);
+
+    const cdi = await pool.query<{ date: string }>(
+      `SELECT to_char(date, 'YYYY-MM-DD') AS date FROM index_series WHERE code = 'CDI' ORDER BY date`,
+    );
+    expect(cdi.rows.map((r) => r.date)).toEqual(['2009-12-31', '2019-12-31', '2026-09-28']);
+  });
+
+  it('#123: a failed window keeps the windows before it, and the next run resumes after them', async () => {
+    const indexSeriesRepository = new DrizzleIndexSeriesRepository(db);
+    const seen: SeenRequest[] = [];
+    const rejectSecondCdiWindow = (r: SeenRequest) =>
+      r.code === 'CDI' && r.since === '2010-01-01'
+        ? domainError(BcbSgsErrorCode.REJECTED, { code: 'CDI', status: 406, message: null })
+        : null;
+
+    await handleBcbSync({
+      clock: clockOn('2026-09-28'),
+      indexSeriesRepository,
+      provider: recordingProvider(seen, rejectSecondCdiWindow),
+      quoteProvider: ibovQuoteProvider,
+    });
+
+    // The failure ends CDI's walk; the first window stays stored, and the
+    // other series are not held back by it.
+    expect(seen.filter((r) => r.code === 'CDI').map((r) => r.since)).toEqual([
+      '2000-01-01',
+      '2010-01-01',
+    ]);
+    expect(seen.filter((r) => r.code === 'SELIC')).toHaveLength(3);
+    expect(await indexSeriesRepository.latestDate('CDI')).toBe('2009-12-31');
+
+    seen.length = 0;
+    await handleBcbSync({
+      clock: clockOn('2026-09-28'),
+      indexSeriesRepository,
+      provider: recordingProvider(seen),
+      quoteProvider: ibovQuoteProvider,
+    });
+
+    // Resumes from the last stored point; the stored span is not re-walked.
+    expect(seen.filter((r) => r.code === 'CDI')).toEqual([
+      { code: 'CDI', since: '2009-12-31', until: '2019-12-30' },
+      { code: 'CDI', since: '2019-12-31', until: '2026-09-28' },
+    ]);
+    expect(await indexSeriesRepository.latestDate('CDI')).toBe('2026-09-28');
+  });
+
+  it('#123: a window BCB holds nothing for is skipped, not a failure', async () => {
+    const indexSeriesRepository = new DrizzleIndexSeriesRepository(db);
+    const seen: SeenRequest[] = [];
+    const firstCdiWindowEmpty = (r: SeenRequest) =>
+      r.code === 'CDI' && r.since === '2000-01-01'
+        ? domainError(BcbSgsErrorCode.NO_DATA, { code: 'CDI', status: 404, message: null })
+        : null;
+
+    await handleBcbSync({
+      clock: clockOn('2026-09-28'),
+      indexSeriesRepository,
+      provider: recordingProvider(seen, firstCdiWindowEmpty),
+      quoteProvider: ibovQuoteProvider,
+    });
+
+    expect(seen.filter((r) => r.code === 'CDI')).toHaveLength(3);
+    expect(await indexSeriesRepository.latestDate('CDI')).toBe('2026-09-28');
   });
 });

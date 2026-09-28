@@ -306,9 +306,15 @@ export interface CloseGapRepositoryPort {
 
 /** BCB SGS series 12 (CDI), 433 (IPCA), 11 (Selic), plus IBOV (FR-6.x). */
 export interface IndexSeriesProvider {
+  /**
+   * Points dated `since` to `until`, both inclusive. The range is bounded
+   * because the provider bounds it (#123: BCB refuses a daily-series window
+   * over 10 years), so the caller walks a long backfill in windows it accepts.
+   */
   fetchSeries(
     code: IndexSeriesCode,
     since: BusinessDate,
+    until: BusinessDate,
   ): Promise<Result<readonly IndexSeriesPointRecord[], DomainError>>;
 }
 

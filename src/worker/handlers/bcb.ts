@@ -7,6 +7,7 @@ import type {
   IndexSeriesRepositoryPort,
   QuoteProvider,
 } from '@/core/quotes/ports';
+import { BcbSgsErrorCode, sgsRequestWindows } from '@/adapters/quotes/bcb-sgs';
 import {
   buildIndexSeriesProvider,
   buildQuoteProvider,
@@ -27,6 +28,11 @@ export interface BcbSyncDeps {
  * only since the latest stored point, so a daily sync is a small
  * incremental request, not a full re-download.
  *
+ * #123: the range is walked in windows BCB accepts (`sgsRequestWindows`),
+ * oldest first, each stored before the next is requested. A failed window
+ * ends that series' run and keeps what is already stored, so the next run
+ * resumes from `latestDate` rather than from `BACKFILL_START` (AR-19).
+ *
  * `BACKFILL_START` is a one-time technical default for how far back the
  * initial load reaches, not a business threshold — SPEC-002's registry
  * governs cadences/thresholds/budgets an operator tunes; this is neither.
@@ -45,15 +51,22 @@ export async function handleBcbSync(overrides?: Partial<BcbSyncDeps>): Promise<v
   for (const code of SGS_CODES) {
     const latest = await indexSeriesRepository.latestDate(code);
     const since = latest ?? BACKFILL_START;
-    const fetched = await provider.fetchSeries(code, since);
-    if (!fetched.ok) {
-      logger.error({ queue: 'bcb.sync', code, err: fetched.error }, 'bcb.sync fetch failed');
-      continue;
+    for (const window of sgsRequestWindows(since, clock.today())) {
+      const fetched = await provider.fetchSeries(code, window.since, window.until);
+      if (!fetched.ok) {
+        // A window BCB holds nothing for is empty, not broken.
+        if (fetched.error.code === BcbSgsErrorCode.NO_DATA) continue;
+        logger.error(
+          { queue: 'bcb.sync', code, window, err: fetched.error },
+          'bcb.sync fetch failed',
+        );
+        break;
+      }
+      // AR-19: `upsertPoints` is keyed `(code, date)` — a retried sync for
+      // dates already stored overwrites with the same values, not a duplicate.
+      await indexSeriesRepository.upsertPoints(fetched.value);
+      totalPoints += fetched.value.length;
     }
-    // AR-19: `upsertPoints` is keyed `(code, date)` — a retried sync for
-    // dates already stored overwrites with the same values, not a duplicate.
-    await indexSeriesRepository.upsertPoints(fetched.value);
-    totalPoints += fetched.value.length;
   }
 
   // IBOV is not a BCB SGS series (see bcb-sgs.ts) — fetched via the same
