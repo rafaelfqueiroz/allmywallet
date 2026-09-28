@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
-import type { TransactionId } from '@/core/shared/ids';
-import { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
+import { ImportBatchId, ImportRowId, TransactionId, UserId } from '@/core/shared/ids';
 import { Money, Quantity, asStored } from '@/core/shared/money';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
 import { editTransaction } from '@/core/ledger/edit-transaction';
-import type { Transaction } from '@/core/ledger/transaction';
+import { computeTotalValue, type Transaction } from '@/core/ledger/transaction';
 import { replayPosition } from '@/core/positions/replay';
+import { PositionErrorCode } from '@/core/positions/errors';
 import { IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportRow, NormalizedTransactionRecord, ParsedExtract } from '@/core/ingestion/ports';
 import { stageBatch } from '@/core/ingestion/stage-batch';
@@ -143,6 +143,45 @@ async function setupOfferedPair(deps: FakeIngestionDeps) {
   return { batchId, exerciseRow, creditRow, creditTransactionId: classified.value.transaction.id };
 }
 
+/**
+ * SPEC-006 BR-006-15 (#157 review F3) — a stray sale on `row`'s own position
+ * for more than it ever held, so `guardReplayable` refuses any edit whose
+ * scope includes that position. Inserted directly (bypassing staging and
+ * commit) precisely to exercise the guard itself, independent of whether the
+ * edit's own fields could ever produce this on their own.
+ */
+async function insertUnreplayableSell(deps: FakeIngestionDeps, row: ImportRow): Promise<void> {
+  const quantity = Quantity.fromString('5');
+  const unitPrice = Money.fromString('10');
+  await deps.transactions.insertMany([
+    {
+      id: TransactionId.generate(),
+      userId,
+      assetId: row.assetId,
+      institutionId: row.institutionId,
+      type: 'sell',
+      status: 'active',
+      tradeDate: BusinessDate.of('2024-12-31'),
+      quantity,
+      unitPrice,
+      fees: Money.zero(),
+      totalValue: computeTotalValue('sell', quantity, unitPrice, Money.zero()),
+      ratio: null,
+      conversionGroupId: null,
+      costBasis: null,
+      naturalKey: `rogue-sell-${row.id}`,
+      occurrence: 1,
+      importBatchId: null,
+      isManual: true,
+      isUserModified: false,
+      costIsEstimate: false,
+      estimateCloseDate: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ]);
+}
+
 describe('findSubscriptionOffers (SPEC-005 BR-005-20d, #157)', () => {
   it('finds an offer for a locked, zero-cost hand-classified credit, with the stored close', async () => {
     const deps = buildFakeIngestionDeps('2024-03-01');
@@ -214,6 +253,45 @@ describe('findSubscriptionOffers (SPEC-005 BR-005-20d, #157)', () => {
       records: [buy()],
     });
     const rows = await deps.rows.listByBatch(batchId);
+
+    const offers = await findSubscriptionOffers(deps, rows, WINDOW_DAYS);
+
+    expect(offers.size).toBe(0);
+  });
+
+  it("SPEC-005 BR-005-20d (#157 review F1) — finds nothing when a conversion definition already names the credit's code (WIZS3 → WIZC3, real v6 definition)", async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'WIZC12',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        // WIZC3 is `wizs3-to-wizc3`'s target — an asset-conversion
+        // definition already names it, so BR-005-20d refuses the pair
+        // outright, before this ever becomes an `offer` (#157 review F1).
+        atualizacaoCredit({
+          assetCode: 'WIZC3',
+          assetClass: 'stock',
+          quantity: Quantity.fromString('10'),
+          tradeDate: BusinessDate.of('2024-01-20'),
+        }),
+      ],
+    });
+    const committed = await commitBatch(deps, userId, { batchId });
+    expect(committed.ok).toBe(true);
+    if (!committed.ok) return;
+    expect(committed.value.resolvedSubscriptions).toBe(0);
+
+    const rows = await deps.rows.listByBatch(batchId);
+    const creditRow = rows.find(
+      (r) => r.record.kind === 'transaction' && r.record.assetCode === 'WIZC3',
+    ) as ImportRow;
+    const classified = await classifyImportRow(deps, { rowId: creditRow.id, type: 'bonificacao' });
+    expect(classified.ok).toBe(true);
 
     const offers = await findSubscriptionOffers(deps, rows, WINDOW_DAYS);
 
@@ -312,8 +390,6 @@ describe('resolveSubscriptionOffer (SPEC-005 BR-005-20d, #157, DL-005-25) — Re
     // A real price becomes known: DL-005-22's own close, on the credit's date.
     deps.closePrices.seed(mainAssetId, BusinessDate.of('2024-02-10'), Money.fromString('27.00'));
 
-    const batchBefore = await deps.batches.findById(pairBatch);
-
     const result = await resolveSubscriptionOffer(deps, {
       rowId: exerciseRow.id,
       windowDays: WINDOW_DAYS,
@@ -342,11 +418,18 @@ describe('resolveSubscriptionOffer (SPEC-005 BR-005-20d, #157, DL-005-25) — Re
     const updatedExerciseRow = await deps.rows.findById(exerciseRow.id);
     expect(updatedExerciseRow?.classification).toBe('ignored');
 
+    // SPEC-005 BR-005-20d (#157 review F2): recomputed from the batch's own
+    // rows, not a ±1 adjustment — the credit's row is `new` (classified
+    // earlier) and the exercise's is now `ignored`, so nothing is left
+    // needing attention on this batch.
     const batchAfter = await deps.batches.findById(pairBatch);
-    expect(batchAfter?.rowCounts?.ignored).toBe((batchBefore?.rowCounts?.ignored ?? 0) + 1);
-    expect(batchAfter?.rowCounts?.needsAttention).toBe(
-      (batchBefore?.rowCounts?.needsAttention ?? 0) - 1,
-    );
+    expect(batchAfter?.rowCounts).toMatchObject({
+      read: 2,
+      new: 1,
+      duplicates: 0,
+      ignored: 1,
+      needsAttention: 0,
+    });
 
     // Preço médio rises: 900,00 (history) + 270,00 (the now-costed
     // subscription, 10 @ 27,00) ÷ 100 = 11,70 — up from the bonificação's
@@ -427,6 +510,32 @@ describe('resolveSubscriptionOffer (SPEC-005 BR-005-20d, #157, DL-005-25) — Re
     expect(result.error.code).toBe(IngestionUseCaseErrorCode.ROW_NOT_FOUND);
   });
 
+  it('SPEC-006 BR-006-15 (#157 review F3) — refuses and writes nothing when the exercise position cannot replay', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const { exerciseRow, creditRow, creditTransactionId } = await setupOfferedPair(deps);
+    deps.closePrices.seed(creditRow.assetId, BusinessDate.of('2024-02-22'), Money.fromString('50'));
+    await insertUnreplayableSell(deps, exerciseRow);
+
+    const result = await resolveSubscriptionOffer(deps, {
+      rowId: exerciseRow.id,
+      windowDays: WINDOW_DAYS,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe(PositionErrorCode.INSUFFICIENT_QUANTITY);
+
+    // Neither leg was written — the guard covers both scopes together.
+    const exerciseTransaction = await deps.transactions.findById(
+      exerciseRow.transactionId as TransactionId,
+    );
+    expect(exerciseTransaction?.status).toBe('unclassified');
+    const creditTransaction = await deps.transactions.findById(creditTransactionId);
+    expect(creditTransaction).toMatchObject({ type: 'bonificacao', status: 'active' });
+    const untouchedExerciseRow = await deps.rows.findById(exerciseRow.id);
+    expect(untouchedExerciseRow?.classification).toBe('unclassified');
+  });
+
   it('a later re-import changes nothing (BR-005-17/AR-19)', async () => {
     const deps = buildFakeIngestionDeps('2024-03-01');
     const extract: ParsedExtract = {
@@ -464,10 +573,18 @@ describe('resolveSubscriptionOffer (SPEC-005 BR-005-20d, #157, DL-005-25) — Re
     expect(resolved.ok).toBe(true);
 
     const secondBatchId = await stagedBatch(deps, extract);
+    const secondRows = await deps.rows.listByBatch(secondBatchId);
+    // The credit's key survived the resolve (BR-005-17): the re-import
+    // matches both rows against their existing occurrence, staging neither
+    // fresh.
+    expect(secondRows.map((r) => r.classification)).toEqual(['duplicate', 'duplicate']);
+    const transactionsBefore = deps.transactions.rows.length;
+
     const second = await commitBatch(deps, userId, { batchId: secondBatchId });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.resolvedSubscriptions).toBe(0);
+    expect(deps.transactions.rows.length).toBe(transactionsBefore); // No new transaction inserted.
 
     const creditTransaction = await deps.transactions.findById(classified.value.transaction.id);
     expect(asStored((creditTransaction as Transaction).unitPrice)).toBe('50.00000000');
@@ -499,10 +616,20 @@ describe('keepSubscriptionClassification (SPEC-005 BR-005-20d, #157, DL-005-25) 
     const updatedExerciseRow = await deps.rows.findById(exerciseRow.id);
     expect(updatedExerciseRow?.classification).toBe('ignored');
 
-    const batchAfter = await deps.batches.findById(batchId);
     const creditRowAfter = await deps.rows.findById(creditRow.id);
-    expect(creditRowAfter?.classification).not.toBe('ignored');
-    expect(batchAfter).toBeDefined();
+    expect(creditRowAfter?.classification).toBe('new'); // Unchanged by Keep — set by `classifyImportRow` earlier.
+
+    // SPEC-005 BR-005-20d (#157 review F2/F3): recomputed from the batch's
+    // own rows, not a ±1 adjustment. The credit's row is `new`, the
+    // exercise's is now `ignored` — nothing left needing attention.
+    const batchAfter = await deps.batches.findById(batchId);
+    expect(batchAfter?.rowCounts).toMatchObject({
+      read: 2,
+      new: 1,
+      duplicates: 0,
+      ignored: 1,
+      needsAttention: 0,
+    });
   });
 
   it('refuses SUBSCRIPTION_OFFER_UNAVAILABLE for a row with no offer', async () => {
@@ -545,6 +672,30 @@ describe('keepSubscriptionClassification (SPEC-005 BR-005-20d, #157, DL-005-25) 
     expect(result.error.code).toBe(IngestionUseCaseErrorCode.ROW_NOT_FOUND);
   });
 
+  it('SPEC-006 BR-006-15 (#157 review F3) — refuses and writes nothing when the exercise position cannot replay', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const { exerciseRow, creditTransactionId } = await setupOfferedPair(deps);
+    await insertUnreplayableSell(deps, exerciseRow);
+
+    const result = await keepSubscriptionClassification(deps, {
+      rowId: exerciseRow.id,
+      windowDays: WINDOW_DAYS,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe(PositionErrorCode.INSUFFICIENT_QUANTITY);
+
+    const exerciseTransaction = await deps.transactions.findById(
+      exerciseRow.transactionId as TransactionId,
+    );
+    expect(exerciseTransaction?.status).toBe('unclassified');
+    const creditTransaction = await deps.transactions.findById(creditTransactionId);
+    expect(creditTransaction).toMatchObject({ type: 'bonificacao', status: 'active' });
+    const untouchedExerciseRow = await deps.rows.findById(exerciseRow.id);
+    expect(untouchedExerciseRow?.classification).toBe('unclassified');
+  });
+
   it('a later re-import changes nothing (BR-005-17/AR-19)', async () => {
     const deps = buildFakeIngestionDeps('2024-03-01');
     const extract: ParsedExtract = {
@@ -581,10 +732,15 @@ describe('keepSubscriptionClassification (SPEC-005 BR-005-20d, #157, DL-005-25) 
     expect(kept.ok).toBe(true);
 
     const secondBatchId = await stagedBatch(deps, extract);
+    const secondRows = await deps.rows.listByBatch(secondBatchId);
+    expect(secondRows.map((r) => r.classification)).toEqual(['duplicate', 'duplicate']);
+    const transactionsBefore = deps.transactions.rows.length;
+
     const second = await commitBatch(deps, userId, { batchId: secondBatchId });
     expect(second.ok).toBe(true);
     if (!second.ok) return;
     expect(second.value.resolvedSubscriptions).toBe(0);
+    expect(deps.transactions.rows.length).toBe(transactionsBefore);
 
     const creditTransaction = await deps.transactions.findById(classified.value.transaction.id);
     expect(creditTransaction).toMatchObject({ type: 'bonificacao', status: 'active' });

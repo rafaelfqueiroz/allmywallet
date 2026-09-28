@@ -1,4 +1,5 @@
 import type { InstitutionId } from '@/core/shared/ids';
+import { SUBSCRIPTION_EXCLUDED_CODES } from '@/core/ingestion/asset-conversion-definitions';
 import { conversionEvidenceMovementOf } from '@/core/ingestion/movement-map';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import type { ImportRow, SubscriptionEvidenceReader } from '@/core/ingestion/ports';
@@ -93,6 +94,10 @@ export async function planSubscriptionCloseRequests(
       const isExercise = isExerciseRow(row);
       const isCredit = !isExercise && isCreditRow(row);
       if (!isExercise && !isCredit) continue;
+      // BR-005-20d: "no pair forms when an asset-conversion or liquidation
+      // definition names the credit's code" — refused before evidence is
+      // even gathered for it, same as `planSubscriptions` (#157 review F1).
+      if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(row.record.assetCode)) continue;
       const id = `row:${row.id}`;
       evidence.push({
         id,
@@ -115,6 +120,7 @@ export async function planSubscriptionCloseRequests(
         item.transaction.type === 'subscription' && suffix === 'direitos de subscricao - exercido';
       const isCredit = !isExercise && suffix === 'atualizacao';
       if (!isExercise && !isCredit) continue;
+      if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(item.assetCode)) continue;
       const state: SubscriptionEvidenceState =
         imported(item.transaction) && item.transaction.status === 'unclassified'
           ? 'open'

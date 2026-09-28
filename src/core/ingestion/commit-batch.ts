@@ -38,6 +38,7 @@ import {
 import {
   ASSET_CONVERSION_DEFINITIONS,
   ASSET_LIQUIDATION_DEFINITIONS,
+  SUBSCRIPTION_EXCLUDED_CODES,
   type AssetLiquidationDefinition,
 } from '@/core/ingestion/asset-conversion-definitions';
 import {
@@ -1913,32 +1914,6 @@ async function planLiquidations(
   }
   return writes;
 }
-
-/**
- * SPEC-005 BR-005-20d — every asset code any `ASSET_CONVERSION_DEFINITIONS`
- * or `ASSET_LIQUIDATION_DEFINITIONS` entry names, on either side. A code a
- * definition already owns is never read as a subscription's main asset — "an
- * asset-conversion or liquidation definition names the credit's code"
- * refuses the pair outright, before any evidence is even gathered for it.
- * Computed once: the definition tables are module-level constants.
- */
-const SUBSCRIPTION_EXCLUDED_CODES: ReadonlySet<string> = new Set([
-  ...ASSET_CONVERSION_DEFINITIONS.flatMap((definition) => [
-    ...definition.sourceAssetCodes,
-    ...definition.targets.flatMap((target) =>
-      target.evidenceAssetCode === undefined
-        ? [target.assetCode]
-        : [target.assetCode, target.evidenceAssetCode],
-    ),
-  ]),
-  ...ASSET_LIQUIDATION_DEFINITIONS.flatMap((definition) => [
-    ...definition.sources.map((source) => source.assetCode),
-    definition.target.assetCode,
-    ...(definition.target.evidenceAssetCode === undefined
-      ? []
-      : [definition.target.evidenceAssetCode]),
-  ]),
-]);
 
 /** What a resolved pair's exercise write does: insert a fresh superseded copy, or update an existing stored one in place. */
 interface PlannedSubscriptionSupersede {

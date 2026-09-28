@@ -63,11 +63,14 @@ const ADDS_SHARES_TRANSACTION_TYPES: ReadonlySet<TransactionType> = new Set([
  * transaction is read for what it already decided about cost, so every
  * caller (commit, the close-request backfill, the read-time offer) agrees
  * on the same reading. `null` covers everything BR-005-20d has no view on: a
- * type that does not add shares, or a negative `adjustment`.
+ * status other than `active` (#157 review F6 — a `superseded` or
+ * `unclassified` row adds nothing to any replay, whatever its type or
+ * price), a type that does not add shares, or a negative `adjustment`.
  */
 export function deriveSubscriptionHandClassification(
   transaction: Transaction,
 ): SubscriptionCreditHandClassification | null {
+  if (transaction.status !== 'active') return null;
   if (!ADDS_SHARES_TRANSACTION_TYPES.has(transaction.type)) return null;
   if (transaction.type === 'adjustment' && !transaction.quantity.isPositive()) return null;
   return transaction.unitPrice.isPositive() ? 'costed' : 'zero_cost';
@@ -249,9 +252,16 @@ export function resolveSubscriptions(input: ResolveSubscriptionsInput): ResolveS
     }
 
     if (creditRow.state === 'locked') {
-      // DL-005-25: "credit locked and exercise applied → applied" — the
-      // no-op state either outcome below leaves behind, so a later import of
-      // the same pair changes nothing.
+      // A credit locked at commit and an exercise `applied` through the
+      // ordinary BR-005-20d path (superseded with no user flag) — reachable,
+      // for instance, when the credit is reclassified again after a
+      // *resolved* pair already applied. Note this is **not** the state
+      // #157's own two actions leave: `editTransactions` flags the exercise
+      // user-modified too (the default), so after **Resolve as
+      // subscription** or **Keep my classification** the exercise itself
+      // reads `locked`, and a later import takes the `exercise.state ===
+      // 'locked'` branch above instead — still a no-op (BR-005-17), just via
+      // that branch rather than this one (#157 review F5).
       if (exercise.state === 'applied') {
         pairs.push({ status: 'applied', exerciseId: exercise.id, creditId: creditRow.id });
         continue;

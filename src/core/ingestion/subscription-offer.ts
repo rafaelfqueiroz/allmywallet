@@ -6,10 +6,12 @@ import { type Result, err } from '@/core/shared/result';
 import { editTransactions, type EditTransactionsResult } from '@/core/ledger/edit-transaction';
 import type { Transaction, TransactionType } from '@/core/ledger/transaction';
 import { replayQuantity } from '@/core/positions/replay';
+import { SUBSCRIPTION_EXCLUDED_CODES } from '@/core/ingestion/asset-conversion-definitions';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import type { ImportRow } from '@/core/ingestion/ports';
+import { summarizeRows } from '@/core/ingestion/stage-batch';
 import {
   deriveSubscriptionHandClassification,
   resolveSubscriptions,
@@ -109,6 +111,10 @@ export async function findSubscriptionOffers(
         item.transaction.type === 'subscription' && suffix === 'direitos de subscricao - exercido';
       const isCredit = !isExercise && suffix === 'atualizacao';
       if (!isExercise && !isCredit) continue;
+      // BR-005-20d: "no pair forms when an asset-conversion or liquidation
+      // definition names the credit's code" — refused before evidence is
+      // even gathered for it, same as `planSubscriptions` (#157 review F1).
+      if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(item.assetCode)) continue;
 
       const applied = isExercise
         ? item.transaction.status === 'superseded' && imported(item.transaction)
@@ -290,18 +296,23 @@ export async function keepSubscriptionClassification(
  * `ignored`, not `new` — like a resolved pair's exercise (`commit-batch.ts`'s
  * `markSubscriptionOriginsIgnored`), neither action ever moves a position by
  * itself.
+ *
+ * Recomputed from the batch's own rows (`summarizeRows`, the same read
+ * `stage-batch.ts` uses), never a ±1 adjustment (#157 review F2): a double
+ * submission of **Resolve as subscription** or **Keep my classification** —
+ * two requests racing, or a retried one — would otherwise decrement
+ * `needsAttention` twice for a row that left it only once. `read` is the one
+ * field a recount cannot recover (rows can outlive the count of what the
+ * file originally held none of), so it is carried over unchanged.
  */
 async function markExerciseRowIgnored(deps: IngestionDependencies, row: ImportRow): Promise<void> {
   await deps.rows.updateClassification(row.id, 'ignored');
   const batch = await deps.batches.findById(row.batchId);
   if (batch === null || batch.rowCounts === null) return;
+  const rows = await deps.rows.listByBatch(batch.id);
   await deps.batches.update({
     ...batch,
-    rowCounts: {
-      ...batch.rowCounts,
-      ignored: batch.rowCounts.ignored + 1,
-      needsAttention: batch.rowCounts.needsAttention - 1,
-    },
+    rowCounts: summarizeRows(batch.rowCounts.read, rows),
   });
 }
 

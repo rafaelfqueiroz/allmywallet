@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import { TransactionId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
+import { UNCLASSIFIED_PLACEHOLDER_TYPE } from '@/core/ingestion/occurrence';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { editTransaction, editTransactions } from '@/core/ledger/edit-transaction';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
@@ -200,6 +201,78 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
       });
 
       expect(result.ok && result.value.transaction.isUserModified).toBe(false);
+    });
+  });
+
+  describe('SPEC-005 BR-005-17 (#157 review F0) — a row keyed in the unclassified form', () => {
+    /**
+     * Keyed as staging keys a genuinely unmapped row (an `Atualização` credit,
+     * BR-005-18 v5): the placeholder type frozen in the key's type slot, the
+     * transaction's own `type` already a real classification — mirroring a
+     * row `classifyImportRow` classified once (e.g. bonificação, price 0).
+     */
+    function unclassifiedKeyedRow(classifiedAs: Transaction['type'] = 'bonificacao') {
+      const row = aTransaction()
+        .bonificacao()
+        .imported('batch-a')
+        .at('Clear')
+        .quantity('7')
+        .price('0')
+        .build();
+      const key = `${naturalKeyFor({
+        ...row,
+        type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+        unitPrice: Money.zero(),
+      })}|atualizacao`;
+      return { ...row, type: classifiedAs, naturalKey: key };
+    }
+
+    it('keeps its key on a type-only re-classification (bonificação → buy, with a real price)', async () => {
+      const row = unclassifiedKeyedRow('bonificacao');
+      const state = deps([row]);
+
+      const result = await editTransaction(state, row.id, {
+        type: 'buy',
+        unitPrice: Money.fromString('112.95'),
+      });
+
+      expect(result.ok && result.value.transaction.naturalKey).toBe(row.naturalKey);
+      expect(result.ok && result.value.transaction.type).toBe('buy');
+    });
+
+    it.each([
+      ['quantity', { quantity: Quantity.fromString('9') }],
+      ['trade date', { tradeDate: BusinessDate.of('2026-01-06') }],
+      ['institution', { institutionId: null }],
+      ['asset', { assetId: assetIdFor('VALE3') }],
+    ])('still rederives its key when the %s changes', async (_label, change) => {
+      const row = unclassifiedKeyedRow('bonificacao');
+      const state = deps([row]);
+
+      const result = await editTransaction(state, row.id, change);
+
+      expect(result.ok && result.value.transaction.naturalKey).not.toBe(row.naturalKey);
+    });
+
+    it('a price-less, mapped row (the `priceless` key form) still rederives on a type change — unaffected by this fix', async () => {
+      // Keyed exactly as `keyFormsFor`'s `priceless` form: a real resolved
+      // type (`transfer_in`) in the type slot, not the placeholder.
+      const built = aTransaction()
+        .transferIn()
+        .imported('batch-a')
+        .at('Destino')
+        .quantity('100')
+        .price('10')
+        .build();
+      const row = {
+        ...built,
+        naturalKey: `${naturalKeyFor({ ...built, unitPrice: Money.zero() })}|transferencia`,
+      };
+      const state = deps([row]);
+
+      const result = await editTransaction(state, row.id, { type: 'buy' });
+
+      expect(result.ok && result.value.transaction.naturalKey).not.toBe(row.naturalKey);
     });
   });
 

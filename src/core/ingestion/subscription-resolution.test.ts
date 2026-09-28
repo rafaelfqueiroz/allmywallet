@@ -383,7 +383,7 @@ describe('SPEC-005 BR-005-20d (#157, DL-005-25) — a locked credit still decide
     expect(result.unresolved.get('cr')).toBe('balance_statement');
   });
 
-  it('applied no-op: a locked credit and an applied exercise report applied, the state either offer action leaves behind', () => {
+  it("applied no-op: a locked credit and an exercise applied through the ordinary BR-005-20d path report applied (#157 review F5 — not the shape #157's own actions leave; see the pure-resolver test below for that one)", () => {
     const result = resolve([
       exercise('ex', 'XXXX12', '3', '2024-01-22', { state: 'applied' }),
       credit('cr', 'XXXX11', '3', '2024-02-22', { state: 'locked', handClassification: 'costed' }),
@@ -392,7 +392,7 @@ describe('SPEC-005 BR-005-20d (#157, DL-005-25) — a locked credit still decide
     expect(result.pairs).toEqual([{ status: 'applied', exerciseId: 'ex', creditId: 'cr' }]);
   });
 
-  it('an exercise the user classified by hand is never touched, whatever the locked credit decided', () => {
+  it('an exercise the user classified by hand is never touched, whatever the locked credit decided — the actual shape a re-import sees after either #157 action (#157 review F5): `editTransactions` flags the exercise user-modified too, so it reads `locked`, not `applied`', () => {
     const result = resolve([
       exercise('ex', 'XXXX12', '3', '2024-01-22', { state: 'locked' }),
       credit('cr', 'XXXX11', '3', '2024-02-22', { state: 'locked', handClassification: 'costed' }),
@@ -470,6 +470,16 @@ describe('SPEC-005 BR-005-20d (#157) — deriveSubscriptionHandClassification', 
     ['split', () => aTransaction().split()],
     ['a negative adjustment', () => aTransaction().adjustment().quantity('-5').price('10')],
     ['a negative adjustment at zero price', () => aTransaction().adjustment().quantity('-5')],
+    // #157 review F6 — a status other than `active` adds nothing to any
+    // replay, whatever its type or price says.
+    [
+      'a superseded buy at a real price',
+      () => aTransaction().buy().price('10').status('superseded'),
+    ],
+    [
+      'an unclassified buy at a real price',
+      () => aTransaction().buy().price('10').status('unclassified'),
+    ],
   ];
   it.each(noReading)('%s reads no classification at all (null)', (_, make) => {
     expect(deriveSubscriptionHandClassification(make().build())).toBeNull();

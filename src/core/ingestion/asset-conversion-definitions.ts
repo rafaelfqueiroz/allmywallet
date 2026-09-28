@@ -278,3 +278,34 @@ export const ASSET_LIQUIDATION_DEFINITIONS: readonly AssetLiquidationDefinition[
     },
   },
 ];
+
+/**
+ * SPEC-005 BR-005-20d (#157 review F1) — every asset code either table above
+ * names, on either side. A code a definition already owns is never read as a
+ * subscription's main asset — "an asset-conversion or liquidation definition
+ * names the credit's code" refuses the pair outright, before any evidence is
+ * even gathered for it. Computed once: the tables are module-level constants.
+ *
+ * Shared by every reader of subscription evidence — `commit-batch.ts`'s own
+ * `planSubscriptions`, `subscription-close-requests.ts`'s pre-commit close
+ * preview, and `subscription-offer.ts`'s read-time offer — so a code added to
+ * either table here is excluded consistently everywhere, rather than each
+ * reader keeping (and risking drifting from) its own copy.
+ */
+export const SUBSCRIPTION_EXCLUDED_CODES: ReadonlySet<string> = new Set([
+  ...ASSET_CONVERSION_DEFINITIONS.flatMap((definition) => [
+    ...definition.sourceAssetCodes,
+    ...definition.targets.flatMap((target) =>
+      target.evidenceAssetCode === undefined
+        ? [target.assetCode]
+        : [target.assetCode, target.evidenceAssetCode],
+    ),
+  ]),
+  ...ASSET_LIQUIDATION_DEFINITIONS.flatMap((definition) => [
+    ...definition.sources.map((source) => source.assetCode),
+    definition.target.assetCode,
+    ...(definition.target.evidenceAssetCode === undefined
+      ? []
+      : [definition.target.evidenceAssetCode]),
+  ]),
+]);
