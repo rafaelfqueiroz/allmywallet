@@ -96,9 +96,11 @@ function extractJsonStringField(text: string, fieldName: string): string | null 
 
 /**
  * Slices out the text of a top-level JSON array field, the same
- * find-the-brackets technique `brapi.ts`'s `extractHistoricalCloses` uses for
- * `historicalDataPrice`. Safe here because `stockDividends` entries are flat
- * objects with no nested arrays or braces.
+ * find-the-brackets technique `brapi.ts`'s `extractHistoricalCloses` used for
+ * `historicalDataPrice` before that method was retired (#171 — official
+ * closes are read from COTAHIST, never from brapi's history). Safe here
+ * because `stockDividends` entries are flat objects with no nested arrays or
+ * braces.
  */
 function extractJsonArrayBlock(rawBody: string, fieldName: string): string | null {
   const start = new RegExp(`"${fieldName}"\\s*:\\s*\\[`).exec(rawBody);

@@ -167,9 +167,14 @@ export async function startWorker(): Promise<PgBoss> {
     });
 
     if (registration.cron) {
+      // #171: `quotes.close-capture`'s cron is resolved from config
+      // (`quotes.close_capture_time`), so `RegisteredWorker.cron` may be a
+      // function — awaited here, once, at boot.
+      const cron =
+        typeof registration.cron === 'string' ? registration.cron : await registration.cron();
       // AR-17: getting the timezone wrong silently shifts every poll by three
       // hours, which looks like a provider outage rather than a bug.
-      await boss.schedule(registration.queue, registration.cron, undefined, {
+      await boss.schedule(registration.queue, cron, undefined, {
         tz: 'America/Sao_Paulo',
       });
     }

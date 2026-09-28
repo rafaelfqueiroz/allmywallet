@@ -12,8 +12,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { Money } from '@/core/shared/money';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
-import { FakeQuoteProvider } from '@/core/quotes/test-support';
-import { ok } from '@/core/shared/result';
+import { FakeOfficialCloseSource } from '@/core/quotes/test-support';
 import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/build-deps';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { allocateToWallet } from '@/core/wallets/allocate';
@@ -2630,13 +2629,21 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       await handleImportStage({ batchId: exerciseBatch, userId }, handlerDeps());
       await handleImportCommit({ batchId: exerciseBatch, userId }, handlerDeps());
 
-      const fakeProvider = new FakeQuoteProvider();
-      fakeProvider.setHistory('HSML11', () =>
-        ok({
-          ticker: 'HSML11',
-          source: 'brapi_free',
-          closes: [{ date: BusinessDate.of('2024-02-26'), close: Money.fromString('90.10') }],
-        }),
+      // `2026-03-20` (this suite's fixed clock) makes 2024 a past year, so the
+      // window's first (unseeded) daily request falls back to 2024's annual
+      // file (SPEC-008 BR-008-30) — seeded here the same way B3's COTAHIST
+      // would actually answer it, rather than one daily file per trading day.
+      const source = new FakeOfficialCloseSource();
+      source.seedYear(
+        2024,
+        [
+          {
+            ticker: 'HSML11',
+            date: BusinessDate.of('2024-02-26'),
+            close: Money.fromString('90.10'),
+          },
+        ],
+        BusinessDate.of('2024-12-30'),
       );
 
       const creditBatch = await newPendingBatch('b3_movimentacao');
@@ -2657,12 +2664,16 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       await handleImportStage({ batchId: creditBatch, userId }, handlerDeps());
       await handleImportCommit(
         { batchId: creditBatch, userId },
-        { ...handlerDeps(), quoteProvider: fakeProvider },
+        { ...handlerDeps(), officialCloseSource: source },
       );
 
-      expect(fakeProvider.historicalCalls).toEqual([
-        { ticker: 'HSML11', from: '2024-02-16', to: '2024-02-26' },
-      ]);
+      expect(source.yearCalls.map((c) => c.year)).toContain(2024);
+      const written = await new DrizzleQuoteRepository(appDb).getClosePrice(
+        (await new DrizzleAssetCatalogRepository(appDb).findByCode('HSML11'))?.id as AssetId,
+        BusinessDate.of('2024-02-26'),
+      );
+      expect(written?.close.toString()).toBe('90.1');
+      expect(written?.source).toBe('b3_cotahist');
 
       const { rows: credit } = await migratorPool.query<{ status: string; unit_price: string }>(
         `SELECT t.status, t.unit_price FROM transactions t JOIN assets a ON a.id = t.asset_id WHERE a.code = 'HSML11'`,

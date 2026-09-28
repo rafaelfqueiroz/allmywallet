@@ -41,6 +41,16 @@ describe('worker registrations (SPEC-008)', () => {
     for (const queue of SPEC_008_QUEUES) {
       const registration = REGISTRATIONS.find((r) => r.queue === queue);
       expect(registration?.cron, `${queue} has no cron`).toBeTruthy();
+      if (queue === QUEUE.QUOTES_CLOSE_CAPTURE) {
+        // #171: resolved from config (`quotes.close_capture_time`) — a
+        // function `startWorker` awaits once at boot, not a plain string.
+        // Calling it needs a database (`resolveConfig`), so its shape —
+        // `MM HH * * *` — is asserted directly against `closeCaptureCron` in
+        // `src/core/quotes/catch-up-days.test.ts`, and end to end wherever
+        // the worker actually starts (`tests/e2e/support/worker-process.ts`).
+        expect(typeof registration?.cron).toBe('function');
+        continue;
+      }
       // AR-17: `startWorker` registers every cron with `tz: 'America/Sao_Paulo'`
       // (a single shared argument to `boss.schedule`, not per-queue) — a
       // 5-field cron expression here is the shape that call requires.

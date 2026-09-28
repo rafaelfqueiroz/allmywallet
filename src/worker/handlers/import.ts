@@ -20,14 +20,10 @@ import { planSubscriptionCloseRequests } from '@/core/ingestion/subscription-clo
 import type { CorporateEventFactorSource } from '@/core/quotes/corporate-event-factors';
 import { refreshCorporateEventFactors } from '@/core/quotes/refresh-corporate-event-factors';
 import { fetchClosesForDates } from '@/core/quotes/fetch-closes-for-dates';
-import type { QuoteProvider } from '@/core/quotes/ports';
+import type { OfficialCloseSource } from '@/core/quotes/ports';
 import { DrizzleCorporateEventFactorRepository } from '@/adapters/db/corporate-event-factor-repository';
 import { B3ListedCompaniesFactorSource } from '@/adapters/market-data/b3-listed-companies';
-import {
-  buildQuoteProvider,
-  buildQuotesComposition,
-  resolveQuoteBudgetConfig,
-} from '@/worker/handlers/composition';
+import { buildOfficialCloseSource, buildQuotesComposition } from '@/worker/handlers/composition';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
 import type { SnapshotJobPayload } from '@/worker/handlers/valuation';
@@ -92,13 +88,12 @@ export interface ImportHandlerDeps {
    */
   readonly corporateEventFactorSource?: CorporateEventFactorSource;
   /**
-   * SPEC-005 BR-005-20d (#144) — the quote provider
+   * SPEC-005 BR-005-20d (#144), #171 — the `OfficialCloseSource`
    * `backfillSubscriptionClosesForBatch` fetches from, when not overridden
-   * (`quotes.provider`, the same `BrapiQuoteProvider` the poller uses). A
-   * seam so integration tests never reach brapi for real; #151 tracks the
-   * missing token this defaults to needing in production.
+   * (B3's COTAHIST, the same source `quotes.close-capture` and catch-up
+   * read). A seam so integration tests never reach B3 for real.
    */
-  readonly quoteProvider?: QuoteProvider;
+  readonly officialCloseSource?: OfficialCloseSource;
 }
 
 function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps {
@@ -113,7 +108,9 @@ function resolveDeps(overrides?: Partial<ImportHandlerDeps>): ImportHandlerDeps 
     ...(overrides?.corporateEventFactorSource === undefined
       ? {}
       : { corporateEventFactorSource: overrides.corporateEventFactorSource }),
-    ...(overrides?.quoteProvider === undefined ? {} : { quoteProvider: overrides.quoteProvider }),
+    ...(overrides?.officialCloseSource === undefined
+      ? {}
+      : { officialCloseSource: overrides.officialCloseSource }),
   };
 }
 
@@ -497,11 +494,13 @@ async function refreshFactorsForBatch(
 }
 
 /**
- * SPEC-005 BR-005-20d / DL-005-22 (#144) — fetch the closes a subscription
- * resolution needs, **before** the commit transaction, modelled on
- * `refreshFactorsForBatch` immediately above for the same two reasons: the
- * commit would otherwise hold ledger row locks across an HTTP call, and a
- * pg-boss retry of `import.commit` would then depend on brapi being up.
+ * SPEC-005 BR-005-20d / DL-005-22 (#144), rewritten onto `fetchOfficialCloses`
+ * for #171 — fetch the closes a subscription resolution needs, **before** the
+ * commit transaction, modelled on `refreshFactorsForBatch` immediately above
+ * for the same reason: the commit would otherwise hold ledger row locks
+ * across an HTTP call, and a pg-boss retry of `import.commit` would then
+ * depend on B3 being up. Every close this writes is COTAHIST's own
+ * (BR-008-09) — it needs no brapi token, unlike before #171.
  *
  * #144 review F1 — which pairs to fetch for is decided by
  * `planSubscriptionCloseRequests`, the same pure resolver `commitBatch`'s own
@@ -512,10 +511,9 @@ async function refreshFactorsForBatch(
  * unresolved pair (both rows now stage `duplicate`, so neither is
  * `unclassified` in *this* batch at all).
  *
- * Never fatal: an outage, an exhausted budget, or any failure to record one
- * leaves the pair unpriced and `unclassified`; `commitBatch` resolves it on a
- * later import once a close exists. Without a brapi token (#151) this fails
- * in production today, which is expected.
+ * Never fatal: an outage, or a day COTAHIST does not (yet) supply, leaves the
+ * pair unpriced and `unclassified`; `commitBatch` resolves it on a later
+ * import once a close exists.
  */
 async function backfillSubscriptionClosesForBatch(
   deps: ImportHandlerDeps,
@@ -536,13 +534,15 @@ async function backfillSubscriptionClosesForBatch(
     );
     if (requests.length === 0) return;
 
-    const provider = deps.quoteProvider ?? (await buildQuoteProvider(deps.database));
-    const { repository, budgetCounter } = buildQuotesComposition(deps.database);
-    const { monthlyQuota, ondemandReservePct } = await resolveQuoteBudgetConfig(deps.database);
+    const source = deps.officialCloseSource ?? (await buildOfficialCloseSource(deps.database));
+    const { repository, calendar } = buildQuotesComposition(deps.database);
+    const annualFileMinDays = (
+      await resolveConfig('quotes.cotahist_annual_min_days', { db: deps.database })
+    ).value;
     const summary = await fetchClosesForDates(
-      { repository, provider, budgetCounter, clock: deps.clock },
+      { source, calendar, repository, clock: deps.clock },
       requests,
-      { monthlyQuota, ondemandReservePct, lookbackDays },
+      { lookbackDays, annualFileMinDays },
     );
     logger.info(
       {

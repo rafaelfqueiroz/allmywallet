@@ -1,29 +1,29 @@
 import type { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
-import { hasScheduledBudget } from '@/core/quotes/budget';
-import type { BudgetCounterPort, Clock, PriceQuote, QuoteProvider } from '@/core/quotes/ports';
+import { fetchOfficialCloses, type WantedClose } from '@/core/quotes/fetch-official-closes';
+import type { Clock, OfficialCloseSource, PriceQuote, TradingCalendar } from '@/core/quotes/ports';
 
 /**
- * SPEC-005 BR-005-20d (#144) / DL-005-22 — fetch and store the closes a
- * subscription resolution needs, ahead of the commit that reads them
- * (`ClosePriceReader.closeOnOrBefore`).
+ * SPEC-005 BR-005-20d (#144) / DL-005-22, rewritten onto `fetchOfficialCloses`
+ * for #171 — fetch and store the closes a subscription resolution needs,
+ * ahead of the commit that reads them (`ClosePriceReader.closeOnOrBefore`).
+ * Every close this writes is B3's own COTAHIST close (BR-008-09) — never an
+ * intraday-provider quote — the same source `quotes.close-capture` and
+ * catch-up write.
  *
- * One request per **credit date actually needed**, for a short window ending
- * at that date — enough to cross a weekend or a B3 holiday and still land on
- * a real close, never the unbounded history `backfillMissedCloses` recovers
- * for worker-start catch-up. `ClosePriceReader` itself carries no lookback
- * bound (D2: the nearest earlier stored close, however old) — this only
- * decides how far a single provider request reaches back, and which dates get
- * one at all, not how far a commit may later look for what it wrote.
+ * A request is **covered** when a close from `source.source` already exists
+ * on, or within `lookbackDays` before, `upTo`; otherwise every trading day in
+ * `[upTo − lookbackDays, upTo]` for that asset is wanted. #144 review F2 still
+ * holds here: two dates on the same asset are genuinely different questions,
+ * so each is tracked and covered on its own — an old, out-of-window close on
+ * the same asset never suppresses a fetch for a later date it does not price.
  *
- * #144 review F2 — two dates on the *same* asset are genuinely different
- * questions ("what closed XPML11 on 2024-02-22" is not "what closed it on
- * 2025-06-10"), so a plain per-asset dedupe that kept only the latest date
- * silently starved every earlier one, and a stale close from an unrelated
- * earlier round wrongly suppressed a fetch for a later date it does not
- * price. Both are fixed below: dates are tracked individually, and "already
- * covered" means a close on the date itself or within the fetch window just
- * before it — never any close, however old.
+ * Never fatal to the caller: a day COTAHIST does not supply (or has not yet
+ * published) simply is not upserted — the commit that follows finds no
+ * stored close and leaves the pair `unclassified` for a later import
+ * (BR-005-20d). No gap is recorded on this path (`price_quote_gaps` is
+ * `quotes.close-capture`/catch-up's own bookkeeping, not a subscription
+ * resolution's), and there is no budget here: COTAHIST is not the brapi quota.
  */
 
 export interface CloseDateRequest {
@@ -34,33 +34,27 @@ export interface CloseDateRequest {
 }
 
 export interface FetchClosesForDatesPorts {
+  readonly source: OfficialCloseSource;
+  readonly calendar: TradingCalendar;
   readonly repository: {
     readonly upsertClosePrice: (quote: PriceQuote) => Promise<void>;
     readonly getCloseOnOrBefore: (
       assetId: AssetId,
       date: BusinessDate,
-    ) => Promise<{ readonly date: BusinessDate } | null>;
+    ) => Promise<{ readonly date: BusinessDate; readonly source: string } | null>;
   };
-  readonly provider: QuoteProvider;
-  readonly budgetCounter: BudgetCounterPort;
   readonly clock: Clock;
 }
 
 export interface FetchClosesForDatesOptions {
-  readonly monthlyQuota: number;
-  readonly ondemandReservePct: number;
-  /**
-   * `import.subscription_close_lookback_days` (SPEC-002): calendar days of
-   * history requested before each date, and how recent a stored close must be
-   * for a date to count as already covered. No default here.
-   */
+  /** `import.subscription_close_lookback_days` (SPEC-002): how far back a request's window reaches, and how recent a stored close must be for a date to count as already covered. */
   readonly lookbackDays: number;
+  readonly annualFileMinDays: number;
 }
 
 export interface FetchClosesForDatesSummary {
   /** Closes written to `price_quotes`. */
   readonly fetched: readonly PriceQuote[];
-  /** Provider requests made — each charged to the scheduled budget (BR-021-32's pattern, reused here). */
   readonly requests: number;
 }
 
@@ -73,42 +67,25 @@ function addDays(date: BusinessDate, days: number): BusinessDate {
   return BusinessDate.of(shifted.toISOString().slice(0, 10));
 }
 
-interface AssetGroup {
-  readonly assetId: AssetId;
-  readonly assetCode: string;
-  readonly dates: Set<BusinessDate>;
-}
-
 /**
- * AR-19 / idempotent: a date already covered by a close on it, or within the
- * fetch window just before it, spends no budget and makes no request — a
- * re-import of the same file costs nothing new. An older, out-of-window close
- * (a stale price from an earlier subscription round on the same asset) does
- * **not** suppress a fetch for a later date (#144 review F2) — the whole
- * point of asking again is that the earlier close does not price the later
- * date.
- *
- * Several dates on one asset are merged into as few requests as possible —
- * cheaper than one per date — but only when one request's own window
- * genuinely covers both; each request's span never widens past
- * `lookbackDays` to force a merge that would not otherwise fit.
- *
- * Never fatal to the caller: a provider failure or an exhausted budget simply
- * fetches nothing for that date, exactly as `backfillMissedCloses` leaves a
- * day unrecovered — the commit that follows finds no stored close and leaves
- * the pair `unclassified` for a later import (BR-005-20d).
+ * AR-19 / idempotent: a date already covered spends no request — a re-import
+ * of the same file costs nothing new. Requests are grouped by asset and
+ * resolved through `fetchOfficialCloses` in one pass, in deterministic (asset
+ * code, then date) order, so a repeated run of the same input reads
+ * identically.
  */
 export async function fetchClosesForDates(
   ports: FetchClosesForDatesPorts,
   requests: readonly CloseDateRequest[],
   options: FetchClosesForDatesOptions,
 ): Promise<FetchClosesForDatesSummary> {
-  const fetched: PriceQuote[] = [];
-  let requestsMade = 0;
-  const yearMonth = ports.clock.today().slice(0, 7);
-  const { lookbackDays } = options;
+  if (requests.length === 0) return { fetched: [], requests: 0 };
 
-  // Group by asset, keeping every distinct date needed — not only the latest.
+  interface AssetGroup {
+    readonly assetId: AssetId;
+    readonly assetCode: string;
+    readonly dates: Set<BusinessDate>;
+  }
   const byAsset = new Map<string, AssetGroup>();
   for (const request of requests) {
     const existing = byAsset.get(request.assetId);
@@ -122,58 +99,44 @@ export async function fetchClosesForDates(
       existing.dates.add(request.upTo);
     }
   }
-  const ordered = [...byAsset.values()].sort((a, b) => (a.assetCode < b.assetCode ? -1 : 1));
+  const orderedGroups = [...byAsset.values()].sort((a, b) => (a.assetCode < b.assetCode ? -1 : 1));
 
-  for (const group of ordered) {
-    // Which of this asset's dates still need a close: not one already stored
-    // on the date itself or within the fetch window just before it.
-    const needed: BusinessDate[] = [];
-    for (const date of [...group.dates].sort()) {
-      const existingClose = await ports.repository.getCloseOnOrBefore(group.assetId, date);
+  const wanted: WantedClose[] = [];
+  for (const group of orderedGroups) {
+    for (const upTo of [...group.dates].sort()) {
+      const existingClose = await ports.repository.getCloseOnOrBefore(group.assetId, upTo);
       if (
         existingClose !== null &&
-        dayNumber(date) - dayNumber(existingClose.date) <= lookbackDays
+        existingClose.source === ports.source.source &&
+        dayNumber(upTo) - dayNumber(existingClose.date) <= options.lookbackDays
       ) {
         continue;
       }
-      needed.push(date);
-    }
-    if (needed.length === 0) continue;
-
-    // Greedily merge from the latest date backward: a request ending at a
-    // date, with the standard lookback window, absorbs any earlier needed
-    // date that window already reaches — cheaper than one request each,
-    // without ever widening a window past `lookbackDays` to force a merge.
-    const descending = [...needed].sort().reverse();
-    const covered = new Set<BusinessDate>();
-    for (const date of descending) {
-      if (covered.has(date)) continue;
-
-      const usage = await ports.budgetCounter.getUsage(yearMonth);
-      if (!hasScheduledBudget(usage, options.monthlyQuota, options.ondemandReservePct)) continue;
-
-      const from = addDays(date, -lookbackDays);
-      const result = await ports.provider.fetchHistoricalCloses(group.assetCode, from, date);
-      if (!result.ok) continue;
-      requestsMade += 1;
-      await ports.budgetCounter.increment(yearMonth, 'scheduled');
-
-      for (const entry of result.value.closes) {
-        const quote: PriceQuote = {
-          assetId: group.assetId,
-          date: entry.date,
-          close: entry.close,
-          source: result.value.source,
-        };
-        await ports.repository.upsertClosePrice(quote);
-        fetched.push(quote);
-      }
-      for (const other of needed) {
-        const span = dayNumber(date) - dayNumber(other);
-        if (span >= 0 && span <= lookbackDays) covered.add(other);
+      const from = addDays(upTo, -options.lookbackDays);
+      for (let cursor = from; !BusinessDate.isAfter(cursor, upTo); cursor = addDays(cursor, 1)) {
+        if (!ports.calendar.isTradingDay(cursor)) continue;
+        wanted.push({ assetId: group.assetId, ticker: group.assetCode, date: cursor });
       }
     }
   }
 
-  return { fetched, requests: requestsMade };
+  const currentYear = Number(ports.clock.today().slice(0, 4));
+  const result = await fetchOfficialCloses({ source: ports.source }, wanted, {
+    annualFileMinDays: options.annualFileMinDays,
+    currentYear,
+  });
+
+  const fetched: PriceQuote[] = [];
+  for (const pair of result.found) {
+    const quote: PriceQuote = {
+      assetId: pair.assetId,
+      date: pair.date,
+      close: pair.close,
+      source: ports.source.source,
+    };
+    await ports.repository.upsertClosePrice(quote);
+    fetched.push(quote);
+  }
+
+  return { fetched, requests: result.requests };
 }

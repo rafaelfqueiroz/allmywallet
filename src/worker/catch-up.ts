@@ -2,27 +2,24 @@ import { logger } from '@/lib/logger';
 import { db as globalDb, type Database } from '@/db/client';
 import { resolveConfig } from '@/config/resolve';
 import type { BusinessDate } from '@/core/shared/clock';
+import type { AssetId } from '@/core/shared/ids';
 import { computePollingSet } from '@/core/quotes/polling-set';
 import { enumerateCatchUpDays } from '@/core/quotes/catch-up-days';
-import { backfillMissedCloses } from '@/core/quotes/backfill-missed-closes';
+import { syncOfficialCloses } from '@/core/quotes/sync-official-closes';
 import type {
   AssetCatalogPort,
-  BudgetCounterPort,
   Clock,
   CloseGapRepositoryPort,
   HeldAssetsPort,
   LatestCloseDatePort,
-  QuoteProvider,
+  OfficialCloseSource,
   QuoteRepositoryPort,
   TradingCalendar,
+  UnofficialClosesPort,
 } from '@/core/quotes/ports';
 import { DrizzleHeldAssetsRepository } from '@/adapters/db/held-assets-repository';
 import { DrizzleCloseGapRepository } from '@/adapters/db/close-gap-repository';
-import {
-  buildQuoteProvider,
-  buildQuotesComposition,
-  resolveQuoteBudgetConfig,
-} from '@/worker/handlers/composition';
+import { buildOfficialCloseSource, buildQuotesComposition } from '@/worker/handlers/composition';
 import { handleBcbSync } from '@/worker/handlers/bcb';
 import { handleTesouroSync } from '@/worker/handlers/tesouro';
 import { handleValuationSnapshot } from '@/worker/handlers/valuation';
@@ -32,7 +29,9 @@ import { QUEUE } from '@/worker/queues';
 export type MarketSeriesQueue = typeof QUEUE.BCB_SYNC | typeof QUEUE.TESOURO_SYNC;
 
 /**
- * SPEC-021 — missed-schedule catch-up (BR-021-28..33).
+ * SPEC-021 — missed-schedule catch-up (BR-021-28..33), rewritten onto
+ * `syncOfficialCloses` for #171 (SPEC-008 BR-008-09/BR-008-30/BR-008-31): the
+ * closes this recovers are B3's own COTAHIST, never brapi's.
  *
  * The personal instance runs on a laptop that is closed, asleep or off for
  * days at a time. pg-boss fires a cron at its next match, never retroactively,
@@ -42,8 +41,9 @@ export type MarketSeriesQueue = typeof QUEUE.BCB_SYNC | typeof QUEUE.TESOURO_SYN
  * first scheduled snapshot of the day already rests on the recovered history.
  *
  * AR-04: a thin entrypoint. The window is `core/quotes/catch-up-days.ts`, the
- * recovery `core/quotes/backfill-missed-closes.ts`, the snapshot rebuild the
- * existing `valuation.snapshot` path; this file resolves ports and sequences.
+ * recovery `core/quotes/sync-official-closes.ts` (the same use case
+ * `quotes.close-capture` itself runs), the snapshot rebuild the existing
+ * `valuation.snapshot` path; this file resolves ports and sequences.
  *
  * **What it deliberately does not do (BR-021-33).** It never enqueues
  * `opportunity.evaluate`, holds no notifier, and never writes `latest_quotes`.
@@ -54,11 +54,15 @@ export interface CatchUpDeps {
   readonly clock: Clock;
   readonly calendar: TradingCalendar;
   readonly catalog: AssetCatalogPort;
-  readonly repository: QuoteRepositoryPort & LatestCloseDatePort;
-  readonly budgetCounter: BudgetCounterPort;
+  readonly repository: QuoteRepositoryPort &
+    LatestCloseDatePort & {
+      deleteClose(assetId: AssetId, date: BusinessDate): Promise<void>;
+    };
   readonly heldAssets: HeldAssetsPort;
-  readonly provider: QuoteProvider;
+  /** SPEC-008 BR-008-30, DL-008-14 (#171) — B3's COTAHIST, the only source an official close is read from. */
+  readonly closeSource: OfficialCloseSource;
   readonly gaps: CloseGapRepositoryPort;
+  readonly unofficial: UnofficialClosesPort;
   /**
    * BR-021-29 — BCB and Tesouro backfill themselves; catch-up relies on that
    * rather than reimplementing it, and only makes sure it has happened before
@@ -86,9 +90,11 @@ export interface CatchUpSummary {
   readonly days: readonly BusinessDate[];
   readonly beyondCap: number;
   readonly recovered: number;
+  readonly superseded: number;
   readonly gaps: number;
+  readonly unpublished: number;
   readonly requests: number;
-  /** `null` when nothing was missed, so nothing was rebuilt. */
+  /** `null` when nothing was written or deleted, so nothing was rebuilt. */
   readonly rebuiltFrom: BusinessDate | null;
   /** The market-series syncs that failed, for the worker to enqueue. */
   readonly retryQueues: readonly MarketSeriesQueue[];
@@ -98,7 +104,9 @@ const NOTHING_MISSED: Omit<CatchUpSummary, 'retryQueues'> = {
   days: [],
   beyondCap: 0,
   recovered: 0,
+  superseded: 0,
   gaps: 0,
+  unpublished: 0,
   requests: 0,
   rebuiltFrom: null,
 };
@@ -140,10 +148,10 @@ async function resolveDeps(overrides?: Partial<CatchUpDeps>): Promise<CatchUpDep
     calendar,
     catalog: overrides?.catalog ?? composition.catalog,
     repository: overrides?.repository ?? composition.repository,
-    budgetCounter: overrides?.budgetCounter ?? composition.budgetCounter,
     heldAssets: overrides?.heldAssets ?? new DrizzleHeldAssetsRepository(database),
-    provider: overrides?.provider ?? (await buildQuoteProvider(database)),
+    closeSource: overrides?.closeSource ?? (await buildOfficialCloseSource(database)),
     gaps: overrides?.gaps ?? new DrizzleCloseGapRepository(database),
+    unofficial: overrides?.unofficial ?? composition.repository,
     syncMarketSeries: overrides?.syncMarketSeries ?? defaultSyncMarketSeries,
     rebuildSnapshotsFrom:
       overrides?.rebuildSnapshotsFrom ??
@@ -162,50 +170,70 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
   // `app.user_id` that makes that read fail (the defect documented in
   // tests/integration/opportunity-worker-handler.test.ts).
   const maxDays = (await resolveConfig('personal.catchup_max_days', { db: deps.database })).value;
-  const { monthlyQuota, ondemandReservePct } = await resolveQuoteBudgetConfig(deps.database);
+  const captureTime = (await resolveConfig('quotes.close_capture_time', { db: deps.database }))
+    .value;
+  const annualFileMinDays = (
+    await resolveConfig('quotes.cotahist_annual_min_days', { db: deps.database })
+  ).value;
 
+  // #171: `syncOfficialCloses`'s own supersede step (`UnofficialClosesPort`)
+  // reaches every stored listed-asset close not from COTAHIST, any date, any
+  // asset, held or not — not bounded by this run's window, and must run
+  // whether or not the window found a day missed, and whether or not
+  // anything is currently held (a supersede-only run costs one indexed query
+  // and zero `OfficialCloseSource` requests when there is nothing to do).
   const pollingSetIds = await computePollingSet(deps);
   const window =
     pollingSetIds.length === 0
-      ? null
+      ? { days: [], beyondCap: 0 }
       : enumerateCatchUpDays({
           calendar: deps.calendar,
           now: deps.clock.now(),
           today: deps.clock.today(),
           lastCapturedClose: await deps.repository.oldestLastCloseAmong(pollingSetIds),
           maxDays,
+          captureTime,
         });
-  const first = window?.days[0];
-  const backfill =
-    window === null || first === undefined
-      ? null
-      : await backfillMissedCloses(deps, await deps.catalog.findByIds(pollingSetIds), window.days, {
-          monthlyQuota,
-          ondemandReservePct,
-        });
+  const sync = await syncOfficialCloses(
+    {
+      source: deps.closeSource,
+      repository: deps.repository,
+      gaps: deps.gaps,
+      unofficial: deps.unofficial,
+    },
+    await deps.catalog.findByIds(pollingSetIds),
+    window.days,
+    { annualFileMinDays, currentYear: Number(deps.clock.today().slice(0, 4)) },
+  );
 
   // #161: every start, whether or not an equity close was missed — see
-  // `syncMarketSeries`. After the equity backfill, before the rebuild.
+  // `syncMarketSeries`. After the equity sync, before the rebuild.
   const retryQueues = await deps.syncMarketSeries();
 
-  if (window === null || first === undefined || backfill === null) {
+  if (window.days.length === 0 && sync.earliestChanged === null) {
     logger.info({ queue: 'catch-up', retryQueues }, 'catch-up: no close was missed');
     return { ...NOTHING_MISSED, retryQueues };
   }
 
-  // BR-021-30: one rebuild from the earliest missed day forward. The snapshot
-  // engine walks dates ascending and each day's figures rest on the day
-  // before, so a single call *is* "in date order"; a rebuild per day would
-  // rewrite every later day once per earlier one for the same result.
-  await deps.rebuildSnapshotsFrom(first);
+  // BR-021-30: one rebuild from the earliest *changed* day forward — not
+  // necessarily the window's first day: that day may have needed no write at
+  // all (already captured from COTAHIST, or genuinely unpublished). The
+  // snapshot engine walks dates ascending and each day's figures rest on the
+  // day before, so a single call *is* "in date order"; a rebuild per day
+  // would rewrite every later day once per earlier one for the same result.
+  if (sync.earliestChanged !== null) {
+    await deps.rebuildSnapshotsFrom(sync.earliestChanged);
+  }
 
   const summary: CatchUpSummary = {
     days: window.days,
     beyondCap: window.beyondCap,
-    recovered: backfill.recovered.length,
-    gaps: backfill.gaps.length,
-    requests: backfill.requests,
-    rebuiltFrom: first,
+    recovered: sync.recorded.length,
+    superseded: sync.superseded.length,
+    gaps: sync.gaps.length,
+    unpublished: sync.unpublished,
+    requests: sync.requests,
+    rebuiltFrom: sync.earliestChanged,
     retryQueues,
   };
   // AR-39: dates and counts only — no asset, no figure.

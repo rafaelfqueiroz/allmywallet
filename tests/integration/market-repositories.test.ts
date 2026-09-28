@@ -205,6 +205,101 @@ describe('SPEC-008 market data repositories (integration)', () => {
       expect(day2?.close.toString()).toBe('31');
       expect(await repo.getLatestQuote(asset.id)).toBeNull(); // never written by upsertClosePrice
     });
+
+    /** SPEC-008 BR-008-09/BR-021-31 (#171) — a close COTAHIST no longer supplies must not stay in history. */
+    it('deleteClose removes exactly the one (asset, date) row and leaves neighbours untouched', async () => {
+      const catalog = new DrizzleAssetCatalogRepository(db);
+      const repo = new DrizzleQuoteRepository(db);
+      const asset = await catalog.upsertByCode({
+        code: 'BBDC4',
+        name: 'Bradesco',
+        assetClass: 'stock',
+      });
+      await repo.upsertClosePrice({
+        assetId: asset.id,
+        date: BusinessDate.of('2026-03-16'),
+        close: Money.fromString('14.00'),
+        source: 'brapi_free',
+      });
+      await repo.upsertClosePrice({
+        assetId: asset.id,
+        date: BusinessDate.of('2026-03-17'),
+        close: Money.fromString('14.20'),
+        source: 'brapi_free',
+      });
+
+      await repo.deleteClose(asset.id, BusinessDate.of('2026-03-16'));
+
+      expect(await repo.getClosePrice(asset.id, BusinessDate.of('2026-03-16'))).toBeNull();
+      expect(
+        (await repo.getClosePrice(asset.id, BusinessDate.of('2026-03-17')))?.close.toString(),
+      ).toBe('14.2');
+      // Idempotent (AR-19): deleting an already-absent row is a no-op, not an error.
+      await expect(
+        repo.deleteClose(asset.id, BusinessDate.of('2026-03-16')),
+      ).resolves.toBeUndefined();
+    });
+
+    /** SPEC-008 BR-008-09/BR-008-30/BR-008-11 (#171) — `UnofficialClosesPort`, the supersede source. */
+    it('listUnofficialListedCloses finds every listed-class close not from officialSource, any date, ignoring fixed income', async () => {
+      const catalog = new DrizzleAssetCatalogRepository(db);
+      const repo = new DrizzleQuoteRepository(db);
+      const stock = await catalog.upsertByCode({
+        code: 'ITSA4',
+        name: 'Itaúsa',
+        assetClass: 'stock',
+      });
+      const fii = await catalog.upsertByCode({
+        code: 'HGLG11',
+        name: 'CSHG Log',
+        assetClass: 'fii',
+      });
+      const alreadyOfficial = await catalog.upsertByCode({
+        code: 'PETR4',
+        name: 'Petrobras',
+        assetClass: 'stock',
+      });
+      const cdb = await catalog.upsertByCode({
+        code: 'CDB Banco X',
+        name: 'CDB Banco X',
+        assetClass: 'cdb',
+      });
+
+      await repo.upsertClosePrice({
+        assetId: stock.id,
+        date: BusinessDate.of('2024-01-15'), // long before any current window
+        close: Money.fromString('9.80'),
+        source: 'brapi_free',
+      });
+      await repo.upsertClosePrice({
+        assetId: fii.id,
+        date: BusinessDate.of('2026-03-16'),
+        close: Money.fromString('158.40'),
+        source: 'brapi_free',
+      });
+      await repo.upsertClosePrice({
+        assetId: alreadyOfficial.id,
+        date: BusinessDate.of('2026-03-16'),
+        close: Money.fromString('38.55'),
+        source: 'b3_cotahist',
+      });
+      await repo.upsertClosePrice({
+        assetId: cdb.id,
+        date: BusinessDate.of('2026-03-16'),
+        close: Money.fromString('1.05'),
+        source: 'brapi_free', // a fixed-income row COTAHIST never prices
+      });
+
+      const unofficial = await repo.listUnofficialListedCloses('b3_cotahist');
+
+      expect(unofficial.map((row) => [row.code, row.date])).toEqual([
+        ['HGLG11', '2026-03-16'],
+        ['ITSA4', '2024-01-15'],
+      ]);
+      expect(
+        unofficial.every((row) => row.assetId !== alreadyOfficial.id && row.assetId !== cdb.id),
+      ).toBe(true);
+    });
   });
 
   describe('DrizzleIndexSeriesRepository', () => {
