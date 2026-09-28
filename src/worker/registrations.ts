@@ -1,3 +1,5 @@
+import { db as globalDb } from '@/db/client';
+import { resolveConfig } from '@/config/resolve';
 import { QUEUE, type QueueName } from '@/worker/queues';
 import { handleQuotesCloseCapture, handleQuotesPoll } from '@/worker/handlers/quotes';
 import { handleTesouroSync } from '@/worker/handlers/tesouro';
@@ -14,7 +16,7 @@ import {
   handleAuditRetentionSweep,
 } from '@/worker/handlers/account-deletion';
 import { handleOpportunityEvaluate } from '@/worker/handlers/opportunity';
-import { CLOSE_CAPTURE_CRON } from '@/core/quotes/catch-up-days';
+import { closeCaptureCron } from '@/core/quotes/catch-up-days';
 
 /**
  * Split out of `src/worker/index.ts` so this list — pure data plus handler
@@ -30,8 +32,14 @@ export type JobHandler<T extends object> = (payload: T) => Promise<void>;
 export interface RegisteredWorker {
   readonly queue: QueueName;
   readonly handler: JobHandler<never>;
-  /** AR-17: cron is registered with `tz: 'America/Sao_Paulo'` — market hours are local. */
-  readonly cron?: string;
+  /**
+   * AR-17: cron is registered with `tz: 'America/Sao_Paulo'` — market hours
+   * are local. A function (#171, `quotes.close-capture`) is resolved by
+   * `startWorker` once, at boot, from `quotes.close_capture_time`
+   * (SPEC-002: the capture time is a config key, never a hardcoded string) —
+   * `startWorker` awaits it before `boss.schedule`.
+   */
+  readonly cron?: string | (() => Promise<string>);
 }
 
 /**
@@ -57,10 +65,14 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
   {
     queue: QUEUE.QUOTES_CLOSE_CAPTURE,
     handler: handleQuotesCloseCapture,
-    // 17:05 — shortly after the regular B3 session's 17:00 close. Shared with
+    // SPEC-008 BR-008-09, DL-008-14 (#171): `quotes.close_capture_time`
+    // (default 22:00 São Paulo — B3 typically publishes COTAHIST between
+    // 20:08 and 21:05, occasionally later), every day rather than weekdays
+    // only (`closeCaptureCron`'s own doc comment says why). Shared with
     // SPEC-021 catch-up's window (BR-021-28), so the two cannot disagree about
     // when today's close stops being "still to come" and becomes "missed".
-    cron: CLOSE_CAPTURE_CRON,
+    cron: async () =>
+      closeCaptureCron((await resolveConfig('quotes.close_capture_time', { db: globalDb })).value),
   },
   {
     queue: QUEUE.TESOURO_SYNC,
@@ -108,13 +120,20 @@ export const REGISTRATIONS: readonly RegisteredWorker[] = [
     handler: handleOpportunityEvaluate,
   },
   /**
-   * SPEC-009 BR-009-14/16. Both run once daily and both are ordered *after*
-   * the market-data jobs above, which is the whole point of the times chosen:
-   * `quotes.close-capture` (17:05), `tesouro.sync` (18:30) and `bcb.sync`
-   * (19:00) are what supply the closes, the Tesouro sell prices and the day's
-   * CDI. A snapshot built before them would be built from yesterday's data and
-   * would then be *correct-looking but stale* — the failure mode this spec
-   * exists to prevent.
+   * SPEC-009 BR-009-14/16. Both run once daily, ordered *after* `tesouro.sync`
+   * (18:30) and `bcb.sync` (19:00) — the Tesouro sell prices and the day's CDI
+   * a snapshot built before them would miss, valuing the day from yesterday's
+   * data and looking *correct but stale*, the failure mode this spec exists
+   * to prevent.
+   *
+   * `quotes.close-capture` is **not** one of the jobs this ordering protects
+   * against any more (#171): it now runs at `quotes.close_capture_time`
+   * (default 22:00 São Paulo — after B3 typically publishes COTAHIST),
+   * *after* this 19:40 snapshot cron, not before it. That is exactly why
+   * `handleQuotesCloseCapture` enqueues its own scoped `valuation.snapshot`
+   * rebuild once it writes a close (`enqueueSnapshotRebuild`,
+   * `src/worker/handlers/quotes.ts`) rather than relying on being ordered
+   * ahead of the daily cron the way `tesouro.sync`/`bcb.sync` still are.
    *
    * AR-18: neither cron can express a B3 holiday, so `fixedincome.accrue`
    * re-checks the trading calendar itself and `valuation.snapshot` relies on
