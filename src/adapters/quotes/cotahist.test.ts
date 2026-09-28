@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
 import { OfficialCloseSourceErrorCode } from '@/core/quotes/ports';
 import { B3CotahistCloseSource } from './cotahist';
-import { buildCotahistZip, buildSingleEntryZip, type QuoteRecordFields } from './cotahist-fixture';
+import {
+  buildCotahistZip,
+  buildHeaderRecord,
+  buildSingleEntryZip,
+  buildTrailerRecord,
+  type QuoteRecordFields,
+} from './cotahist-fixture';
 
 function stubFetch(status: number, body: Buffer | string = Buffer.alloc(0)): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockResolvedValue({
@@ -147,6 +153,20 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
       }
     });
 
+    it('skips a truncated "01" line too short to hold PREULT/FATCOT, without crashing', async () => {
+      const text = [buildHeaderRecord(), '01', buildTrailerRecord()]
+        .map((line) => `${line}\r\n`)
+        .join('');
+      stubFetch(200, buildSingleEntryZip(text));
+      const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
+      const result = await source.fetchDay(SEP_25, new Set(['PETR4']));
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value.closes).toEqual([]);
+        expect(result.value.lastDate).toBeNull();
+      }
+    });
+
     it('returns lastDate null for a file with no quote rows', async () => {
       stubFetch(200, buildCotahistZip([]));
       const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
@@ -220,6 +240,14 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
     it('maps a missing/wrong header record to UNAVAILABLE', async () => {
       const zip = buildSingleEntryZip('not a cotahist header\r\n01whatever\r\n99trailer\r\n');
       stubFetch(200, zip);
+      const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
+      const result = await source.fetchDay(SEP_25, new Set(['PETR4']));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe(OfficialCloseSourceErrorCode.UNAVAILABLE);
+    });
+
+    it('maps a completely empty entry (no lines at all) to UNAVAILABLE', async () => {
+      stubFetch(200, buildSingleEntryZip(''));
       const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
       const result = await source.fetchDay(SEP_25, new Set(['PETR4']));
       expect(result.ok).toBe(false);

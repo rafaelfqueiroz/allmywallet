@@ -74,10 +74,13 @@ function preultToDecimalString(raw: string): string {
   return `${trimmedInt}.${decPart}`;
 }
 
-/** `"0001000"` -> `"1000"`; `"0000001"` -> `"1"`. */
+/**
+ * `"0001000"` -> `"1000"`; `"0000001"` -> `"1"`; `"0000000"` -> `"0"`. The
+ * lookahead never strips the final digit, so a fixed-width all-digit field
+ * (FATCOT always is) never reduces to the empty string.
+ */
 function stripLeadingZeros(raw: string): string {
-  const trimmed = raw.replace(/^0+(?=\d)/, '');
-  return trimmed.length === 0 ? '0' : trimmed;
+  return raw.replace(/^0+(?=\d)/, '');
 }
 
 /** `"20260925"` -> `BusinessDate` `"2026-09-25"`. */

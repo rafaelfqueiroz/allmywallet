@@ -60,4 +60,25 @@ describe('openSingleZipEntry (SPEC-008 BR-008-30 support, #171)', () => {
     corrupted.writeUInt32LE(0, eocdOffset + 16);
     expect(() => openSingleZipEntry(corrupted)).toThrow(ZipFormatError);
   });
+
+  it('throws ZipFormatError when the local file header is missing', () => {
+    const zip = buildSingleEntryZip(SAMPLE_TEXT, { method: 8 });
+    // Point the central directory's local-header offset at the EOCD instead
+    // of the real local header, so its signature does not match.
+    const corrupted = Buffer.from(zip);
+    const eocdOffset = corrupted.length - 22;
+    const centralDirOffset = corrupted.readUInt32LE(eocdOffset + 16);
+    corrupted.writeUInt32LE(eocdOffset, centralDirOffset + 42);
+    expect(() => openSingleZipEntry(corrupted)).toThrow(ZipFormatError);
+  });
+
+  it('throws ZipFormatError when the declared compressed size runs past the archive', () => {
+    const zip = buildSingleEntryZip(SAMPLE_TEXT, { method: 8 });
+    const corrupted = Buffer.from(zip);
+    const eocdOffset = corrupted.length - 22;
+    const centralDirOffset = corrupted.readUInt32LE(eocdOffset + 16);
+    // Inflate the central directory's compressed-size field far beyond the archive.
+    corrupted.writeUInt32LE(0x7fffffff, centralDirOffset + 20);
+    expect(() => openSingleZipEntry(corrupted)).toThrow(ZipFormatError);
+  });
 });
