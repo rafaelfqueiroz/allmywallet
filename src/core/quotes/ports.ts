@@ -256,7 +256,13 @@ export const CloseGapReason = {
   PROVIDER_UNAVAILABLE: 'provider_unavailable',
   /** The request succeeded but the provider's history has no close for the day. */
   NOT_SUPPLIED: 'not_supplied',
-  /** BR-021-32: the scheduled share of the monthly budget could not afford the request. */
+  /**
+   * BR-021-32: the scheduled share of the monthly budget could not afford the
+   * request. Kept as a code (existing rows still carry it, and the database
+   * CHECK constraint still admits it) but nothing writes it any more since
+   * #171: COTAHIST is not the brapi quota BR-021-32 governs, so
+   * `syncOfficialCloses` never checks or charges one.
+   */
   BUDGET_EXHAUSTED: 'budget_exhausted',
 } as const;
 export type CloseGapReason = (typeof CloseGapReason)[keyof typeof CloseGapReason];
