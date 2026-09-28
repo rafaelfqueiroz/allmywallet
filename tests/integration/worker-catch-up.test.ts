@@ -471,6 +471,36 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     expect(gaps).toEqual([{ code: 'VALE3', date: '2026-03-13' }]);
   });
 
+  /**
+   * #169: the window is measured per asset. PETR4 was captured every day while
+   * VALE3 was refused — the #151 shape — and measuring from the newest close
+   * across both would report nothing missed. VALE3's days are recovered;
+   * PETR4, already captured, costs no request.
+   */
+  it('#169/BR-021-28: one asset captured and another behind — only the one behind is backfilled', async () => {
+    await seedClose(petr, '2026-03-12', '31.10');
+    await seedClose(petr, '2026-03-13', '29.00');
+    await seedClose(petr, '2026-03-16', '32.40');
+    const provider = scenarioProvider();
+
+    const summary = await catchUp(provider);
+
+    expect(summary.days).toEqual(['2026-03-12', '2026-03-13', '2026-03-16']);
+    expect(provider.historicalCalls).toEqual([
+      { ticker: 'VALE3', from: '2026-03-12', to: '2026-03-16' },
+    ]);
+    const { rows } = await migratorPool.query<{ date: string; close: string }>(
+      `SELECT date::text AS date, close::text AS close FROM price_quotes
+        WHERE asset_id = $1 AND date > '2026-03-11' ORDER BY date`,
+      [vale],
+    );
+    expect(rows.map((row) => [row.date, Money.fromString(row.close).toString()])).toEqual([
+      ['2026-03-12', '61'],
+      ['2026-03-16', '62.5'],
+    ]);
+    expect(summary.rebuiltFrom).toBe('2026-03-12');
+  });
+
   it('AR-19: a second start in a row finds nothing missed and spends nothing', async () => {
     await catchUp(scenarioProvider());
     const again = scenarioProvider();

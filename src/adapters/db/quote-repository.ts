@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte, max, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, max, min, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { latestQuotes, priceQuoteGaps, priceQuotes } from '@/db/schema/market';
@@ -48,13 +48,18 @@ export class DrizzleQuoteRepository
    * schedule: a Tesouro row from this morning must not make yesterday's
    * missed equity close look captured.
    */
-  async latestCloseDateAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null> {
+  async oldestLastCloseAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null> {
     if (assetIds.length === 0) return null;
-    const [row] = await this.db
-      .select({ latest: max(priceQuotes.date) })
+    // #169: each asset's own last close, then the oldest of those — an asset
+    // with no close at all has no row here, and so no say in the window.
+    const lastByAsset = this.db
+      .select({ last: max(priceQuotes.date).as('last') })
       .from(priceQuotes)
-      .where(inArray(priceQuotes.assetId, [...assetIds]));
-    return row?.latest ? BusinessDate.of(row.latest) : null;
+      .where(inArray(priceQuotes.assetId, [...assetIds]))
+      .groupBy(priceQuotes.assetId)
+      .as('last_by_asset');
+    const [row] = await this.db.select({ oldest: min(lastByAsset.last) }).from(lastByAsset);
+    return row?.oldest ? BusinessDate.of(row.oldest) : null;
   }
 
   async getLatestQuote(assetId: AssetId): Promise<LatestQuote | null> {

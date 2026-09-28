@@ -134,15 +134,19 @@ export class FakeQuoteRepository implements QuoteRepositoryPort, LatestCloseDate
   /** Every close written, in write order — lets a test assert *what* was written, not only the end state. */
   readonly closeWrites: PriceQuote[] = [];
 
-  async latestCloseDateAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null> {
+  async oldestLastCloseAmong(assetIds: readonly AssetId[]): Promise<BusinessDate | null> {
     const wanted = new Set(assetIds);
-    let latest: BusinessDate | null = null;
+    const lastByAsset = new Map<AssetId, BusinessDate>();
     for (const quote of this.closes.values()) {
-      if (wanted.has(quote.assetId) && (latest === null || quote.date > latest)) {
-        latest = quote.date;
-      }
+      if (!wanted.has(quote.assetId)) continue;
+      const last = lastByAsset.get(quote.assetId);
+      if (last === undefined || quote.date > last) lastByAsset.set(quote.assetId, quote.date);
     }
-    return latest;
+    let oldest: BusinessDate | null = null;
+    for (const last of lastByAsset.values()) {
+      if (oldest === null || last < oldest) oldest = last;
+    }
+    return oldest;
   }
 
   async getLatestQuote(assetId: AssetId): Promise<LatestQuote | null> {
