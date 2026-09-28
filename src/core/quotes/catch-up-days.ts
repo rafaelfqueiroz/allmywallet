@@ -12,17 +12,22 @@ import type { TradingCalendar } from './ports';
  *
  *     lastCapturedClose < d <= throughInclusive
  *
- * where `throughInclusive` is today once today's **close-capture time** (17:05
- * in São Paulo, `CLOSE_CAPTURE_LOCAL_TIME`) has passed on a trading day, and
- * yesterday otherwise.
+ * where `throughInclusive` is today once today's **close-capture time**
+ * (`quotes.close_capture_time`, São Paulo local, default 22:00) has passed on
+ * a trading day, and yesterday otherwise.
  *
- * Why the capture time and not the session close: between 17:00 and 17:05 the
- * session is closed but `quotes.close-capture` has not fired yet, and it
- * *will* fire. Catch-up taking today in that window would race it — a
- * non-final candle would make the 17:05 capture report `already_captured`, or
- * a `not_supplied` gap would be recorded for a day the capture then fills.
- * Once 17:05 has passed, a worker that was down missed that cron (pg-boss
- * never fires one retroactively), so today is genuinely missed.
+ * Why the capture time and not the session close: between the 17:00 session
+ * close and the (later, configurable) capture time B3 has not necessarily
+ * published the day's COTAHIST file yet — see `quotes.close_capture_time`'s
+ * own doc comment in `src/config/registry.ts` for when it typically does.
+ * Once the capture time has passed, a worker that was down missed that run
+ * (pg-boss never fires one retroactively), so today is genuinely missed.
+ *
+ * **`lastCapturedClose === null`.** Rather than "nothing is missed", the
+ * window is `throughInclusive` alone (when it is a trading day) — SPEC-008
+ * BR-008-09 (#171): a newly held asset has never had a close captured, and
+ * the daily job must still capture its first one rather than wait for some
+ * future "absence" to appear.
  *
  * **The cap keeps the most recent days.** `personal.catchup_max_days` bounds
  * a long absence. Keeping the *oldest* days instead would be self-defeating:
@@ -30,7 +35,7 @@ import type { TradingCalendar } from './ports';
  * to today, so days dropped from the recent end would never be revisited,
  * while days dropped from the old end are the ones a chart shows least.
  *
- * Worked example (DV-17), against the B3 calendar:
+ * Worked example (DV-17), against the B3 calendar, `captureTime: '17:05'`:
  *
  *   last capture Thu 2026-04-02, now Tue 2026-04-07 11:00 (session open)
  *     Fri 04-03  Sexta-feira Santa — closed
@@ -46,10 +51,12 @@ export interface CatchUpDaysInput {
   readonly now: Date;
   /** Today in São Paulo (AR-29), from the same `Clock` as `now`. */
   readonly today: BusinessDate;
-  /** `null` when no close was ever captured: there is no absence to measure, so nothing is missed. */
+  /** `null` when no close was ever captured — see the class doc above. */
   readonly lastCapturedClose: BusinessDate | null;
   /** `personal.catchup_max_days` — at most this many business days are returned. */
   readonly maxDays: number;
+  /** `quotes.close_capture_time` — `'HH:MM'`, São Paulo local (SPEC-002). */
+  readonly captureTime: string;
 }
 
 export interface CatchUpDays {
@@ -70,25 +77,30 @@ function addCalendarDays(date: BusinessDate, days: number): BusinessDate {
 }
 
 /**
- * SPEC-008 BR-008-09 — when `quotes.close-capture` runs, in São Paulo local
- * time. The single source for both the worker's cron expression
- * (`CLOSE_CAPTURE_CRON`, used by `src/worker/registrations.ts`) and catch-up's
- * window, so the two cannot drift apart.
- */
-export const CLOSE_CAPTURE_LOCAL_TIME = { hour: 17, minute: 5 } as const;
-
-/** Weekdays at `CLOSE_CAPTURE_LOCAL_TIME`; registered with `tz: 'America/Sao_Paulo'` (AR-17). */
-export const CLOSE_CAPTURE_CRON = `${CLOSE_CAPTURE_LOCAL_TIME.minute} ${CLOSE_CAPTURE_LOCAL_TIME.hour} * * 1-5`;
-
-/**
+ * SPEC-008 BR-008-09, DL-008-14 (#171) — when `quotes.close-capture` runs, in
+ * São Paulo local time, as `'HH:MM'`. `quotes.close_capture_time`
+ * (`src/config/registry.ts`) is the single source for both the worker's cron
+ * expression (`closeCaptureCron`, used by `src/worker/registrations.ts`) and
+ * catch-up's window, so the two cannot drift apart.
+ *
  * The instant `quotes.close-capture` fires on `date`. Brazil has observed no
  * daylight-saving time since 2019 (Decree 9,772), so São Paulo is a fixed
  * UTC−3 — the same literal offset `src/adapters/calendar/b3-calendar.ts` uses.
  */
-export function closeCaptureInstant(date: BusinessDate): Date {
-  const hh = String(CLOSE_CAPTURE_LOCAL_TIME.hour).padStart(2, '0');
-  const mm = String(CLOSE_CAPTURE_LOCAL_TIME.minute).padStart(2, '0');
+export function closeCaptureInstant(date: BusinessDate, captureTime: string): Date {
+  const [hh, mm] = captureTime.split(':');
   return new Date(`${date}T${hh}:${mm}:00-03:00`);
+}
+
+/**
+ * SPEC-008 BR-008-09 (#171) — `MM HH * * *`, every day, not weekdays only: a
+ * Friday COTAHIST file B3 publishes only after the run is picked up by
+ * Saturday's run instead of waiting until Monday, and a run that finds
+ * nothing missing (the common case on a weekend) makes no request.
+ */
+export function closeCaptureCron(captureTime: string): string {
+  const [hh, mm] = captureTime.split(':');
+  return `${Number(mm)} ${Number(hh)} * * *`;
 }
 
 /**
@@ -99,8 +111,12 @@ export function lastDueCloseDate(
   calendar: TradingCalendar,
   now: Date,
   today: BusinessDate,
+  captureTime: string,
 ): BusinessDate {
-  if (calendar.isTradingDay(today) && now.getTime() >= closeCaptureInstant(today).getTime()) {
+  if (
+    calendar.isTradingDay(today) &&
+    now.getTime() >= closeCaptureInstant(today, captureTime).getTime()
+  ) {
     return today;
   }
   return addCalendarDays(today, -1);
@@ -113,9 +129,18 @@ export function enumerateCatchUpDays(input: CatchUpDaysInput): CatchUpDays {
     // "nothing was missed".
     throw new RangeError(`enumerateCatchUpDays: maxDays must be a positive integer`);
   }
-  if (input.lastCapturedClose === null) return { days: [], beyondCap: 0 };
 
-  const through = lastDueCloseDate(input.calendar, input.now, input.today);
+  const through = lastDueCloseDate(input.calendar, input.now, input.today, input.captureTime);
+
+  if (input.lastCapturedClose === null) {
+    // SPEC-008 BR-008-09 (#171): no close ever captured for these assets, so
+    // there is no absence to measure — but the daily job must still capture a
+    // newly held asset's first close, so the window is the last due day
+    // alone rather than empty.
+    if (!input.calendar.isTradingDay(through)) return { days: [], beyondCap: 0 };
+    return { days: [through], beyondCap: 0 };
+  }
+
   const missed: BusinessDate[] = [];
   for (
     let cursor = addCalendarDays(input.lastCapturedClose, 1);

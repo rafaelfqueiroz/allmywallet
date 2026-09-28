@@ -3,7 +3,7 @@ import { AssetId } from '@/core/shared/ids';
 import type { UserId } from '@/core/shared/ids';
 import { err, ok, type Result } from '@/core/shared/result';
 import { domainError, type DomainError } from '@/core/shared/domain-error';
-import { QuoteProviderErrorCode } from './ports';
+import { OfficialCloseSourceErrorCode, QuoteProviderErrorCode } from './ports';
 import type {
   Asset,
   AssetCatalogPort,
@@ -12,13 +12,15 @@ import type {
   BudgetUsage,
   CloseGap,
   CloseGapRepositoryPort,
-  HistoricalClosesResult,
   LatestCloseDatePort,
   HeldAssetsPort,
   IndexSeriesCode,
   IndexSeriesPointRecord,
   IndexSeriesProvider,
   LatestQuote,
+  OfficialClose,
+  OfficialClosesFile,
+  OfficialCloseSource,
   PriceQuote,
   QuoteProvider,
   QuoteProviderResult,
@@ -28,6 +30,7 @@ import type {
   TesouroPriceProvider,
   TradingCalendar,
   TradingSession,
+  UnofficialClosesPort,
 } from './ports';
 
 /**
@@ -166,6 +169,11 @@ export class FakeQuoteRepository implements QuoteRepositoryPort, LatestCloseDate
     this.closeWrites.push(quote);
   }
 
+  /** SPEC-008 BR-008-09/BR-021-31 (#171) — a close COTAHIST no longer supplies must not stay in history. */
+  async deleteClose(assetId: AssetId, date: BusinessDate): Promise<void> {
+    this.closes.delete(`${assetId}:${date}`);
+  }
+
   /**
    * SPEC-009 BR-009-03 / SPEC-005 BR-005-20d — the carry-forward lookup
    * `PriceHistoryPort`/`ClosePriceReader` both declare it under: the close on
@@ -197,41 +205,15 @@ export class FakeCloseGapRepository implements CloseGapRepositoryPort {
 }
 
 export class FakeQuoteProvider implements QuoteProvider {
-  /** Every provider request, live or historical — the figure budget assertions care about. */
+  /** Every provider request — the figure budget assertions care about. */
   callCount = 0;
   calledTickers: string[] = [];
-  historicalCalls: { ticker: string; from: BusinessDate; to: BusinessDate }[] = [];
-  /** SPEC-021 BR-021-33 — lets a catch-up test prove the live-quote path was never asked. */
+  /** SPEC-021 BR-021-33 (#171) — lets a catch-up test prove the live-quote path was never asked. */
   liveCallCount = 0;
   private readonly results = new Map<string, () => Result<QuoteProviderResult, DomainError>>();
-  private readonly histories = new Map<
-    string,
-    (from: BusinessDate, to: BusinessDate) => Result<HistoricalClosesResult, DomainError>
-  >();
 
   set(ticker: string, factory: () => Result<QuoteProviderResult, DomainError>): void {
     this.results.set(ticker, factory);
-  }
-
-  setHistory(
-    ticker: string,
-    factory: (from: BusinessDate, to: BusinessDate) => Result<HistoricalClosesResult, DomainError>,
-  ): void {
-    this.histories.set(ticker, factory);
-  }
-
-  async fetchHistoricalCloses(
-    ticker: string,
-    from: BusinessDate,
-    to: BusinessDate,
-  ): Promise<Result<HistoricalClosesResult, DomainError>> {
-    this.callCount += 1;
-    this.historicalCalls.push({ ticker, from, to });
-    const factory = this.histories.get(ticker);
-    if (!factory) {
-      return err(domainError(QuoteProviderErrorCode.NOT_FOUND, { ticker }));
-    }
-    return factory(from, to);
   }
 
   async fetchQuote(ticker: string): Promise<Result<QuoteProviderResult, DomainError>> {
@@ -243,6 +225,92 @@ export class FakeQuoteProvider implements QuoteProvider {
       return err(domainError(QuoteProviderErrorCode.NOT_FOUND, { ticker }));
     }
     return factory();
+  }
+}
+
+/**
+ * TS-02 (#171) — `OfficialCloseSource`. Content is seeded per year (annual
+ * file) and per day (daily file); `fetchDay`/`fetchYear` fall back to an
+ * explicit NOT_PUBLISHED/UNAVAILABLE override when neither is seeded, so a
+ * test can simulate "B3 has not published today's file yet" without seeding
+ * an empty one (an empty file with a `lastDate` is a *published*, empty day
+ * — a different outcome, per `OfficialClosesFile.lastDate`'s own doc comment).
+ */
+export class FakeOfficialCloseSource implements OfficialCloseSource {
+  readonly source: string;
+  readonly dayCalls: { readonly date: BusinessDate; readonly tickers: readonly string[] }[] = [];
+  readonly yearCalls: { readonly year: number; readonly tickers: readonly string[] }[] = [];
+
+  private readonly days = new Map<BusinessDate, OfficialClosesFile>();
+  private readonly years = new Map<number, OfficialClosesFile>();
+  private readonly dayErrors = new Map<BusinessDate, OfficialCloseSourceErrorCode>();
+  private readonly yearErrors = new Map<number, OfficialCloseSourceErrorCode>();
+
+  constructor(source = 'b3_cotahist') {
+    this.source = source;
+  }
+
+  /** A published daily file: `lastDate` defaults to `date` itself. */
+  seedDay(date: BusinessDate, closes: readonly OfficialClose[], lastDate: BusinessDate | null = date): void {
+    this.days.set(date, { closes, lastDate });
+  }
+
+  seedDayError(date: BusinessDate, code: OfficialCloseSourceErrorCode): void {
+    this.dayErrors.set(date, code);
+  }
+
+  seedYear(year: number, closes: readonly OfficialClose[], lastDate: BusinessDate | null): void {
+    this.years.set(year, { closes, lastDate });
+  }
+
+  seedYearError(year: number, code: OfficialCloseSourceErrorCode): void {
+    this.yearErrors.set(year, code);
+  }
+
+  async fetchDay(
+    date: BusinessDate,
+    tickers: ReadonlySet<string>,
+  ): Promise<Result<OfficialClosesFile, DomainError>> {
+    this.dayCalls.push({ date, tickers: [...tickers] });
+    const errorCode = this.dayErrors.get(date);
+    if (errorCode) return err(domainError(errorCode, { date }));
+    const file = this.days.get(date);
+    if (!file) return err(domainError(OfficialCloseSourceErrorCode.NOT_PUBLISHED, { date }));
+    return ok({ closes: file.closes.filter((c) => tickers.has(c.ticker)), lastDate: file.lastDate });
+  }
+
+  async fetchYear(
+    year: number,
+    tickers: ReadonlySet<string>,
+  ): Promise<Result<OfficialClosesFile, DomainError>> {
+    this.yearCalls.push({ year, tickers: [...tickers] });
+    const errorCode = this.yearErrors.get(year);
+    if (errorCode) return err(domainError(errorCode, { year }));
+    const file = this.years.get(year);
+    if (!file) return err(domainError(OfficialCloseSourceErrorCode.NOT_PUBLISHED, { year }));
+    return ok({ closes: file.closes.filter((c) => tickers.has(c.ticker)), lastDate: file.lastDate });
+  }
+}
+
+/** TS-02 (#171) — `UnofficialClosesPort`, seeded directly with what the DB join would already have filtered. */
+export class FakeUnofficialClosesPort implements UnofficialClosesPort {
+  private entries: {
+    readonly assetId: AssetId;
+    readonly code: string;
+    readonly date: BusinessDate;
+    readonly source: string;
+  }[] = [];
+
+  seed(entry: { assetId: AssetId; code: string; date: BusinessDate; source: string }): void {
+    this.entries.push(entry);
+  }
+
+  async listUnofficialListedCloses(
+    officialSource: string,
+  ): Promise<readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]> {
+    return this.entries
+      .filter((entry) => entry.source !== officialSource)
+      .map(({ assetId, code, date }) => ({ assetId, code, date }));
   }
 }
 
