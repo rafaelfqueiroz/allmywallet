@@ -15,6 +15,10 @@ import { BusinessDate, SystemClock } from '@/core/shared/clock';
 import { isErr } from '@/core/shared/result';
 import type { TransactionType } from '@/core/ledger/transaction';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
+import {
+  keepSubscriptionClassification,
+  resolveSubscriptionOffer,
+} from '@/core/ingestion/subscription-offer';
 import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { withIngestionAndWalletDeps, withIngestionDeps } from '@/app/(app)/import/composition';
@@ -223,6 +227,91 @@ export async function classifyRowAction(
   // BR-006-15 / #113: a refusal — a missing ratio, an unstated price, a row
   // that is no longer classifiable — is explained on screen, not swallowed.
   // See `action-state.ts` and `components/patterns/action-form.tsx`.
+  if (isErr(result)) return failure(result.error);
+
+  revalidatePath('/import');
+  return IDLE;
+}
+
+const SubscriptionOfferSchema = z.object({ rowId: z.string() });
+
+/**
+ * SPEC-005 BR-005-20d (#157, DL-005-25) — **Resolve as subscription**: the
+ * user confirms a hand-classified, zero-cost credit was actually the paid
+ * subscription its exercise never found. Re-types the credit in place at the
+ * stored close and supersedes the exercise (`resolveSubscriptionOffer`),
+ * refusing rather than acting on a stale read — see that use case's own
+ * doc comment.
+ */
+export async function resolveSubscriptionOfferAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await requireUserId();
+  const parsed = SubscriptionOfferSchema.safeParse({ rowId: formData.get('rowId') });
+  if (!parsed.success) return INVALID_INPUT;
+
+  const windowDays = (await resolveConfig('import.subscription_credit_window_days', { db })).value;
+
+  const result = await withIngestionAndWalletDeps(userId, async (deps, wallets) => {
+    const resolved = await resolveSubscriptionOffer(deps, {
+      rowId: ImportRowId.of(parsed.data.rowId),
+      windowDays,
+    });
+    if (!resolved.ok) return resolved;
+
+    // SPEC-010 BR-010-05: the credit's re-typed price and every carried leg
+    // re-derived downstream of it move cost, so allocations see the same
+    // edit as the ledger, in the same transaction — as `classifyRowAction`
+    // does for its own edit.
+    const effects = await applyLedgerEffects(wallets, userId, [
+      ...resolved.value.transactions,
+      ...resolved.value.rederived,
+    ]);
+    if (!effects.ok) return effects;
+
+    return resolved;
+  });
+  // BR-006-15: a stale offer, or a race with another edit, is explained on
+  // screen (`SubscriptionOfferPanel` renders it through `ActionForm`).
+  if (isErr(result)) return failure(result.error);
+
+  revalidatePath('/import');
+  return IDLE;
+}
+
+/**
+ * SPEC-005 BR-005-20d (#157, DL-005-25) — **Keep my classification**: the
+ * credit is left exactly as the user classified it; only the exercise
+ * supersedes (`keepSubscriptionClassification`). Nothing that replays
+ * changes, so no wallet effect is expected — the call still runs, for
+ * safety, in case a future change ever makes it carry a transaction.
+ */
+export async function keepSubscriptionClassificationAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await requireUserId();
+  const parsed = SubscriptionOfferSchema.safeParse({ rowId: formData.get('rowId') });
+  if (!parsed.success) return INVALID_INPUT;
+
+  const windowDays = (await resolveConfig('import.subscription_credit_window_days', { db })).value;
+
+  const result = await withIngestionAndWalletDeps(userId, async (deps, wallets) => {
+    const kept = await keepSubscriptionClassification(deps, {
+      rowId: ImportRowId.of(parsed.data.rowId),
+      windowDays,
+    });
+    if (!kept.ok) return kept;
+
+    const changed = [...kept.value.transactions, ...kept.value.rederived];
+    if (changed.length > 0) {
+      const effects = await applyLedgerEffects(wallets, userId, changed);
+      if (!effects.ok) return effects;
+    }
+
+    return kept;
+  });
   if (isErr(result)) return failure(result.error);
 
   revalidatePath('/import');
