@@ -174,6 +174,15 @@ export class FakeQuoteRepository implements QuoteRepositoryPort, LatestCloseDate
     this.closes.delete(`${assetId}:${date}`);
   }
 
+  async earliestCloseFrom(assetId: AssetId, source: string): Promise<BusinessDate | null> {
+    let earliest: BusinessDate | null = null;
+    for (const quote of this.closes.values()) {
+      if (quote.assetId !== assetId || quote.source !== source) continue;
+      if (earliest === null || quote.date < earliest) earliest = quote.date;
+    }
+    return earliest;
+  }
+
   /**
    * SPEC-009 BR-009-03 / SPEC-005 BR-005-20d — the carry-forward lookup
    * `PriceHistoryPort`/`ClosePriceReader` both declare it under: the close on

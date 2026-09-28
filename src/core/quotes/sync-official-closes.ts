@@ -23,6 +23,11 @@ export interface SyncOfficialClosesRepository extends Pick<
 > {
   /** BR-021-31: a close COTAHIST no longer supplies for a day must not stay in history. */
   deleteClose(assetId: AssetId, date: BusinessDate): Promise<void>;
+  /**
+   * The date of the asset's earliest close from `source`, or `null` when it
+   * has none — whether COTAHIST has ever priced the asset (#171).
+   */
+  earliestCloseFrom(assetId: AssetId, source: string): Promise<BusinessDate | null>;
 }
 
 export interface SyncOfficialClosesPorts {
@@ -200,19 +205,45 @@ export async function syncOfficialCloses(
     else recorded.push(quote);
   }
 
+  // SPEC-021 BR-021-31 (#171): a gap is a close that exists for the day and
+  // could not be had. An asset COTAHIST has never priced on or before the day
+  // (a debenture, a subscription right, something never traded on the spot
+  // market) has no close to miss, so no gap is recorded for it — otherwise it
+  // would mark every day of every holder's chart. Asked per asset once, after
+  // this run's own closes are written, so a close found above counts.
+  const firstOfficial = new Map<AssetId, BusinessDate | null>();
+  async function everPricedBy(assetId: AssetId, date: BusinessDate): Promise<boolean> {
+    if (!firstOfficial.has(assetId)) {
+      firstOfficial.set(
+        assetId,
+        await ports.repository.earliestCloseFrom(assetId, ports.source.source),
+      );
+    }
+    const first = firstOfficial.get(assetId) ?? null;
+    return first !== null && !BusinessDate.isAfter(first, date);
+  }
+
   for (const pair of result.notSupplied) {
-    const gap: CloseGap = {
-      assetId: pair.assetId,
-      date: pair.date,
-      reason: CloseGapReason.NOT_SUPPLIED,
-    };
-    // The gap first, then the delete: a crash between the two leaves the
-    // non-official close in place, so the next run's supersede step asks for
-    // the day again and finishes the job. The other order could leave a day
-    // with neither a close nor a gap, outside any later window (BR-021-31).
-    await ports.gaps.recordGap(gap);
-    gaps.push(gap);
-    if (candidateFor(pair.assetId, pair.date).hadPriorClose) {
+    const hadPriorClose = candidateFor(pair.assetId, pair.date).hadPriorClose;
+    const isGap = await everPricedBy(pair.assetId, pair.date);
+    if (isGap) {
+      const gap: CloseGap = {
+        assetId: pair.assetId,
+        date: pair.date,
+        reason: CloseGapReason.NOT_SUPPLIED,
+      };
+      // The gap first, then the delete: a crash between the two leaves the
+      // non-official close in place, so the next run's supersede step asks for
+      // the day again and finishes the job. The other order could leave a day
+      // with neither a close nor a gap, outside any later window (BR-021-31).
+      await ports.gaps.recordGap(gap);
+      gaps.push(gap);
+    } else {
+      // A gap an earlier run recorded for such a day (a brapi-era one, or one
+      // relabelled by migration 0031) is not a gap either.
+      await ports.gaps.clearGap(pair.assetId, pair.date);
+    }
+    if (hadPriorClose) {
       await ports.repository.deleteClose(pair.assetId, pair.date);
       removed.push({ assetId: pair.assetId, date: pair.date });
       noteChanged(pair.date);

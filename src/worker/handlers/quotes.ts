@@ -64,6 +64,7 @@ export interface QuotesHandlerDeps {
   readonly repository: QuoteRepositoryPort &
     LatestCloseDatePort & {
       deleteClose(assetId: AssetId, date: BusinessDate): Promise<void>;
+      earliestCloseFrom(assetId: AssetId, source: string): Promise<BusinessDate | null>;
     };
   readonly budgetCounter: BudgetCounterPort;
   readonly heldAssets: HeldAssetsPort;

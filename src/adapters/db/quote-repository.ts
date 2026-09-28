@@ -204,6 +204,19 @@ export class DrizzleQuoteRepository
   }
 
   /**
+   * #171 — whether, and since when, `source` has priced the asset: a day an
+   * asset COTAHIST has never listed goes unpriced without being a gap
+   * (`syncOfficialCloses`).
+   */
+  async earliestCloseFrom(assetId: AssetId, source: string): Promise<BusinessDate | null> {
+    const [row] = await this.db
+      .select({ earliest: min(priceQuotes.date) })
+      .from(priceQuotes)
+      .where(and(eq(priceQuotes.assetId, assetId), eq(priceQuotes.source, source)));
+    return row?.earliest ? BusinessDate.of(row.earliest) : null;
+  }
+
+  /**
    * SPEC-008 BR-008-09/BR-008-30 (#171) — `UnofficialClosesPort`: every
    * stored listed-asset close not from `officialSource`, any date, any asset
    * (held or not) — `syncOfficialCloses`'s supersede pairs. Listed classes

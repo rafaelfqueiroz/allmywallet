@@ -88,6 +88,13 @@ describe('syncOfficialCloses (SPEC-008 BR-008-09/BR-008-30/BR-008-31, SPEC-021 B
 
   it('a stored brapi_free close COTAHIST does not supply is deleted and recorded as a gap', async () => {
     const ports = setup();
+    // COTAHIST priced PETR4 before, so a day without its row is a gap.
+    await ports.repository.upsertClosePrice({
+      assetId: PETR4.id,
+      date: d('2026-03-13'),
+      close: Money.fromString('31.90'),
+      source: 'b3_cotahist',
+    });
     await ports.repository.upsertClosePrice({
       assetId: PETR4.id,
       date: d('2026-03-16'),
@@ -108,6 +115,13 @@ describe('syncOfficialCloses (SPEC-008 BR-008-09/BR-008-30/BR-008-31, SPEC-021 B
 
   it('not_supplied with nothing stored is only a gap — nothing to delete', async () => {
     const ports = setup();
+    // COTAHIST priced PETR4 before, so a day without its row is a gap.
+    await ports.repository.upsertClosePrice({
+      assetId: PETR4.id,
+      date: d('2026-03-13'),
+      close: Money.fromString('31.90'),
+      source: 'b3_cotahist',
+    });
     ports.source.seedDay(d('2026-03-16'), []);
 
     const summary = await syncOfficialCloses(ports, [PETR4], [d('2026-03-16')], OPTIONS);
@@ -295,6 +309,13 @@ describe('syncOfficialCloses (SPEC-008 BR-008-09/BR-008-30/BR-008-31, SPEC-021 B
     // A crash between the two must leave the non-official close in place, so
     // the next run asks again — never a day with neither a close nor a gap.
     const ports = setup();
+    // COTAHIST priced PETR4 before, so a day without its row is a gap.
+    await ports.repository.upsertClosePrice({
+      assetId: PETR4.id,
+      date: d('2026-03-13'),
+      close: Money.fromString('31.90'),
+      source: 'b3_cotahist',
+    });
     const order: string[] = [];
     const recordGap = ports.gaps.recordGap.bind(ports.gaps);
     ports.gaps.recordGap = async (gap) => {
@@ -319,5 +340,60 @@ describe('syncOfficialCloses (SPEC-008 BR-008-09/BR-008-30/BR-008-31, SPEC-021 B
     await syncOfficialCloses(ports, [PETR4], [d('2026-03-16')], OPTIONS);
 
     expect(order).toEqual(['gap', 'delete']);
+  });
+  it('an asset COTAHIST has never priced is not a gap: no row, no gap, and a stale gap is cleared', async () => {
+    const ports = setup();
+    // A held instrument B3's spot market has never listed (a debenture, a
+    // subscription right): every day's file lacks it.
+    await ports.gaps.recordGap({
+      assetId: VALE3.id,
+      date: d('2026-03-16'),
+      reason: 'provider_unavailable',
+    });
+    ports.source.seedDay(d('2026-03-16'), [
+      { ticker: 'PETR4', date: d('2026-03-16'), close: Money.fromString('32.40') },
+    ]);
+
+    const summary = await syncOfficialCloses(ports, [PETR4, VALE3], [d('2026-03-16')], OPTIONS);
+
+    expect(summary.gaps).toEqual([]);
+    expect(ports.gaps.gaps.size).toBe(0);
+    expect(summary.recorded.map((q) => q.assetId)).toEqual([PETR4.id]);
+  });
+
+  it('a close found earlier in the same run counts: the next unsupplied day is a gap', async () => {
+    const ports = setup();
+    ports.source.seedDay(d('2026-03-13'), [
+      { ticker: 'VALE3', date: d('2026-03-13'), close: Money.fromString('60.10') },
+    ]);
+    ports.source.seedDay(d('2026-03-16'), []);
+
+    const summary = await syncOfficialCloses(
+      ports,
+      [VALE3],
+      [d('2026-03-13'), d('2026-03-16')],
+      OPTIONS,
+    );
+
+    expect(summary.gaps).toEqual([
+      { assetId: VALE3.id, date: '2026-03-16', reason: 'not_supplied' },
+    ]);
+  });
+
+  it('a brapi close for an asset COTAHIST has never priced is deleted without a gap', async () => {
+    const ports = setup();
+    await ports.repository.upsertClosePrice({
+      assetId: VALE3.id,
+      date: d('2026-03-16'),
+      close: Money.fromString('55.00'),
+      source: 'brapi_free',
+    });
+    ports.source.seedDay(d('2026-03-16'), []);
+
+    const summary = await syncOfficialCloses(ports, [VALE3], [d('2026-03-16')], OPTIONS);
+
+    expect(summary.removed).toEqual([{ assetId: VALE3.id, date: '2026-03-16' }]);
+    expect(summary.gaps).toEqual([]);
+    expect(summary.earliestChanged).toBe('2026-03-16');
   });
 });
