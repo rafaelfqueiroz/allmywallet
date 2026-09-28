@@ -235,8 +235,9 @@ export interface QuoteProvider {
  * hide every other asset's missed days: with brapi refusing all but three test
  * tickers (#151), PETR4's daily close made catch-up report "no close was
  * missed" while 60 assets went eight trading days without one. Assets already
- * captured cost nothing in the wider window — `backfillMissedCloses` requests
- * only the days an asset has no close for.
+ * captured cost nothing in the wider window — `syncOfficialCloses`'s window
+ * pairs (`core/quotes/sync-official-closes.ts`) skip any `(asset, date)` that
+ * already has a close from `source.source`.
  *
  * Kept off `QuoteRepositoryPort` so the ports every existing quote job depends
  * on do not grow a method only catch-up needs.
