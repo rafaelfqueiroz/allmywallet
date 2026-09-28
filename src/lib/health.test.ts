@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aggregateStatus, type ComponentHealth } from '@/lib/health';
+import { aggregateStatus, checkQuoteProviderCredential, type ComponentHealth } from '@/lib/health';
 
 /**
  * AR-50/AR-33: "reports database reachability, worker liveness and last
@@ -42,5 +42,20 @@ describe('aggregateStatus', () => {
 
   it('an empty component list reports ok — vacuously true, matches the "no down component" rule', () => {
     expect(aggregateStatus([])).toBe('ok');
+  });
+});
+
+describe('checkQuoteProviderCredential (#151)', () => {
+  it('no token is degraded — never down, so start.sh does not roll back', () => {
+    const health = checkQuoteProviderCredential(undefined);
+    expect(health.status).toBe('degraded');
+    expect(health.detail).toContain('BRAPI_TOKEN');
+    expect(aggregateStatus([{ status: 'ok' }, health])).toBe('degraded');
+  });
+
+  it('a token is ok, and the detail never carries the value', () => {
+    const health = checkQuoteProviderCredential('secret-token');
+    expect(health).toEqual({ status: 'ok' });
+    expect(JSON.stringify(health)).not.toContain('secret-token');
   });
 });

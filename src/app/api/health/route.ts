@@ -2,10 +2,12 @@ import { NextResponse } from 'next/server';
 import { getPool } from '@/db/client';
 import { db } from '@/db/client';
 import { resolveConfig } from '@/config/resolve';
+import { env } from '@/lib/env';
 import {
   aggregateStatus,
   checkBackup,
   checkDatabase,
+  checkQuoteProviderCredential,
   checkQuoteSync,
   checkWorkerLiveness,
 } from '@/lib/health';
@@ -35,14 +37,16 @@ export async function GET(): Promise<NextResponse> {
     // SPEC-021 BR-021-20: degraded until the next success, never down.
     checkBackup(pool),
   ]);
+  // #151: degraded, never down — a missing token is loud, not a rollback.
+  const quoteCredential = checkQuoteProviderCredential(env().BRAPI_TOKEN);
 
-  const status = aggregateStatus([database, worker, quoteSync, backup]);
+  const status = aggregateStatus([database, worker, quoteSync, backup, quoteCredential]);
 
   return NextResponse.json(
     {
       status,
       checkedAt: new Date().toISOString(),
-      components: { database, worker, quoteSync, backup },
+      components: { database, worker, quoteSync, backup, quoteCredential },
     },
     // 'unknown' components (quote sync before SPEC-008/#11 lands) never pull
     // the HTTP status down — only a genuine 'down' does, which is what keeps

@@ -94,6 +94,22 @@ const envSchema = z.object({
    */
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(3).optional(),
+
+  /**
+   * SPEC-008 BR-008-01 (#151) — brapi's API token. The PRD's 15,000
+   * requests/month is brapi's *authenticated* free plan; without a token brapi
+   * answers only its public test tickers, and every other asset stays valued
+   * at cost. A secret, so here rather than in the registry (AR-43).
+   *
+   * Optional because development and CI never call brapi for real — a missing
+   * token degrades `/api/health` (`checkQuoteProviderCredential`) and warns at
+   * worker start rather than failing the boot. A blank value (`BRAPI_TOKEN=`,
+   * as the env templates ship) reads as unset, not as an empty credential.
+   */
+  BRAPI_TOKEN: z
+    .string()
+    .optional()
+    .transform((value) => (value?.trim() ? value.trim() : undefined)),
 });
 
 export type Env = z.infer<typeof envSchema>;

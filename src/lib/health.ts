@@ -154,6 +154,31 @@ export async function checkQuoteSync(pool: Pool): Promise<QuoteSyncHealth> {
 }
 
 /**
+ * SPEC-008 BR-008-01 (#151) — whether the quote provider holds the credential
+ * it needs. brapi without a token answers only its public test tickers, so
+ * every other asset silently stays valued at cost; this makes that a
+ * `degraded` component instead of a stream of per-ticker poll failures.
+ * Never `down`: a missing token must not make `scripts/personal/start.sh` roll
+ * back an image that serves correctly.
+ *
+ * Takes no provider: brapi is the only value `quotes.provider` admits
+ * (`src/config/registry.ts`), and it needs a token. A second provider joining
+ * that enum is when this grows the argument.
+ *
+ * Pure, so the worker's start-up warning and this endpoint cannot disagree.
+ * The web process reads its own environment; web and worker share one env
+ * file in every deployment (`docker-compose*.yml`), which is what makes that
+ * honest. The detail names the variable, never its value.
+ */
+export function checkQuoteProviderCredential(apiToken: string | undefined): ComponentHealth {
+  if (apiToken) return { status: 'ok' };
+  return {
+    status: 'degraded',
+    detail: 'BRAPI_TOKEN is not set — brapi quotes only its public test tickers',
+  };
+}
+
+/**
  * Pure aggregation, split out so it is unit-testable without a database.
  * 'down' wins over everything (the database itself, or the worker, being
  * unreachable is a real outage); 'unknown' components (quote sync before

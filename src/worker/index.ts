@@ -8,6 +8,7 @@ import { validateConfigOrExit } from '@/config/validate';
 import { resolveConfig } from '@/config/resolve';
 import { baseSentryOptions } from '@/lib/sentry';
 import { raiseAlert } from '@/lib/alerts';
+import { checkQuoteProviderCredential } from '@/lib/health';
 import { describeDeadLetterFailure, isQueueBacklogWarning } from '@/worker/alerting';
 import { DEAD_LETTER_QUEUE, deadLetterCreateOptions, queueCreateOptions } from '@/worker/queues';
 import { REGISTRATIONS, type JobHandler, type RegisteredWorker } from '@/worker/registrations';
@@ -42,6 +43,17 @@ export async function startWorker(): Promise<PgBoss> {
   // value must fail the worker's boot loudly, the same as it does web's
   // (src/instrumentation.ts). A bad value must not start half the system.
   await validateConfigOrExit(db);
+
+  // #151: without a token brapi quotes only its public test tickers, and every
+  // other asset stays valued at cost. Said once, at start, rather than as one
+  // failure per ticker per poll; /api/health carries the same finding.
+  const quoteCredential = checkQuoteProviderCredential(env().BRAPI_TOKEN);
+  if (quoteCredential.status !== 'ok') {
+    logger.warn(
+      { component: 'quotes' },
+      quoteCredential.detail ?? 'quote provider credential missing',
+    );
+  }
 
   const boss = new PgBoss({
     connectionString: env().DATABASE_URL,

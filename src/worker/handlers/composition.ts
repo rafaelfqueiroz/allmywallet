@@ -1,5 +1,6 @@
 import { eq, and } from 'drizzle-orm';
 import { db as globalDb, type Database } from '@/db/client';
+import { env } from '@/lib/env';
 import { SystemClock } from '@/core/shared/clock';
 import { resolveConfig } from '@/config/resolve';
 import { registryEntry } from '@/config/registry';
@@ -39,12 +40,17 @@ export function buildQuotesComposition(database: Database = globalDb) {
   return { clock, calendar, catalog, repository, indexSeriesRepository, budgetCounter };
 }
 
-/** BR-008-26: the provider is resolved from config, never hardcoded — swapping vendor/tier is a config change. */
+/**
+ * BR-008-26: the provider is resolved from config, never hardcoded — swapping
+ * vendor/tier is a config change. The token is a secret, so it comes from the
+ * environment (AR-43), never from the registry (#151).
+ */
 export async function buildQuoteProvider(
   database: Database = globalDb,
 ): Promise<BrapiQuoteProvider> {
   const provider = await resolveConfig('quotes.provider', { db: database });
-  return new BrapiQuoteProvider({ source: provider.value });
+  const apiToken = env().BRAPI_TOKEN;
+  return new BrapiQuoteProvider({ source: provider.value, ...(apiToken ? { apiToken } : {}) });
 }
 
 export function buildIndexSeriesProvider(): BcbSgsIndexSeriesProvider {

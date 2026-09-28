@@ -84,6 +84,43 @@ describe('BrapiQuoteProvider (SPEC-008 BR-008-01/19/26)', () => {
     if (!result.ok) expect(result.error.code).toBe(QuoteProviderErrorCode.UNAVAILABLE);
   });
 
+  it('#151: sends the token as a Bearer header and never as a query parameter', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ status: 200, text: () => Promise.resolve(RECORDED_QUOTE_RESPONSE) });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new BrapiQuoteProvider({ source: 'brapi_free', apiToken: 'tok' });
+
+    await provider.fetchQuote('PETR4');
+
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).not.toContain('tok');
+    expect(init).toMatchObject({ headers: { Authorization: 'Bearer tok' } });
+  });
+
+  it('#151: without a token no Authorization header is sent', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ status: 200, text: () => Promise.resolve(RECORDED_QUOTE_RESPONSE) });
+    vi.stubGlobal('fetch', fetchMock);
+    const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
+
+    await provider.fetchQuote('PETR4');
+
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ headers: {} });
+  });
+
+  it.each([401, 403])(
+    '#151: a %i refusal is UNAVAILABLE — a credential problem, not an unknown ticker',
+    async (status) => {
+      stubFetch(status, '{"error":true,"message":"token required"}');
+      const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
+      const result = await provider.fetchQuote('ITSA4');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe(QuoteProviderErrorCode.UNAVAILABLE);
+    },
+  );
+
   it('a network failure is UNAVAILABLE', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
     const provider = new BrapiQuoteProvider({ source: 'brapi_free' });
@@ -143,7 +180,11 @@ describe('BrapiQuoteProvider.fetchHistoricalCloses (SPEC-021 BR-021-29)', () => 
     expect(url.pathname).toBe('/api/quote/PETR4');
     expect(url.searchParams.get('range')).toBe('1mo');
     expect(url.searchParams.get('interval')).toBe('1d');
-    expect(url.searchParams.get('token')).toBe('tok');
+    // #151: the token travels in a header, never in a URL that breadcrumbs keep.
+    expect(url.searchParams.has('token')).toBe(false);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      headers: { Authorization: 'Bearer tok' },
+    });
   });
 
   it('never returns a close outside the requested window', () => {
