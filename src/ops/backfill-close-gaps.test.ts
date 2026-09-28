@@ -1,22 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { AssetId } from '@/core/shared/ids';
 import { Money } from '@/core/shared/money';
-import { BusinessDate, FakeClock } from '@/core/shared/clock';
-import { ok } from '@/core/shared/result';
+import { BusinessDate } from '@/core/shared/clock';
 import type { Asset } from '@/core/quotes/ports';
-import {
-  FakeAssetCatalog,
-  FakeBudgetCounter,
-  FakeCloseGapRepository,
-  FakeQuoteProvider,
-  FakeQuoteRepository,
-} from '@/core/quotes/test-support';
+import { FakeAssetCatalog, FakeOfficialCloseSource, FakeQuoteRepository } from '@/core/quotes/test-support';
 import { backfillCloseGaps } from './backfill-close-gaps';
 
 /**
- * #151 — retrying the gaps a missing brapi token left behind. The recovery
- * rules themselves are `backfillMissedCloses`'s and tested there; this proves
- * the per-asset scoping and the single rebuild.
+ * #151, rewritten for #171 — retrying the gaps a missing brapi token, and
+ * later a COTAHIST outage, left behind. The recovery rules themselves are
+ * `fetchOfficialCloses`'s and tested there; this proves the per-asset
+ * scoping and the single rebuild.
  */
 const d = (value: string): BusinessDate => BusinessDate.of(value);
 
@@ -28,32 +22,18 @@ const HGLG11: Asset = {
   assetClass: 'fii',
 };
 
-function history(ticker: string, closes: Record<string, string>) {
-  return () =>
-    ok({
-      ticker,
-      source: 'brapi_free',
-      closes: Object.entries(closes).map(([date, close]) => ({
-        date: d(date),
-        close: Money.fromString(close),
-      })),
-    });
-}
-
 function setup(gaps: Map<AssetId, readonly BusinessDate[]>) {
   const catalog = new FakeAssetCatalog();
   catalog.add(ITSA4);
   catalog.add(HGLG11);
   const rebuilds: BusinessDate[] = [];
   const deps = {
+    source: new FakeOfficialCloseSource(),
     repository: new FakeQuoteRepository(),
-    provider: new FakeQuoteProvider(),
-    budgetCounter: new FakeBudgetCounter(),
-    gaps: new FakeCloseGapRepository(),
-    clock: new FakeClock('2026-09-28T15:00:00Z'),
     catalog,
     retryableGaps: () => Promise.resolve(gaps),
-    budget: { monthlyQuota: 15000, ondemandReservePct: 10 },
+    annualFileMinDays: 100,
+    currentYear: 2026,
     rebuildSnapshotsFrom: (from: BusinessDate) => {
       rebuilds.push(from);
       return Promise.resolve();
@@ -62,7 +42,7 @@ function setup(gaps: Map<AssetId, readonly BusinessDate[]>) {
   return { deps, rebuilds };
 }
 
-describe('backfillCloseGaps (#151)', () => {
+describe('backfillCloseGaps (#151, #171)', () => {
   it('asks each asset for its own gap dates only, and rebuilds once from the earliest recovered day', async () => {
     const { deps, rebuilds } = setup(
       new Map([
@@ -70,31 +50,34 @@ describe('backfillCloseGaps (#151)', () => {
         [HGLG11.id, [d('2026-09-18')]],
       ]),
     );
-    deps.provider.setHistory(
-      'ITSA4',
-      history('ITSA4', { '2026-09-21': '10.12', '2026-09-22': '10.30' }),
-    );
-    deps.provider.setHistory('HGLG11', history('HGLG11', { '2026-09-18': '158.40' }));
+    deps.source.seedDay(d('2026-09-21'), [
+      { ticker: 'ITSA4', date: d('2026-09-21'), close: Money.fromString('10.12') },
+    ]);
+    deps.source.seedDay(d('2026-09-22'), [
+      { ticker: 'ITSA4', date: d('2026-09-22'), close: Money.fromString('10.30') },
+    ]);
+    deps.source.seedDay(d('2026-09-18'), [
+      { ticker: 'HGLG11', date: d('2026-09-18'), close: Money.fromString('158.40') },
+    ]);
 
     const summary = await backfillCloseGaps(deps);
 
-    expect(deps.provider.historicalCalls).toEqual([
-      { ticker: 'HGLG11', from: '2026-09-18', to: '2026-09-18' },
-      { ticker: 'ITSA4', from: '2026-09-21', to: '2026-09-22' },
-    ]);
     expect(summary).toEqual({
       assets: 2,
       recovered: 3,
       stillMissing: 0,
-      requests: 2,
+      requests: 3,
       rebuiltFrom: '2026-09-18',
     });
     expect(rebuilds).toEqual(['2026-09-18']);
+    expect((await deps.repository.getClosePrice(ITSA4.id, d('2026-09-21')))?.close.toString()).toBe(
+      '10.12',
+    );
   });
 
   it('rebuilds nothing when no close was recovered', async () => {
     const { deps, rebuilds } = setup(new Map([[ITSA4.id, [d('2026-09-21')]]]));
-    deps.provider.setHistory('ITSA4', history('ITSA4', {}));
+    deps.source.seedDay(d('2026-09-21'), []); // published, still no row for ITSA4
 
     const summary = await backfillCloseGaps(deps);
 
@@ -115,7 +98,7 @@ describe('backfillCloseGaps (#151)', () => {
       requests: 0,
       rebuiltFrom: null,
     });
-    expect(deps.provider.callCount).toBe(0);
+    expect(deps.source.dayCalls).toEqual([]);
     expect(rebuilds).toEqual([]);
   });
 });
