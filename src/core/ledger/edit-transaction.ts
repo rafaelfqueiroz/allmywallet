@@ -386,9 +386,10 @@ function keepsImportKey(original: Transaction, input: EditTransactionInput): boo
 
   // `importNaturalKeyFor` always appends exactly one segment to
   // `naturalKeyFor`'s six — the same structural read `storedB3TypeOf` uses
-  // elsewhere to recover it — and only the `unmapped` form's type slot is
-  // ever the placeholder (`keyFormsFor`'s `mapped`/`priceless` forms always
-  // carry the real resolved type).
+  // elsewhere to recover it. The `unmapped` form's type slot is always the
+  // placeholder; a `priceless` form carries its resolved type, which is the
+  // placeholder's own value only for a price-less `Rendimento` — kept here
+  // too, harmlessly, since that key likewise records the B3 row, not a type.
   const segments = original.naturalKey.split('|');
   if (segments.length === 7 && segments[3] === UNCLASSIFIED_PLACEHOLDER_TYPE) {
     return (
