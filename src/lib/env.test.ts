@@ -47,6 +47,16 @@ describe('env', () => {
     expect(() => env()).toThrow(/DATABASE_URL/);
   });
 
+  it('#151: a blank BRAPI_TOKEN reads as unset, and a real one is trimmed', () => {
+    process.env.DATABASE_URL = VALID_URL;
+    process.env.BRAPI_TOKEN = '  ';
+    expect(env().BRAPI_TOKEN).toBeUndefined();
+
+    resetEnvCache();
+    process.env.BRAPI_TOKEN = ' abc123 ';
+    expect(env().BRAPI_TOKEN).toBe('abc123');
+  });
+
   it('rejects an AUTH_SECRET too short to be one', () => {
     process.env.DATABASE_URL = VALID_URL;
     process.env.AUTH_SECRET = 'short';

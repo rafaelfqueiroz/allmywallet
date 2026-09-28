@@ -4,8 +4,8 @@ import type { Tx } from '@/db/tenant';
 import { priceQuoteGaps } from '@/db/schema/market';
 import { positions } from '@/db/schema/positions';
 import { BusinessDate } from '@/core/shared/clock';
-import type { AssetId } from '@/core/shared/ids';
-import type { CloseGap, CloseGapRepositoryPort } from '@/core/quotes/ports';
+import { AssetId } from '@/core/shared/ids';
+import { CloseGapReason, type CloseGap, type CloseGapRepositoryPort } from '@/core/quotes/ports';
 
 /**
  * SPEC-021 BR-021-31 — `price_quote_gaps`, a shared reference table (AR-15),
@@ -29,7 +29,34 @@ export class DrizzleCloseGapRepository implements CloseGapRepositoryPort {
       .delete(priceQuoteGaps)
       .where(and(eq(priceQuoteGaps.assetId, assetId), eq(priceQuoteGaps.date, date)));
   }
+
+  /**
+   * #151 — the gaps a later request may still fill, grouped by asset with each
+   * asset's dates ascending. `not_supplied` is left out: that request
+   * *succeeded* and the provider had no close, so asking again spends budget
+   * on an answer already given.
+   */
+  async listRetryableGaps(): Promise<ReadonlyMap<AssetId, readonly BusinessDate[]>> {
+    const rows = await this.db
+      .select({ assetId: priceQuoteGaps.assetId, date: priceQuoteGaps.date })
+      .from(priceQuoteGaps)
+      .where(inArray(priceQuoteGaps.reason, RETRYABLE_GAP_REASONS))
+      .orderBy(asc(priceQuoteGaps.assetId), asc(priceQuoteGaps.date));
+    const byAsset = new Map<AssetId, BusinessDate[]>();
+    for (const row of rows) {
+      const assetId = AssetId.of(row.assetId);
+      const dates = byAsset.get(assetId) ?? [];
+      dates.push(BusinessDate.of(row.date));
+      byAsset.set(assetId, dates);
+    }
+    return byAsset;
+  }
 }
+
+const RETRYABLE_GAP_REASONS: CloseGapReason[] = [
+  CloseGapReason.PROVIDER_UNAVAILABLE,
+  CloseGapReason.BUDGET_EXHAUSTED,
+];
 
 /**
  * SPEC-021 BR-021-31 — the dates in `[from, to]` a signed-in user's chart

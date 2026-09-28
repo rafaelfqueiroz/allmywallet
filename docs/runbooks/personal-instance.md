@@ -17,8 +17,10 @@ scripts/personal/init.sh
 
 1. The first run writes two files with generated secrets and stops: `~/.config/allmywallet/personal.env`, what web and worker run with; and `migrator.env` beside it, the migrator credential, which only the scripts read and no running container ever sees.
    Running `init.sh` again after that refuses; upgrades belong to `start.sh`, which backs up first.
-2. Fill in `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `BACKUP_DIR`, `BACKUP_AGE_RECIPIENT` and `PGDATA_HOST_PATH`. Register `http://localhost:3100/api/auth/callback/google` on the Google OAuth client.
+2. Fill in `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `BRAPI_TOKEN`, `BACKUP_DIR`, `BACKUP_AGE_RECIPIENT` and `PGDATA_HOST_PATH`. Register `http://localhost:3100/api/auth/callback/google` on the Google OAuth client.
 3. Run it again. It pulls the image, migrates, sets the database marker, takes the first backup and starts everything at <http://localhost:3100>.
+
+Quotes: `BRAPI_TOKEN` is the token from <https://brapi.dev/dashboard> (free plan, 15.000 requests/month). Without it brapi quotes only its test tickers and every other asset stays at cost; `quoteCredential` in `/api/health` reads `degraded` until it is set. After adding it to an existing instance, run `scripts/personal/start.sh`, then `scripts/personal/backfill-gaps.sh` to recover the closes refused while it was missing.
 
 Real email: set `RESEND_API_KEY` and `EMAIL_FROM` in the env file, and the deployment-level config key `notifications.email_provider` to `resend`.
 
@@ -36,6 +38,7 @@ Upgrades when `:latest` has moved (backup → pull → migrate → start → hea
 
 | Symptom | Do |
 |---|---|
+| `quoteCredential` degraded in `/api/health`, or most holdings valued at cost | `BRAPI_TOKEN` is missing from the env file. Set it (see *First run*), run `start.sh`, then `scripts/personal/backfill-gaps.sh`. |
 | "Backup failed" notice in the app, or `backup` degraded in `/api/health` | Read the reason. Mount the drive, fix the path, run `scripts/personal/backup.sh`. The notice clears on the next success. |
 | `start.sh` says the backup failed and the upgrade was aborted | The current image is running and nothing migrated. Fix the backup, run `start.sh` again. |
 | `start.sh` says the migration failed | The current image is running; the migration transaction rolled back. Do not retry by hand — report the migration as a defect. |

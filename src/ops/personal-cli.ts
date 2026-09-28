@@ -3,6 +3,7 @@ import { db, closePool } from '@/db/client';
 import { backupRuns } from '@/db/schema/observability';
 import { resolveConfig } from '@/config/resolve';
 import { rebuildAll } from '@/ops/rebuild-positions';
+import { backfillCloseGaps, buildBackfillCloseGapsDeps } from '@/ops/backfill-close-gaps';
 import { handleValuationSnapshot } from '@/worker/handlers/valuation';
 import { logger } from '@/lib/logger';
 
@@ -23,6 +24,9 @@ import { logger } from '@/lib/logger';
  *                                  position cache (SPEC-007 BR-007-14, DM-4)
  *   rebuild-snapshots              rebuilds every tenant's whole valuation
  *                                  history (SPEC-009 BR-009-17/18)
+ *   backfill-gaps                  retries every recorded close gap a later
+ *                                  request may fill, then rebuilds snapshots
+ *                                  from the earliest recovered day (#151)
  *
  * `rebuild-positions` is `pnpm positions:rebuild --all` made runnable where it
  * is actually needed. The pnpm script needs the repository, a toolchain and a
@@ -75,8 +79,21 @@ export async function runPersonalCommand(argv: readonly string[]): Promise<strin
     return `rebuilt ${summary.snapshots} snapshot(s) for ${summary.tenants} tenant(s)`;
   }
 
+  // #151: catch-up looks forward from the newest capture, so days refused
+  // while other assets were being captured are never revisited on their own.
+  if (command === 'backfill-gaps') {
+    const summary = await backfillCloseGaps(await buildBackfillCloseGapsDeps(db));
+    return (
+      `retried ${summary.assets} asset(s) in ${summary.requests} request(s): ` +
+      `${summary.recovered} close(s) recovered, ${summary.stillMissing} still missing; ` +
+      (summary.rebuiltFrom === null
+        ? 'no snapshot rebuilt'
+        : `snapshots rebuilt from ${summary.rebuiltFrom}`)
+    );
+  }
+
   throw new Error(
-    `unknown command "${command ?? ''}" — expected backup-retain-count, backup-record, rebuild-positions or rebuild-snapshots`,
+    `unknown command "${command ?? ''}" — expected backup-retain-count, backup-record, rebuild-positions, rebuild-snapshots or backfill-gaps`,
   );
 }
 

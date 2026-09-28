@@ -113,6 +113,11 @@ const brapiResponseSchema = z.object({
 
 export interface BrapiConfig {
   readonly baseUrl?: string;
+  /**
+   * #151 — sent as `Authorization: Bearer`, brapi's documented scheme, never
+   * as a `?token=` query parameter: a URL is what ends up in fetch
+   * breadcrumbs, traces and proxy logs, and a header is not.
+   */
   readonly apiToken?: string;
   /** Persisted alongside every quote so BR-008-04 can name the source (`quotes.provider`'s resolved value). */
   readonly source: string;
@@ -128,6 +133,8 @@ export interface BrapiConfig {
 
 const DEFAULT_BASE_URL = 'https://brapi.dev/api';
 const DEFAULT_HISTORY_TIMEOUT_MS = 15_000;
+const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
 
 export class BrapiQuoteProvider implements QuoteProvider {
   private readonly baseUrl: string;
@@ -136,14 +143,17 @@ export class BrapiQuoteProvider implements QuoteProvider {
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
   }
 
+  private headers(): Record<string, string> {
+    return this.config.apiToken ? { Authorization: `Bearer ${this.config.apiToken}` } : {};
+  }
+
   async fetchQuote(ticker: string): Promise<Result<QuoteProviderResult, DomainError>> {
     const url = new URL(`${this.baseUrl}/quote/${encodeURIComponent(ticker)}`);
-    if (this.config.apiToken) url.searchParams.set('token', this.config.apiToken);
 
     let rawBody: string;
     let status: number;
     try {
-      const response = await fetch(url, { method: 'GET' });
+      const response = await fetch(url, { method: 'GET', headers: this.headers() });
       status = response.status;
       rawBody = await response.text();
     } catch {
@@ -151,7 +161,10 @@ export class BrapiQuoteProvider implements QuoteProvider {
       return err(domainError(QuoteProviderErrorCode.UNAVAILABLE, { ticker }));
     }
 
-    if (status >= 500) {
+    // #151: a missing or invalid token (401) and a plan that does not cover
+    // the ticker (403) are refusals of *us*, not evidence the ticker does not
+    // exist — reporting them as NOT_FOUND would call every held asset unknown.
+    if (status >= 500 || status === HTTP_UNAUTHORIZED || status === HTTP_FORBIDDEN) {
       return err(domainError(QuoteProviderErrorCode.UNAVAILABLE, { ticker, status }));
     }
 
@@ -209,7 +222,6 @@ export class BrapiQuoteProvider implements QuoteProvider {
     const url = new URL(`${this.baseUrl}/quote/${encodeURIComponent(ticker)}`);
     url.searchParams.set('range', historyRangeFor(from, to));
     url.searchParams.set('interval', '1d');
-    if (this.config.apiToken) url.searchParams.set('token', this.config.apiToken);
 
     let rawBody: string;
     let status: number;
@@ -219,7 +231,7 @@ export class BrapiQuoteProvider implements QuoteProvider {
       const signal = AbortSignal.timeout(
         this.config.historyTimeoutMs ?? DEFAULT_HISTORY_TIMEOUT_MS,
       );
-      const response = await fetch(url, { method: 'GET', signal });
+      const response = await fetch(url, { method: 'GET', headers: this.headers(), signal });
       status = response.status;
       rawBody = await response.text();
     } catch {
