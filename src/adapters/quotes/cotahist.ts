@@ -56,7 +56,6 @@ const FATCOT_END = 217;
 /** The minimum line length that lets every field above be read. */
 const MIN_QUOTE_RECORD_LENGTH = FATCOT_END;
 
-const TIPREG_HEADER = '00';
 const TIPREG_QUOTE = '01';
 const TIPREG_TRAILER = '99';
 /** BR-008-30: spot market — the only `TPMERC` an official close is read from. */

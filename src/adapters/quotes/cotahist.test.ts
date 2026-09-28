@@ -10,7 +10,10 @@ import {
   type QuoteRecordFields,
 } from './cotahist-fixture';
 
-function stubFetch(status: number, body: Buffer | string = Buffer.alloc(0)): ReturnType<typeof vi.fn> {
+function stubFetch(
+  status: number,
+  body: Buffer | string = Buffer.alloc(0),
+): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn().mockResolvedValue({
     status,
     arrayBuffer: () => Promise.resolve(typeof body === 'string' ? Buffer.from(body) : body),
@@ -273,7 +276,10 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
         'fetch',
         vi.fn((url: string) => {
           urls.push(url);
-          return Promise.resolve({ status: 404, arrayBuffer: () => Promise.resolve(Buffer.alloc(0)) });
+          return Promise.resolve({
+            status: 404,
+            arrayBuffer: () => Promise.resolve(Buffer.alloc(0)),
+          });
         }),
       );
       return { urls };
