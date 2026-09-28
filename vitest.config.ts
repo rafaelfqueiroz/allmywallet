@@ -29,6 +29,11 @@ const testEnv = {
   AUTH_SECRET: 'vitest-placeholder-secret-not-a-real-secret-000',
   AUTH_GOOGLE_ID: 'vitest-placeholder-google-client-id',
   AUTH_GOOGLE_SECRET: 'vitest-placeholder-google-client-secret',
+  // TS-26 (#171): no test reaches B3. A handler built with its default
+  // composition — the import commit's subscription-close backfill, the close
+  // job, catch-up — would otherwise download real COTAHIST files. A closed
+  // loopback port fails in milliseconds, as for the E2E worker.
+  B3_COTAHIST_BASE_URL: 'http://127.0.0.1:9/cotahist',
 };
 
 /**

@@ -65,6 +65,9 @@ describe('market-series provider endpoints', () => {
 
   /** SPEC-008 BR-008-30, DL-008-14 (#171): same env-override pattern, no deployment database needed for the URL itself. */
   it('COTAHIST defaults to the public B3 archive', async () => {
+    // vitest.config.ts points every test at a closed port; unset it here.
+    vi.stubEnv('B3_COTAHIST_BASE_URL', undefined);
+    resetEnvCache();
     const urls = recordFetch();
     const database = fakeTx({ selectRows: [] }) as unknown as Database;
     const source = await buildOfficialCloseSource(database);

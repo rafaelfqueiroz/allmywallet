@@ -50,6 +50,7 @@ import {
   SYNTHETIC_CPF,
 } from '@/adapters/ingestion/xlsx/test-support/builder';
 import { isValidCpf } from '@/adapters/ingestion/xlsx/strip-cpf';
+import { OFFICIAL_CLOSE_SOURCE } from '@/worker/handlers/composition';
 
 /**
  * SPEC-005 (#8) — the full stage → commit → reconcile pipeline against real
@@ -2499,7 +2500,9 @@ describe('SPEC-005 — import pipeline (integration)', () => {
         assetId: mainAsset.id,
         date: BusinessDate.of('2024-02-22'),
         close: Money.fromString('114.90'),
-        source: 'brapi_free',
+        // SPEC-008 BR-008-30 (#171): an official close, so the pre-commit
+        // backfill finds the date covered and asks B3 for nothing.
+        source: OFFICIAL_CLOSE_SOURCE,
       });
 
       const creditBatch = await newPendingBatch('b3_movimentacao');
