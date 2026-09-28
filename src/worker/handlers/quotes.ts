@@ -1,22 +1,33 @@
 import { logger } from '@/lib/logger';
-import type { Database } from '@/db/client';
+import { db as globalDb, type Database } from '@/db/client';
+import { resolveConfig } from '@/config/resolve';
+import type { BusinessDate } from '@/core/shared/clock';
+import type { AssetId } from '@/core/shared/ids';
 import { computePollingSet } from '@/core/quotes/polling-set';
 import { pollHeldAsset } from '@/core/quotes/poll-held-asset';
-import { captureClosePrice } from '@/core/quotes/capture-close-price';
+import { enumerateCatchUpDays } from '@/core/quotes/catch-up-days';
+import { syncOfficialCloses } from '@/core/quotes/sync-official-closes';
 import { DrizzleHeldAssetsRepository } from '@/adapters/db/held-assets-repository';
+import { DrizzleCloseGapRepository } from '@/adapters/db/close-gap-repository';
 import type {
   AssetCatalogPort,
   BudgetCounterPort,
   Clock,
+  CloseGapRepositoryPort,
   HeldAssetsPort,
+  LatestCloseDatePort,
+  OfficialCloseSource,
   QuoteProvider,
   QuoteRepositoryPort,
   TradingCalendar,
+  UnofficialClosesPort,
 } from '@/core/quotes/ports';
 import { enqueue } from '@/lib/queue';
 import { QUEUE } from '@/worker/queues';
 import type { OpportunityEvaluateJobPayload } from '@/worker/handlers/opportunity';
+import type { SnapshotJobPayload } from '@/worker/handlers/valuation';
 import {
+  buildOfficialCloseSource,
   buildQuoteProvider,
   buildQuotesComposition,
   resolveQuoteBudgetConfig,
@@ -44,10 +55,31 @@ export interface QuotesHandlerDeps {
   readonly clock: Clock;
   readonly calendar: TradingCalendar;
   readonly catalog: AssetCatalogPort;
-  readonly repository: QuoteRepositoryPort;
+  /**
+   * SPEC-008 BR-008-09/BR-021-28 (#171) — `handleQuotesCloseCapture` also
+   * needs `oldestLastCloseAmong` (the same window `runCatchUp` computes) and
+   * `deleteClose` (a close COTAHIST no longer supplies must not stay in
+   * history) — both are `DrizzleQuoteRepository` methods already.
+   */
+  readonly repository: QuoteRepositoryPort &
+    LatestCloseDatePort & {
+      deleteClose(assetId: AssetId, date: BusinessDate): Promise<void>;
+    };
   readonly budgetCounter: BudgetCounterPort;
   readonly heldAssets: HeldAssetsPort;
   readonly provider: QuoteProvider;
+  /** SPEC-008 BR-008-30, DL-008-14 (#171) — B3's COTAHIST, the only source an official close is read from. */
+  readonly closeSource: OfficialCloseSource;
+  readonly gaps: CloseGapRepositoryPort;
+  readonly unofficial: UnofficialClosesPort;
+  /**
+   * SPEC-009 BR-009-18 (#171) — the 19:40 `valuation.snapshot` cron now runs
+   * *before* the close job (`quotes.close_capture_time` defaults to 22:00, see
+   * `src/config/registry.ts`), so the rebuild the close job's own writes
+   * invalidate can no longer rely on that cron catching them — it must be
+   * enqueued here, the same shape as `tesouro.ts`'s `enqueueSnapshotRebuild`.
+   */
+  readonly enqueueSnapshotRebuild: (from: BusinessDate) => Promise<void>;
   /**
    * SPEC-018 BR-018-11 — how `quotes.poll` asks for the assets it just polled
    * to be evaluated. A seam rather than a direct `enqueue` call, the same
@@ -68,6 +100,11 @@ async function resolveDeps(overrides?: Partial<QuotesHandlerDeps>): Promise<Reso
   const database = overrides?.database;
   const composition = buildQuotesComposition(database);
   return {
+    // Kept possibly-`undefined` (rather than defaulted to `globalDb` here) so
+    // `resolveQuoteBudgetConfig`/`buildQuoteProvider`/`buildOfficialCloseSource`
+    // fall back to their own default the same way whether this handler is
+    // given no override at all, or a test overrides every *port* but not
+    // `database` itself.
     resolveConfigWith: database,
     clock: overrides?.clock ?? composition.clock,
     calendar: overrides?.calendar ?? composition.calendar,
@@ -76,6 +113,12 @@ async function resolveDeps(overrides?: Partial<QuotesHandlerDeps>): Promise<Reso
     budgetCounter: overrides?.budgetCounter ?? composition.budgetCounter,
     heldAssets: overrides?.heldAssets ?? new DrizzleHeldAssetsRepository(database),
     provider: overrides?.provider ?? (await buildQuoteProvider(database)),
+    closeSource: overrides?.closeSource ?? (await buildOfficialCloseSource(database)),
+    gaps: overrides?.gaps ?? new DrizzleCloseGapRepository(database ?? globalDb),
+    unofficial: overrides?.unofficial ?? composition.repository,
+    enqueueSnapshotRebuild:
+      overrides?.enqueueSnapshotRebuild ??
+      ((from) => enqueue(QUEUE.VALUATION_SNAPSHOT, { from } satisfies SnapshotJobPayload)),
     enqueueOpportunityEvaluation:
       overrides?.enqueueOpportunityEvaluation ??
       ((payload) => enqueue(QUEUE.OPPORTUNITY_EVALUATE, payload)),
@@ -172,39 +215,104 @@ export async function handleQuotesPoll(overrides?: Partial<QuotesHandlerDeps>): 
 }
 
 /**
- * SPEC-008 `quotes.close-capture` — BR-008-09/DL-008-08: the one deliberate
- * call outside session hours. AR-18: the handler still checks
- * `isTradingDay` itself, since the cron schedule (weekdays) cannot express
- * B3 holidays.
+ * SPEC-008 `quotes.close-capture` — BR-008-09/BR-008-30/BR-008-31, DL-008-08,
+ * DL-008-14 (#171). Official closes come from B3's COTAHIST, never from
+ * `provider` (the intraday quote provider is not read by this handler at
+ * all) — `syncOfficialCloses` is the shared use case this and worker-start
+ * catch-up (`src/worker/catch-up.ts`) both run.
+ *
+ * No `isTradingDay` early return: the window below decides what is due,
+ * including a day this run's own cron missed (the cron now fires daily at
+ * `quotes.close_capture_time`, not "weekdays at 17:05" — see
+ * `closeCaptureCron`). Config is resolved **before** any tenant transaction
+ * opens on the pool — see the comment in `src/worker/catch-up.ts` about
+ * config reads on a pooled connection; this handler opens none itself, but
+ * shares the composition root and the same caution applies.
  */
 export async function handleQuotesCloseCapture(
   overrides?: Partial<QuotesHandlerDeps>,
 ): Promise<void> {
-  const { clock, calendar, catalog, repository, budgetCounter, heldAssets, provider } =
-    await resolveDeps(overrides);
+  const {
+    clock,
+    calendar,
+    catalog,
+    repository,
+    heldAssets,
+    closeSource,
+    gaps,
+    unofficial,
+    resolveConfigWith,
+    enqueueSnapshotRebuild,
+  } = await resolveDeps(overrides);
 
-  const today = clock.today();
-  if (!calendar.isTradingDay(today)) {
-    return;
-  }
+  const configDb = resolveConfigWith ?? globalDb;
+  const captureTime = (await resolveConfig('quotes.close_capture_time', { db: configDb })).value;
+  const maxDays = (await resolveConfig('personal.catchup_max_days', { db: configDb })).value;
+  const annualFileMinDays = (
+    await resolveConfig('quotes.cotahist_annual_min_days', { db: configDb })
+  ).value;
 
+  // #171: `syncOfficialCloses`'s own supersede step (`UnofficialClosesPort`)
+  // reaches every stored listed-asset close not from COTAHIST, *any* date,
+  // *any* asset, held or not — it is not bounded by this run's window and
+  // must run whether or not the window itself found a day due, and whether
+  // or not anything is currently held (the AC: every close in history equals
+  // COTAHIST's, none sourced from an intraday quote — that must keep holding
+  // even for an asset since sold). So this never returns early on an empty
+  // polling set or an empty window; the cost of a no-op run is one indexed
+  // query and zero `OfficialCloseSource` requests.
   const pollingSetIds = await computePollingSet({ heldAssets, catalog });
-  if (pollingSetIds.length === 0) return;
-
   const assets = await catalog.findByIds(pollingSetIds);
+  const window =
+    pollingSetIds.length === 0
+      ? { days: [], beyondCap: 0 }
+      : enumerateCatchUpDays({
+          calendar,
+          now: clock.now(),
+          today: clock.today(),
+          lastCapturedClose: await repository.oldestLastCloseAmong(pollingSetIds),
+          maxDays,
+          captureTime,
+        });
 
-  let captured = 0;
-  let alreadyCaptured = 0;
-  let failed = 0;
-  for (const asset of assets) {
-    const result = await captureClosePrice({ repository, provider, budgetCounter, clock }, asset);
-    if (result.outcome === 'captured') captured += 1;
-    else if (result.outcome === 'already_captured') alreadyCaptured += 1;
-    else failed += 1;
+  const currentYear = Number(clock.today().slice(0, 4));
+  const summary = await syncOfficialCloses(
+    { source: closeSource, repository, gaps, unofficial },
+    assets,
+    window.days,
+    { annualFileMinDays, currentYear },
+  );
+
+  if (summary.earliestChanged !== null) {
+    await enqueueSnapshotRebuild(summary.earliestChanged);
   }
 
   logger.info(
-    { queue: 'quotes.close-capture', assetCount: assets.length, captured, alreadyCaptured, failed },
+    {
+      queue: 'quotes.close-capture',
+      assetCount: assets.length,
+      days: window.days.length,
+      beyondCap: window.beyondCap,
+      recorded: summary.recorded.length,
+      superseded: summary.superseded.length,
+      removed: summary.removed.length,
+      gaps: summary.gaps.length,
+      unpublished: summary.unpublished,
+      unavailable: summary.unavailable,
+      requests: summary.requests,
+      rebuildFrom: summary.earliestChanged,
+    },
     'quotes.close-capture cycle complete',
   );
+
+  // SPEC-008 BR-008-27: an unreachable or unreadable COTAHIST fails the job,
+  // after everything that could be written was, so pg-boss retries with
+  // backoff and a persistent failure dead-letters and alerts. Swallowing it
+  // would let closes stop arriving with nothing but an info log to show for
+  // it. An unpublished day is not a failure (BR-008-09).
+  if (summary.unavailable > 0) {
+    throw new Error(
+      `quotes.close-capture: B3 COTAHIST unavailable for ${summary.unavailable} close(s)`,
+    );
+  }
 }

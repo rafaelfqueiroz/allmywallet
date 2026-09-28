@@ -29,20 +29,21 @@ let worker: ChildProcess | undefined;
 const UPLOAD_DIR = path.resolve(process.cwd(), '.data/e2e-imports');
 
 /**
- * #123 — the worker never reaches BCB or Tesouro Transparente from here.
- * Worker-start catch-up runs both syncs before the worker consumes anything,
- * and a first BCB load on a fresh database is 26 years of daily series: a
- * slow or failing public API then ate into the import journey's wait for its
- * batch, which is the failure the journey is least able to tell apart from a
- * broken queue. No journey reads either series; the ones that show a price
- * insert it (`holdings.ts`).
+ * #123 / #171 — the worker never reaches BCB, Tesouro Transparente or B3's
+ * COTAHIST archive from here. Worker-start catch-up runs these syncs before
+ * the worker consumes anything, and a first BCB load on a fresh database is
+ * 26 years of daily series: a slow or failing public API then ate into the
+ * import journey's wait for its batch, which is the failure the journey is
+ * least able to tell apart from a broken queue. No journey reads any of
+ * these series; the ones that show a price insert it (`holdings.ts`).
  *
  * Port 9 on loopback has nothing listening, so the connection is refused at
- * once: both syncs fail in milliseconds, log it, and the worker starts.
+ * once: every sync fails in milliseconds, logs it, and the worker starts.
  */
 const OFFLINE_MARKET_DATA = {
   BCB_SGS_BASE_URL: 'http://127.0.0.1:9/bcdata.sgs',
   TESOURO_PRICES_URL: 'http://127.0.0.1:9/PrecoTaxaTesouroDireto.csv',
+  B3_COTAHIST_BASE_URL: 'http://127.0.0.1:9/cotahist',
 };
 
 export function startWorker(): void {

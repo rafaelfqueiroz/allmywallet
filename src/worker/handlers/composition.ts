@@ -13,6 +13,7 @@ import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
 import { BrapiQuoteProvider } from '@/adapters/quotes/brapi';
 import { BcbSgsIndexSeriesProvider } from '@/adapters/quotes/bcb-sgs';
 import { TesouroTransparenteProvider } from '@/adapters/quotes/tesouro';
+import { B3CotahistCloseSource } from '@/adapters/quotes/cotahist';
 
 /**
  * AR-04: worker handlers are thin entrypoints — this is the composition
@@ -66,6 +67,26 @@ export function buildTesouroProvider(): TesouroTransparenteProvider {
     ...(url ? { url } : {}),
   });
 }
+
+/**
+ * SPEC-008 BR-008-30, DL-008-14 (#171) — official closes come from B3's
+ * COTAHIST, never from the quote provider. The endpoint is an environment
+ * override, unset in every real instance.
+ */
+export async function buildOfficialCloseSource(
+  database: Database = globalDb,
+): Promise<B3CotahistCloseSource> {
+  const timeout = await resolveConfig('quotes.cotahist_timeout_ms', { db: database });
+  const baseUrl = env().B3_COTAHIST_BASE_URL;
+  return new B3CotahistCloseSource({
+    source: OFFICIAL_CLOSE_SOURCE,
+    timeoutMs: timeout.value,
+    ...(baseUrl ? { baseUrl } : {}),
+  });
+}
+
+/** `price_quotes.source` of every close read from COTAHIST. */
+export const OFFICIAL_CLOSE_SOURCE = 'b3_cotahist';
 
 export interface QuoteBudgetConfig {
   readonly cadenceMinutes: number;

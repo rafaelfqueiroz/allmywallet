@@ -47,8 +47,11 @@ describe('registry', () => {
     // how many days after an exercised subscription its `Atualização` credit
     // may fall and still pair with it) and
     // `import.subscription_close_lookback_days` (how much close history the
-    // pre-commit backfill fetches before each credit).
-    expect(CONFIG_KEYS).toHaveLength(38);
+    // pre-commit backfill fetches before each credit); plus #171's
+    // `quotes.close_capture_time`, `quotes.cotahist_annual_min_days` and
+    // `quotes.cotahist_timeout_ms` (SPEC-008 BR-008-09/30, when the official
+    // close is read from B3's COTAHIST and how).
+    expect(CONFIG_KEYS).toHaveLength(41);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {

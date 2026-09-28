@@ -1,19 +1,25 @@
-import { and, asc, desc, eq, gte, inArray, lte, max, min, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, max, min, ne, sql } from 'drizzle-orm';
 import type { Database } from '@/db/client';
 import type { Tx } from '@/db/tenant';
 import { latestQuotes, priceQuoteGaps, priceQuotes } from '@/db/schema/market';
+import { assets } from '@/db/schema/assets';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
-import type {
-  CloseHistoryWriterPort,
-  InsertedCloses,
-  LatestCloseDatePort,
-  LatestQuote,
-  PriceQuote,
-  QuoteRepositoryPort,
+import {
+  CloseGapReason,
+  type CloseHistoryWriterPort,
+  type InsertedCloses,
+  type LatestCloseDatePort,
+  type LatestQuote,
+  type PriceQuote,
+  type QuoteRepositoryPort,
+  type UnofficialClosesPort,
 } from '@/core/quotes/ports';
 import type { PriceHistoryPort } from '@/core/valuation/ports';
 import type { ClosePriceReader } from '@/core/ingestion/ports';
+
+/** SPEC-008 BR-008-11 — the classes COTAHIST can ever price (`core/quotes/polling-set.ts`'s `INTRADAY_ELIGIBLE_CLASSES`, restated here since `core/` may not be imported for a SQL literal). */
+const LISTED_ASSET_CLASSES = ['stock', 'fii', 'bdr', 'etf'] as const;
 
 /**
  * SPEC-008 BR-008-10 — the two tables below are queried and written
@@ -33,7 +39,8 @@ export class DrizzleQuoteRepository
     PriceHistoryPort,
     LatestCloseDatePort,
     ClosePriceReader,
-    CloseHistoryWriterPort
+    CloseHistoryWriterPort,
+    UnofficialClosesPort
 {
   // AR-15: `price_quotes`/`latest_quotes` are shared reference tables with no
   // tenant column (see the class doc above) — `Tx | Database` lets
@@ -182,6 +189,78 @@ export class DrizzleQuoteRepository
         .delete(priceQuoteGaps)
         .where(and(eq(priceQuoteGaps.assetId, quote.assetId), eq(priceQuoteGaps.date, quote.date)));
     });
+  }
+
+  /**
+   * SPEC-008 BR-008-09/BR-021-31 (#171) — a close COTAHIST no longer supplies
+   * for a day must not stay in history (the AC: every close in history equals
+   * COTAHIST's `PREULT` for that day). The caller (`syncOfficialCloses`)
+   * records the gap separately; deleting here never implies one.
+   */
+  async deleteClose(assetId: AssetId, date: BusinessDate): Promise<void> {
+    await this.db
+      .delete(priceQuotes)
+      .where(and(eq(priceQuotes.assetId, assetId), eq(priceQuotes.date, date)));
+  }
+
+  /**
+   * SPEC-008 BR-008-09/BR-008-30 (#171) — `UnofficialClosesPort`: every
+   * stored listed-asset close not from `officialSource`, any date, any asset
+   * (held or not) — `syncOfficialCloses`'s supersede pairs. Listed classes
+   * only (BR-008-11): a Tesouro/CDB/LCI/LCA close is never COTAHIST's to
+   * supersede.
+   */
+  async listUnofficialListedCloses(
+    officialSource: string,
+  ): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  > {
+    const rows = await this.db
+      .select({ assetId: priceQuotes.assetId, code: assets.code, date: priceQuotes.date })
+      .from(priceQuotes)
+      .innerJoin(assets, eq(assets.id, priceQuotes.assetId))
+      .where(
+        and(
+          ne(priceQuotes.source, officialSource),
+          inArray(assets.assetClass, [...LISTED_ASSET_CLASSES]),
+        ),
+      )
+      .orderBy(asc(assets.code), asc(priceQuotes.date));
+    return rows.map((row) => ({
+      assetId: AssetId.of(row.assetId),
+      code: row.code,
+      date: BusinessDate.of(row.date),
+    }));
+  }
+
+  /**
+   * SPEC-008 BR-008-30 (#171) — `UnofficialClosesPort.listRetryableListedGaps`:
+   * listed-asset gaps a later request may still fill, any date. Migration 0031
+   * relabels every brapi-era `not_supplied` gap this way, so the first run
+   * after the upgrade asks COTAHIST for each of those days once.
+   */
+  async listRetryableListedGaps(): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  > {
+    const rows = await this.db
+      .select({ assetId: priceQuoteGaps.assetId, code: assets.code, date: priceQuoteGaps.date })
+      .from(priceQuoteGaps)
+      .innerJoin(assets, eq(assets.id, priceQuoteGaps.assetId))
+      .where(
+        and(
+          inArray(priceQuoteGaps.reason, [
+            CloseGapReason.PROVIDER_UNAVAILABLE,
+            CloseGapReason.BUDGET_EXHAUSTED,
+          ]),
+          inArray(assets.assetClass, [...LISTED_ASSET_CLASSES]),
+        ),
+      )
+      .orderBy(asc(assets.code), asc(priceQuoteGaps.date));
+    return rows.map((row) => ({
+      assetId: AssetId.of(row.assetId),
+      code: row.code,
+      date: BusinessDate.of(row.date),
+    }));
   }
 
   /**

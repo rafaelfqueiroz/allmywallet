@@ -8,8 +8,10 @@ import { ok } from '@/core/shared/result';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { DrizzleQuoteBudgetCounter } from '@/adapters/db/quote-budget-counter';
+import { DrizzleCloseGapRepository } from '@/adapters/db/close-gap-repository';
 import {
   FakeHeldAssetsPort,
+  FakeOfficialCloseSource,
   FakeQuoteProvider,
   FakeTradingCalendar,
 } from '@/core/quotes/test-support';
@@ -53,7 +55,7 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
     const migratorPool = new Pool({ connectionString: database.migrationUrl, max: 1 });
     try {
       await migratorPool.query(
-        'TRUNCATE quote_budget_usage, index_series, price_quotes, latest_quotes, assets RESTART IDENTITY CASCADE',
+        'TRUNCATE quote_budget_usage, index_series, price_quote_gaps, price_quotes, latest_quotes, assets RESTART IDENTITY CASCADE',
       );
     } finally {
       await migratorPool.end();
@@ -66,7 +68,7 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
     const migratorPool = new Pool({ connectionString: database.migrationUrl, max: 1 });
     try {
       await migratorPool.query(
-        'TRUNCATE quote_budget_usage, index_series, price_quotes, latest_quotes, assets RESTART IDENTITY CASCADE',
+        'TRUNCATE quote_budget_usage, index_series, price_quote_gaps, price_quotes, latest_quotes, assets RESTART IDENTITY CASCADE',
       );
     } finally {
       await migratorPool.end();
@@ -189,7 +191,17 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
     expect(enqueuedEvaluations).toEqual([]);
   });
 
-  it('BR-008-09/10: close-capture supersedes the day’s intraday quote in history, never rewriting latest_quotes', async () => {
+  /**
+   * SPEC-008 BR-008-09/BR-008-10/BR-008-30/BR-008-31, DL-008-08, DL-008-14
+   * (#171) — official closes come from B3's COTAHIST, never from the quote
+   * provider. `quotes.close_capture_time` defaults to 22:00 São Paulo (01:00Z
+   * the next day) — `now` below is chosen just after that instant, on the
+   * trading day the `FakeTradingCalendar` declares, so the window (computed
+   * the same way as catch-up's) is exactly that one day.
+   */
+  const NOW_AFTER_DEFAULT_CAPTURE_TIME = '2026-03-17T01:05:00Z'; // 2026-03-16T22:05:00-03:00
+
+  it('BR-008-09/10/30/31: close-capture writes B3’s COTAHIST close, supersedes a stored brapi_free close, and never rewrites latest_quotes', async () => {
     await seedHeldAsset('PETR4');
     const catalog = new DrizzleAssetCatalogRepository(db);
     const asset = await catalog.findByCode('PETR4');
@@ -197,7 +209,7 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
     const heldAssets = new FakeHeldAssetsPort([asset.id]);
     const repository = new DrizzleQuoteRepository(db);
 
-    // An intraday quote lands first.
+    // An intraday quote AND a stale brapi_free "close" both land first.
     await repository.upsertLatestQuote({
       assetId: asset.id,
       price: Money.fromString('38.00'),
@@ -205,34 +217,120 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
       fetchedAt: new Date('2026-03-16T16:55:00Z'),
       source: 'brapi_free',
     });
+    await repository.upsertClosePrice({
+      assetId: asset.id,
+      date: BusinessDate.of('2026-03-16'),
+      close: Money.fromString('38.10'),
+      source: 'brapi_free',
+    });
 
     const calendar = new FakeTradingCalendar(['2026-03-16']);
-    const provider = new FakeQuoteProvider();
-    provider.set('PETR4', () =>
-      ok({
-        ticker: 'PETR4',
-        price: Money.fromString('38.55'),
-        quotedAt: new Date(),
-        source: 'brapi_free',
-      }),
-    );
+    const provider = new FakeQuoteProvider(); // never asked — asserted below
+    const closeSource = new FakeOfficialCloseSource();
+    closeSource.seedDay(BusinessDate.of('2026-03-16'), [
+      { ticker: 'PETR4', date: BusinessDate.of('2026-03-16'), close: Money.fromString('38.55') },
+    ]);
+    const rebuilds: BusinessDate[] = [];
 
     await handleQuotesCloseCapture({
       database: db,
-      clock: new FakeClock('2026-03-16T20:05:00Z'),
+      clock: new FakeClock(NOW_AFTER_DEFAULT_CAPTURE_TIME),
       calendar,
       catalog,
       repository,
-      budgetCounter: new DrizzleQuoteBudgetCounter(db),
       heldAssets,
       provider,
+      closeSource,
+      gaps: new DrizzleCloseGapRepository(db),
+      unofficial: repository,
+      enqueueSnapshotRebuild: async (from) => {
+        rebuilds.push(from);
+      },
     });
 
     const close = await repository.getClosePrice(asset.id, BusinessDate.of('2026-03-16'));
     expect(close?.close.toString()).toBe('38.55');
+    expect(close?.source).toBe('b3_cotahist');
     // BR-008-10: the earlier intraday quote is untouched — a different table entirely.
     const latest = await repository.getLatestQuote(asset.id);
     expect(latest?.price.toString()).toBe('38'); // decimal.js drops an insignificant trailing zero
+    // The close job never reads the quote provider at all.
+    expect(provider.callCount).toBe(0);
+    // SPEC-009 BR-009-18: the rebuild this write invalidates is enqueued
+    // directly from here, from the date that changed.
+    expect(rebuilds).toEqual(['2026-03-16']);
+  });
+
+  it('a newly held asset with no close ever captured still gets today’s close (BR-008-09, #171)', async () => {
+    await seedHeldAsset('VALE3');
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const asset = await catalog.findByCode('VALE3');
+    if (!asset) throw new Error('setup failed');
+    const heldAssets = new FakeHeldAssetsPort([asset.id]);
+    const repository = new DrizzleQuoteRepository(db);
+    const calendar = new FakeTradingCalendar(['2026-03-16']);
+    const closeSource = new FakeOfficialCloseSource();
+    closeSource.seedDay(BusinessDate.of('2026-03-16'), [
+      { ticker: 'VALE3', date: BusinessDate.of('2026-03-16'), close: Money.fromString('61.20') },
+    ]);
+
+    await handleQuotesCloseCapture({
+      database: db,
+      clock: new FakeClock(NOW_AFTER_DEFAULT_CAPTURE_TIME),
+      calendar,
+      catalog,
+      repository,
+      heldAssets,
+      provider: new FakeQuoteProvider(),
+      closeSource,
+      gaps: new DrizzleCloseGapRepository(db),
+      unofficial: repository,
+      enqueueSnapshotRebuild: async () => {},
+    });
+
+    const close = await repository.getClosePrice(asset.id, BusinessDate.of('2026-03-16'));
+    expect(close?.close.toString()).toBe('61.2');
+  });
+
+  /**
+   * #171, BR-008-27: an unreadable COTAHIST fails the job — after what could be
+   * written was — so pg-boss retries it and a persistent failure dead-letters
+   * and alerts. The retry asks again for the day recorded as a gap.
+   */
+  it('BR-008-27: COTAHIST unavailable fails close-capture; the retry fills the day and clears its gap', async () => {
+    await seedHeldAsset('VALE3');
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const asset = await catalog.findByCode('VALE3');
+    if (!asset) throw new Error('setup failed');
+    const repository = new DrizzleQuoteRepository(db);
+    const closeSource = new FakeOfficialCloseSource();
+    closeSource.seedDayError(BusinessDate.of('2026-03-16'), 'OFFICIAL_CLOSES_UNAVAILABLE');
+    const deps = {
+      database: db,
+      clock: new FakeClock(NOW_AFTER_DEFAULT_CAPTURE_TIME),
+      calendar: new FakeTradingCalendar(['2026-03-16']),
+      catalog,
+      repository,
+      heldAssets: new FakeHeldAssetsPort([asset.id]),
+      provider: new FakeQuoteProvider(),
+      closeSource,
+      gaps: new DrizzleCloseGapRepository(db),
+      unofficial: repository,
+      enqueueSnapshotRebuild: async () => {},
+    };
+
+    await expect(handleQuotesCloseCapture(deps)).rejects.toThrow(/COTAHIST unavailable/);
+    expect(await repository.getClosePrice(asset.id, BusinessDate.of('2026-03-16'))).toBeNull();
+
+    closeSource.seedDay(BusinessDate.of('2026-03-16'), [
+      { ticker: 'VALE3', date: BusinessDate.of('2026-03-16'), close: Money.fromString('61.20') },
+    ]);
+    await handleQuotesCloseCapture(deps);
+
+    const close = await repository.getClosePrice(asset.id, BusinessDate.of('2026-03-16'));
+    expect(close?.close.toString()).toBe('61.2');
+    const gapRows = await db.select().from(schema.priceQuoteGaps);
+    expect(gapRows).toEqual([]);
   });
 
   it('AR-19: a retried poll for the same asset within the cadence window makes no second provider call', async () => {

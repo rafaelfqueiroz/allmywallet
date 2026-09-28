@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 #
-# #151 — retry every recorded close gap brapi may now fill, on the personal
-# instance, and rebuild snapshots from the earliest recovered day.
+# #151, #171 — retry every recorded close gap B3's COTAHIST may now fill, on
+# the personal instance, and rebuild snapshots from the earliest recovered day.
 #
 #   scripts/personal/backfill-gaps.sh
 #
-# Worker-start catch-up only looks forward from the newest captured close, so
-# days refused while other assets were being captured (a missing BRAPI_TOKEN
-# quoted three test tickers and nothing else) are never revisited on their
-# own. Idempotent: a day that already has a close is not asked for again.
+# The close job and worker-start catch-up already ask again for these on every
+# run (#171), so this is only for recovering without waiting for either.
+# Idempotent: a day that already has a close is not asked for again.
 set -euo pipefail
 
 # shellcheck source=scripts/personal/lib.sh

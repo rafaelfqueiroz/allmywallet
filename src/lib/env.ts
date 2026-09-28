@@ -121,6 +121,12 @@ const envSchema = z.object({
    */
   BCB_SGS_BASE_URL: z.string().url().optional(),
   TESOURO_PRICES_URL: z.string().url().optional(),
+  /**
+   * #171 — the directory B3's COTAHIST files are fetched from, for the same
+   * reason as the two above: the E2E worker points it at a closed loopback
+   * port. Unset means B3's public server.
+   */
+  B3_COTAHIST_BASE_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

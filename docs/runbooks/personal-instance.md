@@ -20,7 +20,9 @@ scripts/personal/init.sh
 2. Fill in `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `BRAPI_TOKEN`, `BACKUP_DIR`, `BACKUP_AGE_RECIPIENT` and `PGDATA_HOST_PATH`. Register `http://localhost:3100/api/auth/callback/google` on the Google OAuth client.
 3. Run it again. It pulls the image, migrates, sets the database marker, takes the first backup and starts everything at <http://localhost:3100>.
 
-Quotes: `BRAPI_TOKEN` is the token from <https://brapi.dev/dashboard> (free plan, 15.000 requests/month). Without it brapi quotes only its test tickers and every other asset stays at cost; `quoteCredential` in `/api/health` reads `degraded` until it is set. After adding it to an existing instance, run `scripts/personal/start.sh`, then `scripts/personal/backfill-gaps.sh` to recover the closes refused while it was missing.
+Quotes: `BRAPI_TOKEN` is the token from <https://brapi.dev/dashboard> (free plan, 15.000 requests/month). brapi serves the intraday quote only; without the token it quotes only its test tickers and the dashboard's current value stays at the last close; `quoteCredential` in `/api/health` reads `degraded` until it is set. After adding it to an existing instance, run `scripts/personal/start.sh`.
+
+Closes: every daily close comes from B3's public COTAHIST files (SPEC-008 BR-008-30), no credential needed. The close job runs daily at `quotes.close_capture_time` (default 22:00, after B3 publishes the day) and every start catches up what was missed. A day B3 has not published yet is simply fetched by the next run.
 
 Real email: set `RESEND_API_KEY` and `EMAIL_FROM` in the env file, and the deployment-level config key `notifications.email_provider` to `resend`.
 
@@ -38,7 +40,8 @@ Upgrades when `:latest` has moved (backup → pull → migrate → start → hea
 
 | Symptom | Do |
 |---|---|
-| `quoteCredential` degraded in `/api/health`, or most holdings valued at cost | `BRAPI_TOKEN` is missing from the env file. Set it (see *First run*), run `start.sh`, then `scripts/personal/backfill-gaps.sh`. |
+| `quoteCredential` degraded in `/api/health` | `BRAPI_TOKEN` is missing from the env file. Set it (see *First run*) and run `start.sh`. |
+| Closes stopped arriving, or a "job failed" alert for `quotes.close-capture` | B3's COTAHIST server could not be read. Check `https://bvmf.bmfbovespa.com.br/InstDados/SerHist/` answers; the next run or start asks again for every missed day. To retry now: `scripts/personal/backfill-gaps.sh`. |
 | "Backup failed" notice in the app, or `backup` degraded in `/api/health` | Read the reason. Mount the drive, fix the path, run `scripts/personal/backup.sh`. The notice clears on the next success. |
 | `start.sh` says the backup failed and the upgrade was aborted | The current image is running and nothing migrated. Fix the backup, run `start.sh` again. |
 | `start.sh` says the migration failed | The current image is running; the migration transaction rolled back. Do not retry by hand — report the migration as a defect. |

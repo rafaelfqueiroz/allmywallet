@@ -56,8 +56,13 @@ export const QUEUE_POLICIES: Readonly<Record<QueueName, QueuePolicy>> = {
   // tier's 15,000 requests/month ceiling makes aggressive retrying actively
   // harmful (SPEC-008).
   [QUEUE.QUOTES_POLL]: { ...DEFAULT_POLICY, retryLimit: 2, retryDelaySeconds: 60 },
-  // The close capture cannot be corrected by a later run — the close happens
-  // once a day — so it retries harder.
+  // #171: the handler only throws on a genuine fault — network, a bad
+  // response, a bug. A day B3 has not published COTAHIST for yet is not an
+  // error (BR-008-09): `syncOfficialCloses` returns it `unpublished` and the
+  // handler exits normally, to be picked up by the window on this job's own
+  // next run rather than retried here. What retries hard is the genuine
+  // fault case: an official close, unlike a poll, is not self-correcting a
+  // few minutes later, so a real failure gets more attempts.
   [QUEUE.QUOTES_CLOSE_CAPTURE]: { ...DEFAULT_POLICY, retryLimit: 5, retryDelaySeconds: 120 },
   [QUEUE.TESOURO_SYNC]: { ...DEFAULT_POLICY, retryLimit: 3, retryDelaySeconds: 300 },
   [QUEUE.BCB_SYNC]: { ...DEFAULT_POLICY, retryLimit: 3, retryDelaySeconds: 300 },
