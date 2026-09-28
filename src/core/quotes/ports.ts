@@ -335,7 +335,7 @@ export interface OfficialCloseSource {
 
 /**
  * SPEC-008 BR-008-09/BR-008-30 (#171) — one stored listed-asset close that is
- * *not* from B3's COTAHIST: a leftover `brapi_free` write from before this
+ * *not* from B3's COTAHIST: a leftover intraday-provider write from before this
  * spec, or one written by a still-misconfigured source. `syncOfficialCloses`
  * (`core/quotes/sync-official-closes.ts`) uses this to supersede every such
  * close with COTAHIST's own, regardless of the run's own window and

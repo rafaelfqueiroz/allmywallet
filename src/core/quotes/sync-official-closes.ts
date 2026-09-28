@@ -78,7 +78,7 @@ function candidateKey(assetId: AssetId, date: BusinessDate): string {
  *
  *   (a) **window pairs** — for each asset × day in `days`, no close is
  *       stored yet, or the stored one is not from `source.source` (a
- *       `brapi_free` leftover BR-008-09 says must be superseded);
+ *       intraday-provider leftover BR-008-09 says must be superseded);
  *   (b) **supersede pairs** — every stored listed-asset close not from
  *       `source.source`, at *any* date, for *any* asset, held or not
  *       (`UnofficialClosesPort`). BR-008-09's supersession is not bounded by
