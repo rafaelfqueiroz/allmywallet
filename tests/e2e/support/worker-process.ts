@@ -28,12 +28,33 @@ let worker: ChildProcess | undefined;
  */
 const UPLOAD_DIR = path.resolve(process.cwd(), '.data/e2e-imports');
 
+/**
+ * #123 — the worker never reaches BCB or Tesouro Transparente from here.
+ * Worker-start catch-up runs both syncs before the worker consumes anything,
+ * and a first BCB load on a fresh database is 26 years of daily series: a
+ * slow or failing public API then ate into the import journey's wait for its
+ * batch, which is the failure the journey is least able to tell apart from a
+ * broken queue. No journey reads either series; the ones that show a price
+ * insert it (`holdings.ts`).
+ *
+ * Port 9 on loopback has nothing listening, so the connection is refused at
+ * once: both syncs fail in milliseconds, log it, and the worker starts.
+ */
+const OFFLINE_MARKET_DATA = {
+  BCB_SGS_BASE_URL: 'http://127.0.0.1:9/bcdata.sgs',
+  TESOURO_PRICES_URL: 'http://127.0.0.1:9/PrecoTaxaTesouroDireto.csv',
+};
+
 export function startWorker(): void {
   if (worker) return;
 
   worker = spawn('pnpm', ['worker'], {
     stdio: ['ignore', 'inherit', 'inherit'],
-    env: { ...process.env, IMPORT_UPLOAD_DIR: process.env.IMPORT_UPLOAD_DIR ?? UPLOAD_DIR },
+    env: {
+      ...process.env,
+      IMPORT_UPLOAD_DIR: process.env.IMPORT_UPLOAD_DIR ?? UPLOAD_DIR,
+      ...OFFLINE_MARKET_DATA,
+    },
     // Detached so the whole process group can be signalled: `pnpm` spawns
     // `tsx`, and killing only the `pnpm` shim leaves the consumer holding its
     // pg-boss connections open, which then blocks the database teardown.

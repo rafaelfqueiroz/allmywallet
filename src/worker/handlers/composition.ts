@@ -53,12 +53,18 @@ export async function buildQuoteProvider(
   return new BrapiQuoteProvider({ source: provider.value, ...(apiToken ? { apiToken } : {}) });
 }
 
+/** The endpoint is an environment override (#123), unset in every real instance. */
 export function buildIndexSeriesProvider(): BcbSgsIndexSeriesProvider {
-  return new BcbSgsIndexSeriesProvider({ source: 'bcb_sgs' });
+  const baseUrl = env().BCB_SGS_BASE_URL;
+  return new BcbSgsIndexSeriesProvider({ source: 'bcb_sgs', ...(baseUrl ? { baseUrl } : {}) });
 }
 
 export function buildTesouroProvider(): TesouroTransparenteProvider {
-  return new TesouroTransparenteProvider({ source: 'tesouro_transparente' });
+  const url = env().TESOURO_PRICES_URL;
+  return new TesouroTransparenteProvider({
+    source: 'tesouro_transparente',
+    ...(url ? { url } : {}),
+  });
 }
 
 export interface QuoteBudgetConfig {
