@@ -251,7 +251,11 @@ export class FakeOfficialCloseSource implements OfficialCloseSource {
   }
 
   /** A published daily file: `lastDate` defaults to `date` itself. */
-  seedDay(date: BusinessDate, closes: readonly OfficialClose[], lastDate: BusinessDate | null = date): void {
+  seedDay(
+    date: BusinessDate,
+    closes: readonly OfficialClose[],
+    lastDate: BusinessDate | null = date,
+  ): void {
     this.days.set(date, { closes, lastDate });
   }
 
@@ -276,7 +280,10 @@ export class FakeOfficialCloseSource implements OfficialCloseSource {
     if (errorCode) return err(domainError(errorCode, { date }));
     const file = this.days.get(date);
     if (!file) return err(domainError(OfficialCloseSourceErrorCode.NOT_PUBLISHED, { date }));
-    return ok({ closes: file.closes.filter((c) => tickers.has(c.ticker)), lastDate: file.lastDate });
+    return ok({
+      closes: file.closes.filter((c) => tickers.has(c.ticker)),
+      lastDate: file.lastDate,
+    });
   }
 
   async fetchYear(
@@ -288,7 +295,10 @@ export class FakeOfficialCloseSource implements OfficialCloseSource {
     if (errorCode) return err(domainError(errorCode, { year }));
     const file = this.years.get(year);
     if (!file) return err(domainError(OfficialCloseSourceErrorCode.NOT_PUBLISHED, { year }));
-    return ok({ closes: file.closes.filter((c) => tickers.has(c.ticker)), lastDate: file.lastDate });
+    return ok({
+      closes: file.closes.filter((c) => tickers.has(c.ticker)),
+      lastDate: file.lastDate,
+    });
   }
 }
 
@@ -307,7 +317,9 @@ export class FakeUnofficialClosesPort implements UnofficialClosesPort {
 
   async listUnofficialListedCloses(
     officialSource: string,
-  ): Promise<readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]> {
+  ): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  > {
     return this.entries
       .filter((entry) => entry.source !== officialSource)
       .map(({ assetId, code, date }) => ({ assetId, code, date }));

@@ -20,9 +20,24 @@ import {
 const d = (value: string): BusinessDate => BusinessDate.of(value);
 const OPTIONS = { annualFileMinDays: 100, currentYear: 2026 };
 
-const PETR4: Asset = { id: AssetId.generate(), code: 'PETR4', name: 'Petrobras PN', assetClass: 'stock' };
-const VALE3: Asset = { id: AssetId.generate(), code: 'VALE3', name: 'Vale ON', assetClass: 'stock' };
-const CDB01: Asset = { id: AssetId.generate(), code: 'CDB Banco X', name: 'CDB Banco X', assetClass: 'cdb' };
+const PETR4: Asset = {
+  id: AssetId.generate(),
+  code: 'PETR4',
+  name: 'Petrobras PN',
+  assetClass: 'stock',
+};
+const VALE3: Asset = {
+  id: AssetId.generate(),
+  code: 'VALE3',
+  name: 'Vale ON',
+  assetClass: 'stock',
+};
+const CDB01: Asset = {
+  id: AssetId.generate(),
+  code: 'CDB Banco X',
+  name: 'CDB Banco X',
+  assetClass: 'cdb',
+};
 
 function setup() {
   const source = new FakeOfficialCloseSource();
@@ -84,7 +99,9 @@ describe('syncOfficialCloses (SPEC-008 BR-008-09/BR-008-30/BR-008-31, SPEC-021 B
     const summary = await syncOfficialCloses(ports, [PETR4], [d('2026-03-16')], OPTIONS);
 
     expect(summary.removed).toEqual([{ assetId: PETR4.id, date: '2026-03-16' }]);
-    expect(summary.gaps).toEqual([{ assetId: PETR4.id, date: '2026-03-16', reason: 'not_supplied' }]);
+    expect(summary.gaps).toEqual([
+      { assetId: PETR4.id, date: '2026-03-16', reason: 'not_supplied' },
+    ]);
     expect(await ports.repository.getClosePrice(PETR4.id, d('2026-03-16'))).toBeNull();
     expect(summary.earliestChanged).toBe('2026-03-16');
   });
@@ -96,7 +113,9 @@ describe('syncOfficialCloses (SPEC-008 BR-008-09/BR-008-30/BR-008-31, SPEC-021 B
     const summary = await syncOfficialCloses(ports, [PETR4], [d('2026-03-16')], OPTIONS);
 
     expect(summary.removed).toEqual([]);
-    expect(summary.gaps).toEqual([{ assetId: PETR4.id, date: '2026-03-16', reason: 'not_supplied' }]);
+    expect(summary.gaps).toEqual([
+      { assetId: PETR4.id, date: '2026-03-16', reason: 'not_supplied' },
+    ]);
     expect(summary.earliestChanged).toBeNull();
   });
 

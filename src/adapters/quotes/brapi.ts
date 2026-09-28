@@ -2,7 +2,11 @@ import { z } from 'zod';
 import { Money } from '@/core/shared/money';
 import { domainError, type DomainError } from '@/core/shared/domain-error';
 import { err, ok, type Result } from '@/core/shared/result';
-import { QuoteProviderErrorCode, type QuoteProvider, type QuoteProviderResult } from '@/core/quotes/ports';
+import {
+  QuoteProviderErrorCode,
+  type QuoteProvider,
+  type QuoteProviderResult,
+} from '@/core/quotes/ports';
 import { extractJsonDecimalField } from './decimal-json';
 
 /**

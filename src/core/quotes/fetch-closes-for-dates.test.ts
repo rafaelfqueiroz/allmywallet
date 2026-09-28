@@ -25,7 +25,7 @@ const OPTIONS = { lookbackDays: 10, annualFileMinDays: 100 };
 // window is exactly `[upTo - lookbackDays, upTo]` with no day skipped.
 function allDaysTradingCalendar(from: string, to: string): FakeTradingCalendar {
   const days: string[] = [];
-  for (let cursor = d(from); !BusinessDate.isAfter(cursor, d(to)); ) {
+  for (let cursor = d(from); !BusinessDate.isAfter(cursor, d(to));) {
     days.push(cursor);
     const millis = Date.parse(`${cursor}T00:00:00Z`) + 86_400_000;
     cursor = BusinessDate.of(new Date(millis).toISOString().slice(0, 10));

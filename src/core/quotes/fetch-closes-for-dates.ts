@@ -113,11 +113,7 @@ export async function fetchClosesForDates(
         continue;
       }
       const from = addDays(upTo, -options.lookbackDays);
-      for (
-        let cursor = from;
-        !BusinessDate.isAfter(cursor, upTo);
-        cursor = addDays(cursor, 1)
-      ) {
+      for (let cursor = from; !BusinessDate.isAfter(cursor, upTo); cursor = addDays(cursor, 1)) {
         if (!ports.calendar.isTradingDay(cursor)) continue;
         wanted.push({ assetId: group.assetId, ticker: group.assetCode, date: cursor });
       }
@@ -125,11 +121,10 @@ export async function fetchClosesForDates(
   }
 
   const currentYear = Number(ports.clock.today().slice(0, 4));
-  const result = await fetchOfficialCloses(
-    { source: ports.source },
-    wanted,
-    { annualFileMinDays: options.annualFileMinDays, currentYear },
-  );
+  const result = await fetchOfficialCloses({ source: ports.source }, wanted, {
+    annualFileMinDays: options.annualFileMinDays,
+    currentYear,
+  });
 
   const fetched: PriceQuote[] = [];
   for (const pair of result.found) {

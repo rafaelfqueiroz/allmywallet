@@ -14,7 +14,11 @@ import {
   type AssetId,
 } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
-import { FakeHeldAssetsPort, FakeOfficialCloseSource, FakeQuoteProvider } from '@/core/quotes/test-support';
+import {
+  FakeHeldAssetsPort,
+  FakeOfficialCloseSource,
+  FakeQuoteProvider,
+} from '@/core/quotes/test-support';
 import { FakeOpportunityNotifier } from '@/core/opportunity/test-support';
 import { ok } from '@/core/shared/result';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';

@@ -211,7 +211,9 @@ export class DrizzleQuoteRepository
    */
   async listUnofficialListedCloses(
     officialSource: string,
-  ): Promise<readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]> {
+  ): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  > {
     const rows = await this.db
       .select({ assetId: priceQuotes.assetId, code: assets.code, date: priceQuotes.date })
       .from(priceQuotes)

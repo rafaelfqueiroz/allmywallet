@@ -170,9 +170,8 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
   // `app.user_id` that makes that read fail (the defect documented in
   // tests/integration/opportunity-worker-handler.test.ts).
   const maxDays = (await resolveConfig('personal.catchup_max_days', { db: deps.database })).value;
-  const captureTime = (
-    await resolveConfig('quotes.close_capture_time', { db: deps.database })
-  ).value;
+  const captureTime = (await resolveConfig('quotes.close_capture_time', { db: deps.database }))
+    .value;
   const annualFileMinDays = (
     await resolveConfig('quotes.cotahist_annual_min_days', { db: deps.database })
   ).value;

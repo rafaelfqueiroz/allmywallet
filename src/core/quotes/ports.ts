@@ -351,7 +351,9 @@ export interface UnofficialClosesPort {
    */
   listUnofficialListedCloses(
     officialSource: string,
-  ): Promise<readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]>;
+  ): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  >;
 }
 
 /** BCB SGS series 12 (CDI), 433 (IPCA), 11 (Selic), plus IBOV (FR-6.x). */

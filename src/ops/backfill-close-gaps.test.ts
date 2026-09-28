@@ -3,7 +3,11 @@ import { AssetId } from '@/core/shared/ids';
 import { Money } from '@/core/shared/money';
 import { BusinessDate } from '@/core/shared/clock';
 import type { Asset } from '@/core/quotes/ports';
-import { FakeAssetCatalog, FakeOfficialCloseSource, FakeQuoteRepository } from '@/core/quotes/test-support';
+import {
+  FakeAssetCatalog,
+  FakeOfficialCloseSource,
+  FakeQuoteRepository,
+} from '@/core/quotes/test-support';
 import { backfillCloseGaps } from './backfill-close-gaps';
 
 /**

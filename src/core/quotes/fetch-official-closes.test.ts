@@ -23,8 +23,12 @@ function wanted(assetId: AssetId, ticker: string, dates: readonly string[]): Wan
 describe('fetchOfficialCloses (SPEC-008 BR-008-09/BR-008-30)', () => {
   it('below the annual threshold, reads one daily file per distinct day, ascending', async () => {
     const source = new FakeOfficialCloseSource();
-    source.seedDay(d('2026-03-12'), [{ ticker: 'PETR4', date: d('2026-03-12'), close: Money.fromString('31.10') }]);
-    source.seedDay(d('2026-03-13'), [{ ticker: 'PETR4', date: d('2026-03-13'), close: Money.fromString('29.00') }]);
+    source.seedDay(d('2026-03-12'), [
+      { ticker: 'PETR4', date: d('2026-03-12'), close: Money.fromString('31.10') },
+    ]);
+    source.seedDay(d('2026-03-13'), [
+      { ticker: 'PETR4', date: d('2026-03-13'), close: Money.fromString('29.00') },
+    ]);
 
     const result = await fetchOfficialCloses(
       { source },
@@ -175,11 +179,19 @@ describe('fetchOfficialCloses (SPEC-008 BR-008-09/BR-008-30)', () => {
 
   it('a second run of the same wanted set makes the same number of requests (AR-19: no state hidden here)', async () => {
     const source = new FakeOfficialCloseSource();
-    source.seedDay(d('2026-03-13'), [{ ticker: 'PETR4', date: d('2026-03-13'), close: Money.fromString('29.00') }]);
+    source.seedDay(d('2026-03-13'), [
+      { ticker: 'PETR4', date: d('2026-03-13'), close: Money.fromString('29.00') },
+    ]);
     const input = wanted(PETR4, 'PETR4', ['2026-03-13']);
 
-    const first = await fetchOfficialCloses({ source }, input, { annualFileMinDays: 100, currentYear: 2026 });
-    const second = await fetchOfficialCloses({ source }, input, { annualFileMinDays: 100, currentYear: 2026 });
+    const first = await fetchOfficialCloses({ source }, input, {
+      annualFileMinDays: 100,
+      currentYear: 2026,
+    });
+    const second = await fetchOfficialCloses({ source }, input, {
+      annualFileMinDays: 100,
+      currentYear: 2026,
+    });
 
     expect(first.requests).toBe(1);
     expect(second.requests).toBe(1);
@@ -223,14 +235,25 @@ describe('fetchOfficialCloses (SPEC-008 BR-008-09/BR-008-30)', () => {
 
   it('an empty wanted list makes no request', async () => {
     const source = new FakeOfficialCloseSource();
-    const result = await fetchOfficialCloses({ source }, [], { annualFileMinDays: 100, currentYear: 2026 });
-    expect(result).toEqual({ found: [], notSupplied: [], unavailable: [], unpublished: [], requests: 0 });
+    const result = await fetchOfficialCloses({ source }, [], {
+      annualFileMinDays: 100,
+      currentYear: 2026,
+    });
+    expect(result).toEqual({
+      found: [],
+      notSupplied: [],
+      unavailable: [],
+      unpublished: [],
+      requests: 0,
+    });
     expect(source.dayCalls).toEqual([]);
   });
 
   it('two different years are each resolved on their own (one below, one at the annual threshold)', async () => {
     const source = new FakeOfficialCloseSource();
-    source.seedDay(d('2026-03-13'), [{ ticker: 'PETR4', date: d('2026-03-13'), close: Money.fromString('29.00') }]);
+    source.seedDay(d('2026-03-13'), [
+      { ticker: 'PETR4', date: d('2026-03-13'), close: Money.fromString('29.00') },
+    ]);
     const closes2024 = Array.from({ length: 3 }, (_, i) => ({
       ticker: 'PETR4',
       date: d(`2024-01-0${i + 1}`),
@@ -240,7 +263,14 @@ describe('fetchOfficialCloses (SPEC-008 BR-008-09/BR-008-30)', () => {
 
     const result = await fetchOfficialCloses(
       { source },
-      [...wanted(PETR4, 'PETR4', ['2026-03-13']), ...wanted(PETR4, 'PETR4', closes2024.map((c) => c.date))],
+      [
+        ...wanted(PETR4, 'PETR4', ['2026-03-13']),
+        ...wanted(
+          PETR4,
+          'PETR4',
+          closes2024.map((c) => c.date),
+        ),
+      ],
       { annualFileMinDays: 3, currentYear: 2026 },
     );
 

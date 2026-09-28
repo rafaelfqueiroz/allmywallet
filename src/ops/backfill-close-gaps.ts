@@ -5,10 +5,7 @@ import type { AssetId } from '@/core/shared/ids';
 import { fetchOfficialCloses, type WantedClose } from '@/core/quotes/fetch-official-closes';
 import type { AssetCatalogPort, OfficialCloseSource, PriceQuote } from '@/core/quotes/ports';
 import { DrizzleCloseGapRepository } from '@/adapters/db/close-gap-repository';
-import {
-  buildOfficialCloseSource,
-  buildQuotesComposition,
-} from '@/worker/handlers/composition';
+import { buildOfficialCloseSource, buildQuotesComposition } from '@/worker/handlers/composition';
 import { handleValuationSnapshot } from '@/worker/handlers/valuation';
 
 /**
@@ -68,11 +65,10 @@ export async function backfillCloseGaps(
     }
   }
 
-  const result = await fetchOfficialCloses(
-    { source: deps.source },
-    wanted,
-    { annualFileMinDays: deps.annualFileMinDays, currentYear: deps.currentYear },
-  );
+  const result = await fetchOfficialCloses({ source: deps.source }, wanted, {
+    annualFileMinDays: deps.annualFileMinDays,
+    currentYear: deps.currentYear,
+  });
 
   let earliest: BusinessDate | null = null;
   for (const pair of result.found) {

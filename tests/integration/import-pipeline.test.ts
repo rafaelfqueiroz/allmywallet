@@ -13,7 +13,6 @@ import { Money } from '@/core/shared/money';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
 import { FakeOfficialCloseSource } from '@/core/quotes/test-support';
-import { ok } from '@/core/shared/result';
 import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/build-deps';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { allocateToWallet } from '@/core/wallets/allocate';
@@ -2637,7 +2636,13 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       const source = new FakeOfficialCloseSource();
       source.seedYear(
         2024,
-        [{ ticker: 'HSML11', date: BusinessDate.of('2024-02-26'), close: Money.fromString('90.10') }],
+        [
+          {
+            ticker: 'HSML11',
+            date: BusinessDate.of('2024-02-26'),
+            close: Money.fromString('90.10'),
+          },
+        ],
         BusinessDate.of('2024-12-30'),
       );
 

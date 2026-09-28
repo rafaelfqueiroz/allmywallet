@@ -1,7 +1,11 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { AssetId } from '@/core/shared/ids';
 import type { Money } from '@/core/shared/money';
-import { OfficialCloseSourceErrorCode, type OfficialClosesFile, type OfficialCloseSource } from './ports';
+import {
+  OfficialCloseSourceErrorCode,
+  type OfficialClosesFile,
+  type OfficialCloseSource,
+} from './ports';
 
 /**
  * SPEC-008 BR-008-09/BR-008-30 (#171) — pure orchestration over
@@ -120,7 +124,9 @@ export async function fetchOfficialCloses(
       const result = await ports.source.fetchYear(year, tickers);
       if (!result.ok) {
         const bucket =
-          result.error.code === OfficialCloseSourceErrorCode.NOT_PUBLISHED ? unpublished : unavailable;
+          result.error.code === OfficialCloseSourceErrorCode.NOT_PUBLISHED
+            ? unpublished
+            : unavailable;
         bucket.push(...yearPairs);
         continue;
       }
@@ -138,7 +144,10 @@ export async function fetchOfficialCloses(
 
     // Once this year falls back to its annual file, every remaining day is
     // answered from it too, rather than one more `fetchDay` each.
-    let fallback: { readonly outcome: 'file'; readonly file: OfficialClosesFile } | { readonly outcome: 'unavailable' | 'unpublished' } | null = null;
+    let fallback:
+      | { readonly outcome: 'file'; readonly file: OfficialClosesFile }
+      | { readonly outcome: 'unavailable' | 'unpublished' }
+      | null = null;
 
     for (const day of days) {
       const dayPairs = [...(byDay.get(day) ?? [])].sort(byTickerThenDate);
@@ -171,13 +180,18 @@ export async function fetchOfficialCloses(
       // Fall back to the annual file, once, for this day and every later
       // pending day of the same year.
       const remainingTickers = new Set(
-        days.filter((d) => !BusinessDate.isBefore(d, day)).flatMap((d) => (byDay.get(d) ?? []).map((pair) => pair.ticker)),
+        days
+          .filter((d) => !BusinessDate.isBefore(d, day))
+          .flatMap((d) => (byDay.get(d) ?? []).map((pair) => pair.ticker)),
       );
       requests += 1;
       const annual = await ports.source.fetchYear(year, remainingTickers);
       if (!annual.ok) {
         fallback = {
-          outcome: annual.error.code === OfficialCloseSourceErrorCode.NOT_PUBLISHED ? 'unpublished' : 'unavailable',
+          outcome:
+            annual.error.code === OfficialCloseSourceErrorCode.NOT_PUBLISHED
+              ? 'unpublished'
+              : 'unavailable',
         };
         if (fallback.outcome === 'unavailable') unavailable.push(...dayPairs);
         else unpublished.push(...dayPairs);

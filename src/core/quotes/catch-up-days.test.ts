@@ -166,12 +166,7 @@ describe('lastDueCloseDate', () => {
 
   it('is yesterday one millisecond before the close-capture instant', () => {
     expect(
-      lastDueCloseDate(
-        MARCH,
-        new Date('2026-03-17T20:04:59.999Z'),
-        d('2026-03-17'),
-        CAPTURE_TIME,
-      ),
+      lastDueCloseDate(MARCH, new Date('2026-03-17T20:04:59.999Z'), d('2026-03-17'), CAPTURE_TIME),
     ).toBe('2026-03-16');
   });
 
@@ -197,12 +192,12 @@ describe('lastDueCloseDate', () => {
 
   it('uses the configured capture time, not a fixed 17:05', () => {
     // Default capture time 22:00 São Paulo = 01:00Z the next day.
-    expect(lastDueCloseDate(MARCH, new Date('2026-03-17T23:00:00Z'), d('2026-03-17'), '22:00')).toBe(
-      '2026-03-16',
-    );
-    expect(lastDueCloseDate(MARCH, new Date('2026-03-18T01:00:00Z'), d('2026-03-17'), '22:00')).toBe(
-      '2026-03-17',
-    );
+    expect(
+      lastDueCloseDate(MARCH, new Date('2026-03-17T23:00:00Z'), d('2026-03-17'), '22:00'),
+    ).toBe('2026-03-16');
+    expect(
+      lastDueCloseDate(MARCH, new Date('2026-03-18T01:00:00Z'), d('2026-03-17'), '22:00'),
+    ).toBe('2026-03-17');
   });
 });
 

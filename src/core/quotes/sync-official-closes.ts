@@ -1,7 +1,11 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { AssetId } from '@/core/shared/ids';
 import { isIntradayEligible } from './polling-set';
-import { fetchOfficialCloses, type FetchOfficialClosesOptions, type WantedClose } from './fetch-official-closes';
+import {
+  fetchOfficialCloses,
+  type FetchOfficialClosesOptions,
+  type WantedClose,
+} from './fetch-official-closes';
 import {
   CloseGapReason,
   type Asset,
@@ -13,8 +17,10 @@ import {
   type UnofficialClosesPort,
 } from './ports';
 
-export interface SyncOfficialClosesRepository
-  extends Pick<QuoteRepositoryPort, 'getClosePrice' | 'upsertClosePrice'> {
+export interface SyncOfficialClosesRepository extends Pick<
+  QuoteRepositoryPort,
+  'getClosePrice' | 'upsertClosePrice'
+> {
   /** BR-021-31: a close COTAHIST no longer supplies for a day must not stay in history. */
   deleteClose(assetId: AssetId, date: BusinessDate): Promise<void>;
 }
@@ -180,7 +186,11 @@ export async function syncOfficialCloses(
       removed.push({ assetId: pair.assetId, date: pair.date });
       noteChanged(pair.date);
     }
-    const gap: CloseGap = { assetId: pair.assetId, date: pair.date, reason: CloseGapReason.NOT_SUPPLIED };
+    const gap: CloseGap = {
+      assetId: pair.assetId,
+      date: pair.date,
+      reason: CloseGapReason.NOT_SUPPLIED,
+    };
     await ports.gaps.recordGap(gap);
     gaps.push(gap);
   }
