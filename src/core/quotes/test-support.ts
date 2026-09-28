@@ -288,8 +288,9 @@ export class FakeIndexSeriesProvider implements IndexSeriesProvider {
   async fetchSeries(
     code: IndexSeriesCode,
     since: BusinessDate,
+    until: BusinessDate,
   ): Promise<Result<readonly IndexSeriesPointRecord[], DomainError>> {
-    const points = (this.series.get(code) ?? []).filter((p) => p.date >= since);
+    const points = (this.series.get(code) ?? []).filter((p) => p.date >= since && p.date <= until);
     return ok(points);
   }
 }
