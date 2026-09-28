@@ -14,9 +14,9 @@ import {
   type AssetId,
 } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
-import { ok } from '@/core/shared/result';
-import { FakeHeldAssetsPort, FakeQuoteProvider } from '@/core/quotes/test-support';
+import { FakeHeldAssetsPort, FakeOfficialCloseSource, FakeQuoteProvider } from '@/core/quotes/test-support';
 import { FakeOpportunityNotifier } from '@/core/opportunity/test-support';
+import { ok } from '@/core/shared/result';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
 import { DrizzleConsentRepository } from '@/adapters/db/consent-repository';
 import { DrizzleOpportunityRuleRepository } from '@/adapters/db/opportunity-rule-repository';
@@ -40,12 +40,17 @@ import { seedUser } from '../support/users';
 import { seedAsset } from '../support/ledger-fixtures';
 
 /**
- * SPEC-021 — missed-schedule catch-up, end to end against real Postgres.
+ * SPEC-021 — missed-schedule catch-up, end to end against real Postgres,
+ * rewritten onto `syncOfficialCloses` for #171 (SPEC-008 BR-008-09/BR-008-30):
+ * every close this recovers is B3's own COTAHIST, never brapi's, and there is
+ * no monthly-quota budget to exhaust (BR-021-32 is satisfied vacuously — see
+ * `core/quotes/sync-official-closes.ts`'s own comment).
  *
  * Real: the B3 calendar, every repository, the held-asset walk over
- * `positions`, the budget counter, the gap table, the snapshot rebuild and the
- * opportunity evaluation. Faked: the clock and the quote provider (TS-26 — no
- * live network).
+ * `positions`, the gap table, the snapshot rebuild and the opportunity
+ * evaluation. Faked: the clock, `OfficialCloseSource` and (for the live-poll
+ * half of the last test) the intraday quote provider (TS-26 — no live
+ * network).
  *
  * **The scenario.** The worker last captured closes on Wednesday 11 March
  * 2026 and comes back on Tuesday 17 March at 11:00 in São Paulo, with the
@@ -54,12 +59,17 @@ import { seedAsset } from '../support/ledger-fixtures';
  *
  *   Ledger (bought Tue 10 March):  PETR4 100 @ 30,00   VALE3 10 @ 60,00
  *
- *   Provider history      Thu 12    Fri 13    Mon 16
+ *   COTAHIST close        Thu 12    Fri 13    Mon 16
  *   PETR4                 31,10     29,00     32,40
  *   VALE3                 61,00     —         62,50     (Friday not supplied)
  *
  * PETR4's Friday close of 29,00 crosses the user's opportunity rule (buy below
  * 30,00). That is the recovered crossing BR-021-33 says must stay silent.
+ *
+ * **Requests.** `fetchOfficialCloses` reads one COTAHIST daily file per
+ * distinct missed day, covering every ticker still wanted that day — not one
+ * request per asset the way the pre-#171 provider-history path did. Three
+ * missed days both assets need closes for is three requests, not two.
  *
  * **One pool per handler call**, for the reason
  * `tests/integration/opportunity-worker-handler.test.ts` documents at length:
@@ -134,7 +144,8 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     await seedBuy(petr, '100', '30');
     await seedBuy(vale, '10', '60');
 
-    // Wednesday 11 March — the last close `quotes.close-capture` recorded.
+    // Wednesday 11 March — the last close on file, already from COTAHIST
+    // (the steady state once #171's migration has run).
     await seedClose(petr, '2026-03-11', '30.50');
     await seedClose(vale, '2026-03-11', '60.00');
 
@@ -180,7 +191,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
 
   async function seedClose(assetId: AssetId, date: string, close: string): Promise<void> {
     await migratorPool.query(
-      `INSERT INTO price_quotes (asset_id, date, close, source) VALUES ($1, $2, $3, 'brapi_free')`,
+      `INSERT INTO price_quotes (asset_id, date, close, source) VALUES ($1, $2, $3, 'b3_cotahist')`,
       [assetId, date, close],
     );
   }
@@ -222,28 +233,22 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     );
   }
 
-  function historyFor(ticker: string, closes: Record<string, string>) {
-    return (from: BusinessDate, to: BusinessDate) =>
-      ok({
-        ticker,
-        source: 'brapi_free',
-        closes: Object.entries(closes)
-          .filter(([date]) => date >= from && date <= to)
-          .map(([date, close]) => ({ date: d(date), close: Money.fromString(close) })),
-      });
-  }
-
-  function scenarioProvider(): FakeQuoteProvider {
-    const provider = new FakeQuoteProvider();
-    provider.setHistory(
-      'PETR4',
-      historyFor('PETR4', { '2026-03-12': '31.10', '2026-03-13': '29.00', '2026-03-16': '32.40' }),
-    );
-    provider.setHistory(
-      'VALE3',
-      historyFor('VALE3', { '2026-03-12': '61.00', '2026-03-16': '62.50' }),
-    );
-    return provider;
+  /** One COTAHIST daily file per day, with rows for whichever tickers closed that day. */
+  function scenarioCloseSource(): FakeOfficialCloseSource {
+    const source = new FakeOfficialCloseSource();
+    source.seedDay(d('2026-03-12'), [
+      { ticker: 'PETR4', date: d('2026-03-12'), close: Money.fromString('31.10') },
+      { ticker: 'VALE3', date: d('2026-03-12'), close: Money.fromString('61.00') },
+    ]);
+    // VALE3 absent from the 13th's file — published, but not supplied for it.
+    source.seedDay(d('2026-03-13'), [
+      { ticker: 'PETR4', date: d('2026-03-13'), close: Money.fromString('29.00') },
+    ]);
+    source.seedDay(d('2026-03-16'), [
+      { ticker: 'PETR4', date: d('2026-03-16'), close: Money.fromString('32.40') },
+      { ticker: 'VALE3', date: d('2026-03-16'), close: Money.fromString('62.50') },
+    ]);
+    return source;
   }
 
   /**
@@ -251,7 +256,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
    * snapshot repository wrapped only to record the order dates are written in.
    */
   async function catchUp(
-    provider: FakeQuoteProvider,
+    closeSource: FakeOfficialCloseSource,
     upserted: string[] = [],
     extra: Partial<CatchUpDeps> = {},
   ) {
@@ -261,7 +266,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
         database,
         clock,
         calendar,
-        provider,
+        closeSource,
         syncMarketSeries: async () => [],
         rebuildSnapshotsFrom: async (from) => {
           const summary = await handleValuationSnapshot(
@@ -291,14 +296,14 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
   }
 
   it('AC: three business days down → all three closes backfilled and their snapshots written in date order', async () => {
-    const provider = scenarioProvider();
+    const closeSource = scenarioCloseSource();
     const upserted: string[] = [];
 
-    const summary = await catchUp(provider, upserted);
+    const summary = await catchUp(closeSource, upserted);
 
     expect(summary.days).toEqual(['2026-03-12', '2026-03-13', '2026-03-16']);
-    // One request per asset for the whole window (BR-021-32), not one per day.
-    expect(summary.requests).toBe(2);
+    // One COTAHIST daily file per missed day (BR-008-30), not one per asset.
+    expect(summary.requests).toBe(3);
     expect(summary.recovered).toBe(5);
     expect(summary.gaps).toBe(1);
     expect(summary.rebuiltFrom).toBe('2026-03-12');
@@ -307,20 +312,21 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
       code: string;
       date: string;
       close: string;
+      source: string;
     }>(
-      `SELECT a.code, q.date::text AS date, q.close::text AS close
+      `SELECT a.code, q.date::text AS date, q.close::text AS close, q.source
          FROM price_quotes q JOIN assets a ON a.id = q.asset_id
         ORDER BY a.code, q.date`,
     );
     expect(closes).toEqual([
-      { code: 'PETR4', date: '2026-03-11', close: '30.50000000' },
-      { code: 'PETR4', date: '2026-03-12', close: '31.10000000' },
-      { code: 'PETR4', date: '2026-03-13', close: '29.00000000' },
-      { code: 'PETR4', date: '2026-03-16', close: '32.40000000' },
-      { code: 'VALE3', date: '2026-03-11', close: '60.00000000' },
-      { code: 'VALE3', date: '2026-03-12', close: '61.00000000' },
+      { code: 'PETR4', date: '2026-03-11', close: '30.50000000', source: 'b3_cotahist' },
+      { code: 'PETR4', date: '2026-03-12', close: '31.10000000', source: 'b3_cotahist' },
+      { code: 'PETR4', date: '2026-03-13', close: '29.00000000', source: 'b3_cotahist' },
+      { code: 'PETR4', date: '2026-03-16', close: '32.40000000', source: 'b3_cotahist' },
+      { code: 'VALE3', date: '2026-03-11', close: '60.00000000', source: 'b3_cotahist' },
+      { code: 'VALE3', date: '2026-03-12', close: '61.00000000', source: 'b3_cotahist' },
       // No 2026-03-13 row for VALE3 — see the gap test below.
-      { code: 'VALE3', date: '2026-03-16', close: '62.50000000' },
+      { code: 'VALE3', date: '2026-03-16', close: '62.50000000', source: 'b3_cotahist' },
     ]);
 
     // BR-021-30: rebuilt from the first missed day through today, ascending.
@@ -357,16 +363,10 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
       { date: '2026-03-16', total: '3865.00000000' },
       { date: '2026-03-17', total: '3865.00000000' },
     ]);
-
-    const { rows: usage } = await migratorPool.query<{ kind: string; count: number }>(
-      'SELECT kind, count FROM quote_budget_usage WHERE year_month = $1',
-      ['2026-03'],
-    );
-    expect(usage).toEqual([{ kind: 'scheduled', count: 2 }]);
   });
 
-  it('BR-021-31: a close the provider cannot supply is recorded as a gap, with no stand-in price', async () => {
-    await catchUp(scenarioProvider());
+  it('BR-021-31: a close COTAHIST cannot supply is recorded as a gap, with no stand-in price', async () => {
+    await catchUp(scenarioCloseSource());
 
     const { rows: gaps } = await migratorPool.query<{ code: string; date: string; reason: string }>(
       `SELECT a.code, g.date::text AS date, g.reason
@@ -381,75 +381,102 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     expect(stand).toEqual([]);
   });
 
-  it('BR-021-32: days the budget cannot cover become gaps', async () => {
-    // quota 15.000, reserve 10 % → scheduled share floor(15.000 × 90 / 100) = 13.500.
-    // Usage 13.499: PETR4 (first by code) fits; VALE3 then finds 13.500 < 13.500 false.
+  it('a real close later clears a gap row for its day in the same transaction it is written in', async () => {
+    // A gap row for Monday, as if an earlier run had found it unpublished then.
     await migratorPool.query(
-      `INSERT INTO quote_budget_usage (year_month, kind, count) VALUES ('2026-03', 'scheduled', 13499)`,
-    );
-    const provider = scenarioProvider();
-
-    const summary = await catchUp(provider);
-
-    expect(provider.historicalCalls.map((call) => call.ticker)).toEqual(['PETR4']);
-    expect(summary.requests).toBe(1);
-    const { rows: gaps } = await migratorPool.query<{ date: string; reason: string }>(
-      `SELECT date::text AS date, reason FROM price_quote_gaps WHERE asset_id = $1 ORDER BY date`,
+      `INSERT INTO price_quote_gaps (asset_id, date, reason) VALUES ($1, '2026-03-16', 'not_supplied')`,
       [vale],
     );
-    expect(gaps).toEqual([
-      { date: '2026-03-12', reason: 'budget_exhausted' },
-      { date: '2026-03-13', reason: 'budget_exhausted' },
-      { date: '2026-03-16', reason: 'budget_exhausted' },
-    ]);
+    await catchUp(scenarioCloseSource());
+
+    const { rows: gaps } = await migratorPool.query<{ code: string; date: string }>(
+      `SELECT a.code, g.date::text AS date FROM price_quote_gaps g JOIN assets a ON a.id = g.asset_id
+        ORDER BY a.code, g.date`,
+    );
+    // Monday's now-real close cleared the stand-in gap; Friday's, which has
+    // no close, stands.
+    expect(gaps).toEqual([{ code: 'VALE3', date: '2026-03-13' }]);
   });
 
-  it('BR-021-28/31: started at 17:02 — after the close, before the 17:05 capture — catch-up leaves today to the capture, and a real close clears any gap row for its day', async () => {
-    const provider = scenarioProvider();
-    // Tuesday 17's history would include a (non-final) candle; catch-up must not ask for it.
-    provider.set('PETR4', () =>
-      ok({
-        ticker: 'PETR4',
-        price: Money.fromString('33.10'),
-        quotedAt: new Date(),
-        source: 'brapi_free',
-      }),
+  /**
+   * #169: the window is measured per asset. PETR4 was captured every day while
+   * VALE3 was refused, and measuring from the newest close across both would
+   * report nothing missed. VALE3's days are recovered; PETR4, already
+   * captured, is never even requested (its own close already matches
+   * COTAHIST's source, so `syncOfficialCloses`'s window pairs skip it).
+   */
+  it('#169/BR-021-28: one asset captured and another behind — only the one behind is requested', async () => {
+    await seedClose(petr, '2026-03-12', '31.10');
+    await seedClose(petr, '2026-03-13', '29.00');
+    await seedClose(petr, '2026-03-16', '32.40');
+    const closeSource = scenarioCloseSource();
+
+    const summary = await catchUp(closeSource);
+
+    expect(summary.days).toEqual(['2026-03-12', '2026-03-13', '2026-03-16']);
+    expect(closeSource.dayCalls).toEqual([
+      { date: '2026-03-12', tickers: ['VALE3'] },
+      { date: '2026-03-13', tickers: ['VALE3'] },
+      { date: '2026-03-16', tickers: ['VALE3'] },
+    ]);
+    const { rows } = await migratorPool.query<{ date: string; close: string }>(
+      `SELECT date::text AS date, close::text AS close FROM price_quotes
+        WHERE asset_id = $1 AND date > '2026-03-11' ORDER BY date`,
+      [vale],
     );
-    provider.set('VALE3', () =>
-      ok({
-        ticker: 'VALE3',
-        price: Money.fromString('63.00'),
-        quotedAt: new Date(),
-        source: 'brapi_free',
-      }),
-    );
-    // A gap row for today, as the pre-fix window could have left behind.
+    expect(rows.map((row) => [row.date, Money.fromString(row.close).toString()])).toEqual([
+      ['2026-03-12', '61'],
+      ['2026-03-16', '62.5'],
+    ]);
+    expect(summary.rebuiltFrom).toBe('2026-03-12');
+  });
+
+  it('AR-19: a second start in a row finds nothing missed and spends nothing', async () => {
+    await catchUp(scenarioCloseSource());
+    const again = new FakeOfficialCloseSource();
+
+    const summary = await catchUp(again);
+
+    expect(summary.days).toEqual([]);
+    expect(again.dayCalls).toEqual([]);
+    expect(again.yearCalls).toEqual([]);
+  });
+
+  it('BR-021-28/31: caught up well before the (default 22:00) capture time leaves today to the close job, which then captures it and clears any gap for the day', async () => {
+    const closeSource = scenarioCloseSource();
+    closeSource.seedDay(d('2026-03-17'), [
+      { ticker: 'PETR4', date: d('2026-03-17'), close: Money.fromString('33.10') },
+      { ticker: 'VALE3', date: d('2026-03-17'), close: Money.fromString('63.00') },
+    ]);
+    // A gap row for today, as an earlier, since-fixed run could have left behind.
     await migratorPool.query(
       `INSERT INTO price_quote_gaps (asset_id, date, reason) VALUES ($1, '2026-03-17', 'not_supplied')`,
       [petr],
     );
 
-    // 17:02 São Paulo = 20:02Z: the session closed at 20:00Z, the capture fires at 20:05Z.
+    // 20:00 São Paulo (23:00Z) — well after the 17:00 session close, well
+    // before the default 22:00 capture time, so today is not yet due.
     const summary = await withFreshDb((database) =>
       runCatchUp({
         database,
-        clock: new FakeClock('2026-03-17T20:02:00Z'),
+        clock: new FakeClock('2026-03-17T23:00:00Z'),
         calendar,
-        provider,
+        closeSource,
         syncMarketSeries: async () => [],
         rebuildSnapshotsFrom: async () => {},
       }),
     );
     expect(summary.days).toEqual(['2026-03-12', '2026-03-13', '2026-03-16']);
-    expect(provider.historicalCalls.every((call) => call.to === '2026-03-16')).toBe(true);
+    expect(closeSource.dayCalls.every((c) => c.date <= '2026-03-16')).toBe(true);
 
-    // 17:05 — the capture runs as scheduled and is not blocked by catch-up.
+    // 22:05 São Paulo (2026-03-18T01:05Z) — the close job runs as scheduled
+    // and is not blocked by catch-up having already run.
     await withFreshDb((database) =>
       handleQuotesCloseCapture({
         database,
-        clock: new FakeClock('2026-03-17T20:05:00Z'),
+        clock: new FakeClock('2026-03-18T01:05:00Z'),
         calendar,
-        provider,
+        closeSource,
         heldAssets: new FakeHeldAssetsPort([petr, vale]),
       }),
     );
@@ -472,58 +499,18 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
   });
 
   /**
-   * #169: the window is measured per asset. PETR4 was captured every day while
-   * VALE3 was refused — the #151 shape — and measuring from the newest close
-   * across both would report nothing missed. VALE3's days are recovered;
-   * PETR4, already captured, costs no request.
-   */
-  it('#169/BR-021-28: one asset captured and another behind — only the one behind is backfilled', async () => {
-    await seedClose(petr, '2026-03-12', '31.10');
-    await seedClose(petr, '2026-03-13', '29.00');
-    await seedClose(petr, '2026-03-16', '32.40');
-    const provider = scenarioProvider();
-
-    const summary = await catchUp(provider);
-
-    expect(summary.days).toEqual(['2026-03-12', '2026-03-13', '2026-03-16']);
-    expect(provider.historicalCalls).toEqual([
-      { ticker: 'VALE3', from: '2026-03-12', to: '2026-03-16' },
-    ]);
-    const { rows } = await migratorPool.query<{ date: string; close: string }>(
-      `SELECT date::text AS date, close::text AS close FROM price_quotes
-        WHERE asset_id = $1 AND date > '2026-03-11' ORDER BY date`,
-      [vale],
-    );
-    expect(rows.map((row) => [row.date, Money.fromString(row.close).toString()])).toEqual([
-      ['2026-03-12', '61'],
-      ['2026-03-16', '62.5'],
-    ]);
-    expect(summary.rebuiltFrom).toBe('2026-03-12');
-  });
-
-  it('AR-19: a second start in a row finds nothing missed and spends nothing', async () => {
-    await catchUp(scenarioProvider());
-    const again = scenarioProvider();
-
-    const summary = await catchUp(again);
-
-    expect(summary.days).toEqual([]);
-    expect(again.callCount).toBe(0);
-  });
-
-  /**
-   * #161: the Tesouro sync runs at 18:30, the equity capture at 17:05. A
-   * laptop closed in between captures every close and misses every Tesouro
-   * day, so catch-up must sync on a start that found no close missing. The
-   * sync queues the rebuild for what it fills itself, so catch-up rebuilds
+   * #161: the Tesouro sync runs at 18:30, the equity capture by default at
+   * 22:00. A laptop closed in between captures every close and misses every
+   * Tesouro day, so catch-up must sync on a start that found no close missing.
+   * The sync queues the rebuild for what it fills itself, so catch-up rebuilds
    * nothing of its own here.
    */
   it('#161: a start with no close missed still syncs the market series, and rebuilds nothing itself', async () => {
-    await catchUp(scenarioProvider());
+    await catchUp(scenarioCloseSource());
     let synced = 0;
     const rebuilt: BusinessDate[] = [];
 
-    const summary = await catchUp(scenarioProvider(), [], {
+    const summary = await catchUp(new FakeOfficialCloseSource(), [], {
       syncMarketSeries: async () => {
         synced += 1;
         return [];
@@ -542,7 +529,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
   it('#161: a start with nothing polled still syncs the market series', async () => {
     let synced = 0;
 
-    const summary = await catchUp(scenarioProvider(), [], {
+    const summary = await catchUp(scenarioCloseSource(), [], {
       heldAssets: { listDistinctHeldAssetIds: async () => [] },
       syncMarketSeries: async () => {
         synced += 1;
@@ -556,13 +543,13 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
 
   /** #123, BR-008-27: catch-up has no retry of its own, so it reports what the worker must enqueue. */
   it('#123: a market sync that failed is reported for the worker to hand to its queue', async () => {
-    const quiet = await catchUp(scenarioProvider(), [], {
+    const quiet = await catchUp(scenarioCloseSource(), [], {
       heldAssets: { listDistinctHeldAssetIds: async () => [] },
       syncMarketSeries: async () => ['bcb.sync'],
     });
     expect(quiet.retryQueues).toEqual(['bcb.sync']);
 
-    const recovering = await catchUp(scenarioProvider(), [], {
+    const recovering = await catchUp(scenarioCloseSource(), [], {
       syncMarketSeries: async () => ['bcb.sync', 'tesouro.sync'],
     });
     expect(recovering.rebuiltFrom).not.toBeNull();
@@ -570,12 +557,26 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
   });
 
   it('AC/BR-021-33: catch-up sends no opportunity email for recovered days; a live crossing afterwards sends exactly one', async () => {
-    const provider = scenarioProvider();
-    // The live quote the first poll after start will receive: 29,50, below 30,00.
+    const closeSource = scenarioCloseSource();
+    await catchUp(closeSource);
+
+    // Friday's recovered 29,00 crossed the rule — and nothing noticed, by construction:
+    expect(closeSource.dayCalls.length + closeSource.yearCalls.length).toBeGreaterThan(0);
+    const { rows: latest } = await migratorPool.query('SELECT 1 FROM latest_quotes');
+    expect(latest).toEqual([]);
+    const { rows: sentAfterCatchUp } = await migratorPool.query(
+      'SELECT 1 FROM opportunity_notifications',
+    );
+    expect(sentAfterCatchUp).toEqual([]);
+
+    // The first live poll after start, and the evaluation it enqueues. The
+    // intraday quote provider is unrelated to `OfficialCloseSource` — it is
+    // what `quotes.poll` (never catch-up) reads from.
+    const provider = new FakeQuoteProvider();
     provider.set('PETR4', () =>
       ok({
         ticker: 'PETR4',
-        price: Money.fromString('29.50'),
+        price: Money.fromString('29.50'), // below 30,00
         quotedAt: new Date(NOW),
         source: 'brapi_free',
       }),
@@ -588,19 +589,6 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
         source: 'brapi_free',
       }),
     );
-
-    await catchUp(provider);
-
-    // Friday's recovered 29,00 crossed the rule — and nothing noticed, by construction:
-    expect(provider.liveCallCount).toBe(0);
-    const { rows: latest } = await migratorPool.query('SELECT 1 FROM latest_quotes');
-    expect(latest).toEqual([]);
-    const { rows: sentAfterCatchUp } = await migratorPool.query(
-      'SELECT 1 FROM opportunity_notifications',
-    );
-    expect(sentAfterCatchUp).toEqual([]);
-
-    // The first live poll after start, and the evaluation it enqueues.
     const clock = new FakeClock(NOW);
     const enqueued: OpportunityEvaluateJobPayload[] = [];
     await withFreshDb((database) =>
