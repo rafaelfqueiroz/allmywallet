@@ -27,8 +27,8 @@ function allDaysTradingCalendar(from: string, to: string): FakeTradingCalendar {
   const days: string[] = [];
   for (let cursor = d(from); !BusinessDate.isAfter(cursor, d(to)); ) {
     days.push(cursor);
-    const [y, m, day] = cursor.split('-').map(Number);
-    cursor = BusinessDate.of(new Date(Date.UTC(y, m - 1, day + 1)).toISOString().slice(0, 10));
+    const millis = Date.parse(`${cursor}T00:00:00Z`) + 86_400_000;
+    cursor = BusinessDate.of(new Date(millis).toISOString().slice(0, 10));
   }
   return new FakeTradingCalendar(days);
 }
