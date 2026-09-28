@@ -252,26 +252,29 @@ export async function handleQuotesCloseCapture(
     await resolveConfig('quotes.cotahist_annual_min_days', { db: configDb })
   ).value;
 
+  // #171: `syncOfficialCloses`'s own supersede step (`UnofficialClosesPort`)
+  // reaches every stored listed-asset close not from COTAHIST, *any* date,
+  // *any* asset, held or not — it is not bounded by this run's window and
+  // must run whether or not the window itself found a day due, and whether
+  // or not anything is currently held (the AC: every close in history equals
+  // COTAHIST's, none sourced from an intraday quote — that must keep holding
+  // even for an asset since sold). So this never returns early on an empty
+  // polling set or an empty window; the cost of a no-op run is one indexed
+  // query and zero `OfficialCloseSource` requests.
   const pollingSetIds = await computePollingSet({ heldAssets, catalog });
-  if (pollingSetIds.length === 0) {
-    logger.info({ queue: 'quotes.close-capture' }, 'quotes.close-capture: nothing held');
-    return;
-  }
-
-  const window = enumerateCatchUpDays({
-    calendar,
-    now: clock.now(),
-    today: clock.today(),
-    lastCapturedClose: await repository.oldestLastCloseAmong(pollingSetIds),
-    maxDays,
-    captureTime,
-  });
-  if (window.days.length === 0) {
-    logger.info({ queue: 'quotes.close-capture' }, 'quotes.close-capture: nothing due');
-    return;
-  }
-
   const assets = await catalog.findByIds(pollingSetIds);
+  const window =
+    pollingSetIds.length === 0
+      ? { days: [], beyondCap: 0 }
+      : enumerateCatchUpDays({
+          calendar,
+          now: clock.now(),
+          today: clock.today(),
+          lastCapturedClose: await repository.oldestLastCloseAmong(pollingSetIds),
+          maxDays,
+          captureTime,
+        });
+
   const currentYear = Number(clock.today().slice(0, 4));
   const summary = await syncOfficialCloses(
     { source: closeSource, repository, gaps, unofficial },

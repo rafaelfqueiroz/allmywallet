@@ -177,10 +177,16 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
     await resolveConfig('quotes.cotahist_annual_min_days', { db: deps.database })
   ).value;
 
+  // #171: `syncOfficialCloses`'s own supersede step (`UnofficialClosesPort`)
+  // reaches every stored listed-asset close not from COTAHIST, any date, any
+  // asset, held or not — not bounded by this run's window, and must run
+  // whether or not the window found a day missed, and whether or not
+  // anything is currently held (a supersede-only run costs one indexed query
+  // and zero `OfficialCloseSource` requests when there is nothing to do).
   const pollingSetIds = await computePollingSet(deps);
   const window =
     pollingSetIds.length === 0
-      ? null
+      ? { days: [], beyondCap: 0 }
       : enumerateCatchUpDays({
           calendar: deps.calendar,
           now: deps.clock.now(),
@@ -189,21 +195,23 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
           maxDays,
           captureTime,
         });
-  const sync =
-    window === null || window.days.length === 0
-      ? null
-      : await syncOfficialCloses(
-          { source: deps.closeSource, repository: deps.repository, gaps: deps.gaps, unofficial: deps.unofficial },
-          await deps.catalog.findByIds(pollingSetIds),
-          window.days,
-          { annualFileMinDays, currentYear: Number(deps.clock.today().slice(0, 4)) },
-        );
+  const sync = await syncOfficialCloses(
+    {
+      source: deps.closeSource,
+      repository: deps.repository,
+      gaps: deps.gaps,
+      unofficial: deps.unofficial,
+    },
+    await deps.catalog.findByIds(pollingSetIds),
+    window.days,
+    { annualFileMinDays, currentYear: Number(deps.clock.today().slice(0, 4)) },
+  );
 
   // #161: every start, whether or not an equity close was missed — see
   // `syncMarketSeries`. After the equity sync, before the rebuild.
   const retryQueues = await deps.syncMarketSeries();
 
-  if (window === null || sync === null) {
+  if (window.days.length === 0 && sync.earliestChanged === null) {
     logger.info({ queue: 'catch-up', retryQueues }, 'catch-up: no close was missed');
     return { ...NOTHING_MISSED, retryQueues };
   }
