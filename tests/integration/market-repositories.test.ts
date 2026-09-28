@@ -302,6 +302,33 @@ describe('SPEC-008 market data repositories (integration)', () => {
       ).toBe(true);
     });
 
+    /** #171 — whether COTAHIST has ever priced an asset, and since when. */
+    it('earliestCloseFrom returns the earliest close from that source only, or null', async () => {
+      const catalog = new DrizzleAssetCatalogRepository(db);
+      const repo = new DrizzleQuoteRepository(db);
+      const asset = await catalog.upsertByCode({ code: 'WEGE3', name: 'WEG', assetClass: 'stock' });
+      expect(await repo.earliestCloseFrom(asset.id, 'b3_cotahist')).toBeNull();
+      await repo.upsertClosePrice({
+        assetId: asset.id,
+        date: BusinessDate.of('2026-03-12'),
+        close: Money.fromString('40.00'),
+        source: 'brapi_free',
+      });
+      await repo.upsertClosePrice({
+        assetId: asset.id,
+        date: BusinessDate.of('2026-03-16'),
+        close: Money.fromString('41.00'),
+        source: 'b3_cotahist',
+      });
+      await repo.upsertClosePrice({
+        assetId: asset.id,
+        date: BusinessDate.of('2026-03-13'),
+        close: Money.fromString('40.50'),
+        source: 'b3_cotahist',
+      });
+      expect(await repo.earliestCloseFrom(asset.id, 'b3_cotahist')).toBe('2026-03-13');
+    });
+
     /** SPEC-008 BR-008-30 (#171) — the retryable gaps every close run asks COTAHIST for again. */
     it('listRetryableListedGaps finds provider_unavailable and budget_exhausted gaps on listed assets only', async () => {
       const catalog = new DrizzleAssetCatalogRepository(db);

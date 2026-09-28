@@ -65,6 +65,7 @@ export interface CatchUpDeps {
   readonly repository: QuoteRepositoryPort &
     LatestCloseDatePort & {
       deleteClose(assetId: AssetId, date: BusinessDate): Promise<void>;
+      earliestCloseFrom(assetId: AssetId, source: string): Promise<BusinessDate | null>;
     };
   readonly heldAssets: HeldAssetsPort;
   /** SPEC-008 BR-008-30, DL-008-14 (#171) — B3's COTAHIST, the only source an official close is read from. */
