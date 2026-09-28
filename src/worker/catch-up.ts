@@ -151,7 +151,7 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
           calendar: deps.calendar,
           now: deps.clock.now(),
           today: deps.clock.today(),
-          lastCapturedClose: await deps.repository.latestCloseDateAmong(pollingSetIds),
+          lastCapturedClose: await deps.repository.oldestLastCloseAmong(pollingSetIds),
           maxDays,
         });
   const first = window?.days[0];
