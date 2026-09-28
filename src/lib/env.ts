@@ -110,6 +110,17 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => (value?.trim() ? value.trim() : undefined)),
+
+  /**
+   * #123 — where `bcb.sync` and `tesouro.sync` fetch from. Unset means the
+   * public endpoints, which is what every real instance wants. The E2E worker
+   * points both at a closed loopback port (`tests/e2e/support/worker-process.ts`)
+   * so the suite never waits on either service: worker-start catch-up runs
+   * both syncs before the worker consumes a single import, and a first BCB
+   * load is 26 years of daily series.
+   */
+  BCB_SGS_BASE_URL: z.string().url().optional(),
+  TESOURO_PRICES_URL: z.string().url().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
