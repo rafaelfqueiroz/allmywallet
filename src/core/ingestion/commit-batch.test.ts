@@ -5409,6 +5409,182 @@ describe('SPEC-005 BR-005-20d (#144) — an exercised subscription pairs with it
   });
 });
 
+describe('SPEC-005 BR-005-20d (#157, DL-005-25) — a hand-classified credit still decides its exercise', () => {
+  async function stageAndCommitUnresolved(deps: FakeIngestionDeps, extract: ParsedExtract) {
+    const batchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId });
+    expect(result.ok).toBe(true);
+    return batchId;
+  }
+
+  function findRow(rows: readonly ImportRow[], code: string): ImportRow {
+    const row = rows.find((r) => r.record.kind === 'transaction' && r.record.assetCode === code);
+    if (row === undefined) throw new Error(`no staged row for ${code}`);
+    return row;
+  }
+
+  it('evidence_only: an exercise supersedes at commit when the credit is hand-classified with a cost above zero, and the credit is never touched', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'HGLG12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2021-08-11'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'HGLG11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2021-09-02'),
+        }),
+      ],
+    };
+    const firstBatchId = await stageAndCommitUnresolved(deps, extract);
+
+    // The owner classifies the *credit* by hand — before #157 — as a
+    // bonificação, then types a real acquisition cost onto it (BR-006-12:
+    // any transaction can be edited).
+    const creditRow = findRow(await deps.rows.listByBatch(firstBatchId), 'HGLG11');
+    const classified = await classifyImportRow(deps, { rowId: creditRow.id, type: 'bonificacao' });
+    expect(classified.ok).toBe(true);
+    if (!classified.ok) return;
+    const priced = await editTransaction(deps, classified.value.transaction.id, {
+      unitPrice: Money.fromString('112.95'),
+    });
+    expect(priced.ok).toBe(true);
+
+    // A later re-import of the identical file is what triggers the resolver
+    // to look at this issuer again (D3 — no new column or trigger).
+    const secondBatchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId: secondBatchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // SPEC-005 BR-005-20d (#157): never counted — no credit write.
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const creditTransaction = priced.ok ? priced.value.transaction : null;
+    const storedCredit = await deps.transactions.findById((creditTransaction as Transaction).id);
+    expect(storedCredit).toMatchObject({
+      type: 'bonificacao',
+      status: 'active',
+      isUserModified: true,
+    });
+    expect(asStored((storedCredit as Transaction).unitPrice)).toBe('112.95000000');
+
+    const exerciseRow = findRow(await deps.rows.listByBatch(firstBatchId), 'HGLG12');
+    const exerciseTransaction = await deps.transactions.findById(
+      (exerciseRow.transactionId as TransactionId) ?? TransactionId.generate(),
+    );
+    expect(exerciseTransaction?.status).toBe('superseded');
+    const updatedExerciseRow = await deps.rows.findById(exerciseRow.id);
+    expect(updatedExerciseRow?.classification).toBe('ignored');
+
+    // A further re-import changes nothing (AR-19/BR-005-17): the exercise is
+    // now `applied` and the credit is still `locked` — the no-op state.
+    const thirdBatchId = await stagedBatch(deps, extract);
+    const third = await commitBatch(deps, userId, { batchId: thirdBatchId });
+    expect(third.ok).toBe(true);
+    if (!third.ok) return;
+    expect(third.value.resolvedSubscriptions).toBe(0);
+    const stillCredit = await deps.transactions.findById((creditTransaction as Transaction).id);
+    expect(asStored((stillCredit as Transaction).unitPrice)).toBe('112.95000000');
+  });
+
+  it('offer: a zero-cost hand-classified credit writes nothing and leaves the exercise unclassified', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'VISC13',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2019-12-18'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'VISC11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('7'),
+          tradeDate: BusinessDate.of('2020-02-10'),
+        }),
+      ],
+    };
+    const firstBatchId = await stageAndCommitUnresolved(deps, extract);
+
+    // Hand-classified as a bonificação attributing no value (BR-007-05's own
+    // reading of a quantity B3 states without a price) — the owner's real
+    // HGLG11/MGFF11/VISC11 shape (#157).
+    const creditRow = findRow(await deps.rows.listByBatch(firstBatchId), 'VISC11');
+    const classified = await classifyImportRow(deps, { rowId: creditRow.id, type: 'bonificacao' });
+    expect(classified.ok).toBe(true);
+
+    const secondBatchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId: secondBatchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const exerciseRow = findRow(await deps.rows.listByBatch(firstBatchId), 'VISC13');
+    expect(exerciseRow.classification).toBe('unclassified');
+    const exerciseTransaction = await deps.transactions.findById(
+      exerciseRow.transactionId as TransactionId,
+    );
+    expect(exerciseTransaction?.status).toBe('unclassified');
+
+    const creditTransaction = await deps.transactions.findById(
+      classified.ok ? classified.value.transaction.id : TransactionId.generate(),
+    );
+    expect(creditTransaction).toMatchObject({ type: 'bonificacao', status: 'active' });
+    expect((creditTransaction as Transaction).unitPrice.isZero()).toBe(true);
+  });
+
+  it('an ambiguous shape still wins over a locked credit — neither an evidence_only nor an offer outcome', async () => {
+    const deps = buildFakeIngestionDeps('2024-03-01');
+    const extract: ParsedExtract = {
+      extractType: 'b3_movimentacao',
+      records: [
+        subscriptionExercise({
+          assetCode: 'AMBG12',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('4'),
+          tradeDate: BusinessDate.of('2024-01-01'),
+        }),
+        atualizacaoCredit({
+          assetCode: 'AMBG11',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('4'),
+          tradeDate: BusinessDate.of('2024-01-20'),
+        }),
+        // A second same-shape credit within the window — ambiguous, so the
+        // locked-credit branches (evidence_only/offer) are never reached.
+        atualizacaoCredit({
+          assetCode: 'AMBG13',
+          assetClass: 'fii',
+          quantity: Quantity.fromString('4'),
+          tradeDate: BusinessDate.of('2024-01-25'),
+        }),
+      ],
+    };
+    const firstBatchId = await stageAndCommitUnresolved(deps, extract);
+
+    const creditRow = findRow(await deps.rows.listByBatch(firstBatchId), 'AMBG11');
+    const classified = await classifyImportRow(deps, { rowId: creditRow.id, type: 'bonificacao' });
+    expect(classified.ok).toBe(true);
+
+    const secondBatchId = await stagedBatch(deps, extract);
+    const result = await commitBatch(deps, userId, { batchId: secondBatchId });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.resolvedSubscriptions).toBe(0);
+
+    const exerciseRow = findRow(await deps.rows.listByBatch(firstBatchId), 'AMBG12');
+    expect(exerciseRow.classification).toBe('unclassified');
+  });
+});
+
 describe('SPEC-005 BR-005-20e (#144) — a whole-position Atualização credit is a refresh, not a movement', () => {
   it('supersedes a price-less Atualização whose quantity equals the position it lands on, and ignores its row', async () => {
     const deps = buildFakeIngestionDeps('2024-03-01');
