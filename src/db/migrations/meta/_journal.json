@@ -218,6 +218,13 @@
       "when": 1790528942302,
       "tag": "0030_tesouro_educa_renda_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1790612573207,
+      "tag": "0031_cotahist_regap",
+      "breakpoints": true
     }
   ]
 }

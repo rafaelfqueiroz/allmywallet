@@ -110,9 +110,10 @@ describe('enumerateCatchUpDays (SPEC-021 BR-021-28)', () => {
     expect(result).toEqual({ days: ['2026-03-16'], beyondCap: 0 });
   });
 
-  it('no close ever captured and the last due day is not a trading day: nothing is missed', () => {
+  it('no close ever captured and the last due day is not a trading day: the trading day before it', () => {
     // Monday 9 March, before its own capture time: the last due day is
-    // Sunday 8 — never a trading day, so there is nothing to capture yet.
+    // Sunday 8, so the window is Friday 6 — a first start over a weekend
+    // must not skip Friday's close.
     const result = enumerateCatchUpDays({
       calendar: MARCH,
       now: new Date('2026-03-09T15:00:00Z'),
@@ -121,7 +122,7 @@ describe('enumerateCatchUpDays (SPEC-021 BR-021-28)', () => {
       maxDays: 30,
       captureTime: CAPTURE_TIME,
     });
-    expect(result).toEqual({ days: [], beyondCap: 0 });
+    expect(result).toEqual({ days: ['2026-03-06'], beyondCap: 0 });
   });
 
   it('a capture already taken for the last due day leaves nothing to do', () => {

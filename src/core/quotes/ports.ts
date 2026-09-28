@@ -360,6 +360,15 @@ export interface UnofficialClosesPort {
   ): Promise<
     readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
   >;
+  /**
+   * Every recorded gap for a listed asset whose reason a later request may
+   * still fill (`provider_unavailable`, `budget_exhausted`), any date — so a
+   * day COTAHIST could not be read for is asked again on the next run,
+   * however far outside that run's window it falls (BR-008-30, #171).
+   */
+  listRetryableListedGaps(): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  >;
 }
 
 /** BCB SGS series 12 (CDI), 433 (IPCA), 11 (Selic), plus IBOV (FR-6.x). */

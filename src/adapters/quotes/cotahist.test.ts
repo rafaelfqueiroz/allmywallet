@@ -45,7 +45,7 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
   describe('parsing', () => {
     it("returns a requested ticker's close as a Money divided per FATCOT", async () => {
       const rows: QuoteRecordFields[] = [
-        { datpre: '2026-09-25', codneg: 'PETR4', preult: '47.99' },
+        { datpre: '2026-09-25', codneg: 'PETR4', preult: '31.42' },
       ];
       stubFetch(200, buildCotahistZip(rows));
       const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
@@ -55,15 +55,15 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
         expect(result.value.closes).toEqual([
           { ticker: 'PETR4', date: '2026-09-25', close: expect.anything() },
         ]);
-        expect(result.value.closes[0]?.close.toString()).toBe('47.99');
+        expect(result.value.closes[0]?.close.toString()).toBe('31.42');
         expect(result.value.lastDate).toBe('2026-09-25');
       }
     });
 
     it('omits a ticker that was not requested', async () => {
       const rows: QuoteRecordFields[] = [
-        { datpre: '2026-09-25', codneg: 'PETR4', preult: '47.99' },
-        { datpre: '2026-09-25', codneg: 'VALE3', preult: '70.77' },
+        { datpre: '2026-09-25', codneg: 'PETR4', preult: '31.42' },
+        { datpre: '2026-09-25', codneg: 'VALE3', preult: '58.13' },
       ];
       stubFetch(200, buildCotahistZip(rows));
       const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
@@ -76,8 +76,8 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
 
     it('excludes a TPMERC 020 (fractional market) row for the same ticker', async () => {
       const rows: QuoteRecordFields[] = [
-        { datpre: '2026-09-25', codneg: 'SAUD3', preult: '13.46', tpmerc: '010' },
-        { datpre: '2026-09-25', codneg: 'SAUD3F', preult: '13.40', tpmerc: '020' },
+        { datpre: '2026-09-25', codneg: 'SAUD3', preult: '22.07', tpmerc: '010' },
+        { datpre: '2026-09-25', codneg: 'SAUD3F', preult: '21.95', tpmerc: '020' },
       ];
       stubFetch(200, buildCotahistZip(rows));
       const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
@@ -90,7 +90,7 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
 
     it('excludes other non-spot markets (012, 030…)', async () => {
       const rows: QuoteRecordFields[] = [
-        { datpre: '2026-09-25', codneg: 'PETR4', preult: '47.99', tpmerc: '010' },
+        { datpre: '2026-09-25', codneg: 'PETR4', preult: '31.42', tpmerc: '010' },
         { datpre: '2026-09-25', codneg: 'PETR4', preult: '48.50', tpmerc: '012' },
         { datpre: '2026-09-25', codneg: 'PETR4', preult: '49.00', tpmerc: '030' },
       ];
@@ -100,7 +100,7 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.closes).toHaveLength(1);
-        expect(result.value.closes[0]?.close.toString()).toBe('47.99');
+        expect(result.value.closes[0]?.close.toString()).toBe('31.42');
       }
     });
 
@@ -121,7 +121,7 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
     it('lastDate reflects rows of a ticker that was not requested', async () => {
       const rows: QuoteRecordFields[] = [
         { datpre: '2026-09-24', codneg: 'PETR4', preult: '47.00' },
-        { datpre: '2026-09-25', codneg: 'VALE3', preult: '70.77' }, // not requested, but newer
+        { datpre: '2026-09-25', codneg: 'VALE3', preult: '58.13' }, // not requested, but newer
       ];
       stubFetch(200, buildCotahistZip(rows));
       const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });
@@ -137,7 +137,7 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
       const rows: QuoteRecordFields[] = [
         { datpre: '2026-05-10', codneg: 'PETR4', preult: '40.00' },
         { datpre: '2026-01-02', codneg: 'PETR4', preult: '38.00' },
-        { datpre: '2026-09-25', codneg: 'PETR4', preult: '47.99' },
+        { datpre: '2026-09-25', codneg: 'PETR4', preult: '31.42' },
         { datpre: '2026-03-15', codneg: 'PETR4', preult: '41.50' },
       ];
       stubFetch(200, buildCotahistZip(rows));
@@ -224,7 +224,7 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
     });
 
     it('maps a ZIP whose entry does not inflate (corrupted deflate stream) to UNAVAILABLE', async () => {
-      const zip = buildCotahistZip([{ datpre: '2026-09-25', codneg: 'PETR4', preult: '47.99' }]);
+      const zip = buildCotahistZip([{ datpre: '2026-09-25', codneg: 'PETR4', preult: '31.42' }]);
       // Flip bytes inside the compressed payload — after the 30-byte local
       // header and its filename — so the deflate stream fails to inflate.
       const corrupted = Buffer.from(zip);
@@ -259,7 +259,7 @@ describe('B3CotahistCloseSource (SPEC-008 BR-008-09/BR-008-30, DL-008-14, #171)'
 
     it('maps a missing trailer record (truncated file) to UNAVAILABLE', async () => {
       const rows: QuoteRecordFields[] = [
-        { datpre: '2026-09-25', codneg: 'PETR4', preult: '47.99' },
+        { datpre: '2026-09-25', codneg: 'PETR4', preult: '31.42' },
       ];
       stubFetch(200, buildCotahistZip(rows, { omitTrailer: true }));
       const source = new B3CotahistCloseSource({ source: 'b3_cotahist', timeoutMs: 5000 });

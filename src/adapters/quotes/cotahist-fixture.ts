@@ -37,7 +37,7 @@ function toDatpre(isoDate: string): string {
   return isoDate.replace(/-/g, '');
 }
 
-/** `'47.99'` -> `'0000000004799'` — PREULT's 13 digits, 2 implied decimals. */
+/** `'31.42'` -> `'0000000003142'` — PREULT's 13 digits, 2 implied decimals. */
 function toPreultDigits(decimal: string): string {
   const [intPart, decPart = ''] = decimal.split('.');
   const digits = `${intPart}${padRight(decPart, 2, '0')}`;
@@ -49,7 +49,7 @@ export interface QuoteRecordFields {
   readonly datpre: string;
   /** Ticker, e.g. `'PETR4'` — placed at CODNEG (13–24), right-padded with spaces. */
   readonly codneg: string;
-  /** Decimal string, e.g. `'47.99'` — placed at PREULT (109–121). */
+  /** Decimal string, e.g. `'31.42'` — placed at PREULT (109–121). */
   readonly preult: string;
   /** Default `'02'` (lot). */
   readonly codbdi?: string;

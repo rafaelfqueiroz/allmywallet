@@ -29,6 +29,14 @@ import { QUEUE } from '@/worker/queues';
 export type MarketSeriesQueue = typeof QUEUE.BCB_SYNC | typeof QUEUE.TESOURO_SYNC;
 
 /**
+ * The queues catch-up hands a failure to once they exist: the market-series
+ * syncs (#123), and `quotes.close-capture` when B3's COTAHIST could not be
+ * read (#171, BR-008-27) — so the retry policy and the dead-letter alert apply
+ * rather than an error line nobody reads.
+ */
+export type RetryQueue = MarketSeriesQueue | typeof QUEUE.QUOTES_CLOSE_CAPTURE;
+
+/**
  * SPEC-021 — missed-schedule catch-up (BR-021-28..33), rewritten onto
  * `syncOfficialCloses` for #171 (SPEC-008 BR-008-09/BR-008-30/BR-008-31): the
  * closes this recovers are B3's own COTAHIST, never brapi's.
@@ -70,8 +78,9 @@ export interface CatchUpDeps {
    * published for it (BR-021-30).
    *
    * #161: run on **every** start, not only after a missed equity close. The
-   * two schedules are independent — a laptop open at 17:05 and closed by
-   * 18:30 captures every close and never runs `tesouro.sync` — so a start
+   * two schedules are independent — a laptop open at 18:30 and closed by
+   * 22:00 runs `tesouro.sync` and never the close job, and the reverse holds
+   * for one opened only late in the evening — so a start
    * that found no equity close missing may still find Tesouro days missing.
    * The Tesouro sync queues the snapshot rebuild for the days it fills
    * itself (`handlers/tesouro.ts`), so catch-up rebuilds only for the closes
@@ -97,7 +106,7 @@ export interface CatchUpSummary {
   /** `null` when nothing was written or deleted, so nothing was rebuilt. */
   readonly rebuiltFrom: BusinessDate | null;
   /** The market-series syncs that failed, for the worker to enqueue. */
-  readonly retryQueues: readonly MarketSeriesQueue[];
+  readonly retryQueues: readonly RetryQueue[];
 }
 
 const NOTHING_MISSED: Omit<CatchUpSummary, 'retryQueues'> = {
@@ -208,7 +217,10 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
 
   // #161: every start, whether or not an equity close was missed — see
   // `syncMarketSeries`. After the equity sync, before the rebuild.
-  const retryQueues = await deps.syncMarketSeries();
+  const retryQueues: readonly RetryQueue[] = [
+    ...(await deps.syncMarketSeries()),
+    ...(sync.unavailable > 0 ? [QUEUE.QUOTES_CLOSE_CAPTURE] : []),
+  ];
 
   if (window.days.length === 0 && sync.earliestChanged === null) {
     logger.info({ queue: 'catch-up', retryQueues }, 'catch-up: no close was missed');

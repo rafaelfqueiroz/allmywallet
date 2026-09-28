@@ -292,6 +292,47 @@ describe('SPEC-008 quotes.poll / quotes.close-capture handlers (integration)', (
     expect(close?.close.toString()).toBe('61.2');
   });
 
+  /**
+   * #171, BR-008-27: an unreadable COTAHIST fails the job — after what could be
+   * written was — so pg-boss retries it and a persistent failure dead-letters
+   * and alerts. The retry asks again for the day recorded as a gap.
+   */
+  it('BR-008-27: COTAHIST unavailable fails close-capture; the retry fills the day and clears its gap', async () => {
+    await seedHeldAsset('VALE3');
+    const catalog = new DrizzleAssetCatalogRepository(db);
+    const asset = await catalog.findByCode('VALE3');
+    if (!asset) throw new Error('setup failed');
+    const repository = new DrizzleQuoteRepository(db);
+    const closeSource = new FakeOfficialCloseSource();
+    closeSource.seedDayError(BusinessDate.of('2026-03-16'), 'OFFICIAL_CLOSES_UNAVAILABLE');
+    const deps = {
+      database: db,
+      clock: new FakeClock(NOW_AFTER_DEFAULT_CAPTURE_TIME),
+      calendar: new FakeTradingCalendar(['2026-03-16']),
+      catalog,
+      repository,
+      heldAssets: new FakeHeldAssetsPort([asset.id]),
+      provider: new FakeQuoteProvider(),
+      closeSource,
+      gaps: new DrizzleCloseGapRepository(db),
+      unofficial: repository,
+      enqueueSnapshotRebuild: async () => {},
+    };
+
+    await expect(handleQuotesCloseCapture(deps)).rejects.toThrow(/COTAHIST unavailable/);
+    expect(await repository.getClosePrice(asset.id, BusinessDate.of('2026-03-16'))).toBeNull();
+
+    closeSource.seedDay(BusinessDate.of('2026-03-16'), [
+      { ticker: 'VALE3', date: BusinessDate.of('2026-03-16'), close: Money.fromString('61.20') },
+    ]);
+    await handleQuotesCloseCapture(deps);
+
+    const close = await repository.getClosePrice(asset.id, BusinessDate.of('2026-03-16'));
+    expect(close?.close.toString()).toBe('61.2');
+    const gapRows = await db.select().from(schema.priceQuoteGaps);
+    expect(gapRows).toEqual([]);
+  });
+
   it('AR-19: a retried poll for the same asset within the cadence window makes no second provider call', async () => {
     await seedHeldAsset('PETR4');
     const catalog = new DrizzleAssetCatalogRepository(db);

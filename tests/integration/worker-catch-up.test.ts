@@ -545,6 +545,28 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     expect(summary.days).toEqual([]);
   });
 
+  /**
+   * #171, BR-008-27: an unreadable COTAHIST is handed to `quotes.close-capture`,
+   * whose retry policy and dead-letter alert then apply — and the days it
+   * could not read become retryable gaps, asked again by that job.
+   */
+  it('#171: COTAHIST unavailable hands quotes.close-capture to its queue and records retryable gaps', async () => {
+    const source = scenarioCloseSource();
+    source.seedDayError(d('2026-03-13'), 'OFFICIAL_CLOSES_UNAVAILABLE');
+
+    const summary = await catchUp(source);
+
+    expect(summary.retryQueues).toEqual(['quotes.close-capture']);
+    const { rows } = await migratorPool.query<{ code: string; date: string; reason: string }>(
+      `SELECT a.code, g.date::text AS date, g.reason
+         FROM price_quote_gaps g JOIN assets a ON a.id = g.asset_id ORDER BY a.code`,
+    );
+    expect(rows).toEqual([
+      { code: 'PETR4', date: '2026-03-13', reason: 'provider_unavailable' },
+      { code: 'VALE3', date: '2026-03-13', reason: 'provider_unavailable' },
+    ]);
+  });
+
   /** #123, BR-008-27: catch-up has no retry of its own, so it reports what the worker must enqueue. */
   it('#123: a market sync that failed is reported for the worker to hand to its queue', async () => {
     const quiet = await catchUp(scenarioCloseSource(), [], {

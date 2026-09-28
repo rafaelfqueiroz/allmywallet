@@ -256,4 +256,68 @@ describe('syncOfficialCloses (SPEC-008 BR-008-09/BR-008-30/BR-008-31, SPEC-021 B
     expect((await syncOfficialCloses(ports, [PETR4], [], OPTIONS)).requests).toBe(0);
     expect(ports.source.dayCalls).toEqual([]);
   });
+  it('a retryable gap outside the window is asked again: filled when COTAHIST has it, counted unavailable when it cannot be read', async () => {
+    const ports = setup();
+    // Brapi-era gaps (relabelled retryable by migration 0031), long before this run's window.
+    ports.unofficial.seedRetryableGap({ assetId: VALE3.id, code: 'VALE3', date: d('2026-01-12') });
+    ports.unofficial.seedRetryableGap({ assetId: VALE3.id, code: 'VALE3', date: d('2026-01-13') });
+    ports.source.seedDay(d('2026-01-12'), [
+      { ticker: 'VALE3', date: d('2026-01-12'), close: Money.fromString('55.10') },
+    ]);
+    ports.source.seedDayError(d('2026-01-13'), 'OFFICIAL_CLOSES_UNAVAILABLE');
+
+    const summary = await syncOfficialCloses(ports, [PETR4], [], OPTIONS);
+
+    expect(summary.recorded.map((q) => [q.date, q.close.toString()])).toEqual([
+      ['2026-01-12', '55.1'],
+    ]);
+    expect(summary.unavailable).toBe(1);
+    expect(summary.gaps).toEqual([
+      { assetId: VALE3.id, date: '2026-01-13', reason: 'provider_unavailable' },
+    ]);
+    expect(summary.earliestChanged).toBe('2026-01-12');
+  });
+
+  it('a retryable gap inside the window is asked for once, not twice', async () => {
+    const ports = setup();
+    ports.unofficial.seedRetryableGap({ assetId: PETR4.id, code: 'PETR4', date: d('2026-03-16') });
+    ports.source.seedDay(d('2026-03-16'), [
+      { ticker: 'PETR4', date: d('2026-03-16'), close: Money.fromString('32.40') },
+    ]);
+
+    const summary = await syncOfficialCloses(ports, [PETR4], [d('2026-03-16')], OPTIONS);
+
+    expect(summary.recorded).toHaveLength(1);
+    expect(summary.requests).toBe(1);
+  });
+
+  it('a close COTAHIST does not supply is recorded as a gap before the stored close is deleted', async () => {
+    // A crash between the two must leave the non-official close in place, so
+    // the next run asks again — never a day with neither a close nor a gap.
+    const ports = setup();
+    const order: string[] = [];
+    const recordGap = ports.gaps.recordGap.bind(ports.gaps);
+    ports.gaps.recordGap = async (gap) => {
+      order.push('gap');
+      await recordGap(gap);
+    };
+    const deleteClose = ports.repository.deleteClose.bind(ports.repository);
+    ports.repository.deleteClose = async (assetId, date) => {
+      order.push('delete');
+      await deleteClose(assetId, date);
+    };
+    await ports.repository.upsertClosePrice({
+      assetId: PETR4.id,
+      date: d('2026-03-16'),
+      close: Money.fromString('32.00'),
+      source: 'brapi_free',
+    });
+    ports.source.seedDay(d('2026-03-16'), [
+      { ticker: 'VALE3', date: d('2026-03-16'), close: Money.fromString('60.00') },
+    ]);
+
+    await syncOfficialCloses(ports, [PETR4], [d('2026-03-16')], OPTIONS);
+
+    expect(order).toEqual(['gap', 'delete']);
+  });
 });

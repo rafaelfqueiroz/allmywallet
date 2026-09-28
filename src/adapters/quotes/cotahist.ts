@@ -64,7 +64,7 @@ const TPMERC_SPOT = '010';
 /** Real files start `00COTAHIST.` — anything else in the first line is not a COTAHIST file. */
 const HEADER_PREFIX = '00COTAHIST.';
 
-/** `"0000000004799"` (13 digits, 2 implied decimals) -> `"47.99"`. AR-06: string slicing only, never `Number()`. */
+/** `"0000000003142"` (13 digits, 2 implied decimals) -> `"31.42"`. AR-06: string slicing only, never `Number()`. */
 function preultToDecimalString(raw: string): string {
   const decimals = 2;
   const intPart = raw.slice(0, raw.length - decimals);

@@ -257,6 +257,8 @@ export class FakeOfficialCloseSource implements OfficialCloseSource {
     lastDate: BusinessDate | null = date,
   ): void {
     this.days.set(date, { closes, lastDate });
+    // A file published after an earlier failure: the retry reads it.
+    this.dayErrors.delete(date);
   }
 
   seedDayError(date: BusinessDate, code: OfficialCloseSourceErrorCode): void {
@@ -323,6 +325,22 @@ export class FakeUnofficialClosesPort implements UnofficialClosesPort {
     return this.entries
       .filter((entry) => entry.source !== officialSource)
       .map(({ assetId, code, date }) => ({ assetId, code, date }));
+  }
+
+  private retryableGaps: {
+    readonly assetId: AssetId;
+    readonly code: string;
+    readonly date: BusinessDate;
+  }[] = [];
+
+  seedRetryableGap(entry: { assetId: AssetId; code: string; date: BusinessDate }): void {
+    this.retryableGaps.push(entry);
+  }
+
+  async listRetryableListedGaps(): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  > {
+    return [...this.retryableGaps];
   }
 }
 

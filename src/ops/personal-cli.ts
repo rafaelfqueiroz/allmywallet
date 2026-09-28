@@ -24,9 +24,9 @@ import { logger } from '@/lib/logger';
  *                                  position cache (SPEC-007 BR-007-14, DM-4)
  *   rebuild-snapshots              rebuilds every tenant's whole valuation
  *                                  history (SPEC-009 BR-009-17/18)
- *   backfill-gaps                  retries every recorded close gap a later
- *                                  request may fill, then rebuilds snapshots
- *                                  from the earliest recovered day (#151)
+ *   backfill-gaps                  retries every recorded close gap B3's
+ *                                  COTAHIST may fill, then rebuilds snapshots
+ *                                  from the earliest recovered day (#151, #171)
  *
  * `rebuild-positions` is `pnpm positions:rebuild --all` made runnable where it
  * is actually needed. The pnpm script needs the repository, a toolchain and a

@@ -122,6 +122,9 @@ export function lastDueCloseDate(
   return addCalendarDays(today, -1);
 }
 
+/** Longer than any run of B3 non-trading days (Carnaval plus a weekend is four). */
+const LAST_TRADING_DAY_SEARCH_DAYS = 10;
+
 export function enumerateCatchUpDays(input: CatchUpDaysInput): CatchUpDays {
   if (!Number.isInteger(input.maxDays) || input.maxDays < 1) {
     // The registry's schema already refuses this (min 1); reaching here means
@@ -135,10 +138,16 @@ export function enumerateCatchUpDays(input: CatchUpDaysInput): CatchUpDays {
   if (input.lastCapturedClose === null) {
     // SPEC-008 BR-008-09 (#171): no close ever captured for these assets, so
     // there is no absence to measure — but the daily job must still capture a
-    // newly held asset's first close, so the window is the last due day
-    // alone rather than empty.
-    if (!input.calendar.isTradingDay(through)) return { days: [], beyondCap: 0 };
-    return { days: [through], beyondCap: 0 };
+    // newly held asset's first close, so the window is the last trading day
+    // on or before the last due day, rather than empty. Walking back matters
+    // on a first start over a weekend: Sunday's last due day is Saturday, and
+    // Friday's close would otherwise never be asked for.
+    let cursor = through;
+    for (let step = 0; step < LAST_TRADING_DAY_SEARCH_DAYS; step += 1) {
+      if (input.calendar.isTradingDay(cursor)) return { days: [cursor], beyondCap: 0 };
+      cursor = addCalendarDays(cursor, -1);
+    }
+    return { days: [], beyondCap: 0 };
   }
 
   const missed: BusinessDate[] = [];

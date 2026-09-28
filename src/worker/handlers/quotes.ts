@@ -298,9 +298,21 @@ export async function handleQuotesCloseCapture(
       removed: summary.removed.length,
       gaps: summary.gaps.length,
       unpublished: summary.unpublished,
+      unavailable: summary.unavailable,
       requests: summary.requests,
       rebuildFrom: summary.earliestChanged,
     },
     'quotes.close-capture cycle complete',
   );
+
+  // SPEC-008 BR-008-27: an unreachable or unreadable COTAHIST fails the job,
+  // after everything that could be written was, so pg-boss retries with
+  // backoff and a persistent failure dead-letters and alerts. Swallowing it
+  // would let closes stop arriving with nothing but an info log to show for
+  // it. An unpublished day is not a failure (BR-008-09).
+  if (summary.unavailable > 0) {
+    throw new Error(
+      `quotes.close-capture: B3 COTAHIST unavailable for ${summary.unavailable} close(s)`,
+    );
+  }
 }

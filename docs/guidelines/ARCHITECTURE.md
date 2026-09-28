@@ -63,7 +63,7 @@ src/
     shared/                #   Money, Result, domain errors, date/calendar helpers
   adapters/                # implementations of core's ports
     db/                    #   Drizzle repositories
-    quotes/                #   brapi client, Tesouro CSV, BCB SGS
+    quotes/                #   brapi client, B3 COTAHIST, Tesouro CSV, BCB SGS
     ingestion/             #   xlsx parsers (Movimentação, Negociação, Posição)
     email/
   db/                      # schema, migrations, RLS policies, tenant transaction helper
@@ -90,7 +90,8 @@ These come straight from the specs and are not speculative:
 | Port | Implementations | Spec |
 |---|---|---|
 | `IngestionPort` | xlsx parsers, manual entry, (v2) Open Finance adapter | SPEC-005 BR-005-08 |
-| `QuoteProvider` | brapi free tier; swappable tier or vendor | SPEC-008 BR-008-26 |
+| `QuoteProvider` | brapi free tier, intraday only; swappable tier or vendor | SPEC-008 BR-008-26 |
+| `OfficialCloseSource` | B3 COTAHIST daily and annual files — every close in history | SPEC-008 BR-008-30 |
 | `IndexSeriesProvider` | BCB SGS | SPEC-008 |
 | `Clock` / `TradingCalendar` | real, and a controllable fake for tests | SPEC-008 BR-008-07 |
 | Repositories | Drizzle | — |

@@ -32,9 +32,10 @@ export class DrizzleCloseGapRepository implements CloseGapRepositoryPort {
 
   /**
    * #151 — the gaps a later request may still fill, grouped by asset with each
-   * asset's dates ascending. `not_supplied` is left out: that request
-   * *succeeded* and the provider had no close, so asking again spends budget
-   * on an answer already given.
+   * asset's dates ascending. `not_supplied` is left out: B3's COTAHIST was read
+   * and has no close for that asset that day, so asking again repeats an
+   * answer already given (#171; migration 0031 relabelled brapi's own
+   * `not_supplied` answers retryable, since COTAHIST's supersede them).
    */
   async listRetryableGaps(): Promise<ReadonlyMap<AssetId, readonly BusinessDate[]>> {
     const rows = await this.db

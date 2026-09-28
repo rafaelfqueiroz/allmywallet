@@ -6,6 +6,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { Money, Quantity } from '@/core/shared/money';
 import { DrizzleAssetCatalogRepository } from '@/adapters/db/asset-catalog-repository';
 import { DrizzleQuoteRepository } from '@/adapters/db/quote-repository';
+import { DrizzleCloseGapRepository } from '@/adapters/db/close-gap-repository';
 import { DrizzleIndexSeriesRepository } from '@/adapters/db/index-series-repository';
 import { DrizzleQuoteBudgetCounter } from '@/adapters/db/quote-budget-counter';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
@@ -299,6 +300,51 @@ describe('SPEC-008 market data repositories (integration)', () => {
       expect(
         unofficial.every((row) => row.assetId !== alreadyOfficial.id && row.assetId !== cdb.id),
       ).toBe(true);
+    });
+
+    /** SPEC-008 BR-008-30 (#171) — the retryable gaps every close run asks COTAHIST for again. */
+    it('listRetryableListedGaps finds provider_unavailable and budget_exhausted gaps on listed assets only', async () => {
+      const catalog = new DrizzleAssetCatalogRepository(db);
+      const repo = new DrizzleQuoteRepository(db);
+      const gaps = new DrizzleCloseGapRepository(db);
+      const stock = await catalog.upsertByCode({
+        code: 'ABEV3',
+        name: 'Ambev',
+        assetClass: 'stock',
+      });
+      const etf = await catalog.upsertByCode({ code: 'BOVA11', name: 'BOVA11', assetClass: 'etf' });
+      const tesouro = await catalog.upsertByCode({
+        code: 'Tesouro Selic 2031',
+        name: 'Tesouro Selic 2031',
+        assetClass: 'tesouro_direto',
+      });
+      await gaps.recordGap({
+        assetId: stock.id,
+        date: BusinessDate.of('2026-01-12'),
+        reason: 'provider_unavailable',
+      });
+      await gaps.recordGap({
+        assetId: stock.id,
+        date: BusinessDate.of('2026-01-13'),
+        reason: 'not_supplied',
+      });
+      await gaps.recordGap({
+        assetId: etf.id,
+        date: BusinessDate.of('2026-02-02'),
+        reason: 'budget_exhausted',
+      });
+      await gaps.recordGap({
+        assetId: tesouro.id,
+        date: BusinessDate.of('2026-01-12'),
+        reason: 'provider_unavailable',
+      });
+
+      const retryable = await repo.listRetryableListedGaps();
+
+      expect(retryable.map((row) => [row.code, row.date])).toEqual([
+        ['ABEV3', '2026-01-12'],
+        ['BOVA11', '2026-02-02'],
+      ]);
     });
   });
 

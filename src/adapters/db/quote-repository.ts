@@ -5,14 +5,15 @@ import { latestQuotes, priceQuoteGaps, priceQuotes } from '@/db/schema/market';
 import { assets } from '@/db/schema/assets';
 import { AssetId } from '@/core/shared/ids';
 import { BusinessDate } from '@/core/shared/clock';
-import type {
-  CloseHistoryWriterPort,
-  InsertedCloses,
-  LatestCloseDatePort,
-  LatestQuote,
-  PriceQuote,
-  QuoteRepositoryPort,
-  UnofficialClosesPort,
+import {
+  CloseGapReason,
+  type CloseHistoryWriterPort,
+  type InsertedCloses,
+  type LatestCloseDatePort,
+  type LatestQuote,
+  type PriceQuote,
+  type QuoteRepositoryPort,
+  type UnofficialClosesPort,
 } from '@/core/quotes/ports';
 import type { PriceHistoryPort } from '@/core/valuation/ports';
 import type { ClosePriceReader } from '@/core/ingestion/ports';
@@ -225,6 +226,36 @@ export class DrizzleQuoteRepository
         ),
       )
       .orderBy(asc(assets.code), asc(priceQuotes.date));
+    return rows.map((row) => ({
+      assetId: AssetId.of(row.assetId),
+      code: row.code,
+      date: BusinessDate.of(row.date),
+    }));
+  }
+
+  /**
+   * SPEC-008 BR-008-30 (#171) — `UnofficialClosesPort.listRetryableListedGaps`:
+   * listed-asset gaps a later request may still fill, any date. Migration 0031
+   * relabels every brapi-era `not_supplied` gap this way, so the first run
+   * after the upgrade asks COTAHIST for each of those days once.
+   */
+  async listRetryableListedGaps(): Promise<
+    readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]
+  > {
+    const rows = await this.db
+      .select({ assetId: priceQuoteGaps.assetId, code: assets.code, date: priceQuoteGaps.date })
+      .from(priceQuoteGaps)
+      .innerJoin(assets, eq(assets.id, priceQuoteGaps.assetId))
+      .where(
+        and(
+          inArray(priceQuoteGaps.reason, [
+            CloseGapReason.PROVIDER_UNAVAILABLE,
+            CloseGapReason.BUDGET_EXHAUSTED,
+          ]),
+          inArray(assets.assetClass, [...LISTED_ASSET_CLASSES]),
+        ),
+      )
+      .orderBy(asc(assets.code), asc(priceQuoteGaps.date));
     return rows.map((row) => ({
       assetId: AssetId.of(row.assetId),
       code: row.code,

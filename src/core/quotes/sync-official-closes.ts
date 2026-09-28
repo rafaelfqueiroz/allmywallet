@@ -49,6 +49,12 @@ export interface SyncOfficialClosesSummary {
   readonly gaps: readonly CloseGap[];
   /** Count only — nothing is written or recorded for an unpublished day (BR-008-09). */
   readonly unpublished: number;
+  /**
+   * Pairs whose file could not be fetched or read (network, error status,
+   * timeout, unparseable). The close job fails on any, so pg-boss retries it
+   * and a persistent failure dead-letters and alerts (BR-008-27).
+   */
+  readonly unavailable: number;
   readonly requests: number;
   /** Earliest date written or deleted; `null` when nothing changed. */
   readonly earliestChanged: BusinessDate | null;
@@ -136,6 +142,20 @@ export async function syncOfficialCloses(
     });
   }
 
+  // (c) retryable gaps — a day COTAHIST could not be read for, however far
+  // outside this window, is asked again (BR-008-30). A gap day has no close
+  // (BR-021-31), so a pair already wanted above is left as it is.
+  for (const entry of await ports.unofficial.listRetryableListedGaps()) {
+    const key = candidateKey(entry.assetId, entry.date);
+    if (candidates.has(key)) continue;
+    candidates.set(key, {
+      assetId: entry.assetId,
+      ticker: entry.code,
+      date: entry.date,
+      hadPriorClose: false,
+    });
+  }
+
   const wanted: WantedClose[] = [...candidates.values()]
     .sort((a, b) => {
       if (a.ticker !== b.ticker) return a.ticker < b.ticker ? -1 : 1;
@@ -181,18 +201,22 @@ export async function syncOfficialCloses(
   }
 
   for (const pair of result.notSupplied) {
-    if (candidateFor(pair.assetId, pair.date).hadPriorClose) {
-      await ports.repository.deleteClose(pair.assetId, pair.date);
-      removed.push({ assetId: pair.assetId, date: pair.date });
-      noteChanged(pair.date);
-    }
     const gap: CloseGap = {
       assetId: pair.assetId,
       date: pair.date,
       reason: CloseGapReason.NOT_SUPPLIED,
     };
+    // The gap first, then the delete: a crash between the two leaves the
+    // non-official close in place, so the next run's supersede step asks for
+    // the day again and finishes the job. The other order could leave a day
+    // with neither a close nor a gap, outside any later window (BR-021-31).
     await ports.gaps.recordGap(gap);
     gaps.push(gap);
+    if (candidateFor(pair.assetId, pair.date).hadPriorClose) {
+      await ports.repository.deleteClose(pair.assetId, pair.date);
+      removed.push({ assetId: pair.assetId, date: pair.date });
+      noteChanged(pair.date);
+    }
   }
 
   for (const pair of result.unavailable) {
@@ -214,6 +238,7 @@ export async function syncOfficialCloses(
     removed,
     gaps,
     unpublished: result.unpublished.length,
+    unavailable: result.unavailable.length,
     requests: result.requests,
     earliestChanged,
   };
