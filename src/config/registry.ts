@@ -116,7 +116,7 @@ export const REGISTRY = {
    * SPEC-008 BR-008-29 (#113) — the request timeout for B3's public
    * `GetListedSupplementCompany` listed-companies endpoint
    * (`adapters/market-data/b3-listed-companies.ts`). A registry key rather
-   * than a constant for the same reason `historyTimeoutMs` is one on brapi:
+   * than a constant for the same reason `quotes.cotahist_timeout_ms` is one:
    * the refresh runs ahead of an import commit, so a hung request must not
    * hold that commit up indefinitely.
    */
@@ -206,8 +206,10 @@ export const REGISTRY = {
     // SPEC-021 BR-021-28: how many missed business days worker-start catch-up
     // covers. `0` is refused rather than read as "catch-up off" — a disabled
     // catch-up would silently leave every missed close unrecorded, neither
-    // recovered nor marked as a gap. 90 business days is roughly the longest
-    // history the free quote tier's `3mo`/`6mo` ranges return.
+    // recovered nor marked as a gap. 90 business days is a generous ceiling
+    // on one run's own window; #171's COTAHIST source carries B3's whole
+    // history regardless, so this bounds how much of an absence one run
+    // recovers, not what is recoverable at all.
     schema: z.number().int().min(1).max(90),
     default: 30,
     levels: ['deployment'],
