@@ -33,6 +33,13 @@ export interface BcbSyncDeps {
  * ends that series' run and keeps what is already stored, so the next run
  * resumes from `latestDate` rather than from `BACKFILL_START` (AR-19).
  *
+ * BR-008-27: a series that failed fails the job, once the cycle is done —
+ * the other series and IBOV are still attempted first. That hands it to the
+ * queue's retry policy (`queues.ts`: three retries with backoff), and a
+ * failure that outlasts them dead-letters into the `job_failed` alert. A
+ * logged-and-returned failure did neither, which is how #123 went unnoticed
+ * for months.
+ *
  * `BACKFILL_START` is a one-time technical default for how far back the
  * initial load reaches, not a business threshold — SPEC-002's registry
  * governs cadences/thresholds/budgets an operator tunes; this is neither.
@@ -48,6 +55,7 @@ export async function handleBcbSync(overrides?: Partial<BcbSyncDeps>): Promise<v
   const provider = overrides?.provider ?? buildIndexSeriesProvider();
 
   let totalPoints = 0;
+  const failed: IndexSeriesCode[] = [];
   for (const code of SGS_CODES) {
     const latest = await indexSeriesRepository.latestDate(code);
     const since = latest ?? BACKFILL_START;
@@ -60,6 +68,7 @@ export async function handleBcbSync(overrides?: Partial<BcbSyncDeps>): Promise<v
           { queue: 'bcb.sync', code, window, err: fetched.error },
           'bcb.sync fetch failed',
         );
+        failed.push(code);
         break;
       }
       // AR-19: `upsertPoints` is keyed `(code, date)` — a retried sync for
@@ -95,5 +104,8 @@ export async function handleBcbSync(overrides?: Partial<BcbSyncDeps>): Promise<v
     logger.warn({ queue: 'bcb.sync', err: ibov.error }, 'bcb.sync: IBOV fetch failed');
   }
 
-  logger.info({ queue: 'bcb.sync', totalPoints }, 'bcb.sync cycle complete');
+  logger.info({ queue: 'bcb.sync', totalPoints, failed }, 'bcb.sync cycle complete');
+  if (failed.length > 0) {
+    throw new Error(`bcb.sync: ${failed.join(', ')} did not complete; the queue retries it`);
+  }
 }

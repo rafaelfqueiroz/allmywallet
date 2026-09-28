@@ -10,7 +10,12 @@ import { baseSentryOptions } from '@/lib/sentry';
 import { raiseAlert } from '@/lib/alerts';
 import { checkQuoteProviderCredential } from '@/lib/health';
 import { describeDeadLetterFailure, isQueueBacklogWarning } from '@/worker/alerting';
-import { DEAD_LETTER_QUEUE, deadLetterCreateOptions, queueCreateOptions } from '@/worker/queues';
+import {
+  DEAD_LETTER_QUEUE,
+  deadLetterCreateOptions,
+  queueCreateOptions,
+  type QueueName,
+} from '@/worker/queues';
 import { REGISTRATIONS, type JobHandler, type RegisteredWorker } from '@/worker/registrations';
 import { runCatchUp } from '@/worker/catch-up';
 import { WORKER_HEARTBEAT_ID } from '@/db/schema/observability';
@@ -141,8 +146,9 @@ export async function startWorker(): Promise<PgBoss> {
   // the first scheduled job of this start already rests on recovered history.
   // A failure is logged, never fatal: a worker that refuses to start because a
   // backfill failed would miss *today's* closes too, which is strictly worse.
+  let catchUpRetries: readonly QueueName[] = [];
   try {
-    await runCatchUp();
+    catchUpRetries = (await runCatchUp()).retryQueues;
   } catch (error) {
     logger.error({ queue: 'catch-up', err: error }, 'catch-up failed; starting schedules anyway');
   }
@@ -167,6 +173,14 @@ export async function startWorker(): Promise<PgBoss> {
         tz: 'America/Sao_Paulo',
       });
     }
+  }
+
+  // #123, BR-008-27: a market sync that failed during catch-up is handed to
+  // its queue now that the queue exists, so its retry policy and dead-letter
+  // alert apply — rather than waiting for the next cron, which a laptop that
+  // is closed at 19:00 may never reach.
+  for (const queue of catchUpRetries) {
+    await boss.send(queue, {});
   }
 
   logger.info({ queues: REGISTRATIONS.length }, 'worker started');
