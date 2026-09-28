@@ -212,41 +212,15 @@ export type QuoteProviderErrorCode =
  * AR-02/AR-03/DV-11: named for the role, not `BrapiClient` — BR-008-26
  * requires swapping vendor or delay tier to never touch valuation logic, and
  * this is the seam that makes that true.
+ *
+ * SPEC-008 BR-008-09/BR-008-30, DL-008-14 (#171) — this port no longer
+ * carries a historical-closes method. Every official close, including one
+ * older than this provider's own history window, is read from
+ * `OfficialCloseSource` (B3's COTAHIST) instead; an intraday-quote provider
+ * is never the source of a value written to `price_quotes`.
  */
 export interface QuoteProvider {
   fetchQuote(ticker: string): Promise<Result<QuoteProviderResult, DomainError>>;
-  /**
-   * SPEC-021 BR-021-29 — the provider's historical daily closes for `ticker`
-   * over `[from, to]` (both inclusive), used only by worker-start catch-up to
-   * recover closes missed while the worker was down.
-   *
-   * **One request for the whole range**, not one per day: BR-021-32 charges
-   * each request to the same monthly budget as polling, so a per-day shape
-   * would spend thirty requests where one suffices.
-   *
-   * The result may hold fewer dates than asked for — a provider that does not
-   * supply a day simply omits it, and the caller records that day as a gap
-   * (BR-021-31). It must never hold a date outside `[from, to]`.
-   */
-  fetchHistoricalCloses(
-    ticker: string,
-    from: BusinessDate,
-    to: BusinessDate,
-  ): Promise<Result<HistoricalClosesResult, DomainError>>;
-}
-
-/** One observed official close, as the provider's history reports it. */
-export interface HistoricalClose {
-  readonly date: BusinessDate;
-  readonly close: Money;
-}
-
-export interface HistoricalClosesResult {
-  readonly ticker: string;
-  /** Ascending by date, unique per date, every date inside the requested range. */
-  readonly closes: readonly HistoricalClose[];
-  /** Names the active `quotes.provider` adapter, persisted with every recovered close. */
-  readonly source: string;
 }
 
 /**
@@ -356,6 +330,27 @@ export interface OfficialCloseSource {
     year: number,
     tickers: ReadonlySet<string>,
   ): Promise<Result<OfficialClosesFile, DomainError>>;
+}
+
+/**
+ * SPEC-008 BR-008-09/BR-008-30 (#171) — one stored listed-asset close that is
+ * *not* from B3's COTAHIST: a leftover `brapi_free` write from before this
+ * spec, or one written by a still-misconfigured source. `syncOfficialCloses`
+ * (`core/quotes/sync-official-closes.ts`) uses this to supersede every such
+ * close with COTAHIST's own, regardless of the run's own window and
+ * regardless of whether the asset is currently held — a close in history
+ * must never disagree with B3 about a day it does cover.
+ */
+export interface UnofficialClosesPort {
+  /**
+   * Every `price_quotes` row for a listed asset (stock/fii/bdr/etf) whose
+   * `source` is not `officialSource`, any date, any asset. `code` is the
+   * catalog code (`OfficialClose.ticker`'s counterpart), so the caller can
+   * build a `WantedClose` without a second catalog lookup.
+   */
+  listUnofficialListedCloses(
+    officialSource: string,
+  ): Promise<readonly { readonly assetId: AssetId; readonly code: string; readonly date: BusinessDate }[]>;
 }
 
 /** BCB SGS series 12 (CDI), 433 (IPCA), 11 (Selic), plus IBOV (FR-6.x). */
