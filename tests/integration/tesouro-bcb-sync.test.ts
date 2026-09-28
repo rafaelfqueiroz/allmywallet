@@ -427,21 +427,27 @@ describe('SPEC-008 tesouro.sync / bcb.sync handlers (integration)', () => {
         ? domainError(BcbSgsErrorCode.REJECTED, { code: 'CDI', status: 406, message: null })
         : null;
 
-    await handleBcbSync({
-      clock: clockOn('2026-09-28'),
-      indexSeriesRepository,
-      provider: recordingProvider(seen, rejectSecondCdiWindow),
-      quoteProvider: ibovQuoteProvider,
-    });
+    // BR-008-27: the job fails, so the queue retries it and a persistent
+    // failure dead-letters into an alert — but only once the cycle is done.
+    await expect(
+      handleBcbSync({
+        clock: clockOn('2026-09-28'),
+        indexSeriesRepository,
+        provider: recordingProvider(seen, rejectSecondCdiWindow),
+        quoteProvider: ibovQuoteProvider,
+      }),
+    ).rejects.toThrow('bcb.sync: CDI did not complete');
 
     // The failure ends CDI's walk; the first window stays stored, and the
-    // other series are not held back by it.
+    // other series and IBOV are not held back by it.
     expect(seen.filter((r) => r.code === 'CDI').map((r) => r.since)).toEqual([
       '2000-01-01',
       '2010-01-01',
     ]);
     expect(seen.filter((r) => r.code === 'SELIC')).toHaveLength(3);
     expect(await indexSeriesRepository.latestDate('CDI')).toBe('2009-12-31');
+    expect(await indexSeriesRepository.latestDate('SELIC')).toBeNull();
+    expect(await indexSeriesRepository.latestDate('IBOV')).toBe('2026-09-28');
 
     seen.length = 0;
     await handleBcbSync({

@@ -26,6 +26,10 @@ import {
 import { handleBcbSync } from '@/worker/handlers/bcb';
 import { handleTesouroSync } from '@/worker/handlers/tesouro';
 import { handleValuationSnapshot } from '@/worker/handlers/valuation';
+import { QUEUE } from '@/worker/queues';
+
+/** The market-series syncs catch-up runs itself, named by the queue that owns each. */
+export type MarketSeriesQueue = typeof QUEUE.BCB_SYNC | typeof QUEUE.TESOURO_SYNC;
 
 /**
  * SPEC-021 — missed-schedule catch-up (BR-021-28..33).
@@ -68,8 +72,12 @@ export interface CatchUpDeps {
    * The Tesouro sync queues the snapshot rebuild for the days it fills
    * itself (`handlers/tesouro.ts`), so catch-up rebuilds only for the closes
    * it recovered.
+   *
+   * Resolves to the syncs that failed. Catch-up runs outside pg-boss, so it
+   * has no retry of its own; the worker hands these to their queues once
+   * they exist, and the queue's retry policy takes over (#123, BR-008-27).
    */
-  readonly syncMarketSeries: () => Promise<void>;
+  readonly syncMarketSeries: () => Promise<readonly MarketSeriesQueue[]>;
   /** BR-021-30 — the existing `valuation.snapshot` rebuild-from-date path. */
   readonly rebuildSnapshotsFrom: (from: BusinessDate) => Promise<void>;
 }
@@ -82,9 +90,11 @@ export interface CatchUpSummary {
   readonly requests: number;
   /** `null` when nothing was missed, so nothing was rebuilt. */
   readonly rebuiltFrom: BusinessDate | null;
+  /** The market-series syncs that failed, for the worker to enqueue. */
+  readonly retryQueues: readonly MarketSeriesQueue[];
 }
 
-const NOTHING_MISSED: CatchUpSummary = {
+const NOTHING_MISSED: Omit<CatchUpSummary, 'retryQueues'> = {
   days: [],
   beyondCap: 0,
   recovered: 0,
@@ -93,19 +103,30 @@ const NOTHING_MISSED: CatchUpSummary = {
   rebuiltFrom: null,
 };
 
-async function defaultSyncMarketSeries(): Promise<void> {
-  // Each guarded on its own: an unreachable BCB must not cost the rebuild its
-  // Tesouro prices, and neither may stop the worker from starting.
-  try {
-    await handleBcbSync();
-  } catch (error) {
-    logger.error({ queue: 'catch-up', err: error }, 'catch-up: bcb.sync failed');
+/**
+ * Each sync guarded on its own: an unreachable BCB must not cost the rebuild
+ * its Tesouro prices, and neither may stop the worker from starting.
+ */
+export async function runMarketSeriesSyncs(
+  syncs: Readonly<Record<MarketSeriesQueue, () => Promise<void>>>,
+): Promise<readonly MarketSeriesQueue[]> {
+  const failed: MarketSeriesQueue[] = [];
+  for (const queue of [QUEUE.BCB_SYNC, QUEUE.TESOURO_SYNC] as const) {
+    try {
+      await syncs[queue]();
+    } catch (error) {
+      logger.error({ queue: 'catch-up', sync: queue, err: error }, 'catch-up: market sync failed');
+      failed.push(queue);
+    }
   }
-  try {
-    await handleTesouroSync();
-  } catch (error) {
-    logger.error({ queue: 'catch-up', err: error }, 'catch-up: tesouro.sync failed');
-  }
+  return failed;
+}
+
+async function defaultSyncMarketSeries(): Promise<readonly MarketSeriesQueue[]> {
+  return runMarketSeriesSyncs({
+    [QUEUE.BCB_SYNC]: () => handleBcbSync(),
+    [QUEUE.TESOURO_SYNC]: () => handleTesouroSync(),
+  });
 }
 
 async function resolveDeps(overrides?: Partial<CatchUpDeps>): Promise<CatchUpDeps> {
@@ -165,11 +186,11 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
 
   // #161: every start, whether or not an equity close was missed — see
   // `syncMarketSeries`. After the equity backfill, before the rebuild.
-  await deps.syncMarketSeries();
+  const retryQueues = await deps.syncMarketSeries();
 
   if (window === null || first === undefined || backfill === null) {
-    logger.info({ queue: 'catch-up' }, 'catch-up: no close was missed');
-    return NOTHING_MISSED;
+    logger.info({ queue: 'catch-up', retryQueues }, 'catch-up: no close was missed');
+    return { ...NOTHING_MISSED, retryQueues };
   }
 
   // BR-021-30: one rebuild from the earliest missed day forward. The snapshot
@@ -185,6 +206,7 @@ export async function runCatchUp(overrides?: Partial<CatchUpDeps>): Promise<Catc
     gaps: backfill.gaps.length,
     requests: backfill.requests,
     rebuiltFrom: first,
+    retryQueues,
   };
   // AR-39: dates and counts only — no asset, no figure.
   logger.info({ queue: 'catch-up', ...summary }, 'catch-up complete');

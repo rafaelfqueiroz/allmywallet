@@ -262,7 +262,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
         clock,
         calendar,
         provider,
-        syncMarketSeries: async () => {},
+        syncMarketSeries: async () => [],
         rebuildSnapshotsFrom: async (from) => {
           const summary = await handleValuationSnapshot(
             { from },
@@ -436,7 +436,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
         clock: new FakeClock('2026-03-17T20:02:00Z'),
         calendar,
         provider,
-        syncMarketSeries: async () => {},
+        syncMarketSeries: async () => [],
         rebuildSnapshotsFrom: async () => {},
       }),
     );
@@ -526,6 +526,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
     const summary = await catchUp(scenarioProvider(), [], {
       syncMarketSeries: async () => {
         synced += 1;
+        return [];
       },
       rebuildSnapshotsFrom: async (from) => {
         rebuilt.push(from);
@@ -545,11 +546,27 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
       heldAssets: { listDistinctHeldAssetIds: async () => [] },
       syncMarketSeries: async () => {
         synced += 1;
+        return [];
       },
     });
 
     expect(synced).toBe(1);
     expect(summary.days).toEqual([]);
+  });
+
+  /** #123, BR-008-27: catch-up has no retry of its own, so it reports what the worker must enqueue. */
+  it('#123: a market sync that failed is reported for the worker to hand to its queue', async () => {
+    const quiet = await catchUp(scenarioProvider(), [], {
+      heldAssets: { listDistinctHeldAssetIds: async () => [] },
+      syncMarketSeries: async () => ['bcb.sync'],
+    });
+    expect(quiet.retryQueues).toEqual(['bcb.sync']);
+
+    const recovering = await catchUp(scenarioProvider(), [], {
+      syncMarketSeries: async () => ['bcb.sync', 'tesouro.sync'],
+    });
+    expect(recovering.rebuiltFrom).not.toBeNull();
+    expect(recovering.retryQueues).toEqual(['bcb.sync', 'tesouro.sync']);
   });
 
   it('AC/BR-021-33: catch-up sends no opportunity email for recovered days; a live crossing afterwards sends exactly one', async () => {
