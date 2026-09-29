@@ -1324,7 +1324,13 @@ describe('#183 — SPEC-012 BR-012-01 (DL-012-08): TWR and XIRR take the market-
     resetTransactionSequence();
     const result = await dayOf(
       [
-        aTransaction().bonificacao().of('PETR4').at('Clear').on('2026-06-01').quantity('10').build(),
+        aTransaction()
+          .bonificacao()
+          .of('PETR4')
+          .at('Clear')
+          .on('2026-06-01')
+          .quantity('10')
+          .build(),
         aTransaction()
           .transferOut()
           .of('PETR4')

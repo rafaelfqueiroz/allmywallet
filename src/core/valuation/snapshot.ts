@@ -382,7 +382,9 @@ const INTERNAL: RowFlow = { contribution: Money.zero(), market: Money.zero(), es
  * carries a credit's cost by, so what the snapshot calls internal is exactly
  * what the ledger paired.
  */
-export function pairedTransferIds(transactions: readonly Transaction[]): ReadonlySet<TransactionId> {
+export function pairedTransferIds(
+  transactions: readonly Transaction[],
+): ReadonlySet<TransactionId> {
   const paired = new Set<TransactionId>();
   for (const [credit, debit] of pairLedgerTransfers(transactions)) {
     paired.add(credit);
@@ -635,7 +637,8 @@ function totalsOf(valued: readonly ValuedPosition[]): {
  *
  * A `Result` because a transfer out's flow is read off its source position
  * (SPEC-013 BR-013-08), and a position that cannot be replayed has no cost to
- * carry — that is reported, never flowed as zero.
+ * carry — that is reported, never flowed as zero. Likewise an unpaired
+ * transfer whose asset the context cannot value (#183).
  */
 export function buildSnapshot(
   date: BusinessDate,
@@ -668,11 +671,15 @@ export function buildSnapshot(
  * generated history is what catches the accumulation and ordering bugs that
  * every other test walks past.
  *
- * The debits' carried costs are folded **once**, over the ledger up to the
+ * The debits' carried averages are folded **once**, over the ledger up to the
  * last date, where `buildSnapshot` re-folds them per date from a ledger cut
  * there. The two agree because a debit's cost depends only on rows that sort
  * before it (`compareForReplay` orders by date first), so no later row can
- * change it — which is exactly the claim the DM-4 property test puts to them.
+ * change it. The transfer pairing (#183) is taken over the whole ledger by
+ * both, and is cut-invariant for the same reason: a pair and every leg that
+ * could compete with it share one trade date (`pairLedgerTransfers`). An
+ * unpaired leg's market value depends only on its own date and the context.
+ * Those are exactly the claims the DM-4 property test puts to them.
  */
 export function buildSnapshotSeries(
   dates: readonly BusinessDate[],

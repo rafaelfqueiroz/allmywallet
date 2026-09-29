@@ -12,8 +12,12 @@ import { positionKeyString, type ReplayOptions, selectForReplay } from '@/core/p
  * SPEC-013 BR-013-08 (amended 2026-09-29) / DL-013-08 — **the cost a
  * `transfer_out` carries away** from its source position.
  *
- * A transfer is a flow at the cost basis it carries: a `transfer_in` at the
- * cost it opens with, a `transfer_out` at the cost it takes away. B3 exports
+ * An **unpaired** transfer is a flow in `net_contributions` at the cost basis
+ * it carries: a `transfer_in` at the cost it opens with, a `transfer_out` at
+ * the cost it takes away (a paired one flows nowhere since #183, DL-013-09 —
+ * but the figure is still computed for every debit, because a source that
+ * cannot be replayed is an error either way, and the rounding argument below
+ * is what kept #181's pairs exact). B3 exports
  * the debit leg with no price (SPEC-005 BR-005-20a), so the debit's stated
  * price says nothing — its cost is a fact about the **source position at that
  * point of the replay**, and only a fold can read it. That is what this is:

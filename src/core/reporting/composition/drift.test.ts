@@ -29,7 +29,7 @@ function aSnapshot(
     date: day('2026-01-31'),
     totalValue: entries.reduce((acc, [, value]) => acc.plus(value), Money.zero()),
     netContributions: money('0'),
-    marketFlows: money('0'), // #183: calc-engine replaces this with market-valued flows
+    marketFlows: money('0'), // SPEC-013 BR-013-08: no unpaired transfer here, so equal to netContributions
     earningsToDate: money('0'),
     byAssetClass: new Map(entries),
     hasEstimates: false,
