@@ -230,7 +230,9 @@ export interface DailyValuationSnapshot {
   /**
    * External flows only: buys and transfers in, less sells and transfers out.
    * Not price change, never earnings — that distinction is what SPEC-012's TWR
-   * is built on.
+   * is built on. A transfer counts at the cost basis it carries (SPEC-013
+   * BR-013-08 / DL-013-08, `externalFlow`), so a move between the user's own
+   * custodians nets to zero here.
    */
   readonly netContributions: Money;
   /** Proventos recognised at pay date (SPEC-014), cumulative to this date. */

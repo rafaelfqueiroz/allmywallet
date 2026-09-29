@@ -243,7 +243,9 @@ export interface SeriesPoint {
 /**
  * An **external** cash flow, signed from the portfolio's point of view:
  * positive is money in (a buy, a transfer in), negative is money out (a sell, a
- * transfer out).
+ * transfer out). A transfer is valued at the cost basis it carries (SPEC-013
+ * BR-013-08 / DL-013-08), so a move between the user's own custodians is no
+ * flow at all — only a one-sided transfer is.
  *
  * BR-012-01 / SPEC-009: price change is not a flow, and **earnings are not a
  * flow**. Getting that set wrong is precisely what makes a TWR stop being a
