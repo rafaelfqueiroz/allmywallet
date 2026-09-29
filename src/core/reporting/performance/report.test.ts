@@ -69,6 +69,7 @@ function snapshot(
     date: day(date),
     totalValue: money(totalValue),
     netContributions: money(netContributions),
+    marketFlows: money(netContributions), // #183: calc-engine replaces this with market-valued flows
     earningsToDate: money(earningsToDate),
     byAssetClass: new Map<AssetClass, Money>([['stock', money(totalValue)]]),
     hasEstimates: false,

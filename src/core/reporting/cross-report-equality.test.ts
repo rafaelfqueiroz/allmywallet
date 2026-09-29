@@ -93,6 +93,7 @@ function snapshotsFor(portfolio: GeneratedPortfolio, dates: readonly string[]) {
     date: day(date),
     totalValue: total,
     netContributions: Money.fromString('1000'),
+    marketFlows: Money.fromString('1000'), // #183: calc-engine replaces this with market-valued flows
     earningsToDate: Money.fromString('10'),
     byAssetClass: new Map(byAssetClass),
     hasEstimates,

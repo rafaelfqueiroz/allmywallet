@@ -36,6 +36,7 @@ const snapshot = (date: string, total: string): DailyValuationSnapshot => ({
   date: day(date),
   totalValue: money(total),
   netContributions: money('0'),
+  marketFlows: money('0'), // #183: calc-engine replaces this with market-valued flows
   earningsToDate: money('0'),
   byAssetClass: new Map([['stock', money(total)]]),
   hasEstimates: false,

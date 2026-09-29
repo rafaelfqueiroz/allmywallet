@@ -52,6 +52,7 @@ const snapshot = (
     date: day(date),
     totalValue: entries.reduce((acc, [, value]) => acc.plus(value), Money.zero()),
     netContributions: money('0'),
+    marketFlows: money('0'), // #183: calc-engine replaces this with market-valued flows
     earningsToDate: money('0'),
     byAssetClass: new Map(entries),
     hasEstimates: false,

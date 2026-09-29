@@ -435,6 +435,8 @@ export function buildSnapshot(
     date,
     totalValue: total,
     netContributions: flows.value.netContributions,
+    // #183: calc-engine replaces this with market-valued flows
+    marketFlows: flows.value.netContributions,
     earningsToDate: flows.value.earningsToDate,
     byAssetClass,
     hasEstimates,
@@ -489,6 +491,8 @@ export function buildSnapshotSeries(
       date,
       totalValue: total,
       netContributions: running.netContributions,
+      // #183: calc-engine replaces this with market-valued flows
+      marketFlows: running.netContributions,
       earningsToDate: running.earningsToDate,
       byAssetClass,
       hasEstimates,
@@ -503,6 +507,7 @@ export function snapshotsEqual(a: DailyValuationSnapshot, b: DailyValuationSnaps
     a.date !== b.date ||
     !a.totalValue.equals(b.totalValue) ||
     !a.netContributions.equals(b.netContributions) ||
+    !a.marketFlows.equals(b.marketFlows) ||
     !a.earningsToDate.equals(b.earningsToDate) ||
     a.hasEstimates !== b.hasEstimates ||
     a.byAssetClass.size !== b.byAssetClass.size
@@ -530,6 +535,7 @@ export function serializeSnapshot(snapshot: DailyValuationSnapshot): SerializedS
     date: snapshot.date,
     totalValue: snapshot.totalValue.toString(),
     netContributions: snapshot.netContributions.toString(),
+    marketFlows: snapshot.marketFlows.toString(),
     earningsToDate: snapshot.earningsToDate.toString(),
     byAssetClass,
     hasEstimates: snapshot.hasEstimates,
@@ -676,6 +682,7 @@ export function quantizeSnapshot(snapshot: DailyValuationSnapshot): DailyValuati
     date: snapshot.date,
     totalValue: total,
     netContributions: quantizeMoney(snapshot.netContributions),
+    marketFlows: quantizeMoney(snapshot.marketFlows),
     earningsToDate: quantizeMoney(snapshot.earningsToDate),
     byAssetClass,
     hasEstimates: snapshot.hasEstimates,

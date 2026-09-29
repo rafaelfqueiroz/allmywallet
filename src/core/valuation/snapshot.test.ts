@@ -872,6 +872,7 @@ describe('snapshotsEqual', () => {
     date: d('2026-03-20'),
     totalValue: Money.fromString('100'),
     netContributions: Money.fromString('90'),
+    marketFlows: Money.fromString('90'), // #183: calc-engine replaces this with market-valued flows
     earningsToDate: Money.fromString('5'),
     byAssetClass: new Map([['stock', Money.fromString('100')]]),
     hasEstimates: false,
@@ -929,6 +930,7 @@ describe('quantizeSnapshot — the storage boundary, and why AC-16 needs it', ()
       date: d('2026-03-20'),
       totalValue: Money.fromString('0'), // deliberately wrong; must be recomputed
       netContributions: Money.fromString('24415.000000004'),
+      marketFlows: Money.fromString('24415.000000004'), // #183: calc-engine replaces this with market-valued flows
       earningsToDate: Money.fromString('103.000000006'),
       byAssetClass: new Map<AssetClass, Money>([
         ['cdb', Money.fromString('10021.97970588415656252996632310492899145')],
@@ -956,6 +958,7 @@ describe('quantizeSnapshot — the storage boundary, and why AC-16 needs it', ()
       date: d('2026-03-20'),
       totalValue: Money.zero(),
       netContributions: Money.fromString('0.000000005'),
+      marketFlows: Money.fromString('0.000000005'), // #183: calc-engine replaces this with market-valued flows
       earningsToDate: Money.fromString('0.000000004'),
       byAssetClass: new Map<AssetClass, Money>(),
       hasEstimates: false,
@@ -971,6 +974,7 @@ describe('quantizeSnapshot — the storage boundary, and why AC-16 needs it', ()
       date: d('2026-03-20'),
       totalValue: Money.zero(),
       netContributions: Money.fromString('24415.00000001'),
+      marketFlows: Money.fromString('24415.00000001'), // #183: calc-engine replaces this with market-valued flows
       earningsToDate: Money.fromString('103'),
       byAssetClass: new Map<AssetClass, Money>([['stock', Money.fromString('3842.12345678')]]),
       hasEstimates: false,
@@ -986,6 +990,7 @@ describe('quantizeSnapshot — the storage boundary, and why AC-16 needs it', ()
       date: d('2026-03-20'),
       totalValue: Money.fromString('999'),
       netContributions: Money.zero(),
+      marketFlows: Money.zero(), // #183: calc-engine replaces this with market-valued flows
       earningsToDate: Money.zero(),
       byAssetClass: new Map<AssetClass, Money>(),
       hasEstimates: false,
@@ -1000,6 +1005,7 @@ describe('AR-10 — the JSON boundary', () => {
       date: d('2026-03-20'),
       totalValue: Money.fromString('25811.92970588415656'),
       netContributions: Money.fromString('24415'),
+      marketFlows: Money.fromString('24415'), // #183: calc-engine replaces this with market-valued flows
       earningsToDate: Money.fromString('103'),
       byAssetClass: new Map([
         ['cdb', Money.fromString('10021.97970588415656')],
@@ -1081,6 +1087,7 @@ describe('BR-009-18 / AC-15 — invalidate and rebuild forward from a date', () 
       date: d(date),
       totalValue: Money.fromString('1'),
       netContributions: Money.fromString('1'),
+      marketFlows: Money.fromString('1'), // #183: calc-engine replaces this with market-valued flows
       earningsToDate: Money.zero(),
       byAssetClass: new Map(),
       hasEstimates: false,

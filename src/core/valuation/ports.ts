@@ -235,6 +235,20 @@ export interface DailyValuationSnapshot {
    * custodians nets to zero here.
    */
   readonly netContributions: Money;
+  /**
+   * SPEC-013 BR-013-08 (DL-013-09, DL-013-10) / SPEC-012 BR-012-01
+   * (DL-012-08): cumulative external flows valued **at market on the flow
+   * date**, where `netContributions` carries each transfer at cost. Equal to
+   * `netContributions` except for an unpaired custody transfer (and a paired
+   * one whose legs price differently, which flows zero in both). Feeds the
+   * growth decomposition, monthly contribution bars, TWR, XIRR and the shadow
+   * portfolio; `netContributions` keeps feeding *Total investido* and *Ganho*.
+   *
+   * Never null in the domain: the stored column is nullable (AR-69) and the
+   * adapters read NULL — a row written before the column existed — as
+   * `netContributions`.
+   */
+  readonly marketFlows: Money;
   /** Proventos recognised at pay date (SPEC-014), cumulative to this date. */
   readonly earningsToDate: Money;
   readonly byAssetClass: ReadonlyMap<AssetClass, Money>;
@@ -251,6 +265,7 @@ export interface SerializedSnapshot {
   readonly date: string;
   readonly totalValue: string;
   readonly netContributions: string;
+  readonly marketFlows: string;
   readonly earningsToDate: string;
   readonly byAssetClass: Readonly<Record<string, string>>;
   readonly hasEstimates: boolean;
