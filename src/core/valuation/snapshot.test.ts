@@ -891,6 +891,7 @@ describe('snapshotsEqual', () => {
     ['date', { date: d('2026-03-21') }],
     ['totalValue', { totalValue: Money.fromString('101') }],
     ['netContributions', { netContributions: Money.fromString('91') }],
+    ['marketFlows', { marketFlows: Money.fromString('95') }],
     ['earningsToDate', { earningsToDate: Money.fromString('6') }],
     ['hasEstimates', { hasEstimates: true }],
     ['breakdown size', { byAssetClass: new Map<AssetClass, Money>() }],
@@ -965,6 +966,7 @@ describe('quantizeSnapshot — the storage boundary, and why AC-16 needs it', ()
     };
     const quantized = quantizeSnapshot(snapshot);
     expect(quantized.netContributions.toString()).toBe('0.00000001');
+    expect(quantized.marketFlows.toString()).toBe('0.00000001');
     expect(quantized.earningsToDate.toString()).toBe('0');
   });
 
@@ -1005,7 +1007,7 @@ describe('AR-10 — the JSON boundary', () => {
       date: d('2026-03-20'),
       totalValue: Money.fromString('25811.92970588415656'),
       netContributions: Money.fromString('24415'),
-      marketFlows: Money.fromString('24415'), // #183: calc-engine replaces this with market-valued flows
+      marketFlows: Money.fromString('24500.5'),
       earningsToDate: Money.fromString('103'),
       byAssetClass: new Map([
         ['cdb', Money.fromString('10021.97970588415656')],
@@ -1018,6 +1020,7 @@ describe('AR-10 — the JSON boundary', () => {
       date: '2026-03-20',
       totalValue: '25811.92970588415656',
       netContributions: '24415',
+      marketFlows: '24500.5',
       earningsToDate: '103',
       byAssetClass: { cdb: '10021.97970588415656', stock: '3842' },
       hasEstimates: true,
