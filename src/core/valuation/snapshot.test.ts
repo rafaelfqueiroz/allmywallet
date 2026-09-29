@@ -147,14 +147,34 @@ describe('externalFlow — what TWR will have to neutralise, and nothing else', 
     const buy = aTransaction().buy().quantity('100').price('32.15').fees('4.90').build();
     expect(to8(externalFlow(buy))).toBe('3219.90000000');
     expect(externalFlow(aTransaction().subscription().build()).isPositive()).toBe(true);
-    expect(externalFlow(aTransaction().transferIn().build()).isPositive()).toBe(true);
+    // SPEC-013 BR-013-08: a transfer in at the cost it opens its lot with —
+    // 100 × 32,15 carried + 1,20 of fees = 3.216,20, what applyAcquisition adds.
+    const credit = aTransaction().transferIn().quantity('100').price('32.15').fees('1.20').build();
+    expect(to8(externalFlow(credit))).toBe('3216.20000000');
   });
 
-  it('sells and transfers out are negative, net of the fees they cost', () => {
+  it('sells are negative, net of the fees they cost', () => {
     // 100 × 38,42 − 4,90 = 3.837,10 leaving the portfolio.
     const sell = aTransaction().sell().quantity('100').price('38.42').fees('4.90').build();
     expect(to8(externalFlow(sell))).toBe('-3837.10000000');
-    expect(externalFlow(aTransaction().transferOut().build()).isNegative()).toBe(true);
+  });
+
+  it('SPEC-013 BR-013-08: a transfer out flows out at the cost it carries, never at its stated price', () => {
+    // B3's debit is price-less (unit_price 0). Read from the row it flowed
+    // R$ 0 — #181. The cost is what the source position gives up, 3.215,00.
+    const priceless = aTransaction().transferOut().quantity('100').price('0').build();
+    expect(to8(externalFlow(priceless, Money.fromString('3215')))).toBe('-3215.00000000');
+    // A stray price on the debit is not a cost: 100 × 99,00 is ignored.
+    const priced = aTransaction().transferOut().quantity('100').price('99').build();
+    expect(to8(externalFlow(priced, Money.fromString('3215')))).toBe('-3215.00000000');
+    // A fee offsets the outflow, as a sale's fee offsets its proceeds:
+    // −(3.215,00 − 2,50) = −3.212,50.
+    const withFee = aTransaction().transferOut().quantity('100').price('0').fees('2.50').build();
+    expect(to8(externalFlow(withFee, Money.fromString('3215')))).toBe('-3212.50000000');
+  });
+
+  it('a transfer out with no carried cost is refused, never flowed as zero', () => {
+    expect(() => externalFlow(aTransaction().transferOut().build())).toThrow(RangeError);
   });
 
   it('recomputes the cash effect rather than trusting the denormalised total', () => {
@@ -1174,5 +1194,425 @@ describe('SPEC-007 BR-007-05c — valuation replays amortizations with the conte
     expect(valued.ok).toBe(false);
     if (valued.ok) return;
     expect(valued.error.code).toBe('AMORTIZATION_NOT_SUPPORTED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('SPEC-013 BR-013-08 / DL-013-08 — a transfer is a flow at the cost it carries', () => {
+  /** Net contributions on `date`, from scratch, at full precision. */
+  function contributionsOn(
+    ledger: readonly Transaction[],
+    date: string,
+    options: Parameters<typeof buildSnapshot>[3] = {},
+  ): Money {
+    return unwrap(buildSnapshot(d(date), [], ledger, options)).netContributions;
+  }
+
+  it('an inter-broker pair nets to exactly zero, on repeating and terminating averages alike', () => {
+    // Three moves Clear → XP, each credit carrying round₈ of the source's
+    // preço médio (SPEC-005 BR-005-20a / withCarriedCost):
+    //
+    //   PETR4  buy 7 @ 18,99 + 0,03        → 132,96;    avg 18,99428571428…
+    //          debit  −7 × 18,99428571     = −132,95999997
+    //          credit +7 × 18,99428571     = +132,95999997
+    //   ITSA4  buy 128 @ 11,42 + 0,06      → 1.461,82;  avg 11,42046875
+    //          debit −1.461,82, credit +1.461,82
+    //   BBAS3  buy 800 @ 22,13 + 6,61      → 17.710,61; avg 22,1382625
+    //          sell 345 @ 25,00            → −8.625,00 (average unchanged)
+    //          debit  −455 × 22,13826250   = −10.072,9094375
+    //          credit +455 × 22,13826250   = +10.072,9094375
+    //
+    //   net = 132,96 + 1.461,82 + 17.710,61 − 8.625,00 = 10.680,39
+    //
+    // Before #181 the debits flowed R$ 0 and this read 10.680,39 + 132,95999997
+    // + 1.461,82 + 10.072,9094375 = 22.348,07943747. With the debit at its
+    // unrounded cost the PETR4 pair alone would leave −0,00000003.
+    const ledger = [
+      aTransaction()
+        .buy()
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('7')
+        .price('18.99')
+        .fees('0.03')
+        .build(),
+      aTransaction()
+        .transferOut()
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('7')
+        .price('0')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .of('PETR4')
+        .at('XP')
+        .on('2026-03-10')
+        .quantity('7')
+        .price('18.99428571')
+        .build(),
+      aTransaction()
+        .buy()
+        .of('ITSA4')
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('128')
+        .price('11.42')
+        .fees('0.06')
+        .build(),
+      aTransaction()
+        .transferOut()
+        .of('ITSA4')
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('128')
+        .price('0')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .of('ITSA4')
+        .at('XP')
+        .on('2026-03-10')
+        .quantity('128')
+        .price('11.42046875')
+        .build(),
+      aTransaction()
+        .buy()
+        .of('BBAS3')
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('800')
+        .price('22.13')
+        .fees('6.61')
+        .build(),
+      aTransaction()
+        .sell()
+        .of('BBAS3')
+        .at('Clear')
+        .on('2026-03-05')
+        .quantity('345')
+        .price('25')
+        .build(),
+      aTransaction()
+        .transferOut()
+        .of('BBAS3')
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('455')
+        .price('0')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .of('BBAS3')
+        .at('XP')
+        .on('2026-03-10')
+        .quantity('455')
+        .price('22.1382625')
+        .build(),
+    ];
+    const before = contributionsOn(ledger, '2026-03-09');
+    const after = contributionsOn(ledger, '2026-03-10');
+    // Exact, not to eight places: the pairs contribute nothing at all.
+    expect(before.toString()).toBe('10680.39');
+    expect(after.toString()).toBe('10680.39');
+    // And what reaches the column is the same figure.
+    const stored = quantizeSnapshot(unwrap(buildSnapshot(d('2026-03-10'), [], ledger)));
+    expect(stored.netContributions.toString()).toBe('10680.39');
+    // The accumulating series agrees on the transfer date (DM-4).
+    const series = unwrap(
+      buildSnapshotSeries([d('2026-03-09'), d('2026-03-10')], new Map(), ledger),
+    );
+    expect(series.map((snapshot) => snapshot.netContributions.toString())).toEqual([
+      '10680.39',
+      '10680.39',
+    ]);
+  });
+
+  it('an unpaired transfer in is a contribution at the cost it opens with', () => {
+    // Shares arriving from outside the portfolio: 100 × 25,00 + 1,50 of fees
+    // = 2.501,50 of capital the user brought in, exactly what the lot opens at.
+    const ledger = [
+      aTransaction()
+        .transferIn()
+        .at('XP')
+        .on('2026-03-10')
+        .quantity('100')
+        .price('25')
+        .fees('1.50')
+        .build(),
+    ];
+    expect(contributionsOn(ledger, '2026-03-10').toString()).toBe('2501.5');
+  });
+
+  it('an unpaired transfer out is a withdrawal at the cost it takes away', () => {
+    //   buy 100 @ 10,00 + 5,00 fees → +1.005,00, average 10,05
+    //   transfer_out 40 (to someone else's custody, price-less)
+    //     → −40 × 10,05 = −402,00
+    //   net = 1.005,00 − 402,00 = 603,00 — the cost basis still held
+    const ledger = [
+      aTransaction()
+        .buy()
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('100')
+        .price('10')
+        .fees('5')
+        .build(),
+      aTransaction().transferOut().at('Clear').on('2026-03-10').quantity('40').price('0').build(),
+    ];
+    expect(contributionsOn(ledger, '2026-03-10').toString()).toBe('603');
+  });
+
+  it('#135: a same-institution round trip nets to zero, one leg or two of each', () => {
+    //   buy 3 @ 3,33 + 0,01 at Clear → +10,00, average 3,333333333…
+    //   same day, at Clear: credit 3 carrying round₈ = 3,33333333 (rank 0),
+    //   then debit 3 (rank 6). After the credit the lot is 6 shares costing
+    //   19,99999999, A′ = 3,3333333316666…, round₈(A′) = 3,33333333:
+    //     credit +3 × 3,33333333 = +9,99999999
+    //     debit  −3 × 3,33333333 = −9,99999999
+    //   net = 10,00
+    const single = [
+      aTransaction()
+        .buy()
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('3')
+        .price('3.33')
+        .fees('0.01')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('3')
+        .price('3.33333333')
+        .build(),
+      aTransaction().transferOut().at('Clear').on('2026-03-10').quantity('3').price('0').build(),
+    ];
+    expect(contributionsOn(single, '2026-03-10').toString()).toBe('10');
+
+    // The #145 follow-up shape: two credits and two debits of one quantity at
+    // one broker. Both credits first: 9 shares costing 10,00 + 19,99999998 =
+    // 29,99999998, A″ = 3,3333333311…, round₈ = 3,33333333. Each debit then
+    // carries 9,99999999 (a withdrawal leaves the average alone):
+    //   net = 10,00 + 2 × 9,99999999 − 2 × 9,99999999 = 10,00
+    const double = [
+      aTransaction()
+        .buy()
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('3')
+        .price('3.33')
+        .fees('0.01')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('3')
+        .price('3.33333333')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('3')
+        .price('3.33333333')
+        .build(),
+      aTransaction().transferOut().at('Clear').on('2026-03-10').quantity('3').price('0').build(),
+      aTransaction().transferOut().at('Clear').on('2026-03-10').quantity('3').price('0').build(),
+    ];
+    expect(contributionsOn(double, '2026-03-10').toString()).toBe('10');
+  });
+
+  it('#145: a credit B3 priced itself flows in at that price against a carried-cost debit', () => {
+    //   buy 100 @ 10,00 at Clear          → +1.000,00
+    //   debit 100 at Clear (price-less)   → −100 × 10,00 = −1.000,00
+    //   credit 100 at XP, B3 price 12,50  → +100 × 12,50 = +1.250,00
+    //   net = 1.250,00
+    // The pair nets to +250,00, and that is legitimate rather than residual:
+    // the destination lot opened at 12,50, so the portfolio's cost basis rose
+    // by 250,00 on that date, and net contributions track cost (BR-013-08).
+    const ledger = [
+      aTransaction().buy().at('Clear').on('2026-03-02').quantity('100').price('10').build(),
+      aTransaction().transferOut().at('Clear').on('2026-03-10').quantity('100').price('0').build(),
+      aTransaction().transferIn().at('XP').on('2026-03-10').quantity('100').price('12.50').build(),
+    ];
+    expect(contributionsOn(ledger, '2026-03-10').toString()).toBe('1250');
+  });
+
+  it('a debit whose source cannot be replayed is reported, never flowed as zero', () => {
+    // 11 shares leave a position holding 10: there is no cost to carry.
+    const ledger = [
+      aTransaction().buy().at('Clear').on('2026-03-02').quantity('10').price('10').build(),
+      aTransaction().transferOut().at('Clear').on('2026-03-10').quantity('11').price('0').build(),
+    ];
+    const snapshot = buildSnapshot(d('2026-03-10'), [], ledger);
+    expect(snapshot.ok ? 'ok' : snapshot.error.code).toBe('INSUFFICIENT_QUANTITY');
+    const series = buildSnapshotSeries([d('2026-03-09'), d('2026-03-10')], new Map(), ledger);
+    expect(series.ok ? 'ok' : series.error.code).toBe('INSUFFICIENT_QUANTITY');
+    // Before the debit's date there is nothing to value, and the day stands.
+    expect(contributionsOn(ledger, '2026-03-09').toString()).toBe('100');
+  });
+
+  it('TS-07: a backdated transfer gives the same figures as one that was always there', () => {
+    //   03-02  buy 10 @ 3,00 + 1,00 at Clear  → +31,00, average 3,10
+    //   03-05  debit 6 at Clear               → −6 × 3,10 = −18,60
+    //   03-05  credit 6 at XP carrying 3,10   → +18,60
+    //   03-09  buy 5 @ 4,00 at Clear          → +20,00
+    //   net on 03-09 = 31,00 + 20,00 = 51,00
+    const history = (backdated: boolean): readonly Transaction[] => {
+      resetTransactionSequence();
+      const transfer = () => [
+        aTransaction().transferOut().at('Clear').on('2026-03-05').quantity('6').price('0').build(),
+        aTransaction().transferIn().at('XP').on('2026-03-05').quantity('6').price('3.1').build(),
+      ];
+      const first = aTransaction()
+        .buy()
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('10')
+        .price('3')
+        .fees('1')
+        .build();
+      if (!backdated) {
+        const moved = transfer();
+        const last = aTransaction()
+          .buy()
+          .at('Clear')
+          .on('2026-03-09')
+          .quantity('5')
+          .price('4')
+          .build();
+        return [first, ...moved, last];
+      }
+      const last = aTransaction()
+        .buy()
+        .at('Clear')
+        .on('2026-03-09')
+        .quantity('5')
+        .price('4')
+        .build();
+      // Recorded after the 03-09 buy, and appended last.
+      return [first, last, ...transfer()];
+    };
+    const dates = [d('2026-03-02'), d('2026-03-05'), d('2026-03-09')];
+    const always = unwrap(buildSnapshotSeries(dates, new Map(), history(false)));
+    const inserted = unwrap(buildSnapshotSeries(dates, new Map(), history(true)));
+    expect(inserted.map((snapshot) => snapshot.netContributions.toString())).toEqual([
+      '31',
+      '31',
+      '51',
+    ]);
+    expect(always.map(serializeSnapshot)).toEqual(inserted.map(serializeSnapshot));
+  });
+
+  it('TS-11: three hundred repeating-average pairs leave not one storage unit behind', () => {
+    // Day i (i = 1…300): buy 7 @ p = (10 + i),99 + 0,03 at Clear, then move all
+    // 7 to XP. average = p + 0,03 ÷ 7 = (10 + i),99428571428…, so each credit
+    // carries (10 + i),99428571 and each debit takes 7 × that away — equal.
+    //
+    //   Σ buys = 7 × Σ(10,99 + i) + 300 × 0,03
+    //          = 7 × (300 × 10,99 + 300 × 301 ÷ 2) + 9,00
+    //          = 7 × (3.297 + 45.150) + 9,00 = 339.129,00 + 9,00 = 339.138,00
+    //
+    // Were the debit valued at its unrounded cost, each pair would leave
+    // 7 × 0,00428571 − 7 × 0,0042857142857… = 0,02999997 − 0,03 = −0,00000003,
+    // and 300 of them would drift the total to 339.137,999991.
+    const ledger: Transaction[] = [];
+    const start = Date.UTC(2025, 0, 1);
+    for (let i = 1; i <= 300; i += 1) {
+      const date = new Date(start + i * 86_400_000).toISOString().slice(0, 10);
+      ledger.push(
+        aTransaction()
+          .buy()
+          .at('Clear')
+          .on(date)
+          .quantity('7')
+          .price(`${10 + i}.99`)
+          .fees('0.03')
+          .build(),
+        aTransaction().transferOut().at('Clear').on(date).quantity('7').price('0').build(),
+        aTransaction()
+          .transferIn()
+          .at('XP')
+          .on(date)
+          .quantity('7')
+          .price(`${10 + i}.99428571`)
+          .build(),
+      );
+    }
+    const last = ledger.at(-1)?.tradeDate as BusinessDate;
+    expect(contributionsOn(ledger, last).equals(Money.fromString('339138'))).toBe(true);
+    const series = unwrap(buildSnapshotSeries([last], new Map(), ledger));
+    expect(series[0]?.netContributions.equals(Money.fromString('339138'))).toBe(true);
+  });
+
+  it('BR-007-05c: computeSnapshots hands the context’s amortization terms to the flow fold', async () => {
+    //   03-16  buy 100 PETR4 @ 10,00 at Clear → +1.000,00
+    //   03-17  restitution 100 × 1,00 = 100,00 → cost 900,00, average 9,00
+    //          (earnings, not a flow — SPEC-014 BR-014-01)
+    //   03-18  debit 100 at Clear → −100 × 9,00 = −900,00
+    //          credit 100 at XP carrying 9,00 → +900,00
+    //   net contributions stay 1.000,00 on every day.
+    // Without the terms the debit's fold could not read the amortization and
+    // the rebuild would fail rather than flow it.
+    const h = harness();
+    h.prices.addClose(PETR4, '2026-03-16', '10.50');
+    const ledger = [
+      aTransaction()
+        .buy()
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-03-16')
+        .quantity('100')
+        .price('10')
+        .build(),
+      aTransaction()
+        .amortization()
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-03-17')
+        .quantity('100')
+        .price('1')
+        .build(),
+      aTransaction()
+        .transferOut()
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-03-18')
+        .quantity('100')
+        .price('0')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .of('PETR4')
+        .at('XP')
+        .on('2026-03-18')
+        .quantity('100')
+        .price('9')
+        .build(),
+    ];
+    const result = await rebuildSnapshots(h.deps, ledger, {
+      from: d('2026-03-16'),
+      to: d('2026-03-18'),
+    });
+    const snapshots = unwrap(result);
+    expect(snapshots.map((snapshot) => snapshot.netContributions.toString())).toEqual([
+      '1000',
+      '1000',
+      '1000',
+    ]);
+    expect(snapshots.map((snapshot) => snapshot.earningsToDate.toString())).toEqual([
+      '0',
+      '100',
+      '100',
+    ]);
+    // The flow fold without terms refuses, which is what the wiring prevents.
+    const bare = buildSnapshot(d('2026-03-18'), [], ledger);
+    expect(bare.ok ? 'ok' : bare.error.code).toBe('AMORTIZATION_TERMS_UNKNOWN');
   });
 });
