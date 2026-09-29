@@ -429,14 +429,48 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
       expect(to8(row?.marketFlows ?? Money.zero())).toBe('150.00000000');
     });
 
-    it('is written as the snapshot builder produced it (#183: equals net_contributions for now)', async () => {
+    it('is written as the snapshot builder produced it: an unpaired transfer at cost in one column, at market in the other', async () => {
+      // SPEC-013 BR-013-08 (DL-013-09) / SPEC-012 BR-012-01 (DL-012-08).
+      // `tx` writes no institution, so neither transfer pairs (BR-005-20a
+      // wants a known source): both are unpaired, external flows.
+      //
+      //   three-method buys                         24.415,00 both columns
+      //   18/03 10 PETR4 leave; cost 32,15, last close on or before 18/03 is
+      //         17/03's 36,00 (carried forward, BR-009-03)
+      //         net −10 × 32,15 = −321,50     market −10 × 36,00 = −360,00
+      //   20/03 10 PETR4 arrive carried at 30,00, close 38,42
+      //         net +10 × 30,00 = +300,00     market +10 × 38,42 = +384,20
+      //
+      //   net_contributions = 24.415,00 − 321,50 + 300,00 = 24.393,50
+      //   market_flows      = 24.415,00 − 360,00 + 384,20 = 24.439,20
+      //
+      // Rebuilt for 20/03 alone, so the 18/03 debit lies before the range and
+      // its close comes from the real `getCloseOnOrBefore` (withTransferCloses).
       await seedPrices();
-      await rebuildFor(threeMethodLedger(), { from: d('2026-03-20'), to: d('2026-03-20') });
+      await new DrizzleQuoteRepository(db).upsertClosePrice({
+        assetId: petr,
+        date: d('2026-03-17'),
+        close: Money.fromString('36.00'),
+        source: 'brapi_free',
+      });
+      const ledger = [
+        ...threeMethodLedger(),
+        tx(petr, 'transfer_out', '2026-03-18', '10', '0'),
+        tx(petr, 'transfer_in', '2026-03-20', '10', '30'),
+      ];
+      await rebuildFor(ledger, { from: d('2026-03-20'), to: d('2026-03-20') });
 
       const [row] = await storedBetween(d('2026-03-20'), d('2026-03-20'));
-      expect(to8(row?.marketFlows ?? Money.zero())).toBe(
-        to8(row?.netContributions ?? Money.fromString('-1')),
+      expect(to8(row?.netContributions ?? Money.zero())).toBe('24393.50000000');
+      expect(to8(row?.marketFlows ?? Money.zero())).toBe('24439.20000000');
+
+      // And the short rebuild wrote what a full one computes for that day (DM-4).
+      const full = unwrap(
+        await computeSnapshots(readDeps(), ledger, { from: d('2026-03-16'), to: d('2026-03-20') }),
       );
+      const last = quantizeSnapshot(full.at(-1) as DailyValuationSnapshot);
+      expect(to8(last.marketFlows)).toBe('24439.20000000');
+      expect(to8(last.netContributions)).toBe('24393.50000000');
     });
   });
 
