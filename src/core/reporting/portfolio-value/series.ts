@@ -141,7 +141,10 @@ export function withLiveEndpoint(
  * BR-013-06 — net contribution per month, from the cumulative column.
  *
  * A flow, so each month's bar is that month's *change* in the running total:
- * `netContributions(end of month) − netContributions(end of previous month)`.
+ * `marketFlows(end of month) − marketFlows(end of previous month)` — the
+ * market-valued column (SPEC-013 BR-013-08, DL-013-10), in which an unpaired
+ * transfer counts at the shares' market value on its date and a paired one
+ * not at all.
  * Negative in a month of net withdrawals, which the spec calls out explicitly
  * because a bar chart that clamps at zero hides exactly the months a user most
  * wants to find.
@@ -156,11 +159,14 @@ export function monthlyContributions(
 ): readonly MonthlyContribution[] {
   const closingByMonth = new Map<string, Money>();
   for (const snapshot of snapshots) {
-    closingByMonth.set(monthOf(snapshot.date), snapshot.netContributions);
+    // SPEC-013 BR-013-08 / DL-013-10: the market-valued column, as the
+    // decomposition reads it — so a bar and the decomposition's
+    // contributions over the same months are one figure, not two.
+    closingByMonth.set(monthOf(snapshot.date), snapshot.marketFlows);
   }
 
   const bars: MonthlyContribution[] = [];
-  let previous = opening?.netContributions ?? Money.zero();
+  let previous = opening?.marketFlows ?? Money.zero();
   for (const [month, cumulative] of closingByMonth) {
     bars.push({ month, amount: cumulative.minus(previous) });
     previous = cumulative;

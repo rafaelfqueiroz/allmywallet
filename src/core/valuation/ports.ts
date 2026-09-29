@@ -229,18 +229,22 @@ export interface DailyValuationSnapshot {
   readonly totalValue: Money;
   /**
    * External flows only: buys and transfers in, less sells and transfers out.
-   * Not price change, never earnings — that distinction is what SPEC-012's TWR
-   * is built on. A transfer counts at the cost basis it carries (SPEC-013
-   * BR-013-08 / DL-013-08, `externalFlow`), so a move between the user's own
-   * custodians nets to zero here.
+   * Not price change, never earnings. A move between the user's own
+   * custodians — a transfer pair SPEC-005 BR-005-20a matches — contributes
+   * zero whatever either leg's price (SPEC-013 BR-013-08, DL-013-09); an
+   * unpaired transfer counts at the cost basis it carries (DL-013-08,
+   * `externalFlow`). Feeds *Total investido* and *Ganho* only; every return
+   * and flow figure reads `marketFlows`.
    */
   readonly netContributions: Money;
   /**
    * SPEC-013 BR-013-08 (DL-013-09, DL-013-10) / SPEC-012 BR-012-01
    * (DL-012-08): cumulative external flows valued **at market on the flow
-   * date**, where `netContributions` carries each transfer at cost. Equal to
-   * `netContributions` except for an unpaired custody transfer (and a paired
-   * one whose legs price differently, which flows zero in both). Feeds the
+   * date**, where `netContributions` carries an unpaired transfer at cost.
+   * Equal to `netContributions` except for an unpaired custody transfer,
+   * which enters here at the market value of the shares moved on its date,
+   * fees excluded (`flowOf` in `snapshot.ts`); a paired one is zero in both.
+   * Feeds the
    * growth decomposition, monthly contribution bars, TWR, XIRR and the shadow
    * portfolio; `netContributions` keeps feeding *Total investido* and *Ganho*.
    *
@@ -252,7 +256,12 @@ export interface DailyValuationSnapshot {
   /** Proventos recognised at pay date (SPEC-014), cumulative to this date. */
   readonly earningsToDate: Money;
   readonly byAssetClass: ReadonlyMap<AssetClass, Money>;
-  /** BR-009-11: any accrued (estimated) component in the total. */
+  /**
+   * BR-009-11: any accrued (estimated) component in the total — or, on the
+   * date of an unpaired transfer whose market value was itself an estimate
+   * (bank paper accrued, or a listed asset with no close ever and so valued
+   * at cost), in that day's `marketFlows` step (SPEC-013 BR-013-08, #183).
+   */
   readonly hasEstimates: boolean;
 }
 

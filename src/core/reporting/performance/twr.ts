@@ -33,11 +33,13 @@ import {
  * `xirr.ts` answers it separately, alongside.
  *
  * **External flows are buys, sells and transfers, and nothing else.** Not price
- * change, and **not earnings** (BR-012-08; SPEC-009's `externalFlow` draws the
- * same line for `net_contributions`). A transfer flows at the cost basis it
- * carries (SPEC-013 BR-013-08 / DL-013-08): a move between the user's own
- * brokers nets to zero and leaves the day's return to price alone, while a
- * one-sided transfer is capital in or out like any deposit. Getting that set wrong is exactly what
+ * change, and **not earnings** (BR-012-08; SPEC-009's snapshot fold draws the
+ * same line for `market_flows`). A transfer between the user's own custodians
+ * — a pair SPEC-005 BR-005-20a matches — is no flow at all, whatever price
+ * either leg carries, and leaves the day's return to price alone; an unpaired
+ * transfer is capital in or out, at the **market value** of the shares that
+ * moved on its date (BR-012-01, DL-012-08 — GIPS's in-kind flow). Getting
+ * that set wrong is exactly what
  * makes a TWR stop being a TWR — it neutralises these and only these. Earnings
  * enter, when they enter at all, through the *value* series (`report.ts`):
  * they are income received, not capital the user contributed.

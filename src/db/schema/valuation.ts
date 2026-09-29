@@ -44,20 +44,22 @@ export const dailyValuationSnapshots = pgTable(
     // and every figure here is an intermediate for some report.
     totalValue: money('total_value').notNull(),
     /**
-     * External flows only — buys and transfers in, less sells and transfers
-     * out, with each transfer at the cost basis it carries (SPEC-013
-     * BR-013-08), so a move between custodians nets to zero. Not price
-     * change, never earnings. SPEC-012's TWR neutralises
-     * exactly this column and nothing else, which is why it is stored rather
-     * than re-derived: the definition must not drift between reports.
+     * External flows only, **at cost** — buys and transfers in, less sells
+     * and transfers out. A transfer pair SPEC-005 BR-005-20a matches is a move
+     * between the user's own custodians and contributes zero; an unpaired
+     * transfer counts at the cost basis it carries (SPEC-013 BR-013-08,
+     * DL-013-08/09). Not price change, never earnings. *Total investido* and
+     * *Ganho* read this column; stored rather than re-derived so the
+     * definition cannot drift between reports.
      */
     netContributions: money('net_contributions').notNull(),
     /**
      * SPEC-013 BR-013-08 (DL-013-09, DL-013-10) / SPEC-012 BR-012-01
      * (DL-012-08) — cumulative external flows **valued at market on the flow
-     * date**, where `net_contributions` carries each transfer at cost. The two
-     * agree except for an unpaired custody transfer (and a paired one whose
-     * legs price differently, which flows zero in both). `net_contributions`
+     * date**, where `net_contributions` carries an unpaired transfer at cost.
+     * The two agree except for an unpaired custody transfer, which enters
+     * here at the market value of the shares moved (a pair is zero in both).
+     * SPEC-012's TWR neutralises exactly this column. `net_contributions`
      * feeds *Total investido* and *Ganho*; this feeds the growth
      * decomposition, the monthly contribution bars, TWR, XIRR and the shadow
      * portfolio.

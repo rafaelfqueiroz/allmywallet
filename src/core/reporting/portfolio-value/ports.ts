@@ -44,9 +44,17 @@ export interface GrowthDecomposition {
   readonly opening: Money;
   readonly closing: Money;
   /**
-   * BR-013-08 — buys and transfers in, less sells and transfers out; a
-   * transfer at the cost basis it carries, so a move between the user's own
-   * custodians nets to zero (DL-013-08). Never price, never earnings.
+   * BR-013-08 — the period's net contributions **at market**, from the
+   * snapshots' `marketFlows` (DL-013-10): buys and unpaired transfers in, less
+   * sells and unpaired transfers out, an unpaired transfer at the market value
+   * of the shares moved on its date. A move between the user's own custodians
+   * (a BR-005-20a pair) is zero. Never price, never earnings.
+   *
+   * Not *Total investido*: that headline counts an unpaired transfer at cost
+   * (`InvestedFigures.totalInvested`). The name stays the spec's driver name
+   * ("net contributions", BR-013-03); the two diverge only for unpaired
+   * transfers, where at cost the shares' appreciation before the user tracked
+   * them would land in this portfolio's price change.
    */
   readonly netContributions: Money;
   /** The residual. Everything the market did, once flows and income are removed. */
@@ -66,7 +74,13 @@ export interface GrowthDecomposition {
  * subtracted from the *portfolio's* contributions — see `report.ts`.
  */
 export interface InvestedFigures {
-  /** Net contributions to date: what the user actually put in and left in. */
+  /**
+   * Net contributions to date **at cost** (`netContributions` on the
+   * snapshot): what the user actually put in and left in. The one figure that
+   * counts an unpaired transfer at the cost basis it carries rather than at
+   * market (SPEC-013 BR-013-08, DL-013-09) — it is what a user reconciles
+   * against a broker statement.
+   */
   readonly totalInvested: Money;
   readonly absoluteGain: Money;
   /**

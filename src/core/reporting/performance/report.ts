@@ -71,7 +71,11 @@ import {
 
 export interface PerformanceSeries {
   readonly points: readonly SeriesPoint[];
-  /** BR-012-01: external flows, signed positive into the portfolio. */
+  /**
+   * BR-012-01: external flows, signed positive into the portfolio, from the
+   * snapshots' market-valued `marketFlows` (DL-012-08). TWR, XIRR and the
+   * shadow portfolio (BR-012-12) all take these same flows.
+   */
   readonly flows: readonly DatedFlow[];
   /** BR-012-06: proventos recognised inside the period, at pay date. */
   readonly earningsInPeriod: Money;
@@ -130,7 +134,13 @@ export function seriesFromSnapshots(
     // Non-null: `index` runs strictly inside the array's bounds.
     const previous = snapshots[index - 1] as DailyValuationSnapshot;
     const current = snapshots[index] as DailyValuationSnapshot;
-    const external = current.netContributions.minus(previous.netContributions);
+    // SPEC-012 BR-012-01 (DL-012-08) / SPEC-013 BR-013-08: the market-valued
+    // flows, not the cost-valued ones. An unpaired transfer moves the
+    // portfolio's value by the shares' market value on the day, so that is
+    // what must be neutralised — at cost, 100 shares leaving at cost 10,00
+    // with a close of 40,00 read as a −75 % day. A paired transfer is zero
+    // on both columns.
+    const external = current.marketFlows.minus(previous.marketFlows);
     const paid = current.earningsToDate.minus(previous.earningsToDate);
     earnings = earnings.plus(paid);
     flows.push({
@@ -168,7 +178,7 @@ export function seriesFromSnapshots(
  * Prepending the preceding snapshot makes the first sub-period span
  * `close(before) → close(from)`, which is the day `from`. **The flow alignment
  * follows from it rather than needing its own rule**: `seriesFromSnapshots`
- * derives flows as differences of the cumulative `net_contributions`, so a
+ * derives flows as differences of the cumulative `market_flows`, so a
  * contribution made on `from` becomes the difference between the baseline's
  * total and `from`'s — one flow, dated `from`, inside the one sub-period that
  * ends there. Neither dropped (as it was before, the first snapshot
