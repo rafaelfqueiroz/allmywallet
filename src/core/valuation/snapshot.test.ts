@@ -3,6 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { AssetId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { Transaction } from '@/core/ledger/transaction';
+import { costsCarriedOut } from '@/core/positions/carried-out';
 import {
   aTransaction,
   assetIdFor,
@@ -711,6 +712,37 @@ describe('DM-4 / TS-08 — rebuild equals incremental', () => {
     let index = 0;
     for (const day of days) {
       index += 1;
+      // SPEC-013 BR-013-08: a transfer's flow is read off its source position,
+      // so the two builders must also agree on *that* — one folding the costs
+      // per date from a cut ledger, the other once. Pushed ahead of the day's
+      // buy and split, so replay order, not arrival order, decides the average
+      // each debit carries; the credits carry repeating prices into XP, and
+      // XP later sends three of its shares out one-sided.
+      if (index % 2 === 0) {
+        history.push(
+          aTransaction().transferOut().of('PETR4').on(day).quantity('2').price('0').build(),
+          aTransaction()
+            .transferIn()
+            .of('PETR4')
+            .at('XP')
+            .on(day)
+            .quantity('2')
+            .price(`2${index}.14285714`)
+            .build(),
+        );
+      }
+      if (index === 7) {
+        history.push(
+          aTransaction()
+            .transferOut()
+            .of('PETR4')
+            .at('XP')
+            .on(day)
+            .quantity('3')
+            .price('0')
+            .build(),
+        );
+      }
       // Repeating decimals throughout, so any float leak shows up as drift.
       history.push(
         aTransaction()
@@ -798,6 +830,9 @@ describe('DM-4 / TS-08 — rebuild equals incremental', () => {
     }
 
     // The property is worthless if the fixture happens to be trivial.
+    const carried = costsCarriedOut(ledger);
+    expect(carried.ok && [...carried.value.values()].every((cost) => cost.isPositive())).toBe(true);
+    expect(carried.ok && carried.value.size).toBe(4);
     expect(incremental.some((snapshot) => snapshot.totalValue.isPositive())).toBe(true);
     expect(incremental.some((snapshot) => snapshot.earningsToDate.isPositive())).toBe(true);
     expect(incremental.at(-1)?.hasEstimates).toBe(true);
