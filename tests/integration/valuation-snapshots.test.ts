@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -338,6 +339,105 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
     expect(snapshot.hasEstimates).toBe(true);
     // 3.215,00 + 11.200,00 + 10.000,00
     expect(to8(snapshot.netContributions)).toBe('24415.00000000');
+  });
+
+  /**
+   * #183 / SPEC-013 BR-013-08 — `market_flows`, the second cumulative flow.
+   * Nullable on purpose (AR-69): NULL is a row a previous image wrote, and it
+   * reads as `net_contributions`.
+   */
+  describe('market_flows (#183)', () => {
+    const snapshotOf = (
+      date: string,
+      net: string,
+      market: string,
+      total = '1000',
+    ): DailyValuationSnapshot => ({
+      date: d(date),
+      totalValue: Money.fromString(total),
+      netContributions: Money.fromString(net),
+      marketFlows: Money.fromString(market),
+      earningsToDate: Money.zero(),
+      byAssetClass: new Map([['stock', Money.fromString(total)]]),
+      hasEstimates: false,
+    });
+
+    const upsert = async (snapshots: readonly DailyValuationSnapshot[]): Promise<void> =>
+      withTenant(
+        userId,
+        async (tenantTx) =>
+          new DrizzleValuationSnapshotRepository(tenantTx, userId).upsertMany(snapshots),
+        db,
+      );
+
+    it('round-trips at full NUMERIC(20,8) precision, distinct from net_contributions', async () => {
+      await upsert([snapshotOf('2026-03-20', '100', '1234567890.12345678')]);
+
+      const [row] = await storedBetween(d('2026-03-20'), d('2026-03-20'));
+      expect(to8(row?.netContributions ?? Money.zero())).toBe('100.00000000');
+      expect(to8(row?.marketFlows ?? Money.zero())).toBe('1234567890.12345678');
+    });
+
+    it('is overwritten by a second upsert of the same day (AR-19), not left stale', async () => {
+      await upsert([snapshotOf('2026-03-20', '100', '150')]);
+      await upsert([snapshotOf('2026-03-20', '100', '175.5')]);
+
+      const rows = await storedBetween(d('2026-03-20'), d('2026-03-20'));
+      expect(rows).toHaveLength(1);
+      expect(to8(rows[0]?.marketFlows ?? Money.zero())).toBe('175.50000000');
+    });
+
+    it('a row with NULL market_flows reads back as its net_contributions', async () => {
+      // The previous image's INSERT: it does not name the column at all.
+      await migratorPool.query(
+        `INSERT INTO daily_valuation_snapshots
+           (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+         VALUES ($1, '2026-03-20', '1000', '321.12345678', '0', '{}'::jsonb)`,
+        [userId],
+      );
+      const raw = await migratorPool.query<{ market_flows: string | null }>(
+        `SELECT market_flows FROM daily_valuation_snapshots WHERE user_id = $1`,
+        [userId],
+      );
+      expect(raw.rows[0]?.market_flows).toBeNull();
+
+      const [row] = await storedBetween(d('2026-03-20'), d('2026-03-20'));
+      expect(to8(row?.netContributions ?? Money.zero())).toBe('321.12345678');
+      expect(to8(row?.marketFlows ?? Money.zero())).toBe('321.12345678');
+    });
+
+    it('the previous image can still upsert a day over one that carries market_flows', async () => {
+      await upsert([snapshotOf('2026-03-20', '100', '150')]);
+
+      // The previous image's ON CONFLICT DO UPDATE names no `market_flows`, so
+      // it leaves the new column as it was — never an error under RLS.
+      await withTenant(
+        userId,
+        async (tenantTx) =>
+          tenantTx.execute(sql`
+            INSERT INTO daily_valuation_snapshots
+              (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+            VALUES (${userId}, '2026-03-20', '2000', '110', '0', '{}'::jsonb)
+            ON CONFLICT (user_id, date) DO UPDATE
+              SET total_value = EXCLUDED.total_value,
+                  net_contributions = EXCLUDED.net_contributions`),
+        db,
+      );
+
+      const [row] = await storedBetween(d('2026-03-20'), d('2026-03-20'));
+      expect(to8(row?.netContributions ?? Money.zero())).toBe('110.00000000');
+      expect(to8(row?.marketFlows ?? Money.zero())).toBe('150.00000000');
+    });
+
+    it('is written as the snapshot builder produced it (#183: equals net_contributions for now)', async () => {
+      await seedPrices();
+      await rebuildFor(threeMethodLedger(), { from: d('2026-03-20'), to: d('2026-03-20') });
+
+      const [row] = await storedBetween(d('2026-03-20'), d('2026-03-20'));
+      expect(to8(row?.marketFlows ?? Money.zero())).toBe(
+        to8(row?.netContributions ?? Money.fromString('-1')),
+      );
+    });
   });
 
   it('DM-4 / AC-14: a full rebuild reproduces the incrementally-maintained snapshots exactly', async () => {

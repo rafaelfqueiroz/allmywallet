@@ -82,6 +82,35 @@ describe('SPEC-013 report reads (integration)', () => {
       expect(opening?.netContributions.toDecimal().toFixed(2)).toBe('95000.00');
     });
 
+    /**
+     * #183 / AR-69: `market_flows` is nullable, and the report loaders read
+     * NULL — a row a previous image wrote — as `net_contributions`.
+     */
+    it('reads a NULL market_flows as net_contributions, and a stored one as itself (#183)', async () => {
+      await seedSnapshot('2026-02-27', '90000', '88000'); // no market_flows: NULL
+      await migratorPool.query(
+        `INSERT INTO daily_valuation_snapshots
+           (user_id, date, total_value, net_contributions, market_flows, earnings_to_date, by_asset_class)
+         VALUES ($1, '2026-02-28', '100000', '95000', '96500.12345678', 0, '{}'::jsonb)`,
+        [userId],
+      );
+
+      const { range, before } = await withReportPort(userId, async (port) => ({
+        range: await port.listSnapshots(
+          BusinessDate.of('2026-02-27'),
+          BusinessDate.of('2026-02-28'),
+        ),
+        before: await port.findSnapshotBefore(BusinessDate.of('2026-02-28')),
+      }));
+
+      expect(range.map((row) => row.marketFlows.toDecimal().toFixed(8))).toEqual([
+        '88000.00000000',
+        '96500.12345678',
+      ]);
+      expect(before?.date).toBe('2026-02-27');
+      expect(before?.marketFlows.toDecimal().toFixed(8)).toBe('88000.00000000');
+    });
+
     it('returns null when the range starts at the first snapshot there is', async () => {
       await seedSnapshot('2026-03-01', '1000', '1000');
       const opening = await withReportPort(userId, (port) =>
