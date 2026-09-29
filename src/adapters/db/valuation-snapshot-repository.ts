@@ -80,6 +80,14 @@ export class DrizzleValuationSnapshotRepository implements SnapshotRepositoryPor
     return removed.length;
   }
 
+  /** Same RLS reasoning as `deleteFrom`: unqualified on `user_id` on purpose. */
+  async deleteAll(): Promise<number> {
+    const removed = await this.tx
+      .delete(dailyValuationSnapshots)
+      .returning({ date: dailyValuationSnapshots.date });
+    return removed.length;
+  }
+
   async listRange(
     from: BusinessDate,
     to: BusinessDate,

@@ -688,15 +688,24 @@ function quantizeMoney(value: Money): Money {
  * the upsert run together so a crash between them cannot leave a tenant with a
  * hole where their history was.
  *
+ * `invalidateFrom` is where **deletion** starts, and it is deliberately not
+ * where the first written snapshot is: a write that moves the earliest trade
+ * later, or removes the ledger's earliest (or only) rows, leaves snapshots
+ * *before* the new earliest date that no ledger backs any more
+ * (BR-009-17: the ledger wins). Those are deleted, and none is rewritten.
+ * `null` means the tenant's whole history (a full rebuild) — every snapshot
+ * goes, then the new series is written.
+ *
  * Quantises on the way in, so what is read back is bit-for-bit what was
  * written and two rebuilds of the same range are byte-identical (DM-4).
  */
 export async function persistSnapshots(
   repository: SnapshotRepositoryPort,
   snapshots: readonly DailyValuationSnapshot[],
-  from: BusinessDate,
+  invalidateFrom: BusinessDate | null,
 ): Promise<void> {
-  await repository.deleteFrom(from);
+  if (invalidateFrom === null) await repository.deleteAll();
+  else await repository.deleteFrom(invalidateFrom);
   await repository.upsertMany(snapshots.map(quantizeSnapshot));
 }
 

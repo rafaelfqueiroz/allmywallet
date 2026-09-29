@@ -141,6 +141,7 @@ export class FakePriceHistory implements PriceHistoryPort {
 
 export class FakeSnapshotRepository implements SnapshotRepositoryPort {
   readonly deleteCalls: BusinessDate[] = [];
+  deleteAllCalls = 0;
   readonly rows = new Map<BusinessDate, DailyValuationSnapshot>();
 
   async upsertMany(snapshots: readonly DailyValuationSnapshot[]): Promise<void> {
@@ -156,6 +157,13 @@ export class FakeSnapshotRepository implements SnapshotRepositoryPort {
         removed += 1;
       }
     }
+    return removed;
+  }
+
+  async deleteAll(): Promise<number> {
+    this.deleteAllCalls += 1;
+    const removed = this.rows.size;
+    this.rows.clear();
     return removed;
   }
 
