@@ -1,4 +1,4 @@
-import type { BusinessDate } from '@/core/shared/clock';
+import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
 import { type Result, ok } from '@/core/shared/result';
@@ -23,9 +23,11 @@ import type { LedgerDependencies } from '@/core/ledger/dependencies';
  * silently disagreeing with the transactions behind them.
  *
  * So `fromDate` is carried on the result rather than used here: it is the
- * boundary SPEC-009 will invalidate from once daily snapshots exist. Today
- * nothing consumes it, and the alternative — discovering later that the
- * boundary was never recorded — costs a second pass over every write path.
+ * boundary SPEC-009 BR-009-18 invalidates **daily valuation snapshots** from.
+ * The app layer reads it through `earliestFromDate` and requests a
+ * `valuation.snapshot` rebuild once the write's transaction has committed
+ * (`src/lib/snapshot-rebuild.ts`) — `core/` only records the boundary, it
+ * never enqueues (AR-01).
  */
 export interface RecalculationScope {
   readonly assetId: AssetId;
@@ -43,6 +45,24 @@ export interface RecalculationOutcome {
    * rebuild (DM-4) the moment anyone checked.
    */
   readonly position: PositionSnapshot | null;
+}
+
+/**
+ * SPEC-009 BR-009-18 / SPEC-006 DL-006-03 — the earliest date whose derived
+ * figures any of a write's recalculations left stale, or `null` when the write
+ * recalculated nothing. One write can touch several positions (an edit that
+ * moves a row between assets, a bulk delete, a carried leg re-derived
+ * downstream); the snapshots behind **all** of them are stale from the
+ * earliest boundary among them.
+ */
+export function earliestFromDate(outcomes: readonly RecalculationOutcome[]): BusinessDate | null {
+  let earliest: BusinessDate | null = null;
+  for (const { scope } of outcomes) {
+    if (earliest === null || BusinessDate.isBefore(scope.fromDate, earliest)) {
+      earliest = scope.fromDate;
+    }
+  }
+  return earliest;
 }
 
 /**
