@@ -40,6 +40,12 @@ import { applyMigrations, startTestDatabase, type TestDatabase } from '../suppor
 import { resetLedger, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
 
+/** A builder that must succeed here; a failure names its code. */
+function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: { code: string } }): T {
+  if (!result.ok) throw new Error(`expected ok, got ${result.error.code}`);
+  return result.value;
+}
+
 /**
  * SPEC-009 integration — real Postgres for the price history, the index
  * series and the snapshot table (so AR-06/AR-07's NUMERIC round trip and the
@@ -357,7 +363,7 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
     const independent = dates.map((date) => {
       const valued = valuePortfolioAt(context, ledger, date, 'historical');
       if (!valued.ok) throw new Error(`valuation failed on ${date}`);
-      return buildSnapshot(date, valued.value, ledger);
+      return unwrap(buildSnapshot(date, valued.value, ledger));
     });
 
     expect(rebuilt).toHaveLength(independent.length);
@@ -400,7 +406,7 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
         return [date, valued.value] as const;
       }),
     );
-    expect(buildSnapshotSeries(dates, valuedByDate, ledger).map(serializeSnapshot)).toEqual(
+    expect(unwrap(buildSnapshotSeries(dates, valuedByDate, ledger)).map(serializeSnapshot)).toEqual(
       independent.map(serializeSnapshot),
     );
 

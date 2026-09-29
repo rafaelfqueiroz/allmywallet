@@ -49,6 +49,12 @@ import {
  */
 
 const calendar = new B3TradingCalendar();
+
+/** A builder that must succeed here; a failure names its code. */
+function unwrap<T>(result: { ok: true; value: T } | { ok: false; error: { code: string } }): T {
+  if (!result.ok) throw new Error(`expected ok, got ${result.error.code}`);
+  return result.value;
+}
 const d = (value: string): BusinessDate => BusinessDate.of(value);
 const to8 = (value: Money): string => value.toDecimal().toFixed(8);
 
@@ -263,7 +269,7 @@ describe('BR-009-16 — the four figures on a snapshot', () => {
     expect(valued.ok).toBe(true);
     if (!valued.ok) return;
 
-    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+    const snapshot = unwrap(buildSnapshot(d('2026-03-20'), valued.value, ledger));
     expect(to8(snapshot.totalValue)).toBe('25811.92970588');
 
     // The invariant itself, not a restatement of the literal: whatever the
@@ -292,7 +298,7 @@ describe('BR-009-16 — the four figures on a snapshot', () => {
     const context = await loadValuationContext(h.deps, ledger, d('2026-03-20'), d('2026-03-20'));
     const valued = valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical');
     if (!valued.ok) throw new Error('valuation failed');
-    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+    const snapshot = unwrap(buildSnapshot(d('2026-03-20'), valued.value, ledger));
 
     expect(to8(snapshot.netContributions)).toBe('24415.00000000');
     // 100 × 0,72 + 100 × 0,31 = 72,00 + 31,00 = 103,00, recognised at pay date
@@ -319,7 +325,7 @@ describe('BR-009-16 — the four figures on a snapshot', () => {
     const context = await loadValuationContext(h.deps, ledger, d('2026-03-20'), d('2026-03-20'));
     const valued = valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical');
     if (!valued.ok) throw new Error('valuation failed');
-    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+    const snapshot = unwrap(buildSnapshot(d('2026-03-20'), valued.value, ledger));
 
     // 100 × 0,72 + 0,2 × 14,00 = 72,00 + 2,80 = 74,80
     expect(to8(snapshot.earningsToDate)).toBe('74.80000000');
@@ -345,7 +351,7 @@ describe('BR-009-16 — the four figures on a snapshot', () => {
     const context = await loadValuationContext(h.deps, ledger, d('2026-03-20'), d('2026-03-20'));
     const valued = valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical');
     if (!valued.ok) throw new Error('valuation failed');
-    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+    const snapshot = unwrap(buildSnapshot(d('2026-03-20'), valued.value, ledger));
     // The 1.500,00 unclassified buy moves neither the total nor contributions.
     expect(to8(snapshot.totalValue)).toBe('25811.92970588');
     expect(to8(snapshot.netContributions)).toBe('24415.00000000');
@@ -356,8 +362,12 @@ describe('BR-009-16 — the four figures on a snapshot', () => {
       aTransaction().buy().on('2026-03-16').quantity('100').price('10').build(),
       aTransaction().buy().on('2026-03-25').quantity('100').price('10').build(),
     ];
-    expect(to8(buildSnapshot(d('2026-03-20'), [], ledger).netContributions)).toBe('1000.00000000');
-    expect(to8(buildSnapshot(d('2026-03-25'), [], ledger).netContributions)).toBe('2000.00000000');
+    expect(to8(unwrap(buildSnapshot(d('2026-03-20'), [], ledger)).netContributions)).toBe(
+      '1000.00000000',
+    );
+    expect(to8(unwrap(buildSnapshot(d('2026-03-25'), [], ledger)).netContributions)).toBe(
+      '2000.00000000',
+    );
   });
 });
 
@@ -379,7 +389,7 @@ describe('valuePortfolioAt — dispatch, and the edges', () => {
     if (!valued.ok) return;
     expect(valued.value).toEqual([]);
 
-    const snapshot = buildSnapshot(d('2026-03-18'), valued.value, ledger);
+    const snapshot = unwrap(buildSnapshot(d('2026-03-18'), valued.value, ledger));
     expect(snapshot.totalValue.isZero()).toBe(true);
     expect(snapshot.hasEstimates).toBe(false);
     // The sale still shows up as an external flow: 3.215,00 in, 3.842,00 out.
@@ -500,7 +510,7 @@ describe('valuePortfolioAt — dispatch, and the edges', () => {
     const context = await loadValuationContext(h.deps, ledger, d('2026-03-20'), d('2026-03-20'));
     const valued = valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical');
     if (!valued.ok) throw new Error('valuation failed');
-    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+    const snapshot = unwrap(buildSnapshot(d('2026-03-20'), valued.value, ledger));
     expect(to8(snapshot.totalValue)).toBe('10000.00000000');
     expect(valued.value[0]?.needsAttention).toBe(
       NeedsAttentionReason.FIXED_INCOME_CONTRACT_MISSING,
@@ -752,8 +762,10 @@ describe('DM-4 / TS-08 — rebuild equals incremental', () => {
       }),
     );
 
-    const incremental = buildSnapshotSeries(dates, valuedByDate, ledger);
-    const rebuilt = dates.map((date) => buildSnapshot(date, valuedByDate.get(date) ?? [], ledger));
+    const incremental = unwrap(buildSnapshotSeries(dates, valuedByDate, ledger));
+    const rebuilt = dates.map((date) =>
+      unwrap(buildSnapshot(date, valuedByDate.get(date) ?? [], ledger)),
+    );
 
     expect(incremental).toHaveLength(rebuilt.length);
     for (const [index, snapshot] of incremental.entries()) {
@@ -774,19 +786,19 @@ describe('DM-4 / TS-08 — rebuild equals incremental', () => {
   it('the series is monotonic in dates and carries no state between runs', () => {
     const ledger = [aTransaction().buy().on('2026-03-16').quantity('10').price('10').build()];
     const dates = [d('2026-03-16'), d('2026-03-17')];
-    const first = buildSnapshotSeries(dates, new Map(), ledger);
-    const second = buildSnapshotSeries(dates, new Map(), ledger);
+    const first = unwrap(buildSnapshotSeries(dates, new Map(), ledger));
+    const second = unwrap(buildSnapshotSeries(dates, new Map(), ledger));
     expect(first.map(serializeSnapshot)).toEqual(second.map(serializeSnapshot));
     expect(first.map((snapshot) => snapshot.date)).toEqual(['2026-03-16', '2026-03-17']);
   });
 
   it('an empty date list produces no snapshots', () => {
-    expect(buildSnapshotSeries([], new Map(), [])).toEqual([]);
+    expect(unwrap(buildSnapshotSeries([], new Map(), []))).toEqual([]);
   });
 
   it('a transaction after the last date is never consumed', () => {
     const ledger = [aTransaction().buy().on('2026-04-01').quantity('10').price('10').build()];
-    const series = buildSnapshotSeries([d('2026-03-16')], new Map(), ledger);
+    const series = unwrap(buildSnapshotSeries([d('2026-03-16')], new Map(), ledger));
     expect(series[0]?.netContributions.isZero()).toBe(true);
   });
 });
@@ -1132,7 +1144,7 @@ describe('SPEC-007 BR-007-05c — valuation replays amortizations with the conte
     expect(to8(petr4?.costBasis ?? Money.zero())).toBe('3165.00000000');
     expect(to8(petr4?.unrealizedGain ?? Money.zero())).toBe('677.00000000');
 
-    const snapshot = buildSnapshot(d('2026-03-20'), valued.value, ledger);
+    const snapshot = unwrap(buildSnapshot(d('2026-03-20'), valued.value, ledger));
     expect(to8(snapshot.netContributions)).toBe('3215.00000000');
     expect(to8(snapshot.earningsToDate)).toBe('50.00000000');
   });
