@@ -2312,6 +2312,141 @@ describe('#183 — SPEC-013 BR-013-08 (DL-013-09) / SPEC-012 BR-012-01 (DL-012-0
     expect(snapshot.hasEstimates).toBe(true);
   });
 
+  it('review F1: an arriving lot with no price flows at its cost with fees — exactly what it adds', async () => {
+    //   10/03 10 VALE3 (never priced) arrive at 50,00 + 5,00 of fees
+    //     lot average (500,00 + 5,00) ÷ 10 = 50,50; COST_FALLBACK value 505,00
+    //     net    +10 × 50,00 + 5,00 = +505,00
+    //     market +10 × 50,50        = +505,00 — the value the day gained, so
+    //            the flat day reads 0 % (with the fee-less 500,00 it read +0,5 %
+    //            on a 1.000,00 portfolio)
+    //   11/03 4 leave with a 1,00 fee; average stays 50,50
+    //     net    −(4 × 50,50 − 1,00) = −201,00 → 304,00
+    //     market −4 × 50,50         = −202,00 → 303,00 — the value that left;
+    //            the debit's fee is money spent, not value moved
+    const ledger = [
+      aTransaction()
+        .transferIn()
+        .of('VALE3')
+        .at('XP')
+        .on('2026-03-10')
+        .quantity('10')
+        .price('50')
+        .fees('5')
+        .build(),
+      aTransaction()
+        .transferOut()
+        .of('VALE3')
+        .at('XP')
+        .on('2026-03-11')
+        .quantity('4')
+        .price('0')
+        .fees('1')
+        .build(),
+    ];
+    const figures = await figuresOn(ledger, ['2026-03-10', '2026-03-11'], () => {});
+    expect(figures.net).toEqual(['505', '304']);
+    expect(figures.market).toEqual(['505', '303']);
+
+    // The market step equals the valuation's own step, on both days.
+    const h = harness();
+    const context = await loadValuationContext(h.deps, ledger, d('2026-03-10'), d('2026-03-11'));
+    const valueOn = (date: string) =>
+      unwrap(valuePortfolioAt(context, ledger, d(date), 'historical'))
+        .map((position) => position.value.toString())
+        .join();
+    expect(valueOn('2026-03-10')).toBe('505');
+    expect(valueOn('2026-03-11')).toBe('303');
+  });
+
+  it('review F1: an outbound leg with a fee flows its fee in net contributions only', async () => {
+    //   buy 100 @ 10,00 at Clear → +1.000,00 both
+    //   10/03 40 leave, unpaired, with a 2,00 fee; close 12,00
+    //     net    −(40 × 10,00 − 2,00) = −398,00 → 602,00
+    //     market −40 × 12,00          = −480,00 → 520,00
+    const ledger = [
+      bought(),
+      aTransaction()
+        .transferOut()
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('40')
+        .price('0')
+        .fees('2')
+        .build(),
+    ];
+    const figures = await figuresOn(ledger, ['2026-03-10'], (h) => {
+      h.prices.addClose(PETR4, '2026-03-10', '12');
+    });
+    expect(figures.net).toEqual(['602']);
+    expect(figures.market).toEqual(['520']);
+  });
+
+  it('review F1: bank paper arriving with a fee accrues on its cost with the fee', async () => {
+    //   20/03 1 CDB (110 % CDI, issued 16/03) arrives at 10.000,00 + 10,00 fees
+    //     lot cost 10.010,00; factor 1,002197970588… (the three-method fixture)
+    //     market 10.010 × 1,0021979705884156… = 10.021,979705884156…
+    //                                          +     10,021979705884156…
+    //                                          = 10.032,00168559… at 8 places
+    //     net    10.000,00 + 10,00 = 10.010,00
+    const ledger = [
+      aTransaction()
+        .transferIn()
+        .of('CDB BANCO X 2028')
+        .at('XP')
+        .on('2026-03-20')
+        .quantity('1')
+        .price('10000')
+        .fees('10')
+        .build(),
+    ];
+    const h = harness();
+    h.contracts.set(aContract(CDB, { issueDate: '2026-03-16' }));
+    const context = await loadValuationContext(h.deps, ledger, d('2026-03-16'), d('2026-03-20'));
+    const snapshot = unwrap(buildSnapshot(d('2026-03-20'), [], ledger, { context }));
+    expect(snapshot.netContributions.toString()).toBe('10010');
+    expect(to8(snapshot.marketFlows)).toBe('10032.00168559');
+    // Exactly — not to eight places — the value the accrued position adds.
+    const valued = unwrap(valuePortfolioAt(context, ledger, d('2026-03-20'), 'historical'));
+    expect(valued.map((position) => position.value.toString())).toEqual([
+      snapshot.marketFlows.toString(),
+    ]);
+  });
+
+  it('review F2: a transfer dated the current date is valued in current mode, like that date’s total', async () => {
+    //   buy 100 @ 10,00 → +1.000,00; close 09/03 10,00; live quote 10/03 10,50
+    //   10/03 1.000 arrive, unpaired, carried at 8,00
+    //     current date 10/03  market 1.000 + 1.000 × 10,50 = 11.500,00
+    //     not declared        market 1.000 + 1.000 × 10,00 = 11.000,00 (the
+    //                         close carried forward — history never reads the
+    //                         intraday quote, BR-009-02)
+    //     net either way      1.000 + 1.000 × 8,00 = 9.000,00
+    const ledger = [
+      bought(),
+      aTransaction().transferIn().at('XP').on('2026-03-10').quantity('1000').price('8').build(),
+    ];
+    const h = harness();
+    h.prices.addClose(PETR4, '2026-03-09', '10');
+    h.prices.setLatest(PETR4, '10.50', '2026-03-10T18:00:00Z');
+    const context = await loadValuationContext(h.deps, ledger, d('2026-03-09'), d('2026-03-10'));
+    const dates = [d('2026-03-09'), d('2026-03-10')];
+
+    const current = { context, currentDate: d('2026-03-10') };
+    const series = unwrap(buildSnapshotSeries(dates, new Map(), ledger, current));
+    // DM-4 with the option: both builders see the same mode for the same date.
+    for (const snapshot of series) {
+      const scratch = unwrap(buildSnapshot(snapshot.date, [], ledger, current));
+      expect(snapshotsEqual(snapshot, scratch), snapshot.date).toBe(true);
+    }
+    expect(series.map((snapshot) => snapshot.marketFlows.toString())).toEqual(['1000', '11500']);
+    expect(series.map((snapshot) => snapshot.netContributions.toString())).toEqual([
+      '1000',
+      '9000',
+    ]);
+
+    const historical = unwrap(buildSnapshot(d('2026-03-10'), [], ledger, { context }));
+    expect(historical.marketFlows.toString()).toBe('11000');
+  });
+
   it('an unpaired transfer with no valuation context throws — zero is never the answer', () => {
     const ledger = [
       aTransaction().transferIn().at('XP').on('2026-03-10').quantity('100').price('8').build(),
@@ -2354,14 +2489,16 @@ describe('#183 — SPEC-013 BR-013-08 (DL-013-09) / SPEC-012 BR-012-01 (DL-012-0
      *   04/03 a credit of 10 at XP, *unclassified* — out of the arithmetic,
      *         so it pairs with nothing and the debit of 10 stays unpaired
      *   05/03 20 move Clear → XP, paired                        0 both
+     *   06/03 1 leaves Clear, unpaired; its last close is 03/03's too
+     *                                                           net −10,00,  market −9,50
      *   18/03 1 arrives at Rico carried at 13,00, close 14,00   net +13,00, market +14,00
      *
-     *   18/03 net    1.000 + 500 − 100 − 50 + 13     = 1.363,00
-     *         market 1.000 + 500 − 95 − 47,50 + 14   = 1.371,50
+     *   18/03 net    1.000 + 500 − 100 − 50 − 10 + 13        = 1.353,00
+     *         market 1.000 + 500 − 95 − 47,50 − 9,50 + 14    = 1.362,00
      *
      * A rebuild of [17/03, 18/03] alone loads closes from 17/03's anchor on;
-     * without `withTransferCloses` the 04/03 debits would find no close, fall
-     * back to cost and read −150,00 rather than −142,50.
+     * without `withTransferCloses` the 04/03 and 06/03 debits would find no
+     * close, fall back to cost and read −160,00 rather than −152,00.
      */
     function ledger(): readonly Transaction[] {
       return [
@@ -2386,6 +2523,7 @@ describe('#183 — SPEC-013 BR-013-08 (DL-013-09) / SPEC-012 BR-012-01 (DL-012-0
           .build(),
         aTransaction().transferOut().at('Clear').on('2026-03-05').quantity('20').price('0').build(),
         aTransaction().transferIn().at('XP').on('2026-03-05').quantity('20').price('10').build(),
+        aTransaction().transferOut().at('Clear').on('2026-03-06').quantity('1').price('0').build(),
         aTransaction().transferIn().at('Rico').on('2026-03-18').quantity('1').price('13').build(),
       ];
     }
@@ -2414,11 +2552,11 @@ describe('#183 — SPEC-013 BR-013-08 (DL-013-09) / SPEC-012 BR-012-01 (DL-012-0
         if (reference === undefined) throw new Error(`no full snapshot on ${snapshot.date}`);
         expect(snapshotsEqual(snapshot, reference), snapshot.date).toBe(true);
       }
-      expect(short.at(-1)?.netContributions.toString()).toBe('1363');
-      expect(short.at(-1)?.marketFlows.toString()).toBe('1371.5');
+      expect(short.at(-1)?.netContributions.toString()).toBe('1353');
+      expect(short.at(-1)?.marketFlows.toString()).toBe('1362');
     });
 
-    it('asks for one close per unpaired transfer before the range, and inserts it in date order', async () => {
+    it('asks once per distinct (asset, date) before the range, and inserts each close once, in date order', async () => {
       const h = seeded();
       const from = d('2026-03-17');
       const rows = [
@@ -2443,10 +2581,13 @@ describe('#183 — SPEC-013 BR-013-08 (DL-013-09) / SPEC-012 BR-012-01 (DL-012-0
       };
       const widened = await withTransferCloses(spy, context, rows, from);
 
-      // The two 04/03 debits ask (the second finds its close already there);
-      // VALE3 asks and finds none. Not the buy, the unclassified credit, the
-      // 05/03 pair, the 18/03 arrival inside the range, or the CDB.
-      expect(asked).toEqual(['VALE3@2026-03-03', 'PETR4@2026-03-04', 'PETR4@2026-03-04']);
+      // Three questions for four unpaired legs before the range (#183 review
+      // N2): VALE3 on 03/03 (no close ever); PETR4 on 04/03 once for both of
+      // that day's debits; PETR4 on 06/03, whose answer — 03/03's close — is
+      // already there and is not inserted twice. Nothing is asked for the buy,
+      // the unclassified credit, the 05/03 pair, the 18/03 arrival inside the
+      // range, or the CDB.
+      expect(asked).toEqual(['VALE3@2026-03-03', 'PETR4@2026-03-04', 'PETR4@2026-03-06']);
       expect(widened.closes.get(PETR4)?.map((quote) => quote.date)).toEqual([
         '2026-03-03',
         '2026-03-17',

@@ -7,7 +7,9 @@ import Decimal from 'decimal.js';
 import { computeTotalValue, isEarnings, type Transaction } from '@/core/ledger/transaction';
 import { aggregateAcrossInstitutions } from '@/core/positions/aggregate';
 import { type AmortizationTerms, amortizationTermsOf } from '@/core/positions/amortization';
+import { applyAcquisition } from '@/core/positions/average-cost';
 import { averagesCarriedOut } from '@/core/positions/carried-out';
+import { EMPTY_POSITION } from '@/core/positions/position-state';
 import { pairLedgerTransfers } from '@/core/ledger/transfer-pairs';
 import { replayPositions } from '@/core/positions/replay';
 import type { Asset, AssetCatalogPort } from '@/core/quotes/ports';
@@ -335,6 +337,13 @@ export interface FlowOptions {
    * zero, because zero is the one answer that is certainly wrong.
    */
   readonly context?: ValuationContext | undefined;
+  /**
+   * BR-009-02: the one date whose valuation may read the intraday quote —
+   * `RebuildRange.currentDate`. An unpaired transfer dated on it is valued in
+   * `current` mode, as that date's total is; every other in `historical`.
+   * Both builders must be given the same value, or DM-4 fails on that date.
+   */
+  readonly currentDate?: BusinessDate | undefined;
 }
 
 interface RunningFlows {
@@ -364,6 +373,7 @@ interface FlowFacts {
   /** Both legs of every BR-005-20a pair (`pairedTransferIds`). */
   readonly paired: ReadonlySet<TransactionId>;
   readonly context: ValuationContext | undefined;
+  readonly currentDate: BusinessDate | undefined;
 }
 
 /** One row's share of each running figure. */
@@ -407,6 +417,7 @@ function flowFactsOf(
     averages: averages.value,
     paired: pairedTransferIds(transactions),
     context: options.context,
+    currentDate: options.currentDate,
   });
 }
 
@@ -450,10 +461,12 @@ function flowFactsOf(
  *                                         this portfolio's price change)
  *
  * **The market value is SPEC-009's**, never a price read by hand: the moved
- * quantity is valued as a holding by `valueHoldingsAt` in `historical` mode
- * (BR-009-02 — never an intraday quote, even when the transfer is dated
- * today, so the figure does not move with the time of day and DM-4 holds).
- * That settles every edge the same way the snapshot's own total settles it:
+ * quantity is valued as a holding by `valueHoldingsAt`, in the mode its date
+ * is valued in — `historical` (closes only, BR-009-02) for every date but the
+ * rebuild's declared current date, which is `current` for its flow exactly as
+ * for its total (`FlowOptions.currentDate`). Both builders read the same
+ * option, so DM-4 holds. That settles every edge the same way the snapshot's
+ * own total settles it:
  *
  * - **No close on the transfer date**: the last close on or before it
  *   (BR-009-03 carry-forward) — a weekend or holiday transfer takes Friday's.
@@ -466,17 +479,19 @@ function flowFactsOf(
  *   date on the leg's own cost basis — an estimate by nature (BR-009-11), so
  *   the date is marked.
  *
- * The cost a fallback or an accrual starts from is the leg's own per-share
- * figure: the credit's `unitPrice`, or the debit's round₈ source average — the
- * same figure `netContributions` takes it at.
+ * The cost a fallback or an accrual starts from is the per-share cost the
+ * valuation itself reads for those shares: for a credit, the average its lot
+ * opens with, fees included (`arrivingLotAverage`); for a debit, the round₈
+ * source average `netContributions` takes it at. So on those paths the flow
+ * is exactly what the move adds to or takes from the day's total.
  *
- * **Fees are not part of the market flow.** GIPS values an in-kind flow at
- * the market value of the securities that moved; a transfer fee is paid
- * around the move, not moved with it, and a listed holding's value
- * (quantity × close) never includes it — so a fee in the flow would read as a
- * return the holdings never made. `netContributions` keeps the fee
- * (DL-013-08's convention), because *Total investido* counts what the user
- * spent.
+ * **Where a price exists, fees are not part of the market flow.** GIPS values
+ * an in-kind flow at the market value of the securities that moved; a listed
+ * holding's value (quantity × close, or Tesouro's sell price) never includes
+ * a fee, so a fee in the flow would read as a return the holdings never made.
+ * A debit's own fee likewise never enters `marketFlows`. `netContributions`
+ * keeps fees (DL-013-08's convention), because *Total investido* counts what
+ * the user spent.
  *
  * **Rounding**: none. `quantity × close` is exact in `decimal.js` (at most 16
  * places from two 8-place factors), just as the snapshot's own `totalValue`
@@ -496,12 +511,16 @@ function flowOf(transaction: Transaction, facts: FlowFacts): Result<RowFlow, Dom
   // `averagesCarriedOut` values every active debit on or before its cut, or
   // fails — and the fold only reaches rows on or before it — so a debit here
   // always finds its figure.
-  const average = inbound ? transaction.unitPrice : (facts.averages.get(transaction.id) as Money);
+  const carriedOut = inbound ? null : (facts.averages.get(transaction.id) as Money);
   const contribution = externalFlow(
     transaction,
-    inbound ? null : average.times(transaction.quantity),
+    carriedOut === null ? null : carriedOut.times(transaction.quantity),
   );
-  const market = marketValueMoved(facts.context, transaction, average);
+  const market = marketValueMoved(
+    facts,
+    transaction,
+    carriedOut ?? arrivingLotAverage(transaction),
+  );
   if (!market.ok) return market;
   return ok({
     contribution,
@@ -517,26 +536,55 @@ function flowOf(transaction: Transaction, facts: FlowFacts): Result<RowFlow, Dom
  * zero-quantity row — so there is no path on which a figure is invented.
  */
 function marketValueMoved(
-  context: ValuationContext | undefined,
+  facts: FlowFacts,
   transaction: Transaction,
   averageCost: Money,
 ): Result<{ readonly value: Money; readonly estimated: boolean }, DomainError> {
-  if (context === undefined) {
+  if (facts.context === undefined) {
     throw new RangeError(
       'buildSnapshot: an unpaired transfer flows at the market value it moved (SPEC-013 BR-013-08) — pass the valuation context',
     );
   }
   const valued = valueHoldingsAt(
-    context,
+    facts.context,
     [{ assetId: transaction.assetId, quantity: transaction.quantity, averageCost }],
     transaction.tradeDate,
-    'historical',
+    // BR-009-02: history reads closes only. The one date valued `current` —
+    // today, in a rebuild that declares it — has its flow valued the same way
+    // as its total, so the flow is exactly the value the move added (#183
+    // review F2); the nightly rebuild revalues both from the close.
+    transaction.tradeDate === facts.currentDate ? 'current' : 'historical',
   );
   if (!valued.ok) return valued;
   return ok({
     value: sumMoney(valued.value.map((position) => position.value)),
     estimated: valued.value.some((position) => position.estimated),
   });
+}
+
+/**
+ * The per-share cost an arriving lot opens with, **as the replay gives it**:
+ * `applyAcquisition` on an empty position, i.e. `(quantity × unitPrice +
+ * fees) ÷ quantity` (#183 review F1).
+ *
+ * It matters only where the valuation reads cost rather than a price — the
+ * COST_FALLBACK of an asset with no close, and bank paper's accrual — and
+ * there the arriving lot adds exactly `quantity × this` (accrued) to the
+ * total, fees included. Valuing the flow on the fee-less `unitPrice` instead
+ * left the fee in the day's value but out of its flow, a return the holdings
+ * never made. Where a close exists the value is `quantity × close` and this
+ * figure is not read, so the fee stays out of the market flow (GIPS).
+ *
+ * Worked example (DV-17): 10 VALE3, never priced, arrive at 50,00 + 5,00 of
+ * fees → average (500,00 + 5,00) ÷ 10 = 50,50; the flow is 10 × 50,50 =
+ * 505,00, exactly the 505,00 the cost-valued position adds.
+ */
+function arrivingLotAverage(transaction: Transaction): Money {
+  return applyAcquisition(EMPTY_POSITION, {
+    quantity: transaction.quantity,
+    unitPrice: transaction.unitPrice,
+    fees: transaction.fees,
+  }).averageCost;
 }
 
 function applyFlow(
@@ -856,6 +904,8 @@ export async function computeSnapshots(
     // the range is still valued — at its own date's close, which the range's
     // context does not hold.
     context: await withTransferCloses(deps.prices, context, transactions, range.from),
+    // BR-009-02: the date valued `current` above values its flows the same way.
+    currentDate: range.currentDate,
   });
 }
 
@@ -871,8 +921,9 @@ export async function computeSnapshots(
  * different `market_flows` on today's row than the full rebuild put there —
  * DM-4 broken by the choice of range.
  *
- * One `getCloseOnOrBefore` per such transfer, not a history load: the owner's
- * ledger has none today, and a transfer needs exactly one close. Inserted in
+ * One `getCloseOnOrBefore` per distinct (asset, trade date) among such
+ * transfers, not a history load: the owner's ledger has none today, and a
+ * transfer needs exactly one close. Inserted in
  * date order and never duplicating a date, so `closeOnOrBefore` answers every
  * other date exactly as before: each added close is the latest one on or
  * before its transfer, and precedes the range's anchor.
@@ -889,19 +940,25 @@ export async function withTransferCloses(
 ): Promise<ValuationContext> {
   const paired = pairedTransferIds(transactions);
   const closes = new Map(context.closes);
+  const asked = new Set<string>();
   for (const transaction of transactions) {
+    const key = `${transaction.assetId}|${transaction.tradeDate}`;
     if (
       transaction.status !== 'active' ||
       (transaction.type !== 'transfer_in' && transaction.type !== 'transfer_out') ||
       !BusinessDate.isBefore(transaction.tradeDate, from) ||
-      paired.has(transaction.id)
+      paired.has(transaction.id) ||
+      asked.has(key)
     ) {
       continue;
     }
     const history = closes.get(transaction.assetId);
     // No entry at all: bank paper, valued by accrual rather than by a close.
     if (history === undefined) continue;
+    asked.add(key);
     const quote = await prices.getCloseOnOrBefore(transaction.assetId, transaction.tradeDate);
+    // Two trade dates can share their close (a Friday and the Saturday after
+    // it), or it can be the range's anchor: never a duplicate date.
     if (quote === null || history.some((known) => known.date === quote.date)) continue;
     closes.set(
       transaction.assetId,
