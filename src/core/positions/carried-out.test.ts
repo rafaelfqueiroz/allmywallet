@@ -10,7 +10,7 @@ import {
 import { amortizationTermsOf } from '@/core/positions/amortization';
 import { costsCarriedOut } from '@/core/positions/carried-out';
 import { PositionErrorCode } from '@/core/positions/errors';
-import type { ReplayOptions } from '@/core/positions/replay';
+import { replayPosition, type ReplayOptions } from '@/core/positions/replay';
 
 /**
  * SPEC-013 BR-013-08 (amended 2026-09-29) / DL-013-08 — the cost a
@@ -336,6 +336,257 @@ describe('costsCarriedOut — the source preço médio × quantity', () => {
     // Without the terms the fold cannot say what the amortization returned, so
     // it fails rather than carry a guessed cost.
     expect(failure(ledger)).toBe(PositionErrorCode.AMORTIZATION_TERMS_UNKNOWN);
+  });
+});
+
+describe('costsCarriedOut — corporate events and same-day order ahead of a debit (review F6)', () => {
+  it('BR-007-04: a split between buy and debit carries the new share base’s average', () => {
+    //   buy 3 @ 3,33 + 0,01 → total 10,00, average 3,3333…
+    //   split ×2            → 6 shares, total 10,00 (unchanged), average 1,6666…
+    //   round₈(1,666666666…) = 1,66666667 (9th digit 6, up)
+    //   debit 6 → 6 × 1,66666667 = 10,00000002
+    // Two storage units above the 10,00 the lot drops — the rounding decision
+    // documented on costsCarriedOut, and exactly what the credit carries.
+    const debit = aTransaction()
+      .transferOut()
+      .at('Clear')
+      .on('2026-03-10')
+      .quantity('6')
+      .price('0')
+      .build();
+    const ledger = [
+      aTransaction()
+        .buy()
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('3')
+        .price('3.33')
+        .fees('0.01')
+        .build(),
+      aTransaction().split().at('Clear').on('2026-03-05').ratio('2').build(),
+      debit,
+    ];
+    expect(carried(ledger, debit)).toBe('10.00000002');
+  });
+
+  it('BR-007-05: a bonificação between buy and debit — without and with attributed value', () => {
+    //   buy 100 @ 10,00                  → total 1.000,00
+    //   bonificação 10, nothing attributed → 110 shares, total 1.000,00
+    //     average = 1.000,00 ÷ 110 = 9,090909090…, round₈ = 9,09090909
+    //   debit 55 → 55 × 9,09090909 = 454,5454545 + 45,45454545 = 499,99999995
+    const free = aTransaction()
+      .transferOut()
+      .at('Clear')
+      .on('2026-03-10')
+      .quantity('55')
+      .price('0')
+      .build();
+    expect(
+      carried(
+        [
+          aTransaction().buy().at('Clear').on('2026-03-02').quantity('100').price('10').build(),
+          aTransaction().bonificacao().at('Clear').on('2026-03-05').quantity('10').build(),
+          free,
+        ],
+        free,
+      ),
+    ).toBe('499.99999995');
+
+    //   bonificação 10 at 8,00 attributed → 110 shares, total 1.080,00
+    //     average = 1.080,00 ÷ 110 = 9,818181818…, round₈ = 9,81818182 (up)
+    //   debit 55 → 55 × 9,81818182 = 490,909091 + 49,0909091 = 540,0000001
+    const valued = aTransaction()
+      .transferOut()
+      .of('ITSA4')
+      .at('Clear')
+      .on('2026-03-10')
+      .quantity('55')
+      .price('0')
+      .build();
+    expect(
+      carried(
+        [
+          aTransaction()
+            .buy()
+            .of('ITSA4')
+            .at('Clear')
+            .on('2026-03-02')
+            .quantity('100')
+            .price('10')
+            .build(),
+          aTransaction()
+            .bonificacao()
+            .of('ITSA4')
+            .at('Clear')
+            .on('2026-03-05')
+            .quantity('10')
+            .price('8')
+            .build(),
+          valued,
+        ],
+        valued,
+      ),
+    ).toBe('540.0000001');
+  });
+
+  it('BR-007-05b: a same-day conversion leg (rank 1) enters the average before the debit (rank 6)', () => {
+    //   ITSA4 at Clear: buy 50 @ 8,00 → total 400,00
+    //   03-10 conversion_in 50 ITSA4 with exact cost 600,00 (from 100 PETR4
+    //         bought @ 6,00) → 100 shares, total 1.000,00, average 10,00
+    //   03-10 debit 30 ITSA4, recorded before the conversion
+    //         → 30 × 10,00 = 300,00 (not 30 × 8,00 = 240,00)
+    const debit = aTransaction()
+      .transferOut()
+      .of('ITSA4')
+      .at('Clear')
+      .on('2026-03-10')
+      .quantity('30')
+      .price('0')
+      .build();
+    const ledger = [
+      debit,
+      aTransaction()
+        .buy()
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('100')
+        .price('6')
+        .build(),
+      aTransaction()
+        .buy()
+        .of('ITSA4')
+        .at('Clear')
+        .on('2026-03-02')
+        .quantity('50')
+        .price('8')
+        .build(),
+      aTransaction()
+        .conversionOut(undefined, '600')
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('100')
+        .build(),
+      aTransaction()
+        .conversionIn('600')
+        .of('ITSA4')
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('50')
+        .build(),
+    ];
+    expect(carried(ledger, debit)).toBe('300');
+  });
+
+  describe('BR-007-15: a same-day sell and debit share rank 6 and apply in created_at order', () => {
+    const early = '2026-03-10T10:00:00Z';
+    const late = '2026-03-10T11:00:00Z';
+
+    it('either order carries the same cost — a sale leaves the average alone (BR-007-03)', () => {
+      //   buy 10 @ 3,00 + 1,00 → total 31,00, average 3,10
+      //   03-10 sell 4 and debit 6, in either order: average 3,10 throughout
+      //   debit → 6 × 3,10 = 18,60
+      for (const [sellAt, debitAt] of [
+        [early, late],
+        [late, early],
+      ] as const) {
+        resetTransactionSequence();
+        const debit = aTransaction()
+          .transferOut()
+          .at('Clear')
+          .on('2026-03-10')
+          .quantity('6')
+          .price('0')
+          .createdAt(debitAt)
+          .build();
+        const ledger = [
+          aTransaction()
+            .buy()
+            .at('Clear')
+            .on('2026-03-02')
+            .quantity('10')
+            .price('3')
+            .fees('1')
+            .build(),
+          aTransaction()
+            .sell()
+            .at('Clear')
+            .on('2026-03-10')
+            .quantity('4')
+            .price('5')
+            .createdAt(sellAt)
+            .build(),
+          debit,
+        ];
+        expect(carried(ledger, debit), `sell ${sellAt}, debit ${debitAt}`).toBe('18.6');
+      }
+    });
+
+    it('where both cannot fit, created_at decides which is refused — and it is always surfaced', () => {
+      // Holding 10; a sell of 6 and a debit of 6 on one day. Only one fits.
+      const buy = () =>
+        aTransaction()
+          .buy()
+          .at('Clear')
+          .on('2026-03-02')
+          .quantity('10')
+          .price('3')
+          .fees('1')
+          .build();
+
+      // Sell first: the debit meets 4 shares and has no cost to carry.
+      resetTransactionSequence();
+      const sellFirst = [
+        buy(),
+        aTransaction()
+          .sell()
+          .at('Clear')
+          .on('2026-03-10')
+          .quantity('6')
+          .price('5')
+          .createdAt(early)
+          .build(),
+        aTransaction()
+          .transferOut()
+          .at('Clear')
+          .on('2026-03-10')
+          .quantity('6')
+          .price('0')
+          .createdAt(late)
+          .build(),
+      ];
+      expect(failure(sellFirst)).toBe(PositionErrorCode.INSUFFICIENT_QUANTITY);
+
+      // Debit first: it carries 6 × 3,10 = 18,60, and the oversold sale after
+      // it is the position replay's to refuse — which it does.
+      resetTransactionSequence();
+      const debit = aTransaction()
+        .transferOut()
+        .at('Clear')
+        .on('2026-03-10')
+        .quantity('6')
+        .price('0')
+        .createdAt(early)
+        .build();
+      const debitFirst = [
+        buy(),
+        aTransaction()
+          .sell()
+          .at('Clear')
+          .on('2026-03-10')
+          .quantity('6')
+          .price('5')
+          .createdAt(late)
+          .build(),
+        debit,
+      ];
+      expect(carried(debitFirst, debit)).toBe('18.6');
+      const replayed = replayPosition(debitFirst);
+      expect(replayed.ok ? 'ok' : replayed.error.code).toBe(
+        PositionErrorCode.INSUFFICIENT_QUANTITY,
+      );
+    });
   });
 });
 
