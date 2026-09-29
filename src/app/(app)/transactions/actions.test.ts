@@ -530,4 +530,72 @@ describe('transaction actions — SPEC-009 BR-009-18 snapshot rebuild request', 
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
   });
+  /**
+   * The request must follow the commit. The composition mock only invokes the
+   * callback, so without an event log moving `requestSnapshotRebuild` inside
+   * the callback would still pass every test above.
+   */
+  describe('ordering — the rebuild is requested only after the tenant transaction committed', () => {
+    let events: string[];
+
+    beforeEach(() => {
+      events = [];
+      vi.mocked(withTransactionWriteDeps).mockImplementation(async (_userId, callback) => {
+        events.push('callback-start');
+        const result = await callback(writeDeps);
+        events.push('commit');
+        return result;
+      });
+      vi.mocked(enqueue).mockImplementation(async () => {
+        events.push('enqueue');
+      });
+    });
+
+    const COMMITTED_THEN_ENQUEUED = ['callback-start', 'commit', 'enqueue'];
+
+    it('create', async () => {
+      vi.mocked(createTransaction).mockResolvedValue(
+        ok({ transaction: plain, recalculation: recalculated('2020-01-13') }),
+      );
+
+      await createTransactionAction(IDLE_STATE, createForm());
+
+      expect(events).toEqual(COMMITTED_THEN_ENQUEUED);
+    });
+
+    it('edit', async () => {
+      vi.mocked(editTransaction).mockResolvedValue(
+        ok({ transaction: plain, recalculations: [recalculated('2020-01-13')], rederived: [] }),
+      );
+
+      await editTransactionAction(IDLE_STATE, editForm());
+
+      expect(events).toEqual(COMMITTED_THEN_ENQUEUED);
+    });
+
+    it('delete', async () => {
+      vi.mocked(deleteTransaction).mockResolvedValue(
+        ok({
+          deletedCount: 1,
+          recalculation: recalculated('2020-02-10'),
+          rederived: [],
+          downstream: [],
+        }),
+      );
+
+      await deleteTransactionAction(IDLE_STATE, deleteForm());
+
+      expect(events).toEqual(COMMITTED_THEN_ENQUEUED);
+    });
+
+    it('bulk delete', async () => {
+      vi.mocked(bulkDeleteTransactions).mockResolvedValue(
+        ok({ deletedCount: 1, recalculations: [recalculated('2020-01-13')], rederived: [] }),
+      );
+
+      await bulkTransactionsAction(IDLE_STATE, bulkForm('delete'));
+
+      expect(events).toEqual(COMMITTED_THEN_ENQUEUED);
+    });
+  });
 });

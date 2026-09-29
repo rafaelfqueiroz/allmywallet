@@ -281,4 +281,69 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
   });
+  /**
+   * The request must follow the commit. The composition mock only invokes the
+   * callback, so without an event log moving `requestSnapshotRebuild` inside
+   * the callback would still pass every test above.
+   */
+  describe('ordering — the rebuild is requested only after the tenant transaction committed', () => {
+    let events: string[];
+
+    beforeEach(() => {
+      events = [];
+      vi.mocked(withIngestionAndWalletDeps).mockImplementation(async (_userId, callback) => {
+        events.push('callback-start');
+        const result = await callback({} as never, {} as never);
+        events.push('commit');
+        return result;
+      });
+      vi.mocked(enqueue).mockImplementation(async () => {
+        events.push('enqueue');
+      });
+    });
+
+    it('classify', async () => {
+      vi.mocked(classifyImportRow).mockResolvedValue(
+        ok({
+          transaction: aTransaction,
+          recalculations: [recalculated('2020-02-10')],
+          rederived: [],
+        }),
+      );
+
+      await classifyRowAction(IDLE_STATE, rowForm({ type: 'buy' }));
+
+      expect(events).toEqual(['callback-start', 'commit', 'enqueue']);
+    });
+
+    it('resolve as subscription', async () => {
+      vi.mocked(resolveSubscriptionOffer).mockResolvedValue(
+        ok({
+          transactions: [aTransaction],
+          recalculations: [recalculated('2020-01-13')],
+          rederived: [],
+        }),
+      );
+
+      await resolveSubscriptionOfferAction(IDLE_STATE, rowForm());
+
+      expect(events).toEqual(['callback-start', 'commit', 'enqueue']);
+    });
+
+    it('accept adjustment', async () => {
+      vi.mocked(acceptReconciliationAdjustment).mockResolvedValue(
+        ok({
+          batch: {},
+          result: { transaction: aTransaction, recalculation: recalculated('2026-03-02') },
+        }) as never,
+      );
+      const data = new FormData();
+      data.set('batchId', BATCH);
+      data.set('assetId', ASSET);
+
+      await acceptAdjustmentAction(data);
+
+      expect(events).toEqual(['callback-start', 'commit', 'enqueue']);
+    });
+  });
 });
