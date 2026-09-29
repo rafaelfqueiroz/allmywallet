@@ -7,9 +7,15 @@ import type { GrowthDecomposition, InvestedFigures } from '@/core/reporting/port
  * and earnings.
  *
  * **The two cumulative columns are what make this cheap.** A snapshot's
- * `net_contributions` and `earnings_to_date` are running totals to that date,
+ * `market_flows` and `earnings_to_date` are running totals to that date,
  * so the amount attributable to a *period* is the difference between its ends.
  * No ledger is read, which is what keeps the report inside DL-011-07's budget.
+ *
+ * **Contributions here are `market_flows`, not `net_contributions`** (SPEC-013
+ * BR-013-08, DL-013-10): the two differ only for an unpaired transfer, which
+ * `market_flows` values at the market value of the shares on the transfer
+ * date. Only the *Total investido* headline below (`investedFigures`) reads
+ * the cost-valued column.
  *
  * **Price change is the residual, deliberately.** BR-013-03 requires
  * `closing − opening = contributions + priceChange + earnings`, and defining
@@ -66,10 +72,15 @@ export function decomposeGrowth({ opening, closing }: DecompositionInput): Growt
   if (closing === null) return ZERO_DECOMPOSITION;
 
   const openingValue = opening?.totalValue ?? Money.zero();
-  const openingContributions = opening?.netContributions ?? Money.zero();
+  // SPEC-013 BR-013-08 / DL-013-10: the market-valued column. Price change is
+  // the residual, so an unpaired transfer counted at cost would put the
+  // shares' appreciation *before* they were tracked into this portfolio's
+  // price change: 100 arriving carried at 8,00 with a close of 11,00 would
+  // add 300,00 of price change the holdings never earned here.
+  const openingContributions = opening?.marketFlows ?? Money.zero();
   const openingEarnings = opening?.earningsToDate ?? Money.zero();
 
-  const netContributions = closing.netContributions.minus(openingContributions);
+  const netContributions = closing.marketFlows.minus(openingContributions);
   const earnings = closing.earningsToDate.minus(openingEarnings);
   const growth = closing.totalValue.minus(openingValue);
 
@@ -97,7 +108,12 @@ export function decomposeGrowth({ opening, closing }: DecompositionInput): Growt
  *
  * `totalInvested` does come from the snapshot, because "what did I put in" is
  * a cumulative ledger fact rather than a valuation, and the snapshot is where
- * that running total lives (BR-013-08).
+ * that running total lives (BR-013-08). It is the **cost-valued**
+ * `netContributions` — the only report figure that is: an unpaired transfer
+ * enters *Total investido* and *Ganho* at the cost basis it carries, because
+ * that is what the user reconciles against a broker (DL-013-09). Everything
+ * else — the decomposition above, the monthly bars, SPEC-012's returns —
+ * reads `marketFlows`.
  *
  * **The two arguments must describe the same scope, and only the caller can
  * know that.** This function subtracts a snapshot figure from a holdings

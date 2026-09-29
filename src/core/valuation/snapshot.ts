@@ -1,13 +1,16 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { AssetId, TransactionId } from '@/core/shared/ids';
-import { Money } from '@/core/shared/money';
+import { Money, sumMoney } from '@/core/shared/money';
 import { ok, type Result } from '@/core/shared/result';
 import Decimal from 'decimal.js';
 import { computeTotalValue, isEarnings, type Transaction } from '@/core/ledger/transaction';
 import { aggregateAcrossInstitutions } from '@/core/positions/aggregate';
 import { type AmortizationTerms, amortizationTermsOf } from '@/core/positions/amortization';
-import { costsCarriedOut } from '@/core/positions/carried-out';
+import { applyAcquisition } from '@/core/positions/average-cost';
+import { averagesCarriedOut } from '@/core/positions/carried-out';
+import { EMPTY_POSITION } from '@/core/positions/position-state';
+import { pairLedgerTransfers } from '@/core/ledger/transfer-pairs';
 import { replayPositions } from '@/core/positions/replay';
 import type { Asset, AssetCatalogPort } from '@/core/quotes/ports';
 import { listCalendarDays } from '@/core/valuation/business-days';
@@ -243,29 +246,28 @@ export function valuePortfolioAt(
  * this set wrong is what makes SPEC-012's TWR stop being TWR: TWR neutralises
  * exactly these and nothing else.
  *
- * **A transfer is a flow at the cost basis it carries** (SPEC-013 BR-013-08,
- * amended 2026-09-29 / DL-013-08): a `transfer_in` at the cost it opens its
- * lot with — `quantity × unitPrice + fees`, exactly what `applyAcquisition`
- * adds — and a `transfer_out` at the cost it takes away from its source,
- * which is not on the row at all. B3 exports the debit with no price
- * (SPEC-005 BR-005-20a), so reading it from `unitPrice` flowed every debit at
- * R$ 0 and counted each move between the user's own brokers as a deposit of
- * its whole cost basis (#181: R$ 193.802,75 on the owner's ledger). The debit's
- * cost is read off the source position by `costsCarriedOut` and passed in as
+ * This is one row's contribution to **`netContributions`** — the figure
+ * *Total investido* and *Ganho* read, where a transfer counts at the cost
+ * basis it carries. Whether a transfer counts *at all* is the fold's decision
+ * (`flowOf` below: a paired transfer counts nowhere, SPEC-013 BR-013-08 as
+ * amended by #183), and so is its market-valued twin, `marketFlows`.
+ *
+ * **A transfer is a flow at the cost basis it carries** (SPEC-013 BR-013-08 /
+ * DL-013-08): a `transfer_in` at the cost it opens its lot with —
+ * `quantity × unitPrice + fees`, exactly what `applyAcquisition` adds — and a
+ * `transfer_out` at the cost it takes away from its source, which is not on
+ * the row at all. B3 exports the debit with no price (SPEC-005 BR-005-20a), so
+ * reading it from `unitPrice` flowed every debit at R$ 0 (#181: R$ 193.802,75
+ * of phantom deposits on the owner's ledger). The debit's cost is read off
+ * the source position (`averagesCarriedOut` × quantity) and passed in as
  * `carriedOut`; a stated price on a debit is ignored.
  *
- * Worked example (DV-17): 100 PETR4 bought at Clear for 3.215,00 move to XP.
+ * Worked example (DV-17): 40 shares leave for someone else's custody from a
+ * lot bought as 100 @ 10,00 + 5,00 of fees (average 10,05).
  *
- *   buy at Clear            +100 × 32,15              = +3.215,00
- *   transfer_out at Clear   −100 × round₈(32,15)      = −3.215,00  (price-less)
- *   transfer_in at XP       +100 × 32,15 (carried)    = +3.215,00
- *   net contributions                                 =  3.215,00  — the buy
- *
- * The pair nets to exactly zero; only a one-sided transfer is money in or
- * out. A credit B3 exported *with its own price* (#145) opens its lot at that
- * price and so flows in at it, while its debit still flows out at the
- * carried cost: the pair then nets to the difference, which is real — the
- * lot's cost basis changed by that much, and net contributions track cost.
+ *   buy                     +100 × 10,00 + 5,00          = +1.005,00
+ *   transfer_out (unpaired) −40 × round₈(10,05)          =   −402,00
+ *   net contributions                                    =    603,00
  *
  * Fees keep the sign convention of every other leg (`computeTotalValue`): a
  * fee is money the user spent, so it adds to a transfer in and offsets a
@@ -322,42 +324,306 @@ export interface FlowOptions {
    * do not cover fails rather than guessing.
    */
   readonly amortization?: AmortizationTerms | undefined;
+  /**
+   * SPEC-013 BR-013-08 / SPEC-012 BR-012-01 (#183): an **unpaired** transfer
+   * enters `marketFlows` at the market value of the shares that moved, on the
+   * transfer date, valued by this context exactly as a snapshot values a
+   * holding (`valueHoldingsAt`, `historical` mode). It must hold a close on
+   * or before every such transfer's date — `computeSnapshots` makes sure of
+   * that (`withTransferCloses`) even for transfers before the range.
+   *
+   * Required only when the ledger holds an unpaired transfer on or before the
+   * date being built; omitting it then throws rather than valuing the move at
+   * zero, because zero is the one answer that is certainly wrong.
+   */
+  readonly context?: ValuationContext | undefined;
+  /**
+   * BR-009-02: the one date whose valuation may read the intraday quote —
+   * `RebuildRange.currentDate`. An unpaired transfer dated on it is valued in
+   * `current` mode, as that date's total is; every other in `historical`.
+   * Both builders must be given the same value, or DM-4 fails on that date.
+   */
+  readonly currentDate?: BusinessDate | undefined;
 }
 
 interface RunningFlows {
   readonly netContributions: Money;
+  readonly marketFlows: Money;
   readonly earningsToDate: Money;
+  /**
+   * The trade date of the latest flow folded so far whose market value was an
+   * estimate (SPEC-009 BR-009-11: accrued, or valued at cost for want of any
+   * price). The snapshot dated that day is marked, because its `marketFlows`
+   * step — the day's flow TWR neutralises — rests on that estimate.
+   */
+  readonly latestEstimate: BusinessDate | null;
 }
 
 const NO_FLOWS: RunningFlows = {
   netContributions: Money.zero(),
+  marketFlows: Money.zero(),
   earningsToDate: Money.zero(),
+  latestEstimate: null,
 };
+
+/** What the fold reads besides the row itself, derived once per ledger. */
+interface FlowFacts {
+  /** `averagesCarriedOut`: round₈ of each debit's source *preço médio*. */
+  readonly averages: ReadonlyMap<TransactionId, Money>;
+  /** Both legs of every BR-005-20a pair (`pairedTransferIds`). */
+  readonly paired: ReadonlySet<TransactionId>;
+  readonly context: ValuationContext | undefined;
+  readonly currentDate: BusinessDate | undefined;
+}
+
+/** One row's share of each running figure. */
+interface RowFlow {
+  readonly contribution: Money;
+  readonly market: Money;
+  readonly estimated: boolean;
+}
+
+/** A move between the user's own custodians: no money in or out, on either figure. */
+const INTERNAL: RowFlow = { contribution: Money.zero(), market: Money.zero(), estimated: false };
+
+/**
+ * SPEC-005 BR-005-20a over the ledger — both legs of every one-to-one pair,
+ * as one set. The pairing is `pairLedgerTransfers`, the very relation import
+ * carries a credit's cost by, so what the snapshot calls internal is exactly
+ * what the ledger paired.
+ */
+export function pairedTransferIds(
+  transactions: readonly Transaction[],
+): ReadonlySet<TransactionId> {
+  const paired = new Set<TransactionId>();
+  for (const [credit, debit] of pairLedgerTransfers(transactions)) {
+    paired.add(credit);
+    paired.add(debit);
+  }
+  return paired;
+}
+
+function flowFactsOf(
+  transactions: readonly Transaction[],
+  asOf: BusinessDate,
+  options: FlowOptions,
+): Result<FlowFacts, DomainError> {
+  const averages = averagesCarriedOut(transactions, {
+    asOf,
+    amortization: options.amortization,
+  });
+  if (!averages.ok) return averages;
+  return ok({
+    averages: averages.value,
+    paired: pairedTransferIds(transactions),
+    context: options.context,
+    currentDate: options.currentDate,
+  });
+}
+
+/**
+ * **One row's flow, on both figures** — SPEC-013 BR-013-08 as amended by #183
+ * (DL-013-09, DL-013-10), SPEC-012 BR-012-01 (DL-012-08).
+ *
+ * - **Every type but a transfer**: `marketFlows` takes exactly what
+ *   `netContributions` takes. A buy, a sale or a subscription is cash at the
+ *   transaction's own price, which *is* its market value on that date.
+ * - **A paired transfer** — debit and credit that BR-005-20a matches
+ *   one-to-one — is a move between the user's own custodians and contributes
+ *   **zero to both**, whatever price either leg carries. Pairing, not price,
+ *   is what makes a move internal.
+ * - **An unpaired transfer** is money in or out. `netContributions` takes it
+ *   at the cost it carries (`externalFlow`, DL-013-08); `marketFlows` at the
+ *   **market value of the shares that moved on the transfer date** (GIPS: an
+ *   in-kind flow is valued at market), signed like the cost.
+ *
+ * Worked examples (DV-17), each the #183 shape it fixes:
+ *
+ *   #145, a priced credit paired with its debit — 100 carried at 10,00 at
+ *   Clear, credited at XP at B3's 12,50, close 11,00:
+ *     before  net +1.250,00 − 1.000,00 = +250,00, a deposit that never happened
+ *     now     net 0, market 0
+ *
+ *   #112, a credit on a stored fallback cost — the source holds 10 free
+ *   bonificação shares (cost 0) and the credit was carried at 5,00:
+ *     before  net +50,00 − 0,00 = +50,00
+ *     now     net 0, market 0
+ *
+ *   One-sided out — 100 shares, cost 10,00, close 40,00 on the date:
+ *     net     −100 × 10,00 = −1.000,00  (Total investido falls by the cost)
+ *     market  −100 × 40,00 = −4.000,00  (the value that left; TWR reads 0 %,
+ *                                         not (0 − 4.000 + 1.000) ÷ 4.000 = −75 %)
+ *
+ *   One-sided in — 100 carried at 8,00, close 11,00 on the date:
+ *     net     +100 × 8,00  =   +800,00
+ *     market  +100 × 11,00 = +1.100,00  (the 300,00 of appreciation before
+ *                                         the user tracked the shares is not
+ *                                         this portfolio's price change)
+ *
+ * **The market value is SPEC-009's**, never a price read by hand: the moved
+ * quantity is valued as a holding by `valueHoldingsAt`, in the mode its date
+ * is valued in — `historical` (closes only, BR-009-02) for every date but the
+ * rebuild's declared current date, which is `current` for its flow exactly as
+ * for its total (`FlowOptions.currentDate`). Both builders read the same
+ * option, so DM-4 holds. That settles every edge the same way the snapshot's
+ * own total settles it:
+ *
+ * - **No close on the transfer date**: the last close on or before it
+ *   (BR-009-03 carry-forward) — a weekend or holiday transfer takes Friday's.
+ * - **No close on or before it at all**: valued at cost and marked an
+ *   estimate (`COST_FALLBACK`), exactly as the engine values such a position;
+ *   never zero. The snapshot of the transfer date is then marked
+ *   `hasEstimates`, because its flow step rests on that estimate.
+ * - **Tesouro Direto**: its published sell price, same fallback.
+ * - **Bank paper (CDB/LCI/LCA)**: accrued from the contract to the transfer
+ *   date on the leg's own cost basis — an estimate by nature (BR-009-11), so
+ *   the date is marked.
+ *
+ * The cost a fallback or an accrual starts from is the per-share cost the
+ * valuation itself reads for those shares: for a credit, the average its lot
+ * opens with, fees included (`arrivingLotAverage`); for a debit, the round₈
+ * source average `netContributions` takes it at. So on those paths the flow
+ * is exactly what the move adds to or takes from the day's total.
+ *
+ * **Where a price exists, fees are not part of the market flow.** GIPS values
+ * an in-kind flow at the market value of the securities that moved; a listed
+ * holding's value (quantity × close, or Tesouro's sell price) never includes
+ * a fee, so a fee in the flow would read as a return the holdings never made.
+ * A debit's own fee likewise never enters `marketFlows`. `netContributions`
+ * keeps fees (DL-013-08's convention), because *Total investido* counts what
+ * the user spent.
+ *
+ * **Rounding**: none. `quantity × close` is exact in `decimal.js` (at most 16
+ * places from two 8-place factors), just as the snapshot's own `totalValue`
+ * is; the only rounding step is `quantizeSnapshot`'s at the storage boundary.
+ * An accrued value carries the accrual chain's 40 significant digits, again
+ * exactly as the position it came from.
+ */
+function flowOf(transaction: Transaction, facts: FlowFacts): Result<RowFlow, DomainError> {
+  if (transaction.type !== 'transfer_in' && transaction.type !== 'transfer_out') {
+    const cash = externalFlow(transaction);
+    return ok({ contribution: cash, market: cash, estimated: false });
+  }
+  // SPEC-013 BR-013-08 (DL-013-09): internal, whatever either leg's price says.
+  if (facts.paired.has(transaction.id)) return ok(INTERNAL);
+
+  const inbound = transaction.type === 'transfer_in';
+  // `averagesCarriedOut` values every active debit on or before its cut, or
+  // fails — and the fold only reaches rows on or before it — so a debit here
+  // always finds its figure.
+  const carriedOut = inbound ? null : (facts.averages.get(transaction.id) as Money);
+  const contribution = externalFlow(
+    transaction,
+    carriedOut === null ? null : carriedOut.times(transaction.quantity),
+  );
+  const market = marketValueMoved(
+    facts,
+    transaction,
+    carriedOut ?? arrivingLotAverage(transaction),
+  );
+  if (!market.ok) return market;
+  return ok({
+    contribution,
+    market: inbound ? market.value.value : market.value.value.negated(),
+    estimated: market.value.estimated,
+  });
+}
+
+/**
+ * SPEC-009 BR-009-16 applied to the shares a transfer moved, on its own date:
+ * the quantity valued as one holding at the leg's per-share cost. Summed over
+ * whatever `valueHoldingsAt` returns — one position, or none for a
+ * zero-quantity row — so there is no path on which a figure is invented.
+ */
+function marketValueMoved(
+  facts: FlowFacts,
+  transaction: Transaction,
+  averageCost: Money,
+): Result<{ readonly value: Money; readonly estimated: boolean }, DomainError> {
+  if (facts.context === undefined) {
+    throw new RangeError(
+      'buildSnapshot: an unpaired transfer flows at the market value it moved (SPEC-013 BR-013-08) — pass the valuation context',
+    );
+  }
+  const valued = valueHoldingsAt(
+    facts.context,
+    [{ assetId: transaction.assetId, quantity: transaction.quantity, averageCost }],
+    transaction.tradeDate,
+    // BR-009-02: history reads closes only. The one date valued `current` —
+    // today, in a rebuild that declares it — has its flow valued the same way
+    // as its total, so the flow is exactly the value the move added (#183
+    // review F2); the nightly rebuild revalues both from the close.
+    transaction.tradeDate === facts.currentDate ? 'current' : 'historical',
+  );
+  if (!valued.ok) return valued;
+  return ok({
+    value: sumMoney(valued.value.map((position) => position.value)),
+    estimated: valued.value.some((position) => position.estimated),
+  });
+}
+
+/**
+ * The per-share cost an arriving lot opens with, **as the replay gives it**:
+ * `applyAcquisition` on an empty position, i.e. `(quantity × unitPrice +
+ * fees) ÷ quantity` (#183 review F1).
+ *
+ * It matters only where the valuation reads cost rather than a price — the
+ * COST_FALLBACK of an asset with no close, and bank paper's accrual — and
+ * there the arriving lot adds exactly `quantity × this` (accrued) to the
+ * total, fees included. Valuing the flow on the fee-less `unitPrice` instead
+ * left the fee in the day's value but out of its flow, a return the holdings
+ * never made. Where a close exists the value is `quantity × close` and this
+ * figure is not read, so the fee stays out of the market flow (GIPS).
+ *
+ * Worked example (DV-17): 10 VALE3, never priced, arrive at 50,00 + 5,00 of
+ * fees → average (500,00 + 5,00) ÷ 10 = 50,50; the flow is 10 × 50,50 =
+ * 505,00, exactly the 505,00 the cost-valued position adds.
+ */
+function arrivingLotAverage(transaction: Transaction): Money {
+  return applyAcquisition(EMPTY_POSITION, {
+    quantity: transaction.quantity,
+    unitPrice: transaction.unitPrice,
+    fees: transaction.fees,
+  }).averageCost;
+}
 
 function applyFlow(
   running: RunningFlows,
   transaction: Transaction,
-  carriedOut: ReadonlyMap<TransactionId, Money>,
-): RunningFlows {
+  facts: FlowFacts,
+): Result<RunningFlows, DomainError> {
   // BR-006-03: only active rows are calculated on. `unclassified` rows stay
   // visible in the ledger and out of the arithmetic.
-  if (transaction.status !== 'active') return running;
+  if (transaction.status !== 'active') return ok(running);
   if (isEarnings(transaction.type)) {
-    return {
-      netContributions: running.netContributions,
+    return ok({
+      ...running,
       // Recognised at pay date (`tradeDate` for a provento) — never accrued
       // forward from an ex-date, never assumed reinvested.
       earningsToDate: running.earningsToDate.plus(transaction.totalValue),
-    };
+    });
   }
-  return {
-    netContributions: running.netContributions.plus(
-      // `costsCarriedOut` values every active debit it was given or fails, so
-      // a debit here always finds its cost; every other type has none.
-      externalFlow(transaction, carriedOut.get(transaction.id) ?? null),
-    ),
+  const flow = flowOf(transaction, facts);
+  if (!flow.ok) return flow;
+  return ok({
+    netContributions: running.netContributions.plus(flow.value.contribution),
+    marketFlows: running.marketFlows.plus(flow.value.market),
     earningsToDate: running.earningsToDate,
-  };
+    // Both folds walk the ledger in trade-date order (`byTradeDate`), so the
+    // latest estimated row is simply the last one seen.
+    latestEstimate: flow.value.estimated ? transaction.tradeDate : running.latestEstimate,
+  });
+}
+
+/**
+ * The one order both folds sum in: ascending trade date, ties in the order
+ * the ledger was given (a stable sort). Sums of exact figures do not care,
+ * but an accrued market value carries 40 significant digits, and two folds
+ * adding the same figures in two orders could disagree in the last of them —
+ * which DM-4's exact comparison would, rightly, report.
+ */
+function byTradeDate(transactions: readonly Transaction[]): readonly Transaction[] {
+  return [...transactions].sort((a, b) => BusinessDate.compare(a.tradeDate, b.tradeDate));
 }
 
 /**
@@ -369,15 +635,14 @@ function flowsThrough(
   date: BusinessDate,
   options: FlowOptions,
 ): Result<RunningFlows, DomainError> {
-  const carriedOut = costsCarriedOut(transactions, {
-    asOf: date,
-    amortization: options.amortization,
-  });
-  if (!carriedOut.ok) return carriedOut;
+  const facts = flowFactsOf(transactions, date, options);
+  if (!facts.ok) return facts;
   let running = NO_FLOWS;
-  for (const transaction of transactions) {
+  for (const transaction of byTradeDate(transactions)) {
     if (BusinessDate.isAfter(transaction.tradeDate, date)) continue;
-    running = applyFlow(running, transaction, carriedOut.value);
+    const next = applyFlow(running, transaction, facts.value);
+    if (!next.ok) return next;
+    running = next.value;
   }
   return ok(running);
 }
@@ -420,7 +685,8 @@ function totalsOf(valued: readonly ValuedPosition[]): {
  *
  * A `Result` because a transfer out's flow is read off its source position
  * (SPEC-013 BR-013-08), and a position that cannot be replayed has no cost to
- * carry — that is reported, never flowed as zero.
+ * carry — that is reported, never flowed as zero. Likewise an unpaired
+ * transfer whose asset the context cannot value (#183).
  */
 export function buildSnapshot(
   date: BusinessDate,
@@ -435,9 +701,11 @@ export function buildSnapshot(
     date,
     totalValue: total,
     netContributions: flows.value.netContributions,
+    marketFlows: flows.value.marketFlows,
     earningsToDate: flows.value.earningsToDate,
     byAssetClass,
-    hasEstimates,
+    // BR-009-11, and #183: a flow valued by estimate marks its own date.
+    hasEstimates: hasEstimates || flows.value.latestEstimate === date,
   });
 }
 
@@ -451,11 +719,15 @@ export function buildSnapshot(
  * generated history is what catches the accumulation and ordering bugs that
  * every other test walks past.
  *
- * The debits' carried costs are folded **once**, over the ledger up to the
+ * The debits' carried averages are folded **once**, over the ledger up to the
  * last date, where `buildSnapshot` re-folds them per date from a ledger cut
  * there. The two agree because a debit's cost depends only on rows that sort
  * before it (`compareForReplay` orders by date first), so no later row can
- * change it — which is exactly the claim the DM-4 property test puts to them.
+ * change it. The transfer pairing (#183) is taken over the whole ledger by
+ * both, and is cut-invariant for the same reason: a pair and every leg that
+ * could compete with it share one trade date (`pairLedgerTransfers`). An
+ * unpaired leg's market value depends only on its own date and the context.
+ * Those are exactly the claims the DM-4 property test puts to them.
  */
 export function buildSnapshotSeries(
   dates: readonly BusinessDate[],
@@ -465,14 +737,11 @@ export function buildSnapshotSeries(
 ): Result<readonly DailyValuationSnapshot[], DomainError> {
   const last = dates.at(-1);
   if (last === undefined) return ok([]);
-  const carriedOut = costsCarriedOut(transactions, {
-    asOf: last,
-    amortization: options.amortization,
-  });
-  if (!carriedOut.ok) return carriedOut;
+  const facts = flowFactsOf(transactions, last, options);
+  if (!facts.ok) return facts;
 
   // Ascending by trade date, so the walk below can consume the ledger once.
-  const ordered = [...transactions].sort((a, b) => BusinessDate.compare(a.tradeDate, b.tradeDate));
+  const ordered = byTradeDate(transactions);
 
   const snapshots: DailyValuationSnapshot[] = [];
   let cursor = 0;
@@ -481,7 +750,9 @@ export function buildSnapshotSeries(
     while (cursor < ordered.length) {
       const next = ordered[cursor];
       if (next === undefined || BusinessDate.isAfter(next.tradeDate, date)) break;
-      running = applyFlow(running, next, carriedOut.value);
+      const applied = applyFlow(running, next, facts.value);
+      if (!applied.ok) return applied;
+      running = applied.value;
       cursor += 1;
     }
     const { total, byAssetClass, hasEstimates } = totalsOf(valuedByDate.get(date) ?? []);
@@ -489,9 +760,11 @@ export function buildSnapshotSeries(
       date,
       totalValue: total,
       netContributions: running.netContributions,
+      marketFlows: running.marketFlows,
       earningsToDate: running.earningsToDate,
       byAssetClass,
-      hasEstimates,
+      // BR-009-11, and #183: a flow valued by estimate marks its own date.
+      hasEstimates: hasEstimates || running.latestEstimate === date,
     });
   }
   return ok(snapshots);
@@ -503,6 +776,7 @@ export function snapshotsEqual(a: DailyValuationSnapshot, b: DailyValuationSnaps
     a.date !== b.date ||
     !a.totalValue.equals(b.totalValue) ||
     !a.netContributions.equals(b.netContributions) ||
+    !a.marketFlows.equals(b.marketFlows) ||
     !a.earningsToDate.equals(b.earningsToDate) ||
     a.hasEstimates !== b.hasEstimates ||
     a.byAssetClass.size !== b.byAssetClass.size
@@ -530,6 +804,7 @@ export function serializeSnapshot(snapshot: DailyValuationSnapshot): SerializedS
     date: snapshot.date,
     totalValue: snapshot.totalValue.toString(),
     netContributions: snapshot.netContributions.toString(),
+    marketFlows: snapshot.marketFlows.toString(),
     earningsToDate: snapshot.earningsToDate.toString(),
     byAssetClass,
     hasEstimates: snapshot.hasEstimates,
@@ -624,7 +899,73 @@ export async function computeSnapshots(
 
   return buildSnapshotSeries(dates, valuedByDate, transactions, {
     amortization: amortizationOf(context),
+    // SPEC-013 BR-013-08 (#183): the flows are cumulative from the ledger's
+    // first row, not from `range.from`, so an unpaired transfer dated before
+    // the range is still valued — at its own date's close, which the range's
+    // context does not hold.
+    context: await withTransferCloses(deps.prices, context, transactions, range.from),
+    // BR-009-02: the date valued `current` above values its flows the same way.
+    currentDate: range.currentDate,
   });
+}
+
+/**
+ * SPEC-013 BR-013-08 (#183) — the closes an **unpaired transfer dated before
+ * `from`** is valued at, added to a context loaded for `[from, to]`.
+ *
+ * A rebuild of a short range — the daily job builds today alone — still sums
+ * every flow since the ledger began, and an unpaired transfer's market flow is
+ * the close on or before *its own* date. The range's context holds closes from
+ * the anchor on or before `from` onwards only, so without this a 2024
+ * transfer rebuilt in 2026 would find no close, fall back to cost, and put a
+ * different `market_flows` on today's row than the full rebuild put there —
+ * DM-4 broken by the choice of range.
+ *
+ * One `getCloseOnOrBefore` per distinct (asset, trade date) among such
+ * transfers, not a history load: the owner's ledger has none today, and a
+ * transfer needs exactly one close. Inserted in
+ * date order and never duplicating a date, so `closeOnOrBefore` answers every
+ * other date exactly as before: each added close is the latest one on or
+ * before its transfer, and precedes the range's anchor.
+ *
+ * Paired transfers need no price (they flow zero); bank paper has no closes
+ * (it accrues from its contract and index series, loaded from issue date);
+ * a transfer on or after `from` is already covered by the range's own closes.
+ */
+export async function withTransferCloses(
+  prices: Pick<PriceHistoryPort, 'getCloseOnOrBefore'>,
+  context: ValuationContext,
+  transactions: readonly Transaction[],
+  from: BusinessDate,
+): Promise<ValuationContext> {
+  const paired = pairedTransferIds(transactions);
+  const closes = new Map(context.closes);
+  const asked = new Set<string>();
+  for (const transaction of transactions) {
+    const key = `${transaction.assetId}|${transaction.tradeDate}`;
+    if (
+      transaction.status !== 'active' ||
+      (transaction.type !== 'transfer_in' && transaction.type !== 'transfer_out') ||
+      !BusinessDate.isBefore(transaction.tradeDate, from) ||
+      paired.has(transaction.id) ||
+      asked.has(key)
+    ) {
+      continue;
+    }
+    const history = closes.get(transaction.assetId);
+    // No entry at all: bank paper, valued by accrual rather than by a close.
+    if (history === undefined) continue;
+    asked.add(key);
+    const quote = await prices.getCloseOnOrBefore(transaction.assetId, transaction.tradeDate);
+    // Two trade dates can share their close (a Friday and the Saturday after
+    // it), or it can be the range's anchor: never a duplicate date.
+    if (quote === null || history.some((known) => known.date === quote.date)) continue;
+    closes.set(
+      transaction.assetId,
+      [...history, quote].sort((a, b) => BusinessDate.compare(a.date, b.date)),
+    );
+  }
+  return { ...context, closes };
 }
 
 /**
@@ -676,6 +1017,7 @@ export function quantizeSnapshot(snapshot: DailyValuationSnapshot): DailyValuati
     date: snapshot.date,
     totalValue: total,
     netContributions: quantizeMoney(snapshot.netContributions),
+    marketFlows: quantizeMoney(snapshot.marketFlows),
     earningsToDate: quantizeMoney(snapshot.earningsToDate),
     byAssetClass,
     hasEstimates: snapshot.hasEstimates,

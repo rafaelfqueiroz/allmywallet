@@ -10,9 +10,7 @@ import {
 import {
   type CarriedCost,
   type CarryLeg,
-  pairTransfers,
   resolveCarriedCosts,
-  type TransferLeg,
   withCarriedCost,
 } from '@/core/ingestion/transfer-cost';
 import type { DomainError } from '@/core/shared/domain-error';
@@ -20,7 +18,7 @@ import { type Result, ok } from '@/core/shared/result';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { guardReplayable } from '@/core/ledger/guard-replayable';
 import { recalculatePositionFrom, type RecalculationOutcome } from '@/core/ledger/recalculate-from';
-import { naturalKeyFor } from '@/core/ledger/natural-key';
+import { isCarriedCredit, isImportOwned, pairLedgerTransfers } from '@/core/ledger/transfer-pairs';
 import { isActive, type Transaction } from '@/core/ledger/transaction';
 import type { PositionState } from '@/core/positions/position-state';
 
@@ -73,28 +71,9 @@ import type { PositionState } from '@/core/positions/position-state';
  * re-derived leg sits in is recalculated by the caller.
  */
 
-/**
- * A `transfer_in` that took its cost by carry rather than from a stated price.
- *
- * Import keys such a credit at the price B3 stated — none — while it stores
- * the carried cost (SPEC-005 BR-005-17, `keepsImportKey` in
- * `edit-transaction.ts`), so its key is not the one its own fields derive. A
- * priced B3 credit is keyed at its own price and never matches. A carried cost
- * is always positive (`resolveCarriedCosts` carries no zero average), so the
- * two keys can never coincide by accident.
- */
-function isCarriedCredit(transaction: Transaction): boolean {
-  return (
-    transaction.type === 'transfer_in' &&
-    isImportOwned(transaction) &&
-    transaction.naturalKey !== naturalKeyFor(transaction)
-  );
-}
-
-/** Written by import and never edited by a user (BR-006-16). */
-function isImportOwned(transaction: Transaction): boolean {
-  return transaction.importBatchId !== null && !transaction.isManual && !transaction.isUserModified;
-}
+// `isCarriedCredit` and `isImportOwned` live in `transfer-pairs.ts`, shared
+// with the snapshot's flow fold (SPEC-013 BR-013-08), which pairs the same
+// stored ledger and must pair it the same way.
 
 /**
  * Re-derives every carried leg downstream of `seeds` over `ledger` — the whole
@@ -153,18 +132,8 @@ function rederiveTransfers(
   amortization: AmortizationTerms,
 ): readonly Transaction[] {
   const active = rows.filter(isActive);
-  const legOf = (transaction: Transaction): TransferLeg => ({
-    id: transaction.id,
-    assetId: transaction.assetId,
-    institutionId: transaction.institutionId,
-    tradeDate: transaction.tradeDate,
-    quantity: transaction.quantity,
-    priceStated: !isCarriedCredit(transaction),
-  });
-  const credits = active.filter((t) => t.type === 'transfer_in');
-  const debits = active.filter((t) => t.type === 'transfer_out');
   const byId = new Map<string, Transaction>(active.map((t) => [t.id, t]));
-  const pairs = pairTransfers(credits.map(legOf), debits.map(legOf));
+  const pairs = pairLedgerTransfers(active);
 
   const legs: CarryLeg[] = [];
   for (const [creditId, debitId] of pairs) {

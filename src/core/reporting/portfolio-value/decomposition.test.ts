@@ -28,12 +28,18 @@ function snapshot(
   totalValue: string,
   netContributions: string,
   earningsToDate: string,
-  options: { hasEstimates?: boolean; byAssetClass?: ReadonlyMap<AssetClass, Money> } = {},
+  options: {
+    hasEstimates?: boolean;
+    byAssetClass?: ReadonlyMap<AssetClass, Money>;
+    /** SPEC-013 BR-013-08: differs from `netContributions` only for an unpaired transfer. */
+    marketFlows?: string;
+  } = {},
 ): DailyValuationSnapshot {
   return {
     date: d(date),
     totalValue: m(totalValue),
     netContributions: m(netContributions),
+    marketFlows: m(options.marketFlows ?? netContributions),
     earningsToDate: m(earningsToDate),
     byAssetClass: options.byAssetClass ?? new Map<AssetClass, Money>(),
     hasEstimates: options.hasEstimates ?? false,
@@ -235,5 +241,60 @@ describe('investedFigures (BR-013-04)', () => {
     const result = investedFigures(m('0'), null);
     expect(to8(result.totalInvested)).toBe('0.00000000');
     expect(result.gainRatio).toBe(null);
+  });
+});
+
+describe('#183 — SPEC-013 BR-013-08 / DL-013-10: an unpaired transfer, at market in the decomposition and at cost in the headline', () => {
+  /**
+   * The #183 unpaired-in shape. 100 shares held at 10,00 (bought for
+   * 1.000,00); on 10/03 the close moves to 11,00 (+10 %) and 100 more arrive
+   * from outside, carried at 8,00.
+   *
+   *   opening 09/03  value 1.000   net 1.000   market 1.000
+   *   closing 10/03  value 200 × 11,00 = 2.200
+   *                  net    1.000 + 100 × 8,00  = 1.800
+   *                  market 1.000 + 100 × 11,00 = 2.100
+   *
+   *   contributions = 2.100 − 1.000 = **1.100** (the arriving shares at market)
+   *   growth        = 2.200 − 1.000 = 1.200
+   *   price change  = 1.200 − 1.100 − 0 = **100** — the 10 % on the 100 held
+   *
+   * At cost the contributions would be 800 and the price change 400, of which
+   * 300 is the arriving shares' appreciation before the user tracked them.
+   */
+  const opening = snapshot('2026-03-09', '1000', '1000', '0');
+  const closing = snapshot('2026-03-10', '2200', '1800', '0', { marketFlows: '2100' });
+
+  it('contributions are the market value that arrived; price change only what moved while held', () => {
+    const result = decomposeGrowth({ opening, closing });
+    expect(result.netContributions.toString()).toBe('1100');
+    expect(result.priceChange.toString()).toBe('100');
+    expect(result.earnings.toString()).toBe('0');
+    // No pre-transfer appreciation anywhere: 1.200 of growth = 1.100 + 100.
+    expect(
+      result.netContributions.plus(result.priceChange).equals(result.closing.minus(result.opening)),
+    ).toBe(true);
+  });
+
+  it('an opening snapshot is read on the same column as the closing one', () => {
+    // Opening market 1.500 (an earlier unpaired arrival at market) against
+    // net 1.000: contributions = 2.100 − 1.500 = 600 — never 1.800 − 1.000 =
+    // 800 (cost) nor 2.100 − 1.000 = 1.100 (the columns mixed).
+    //   price change = (2.200 − 1.500) − 600 = 100
+    const result = decomposeGrowth({
+      opening: snapshot('2026-03-09', '1500', '1000', '0', { marketFlows: '1500' }),
+      closing,
+    });
+    expect(result.netContributions.toString()).toBe('600');
+    expect(result.priceChange.toString()).toBe('100');
+  });
+
+  it('Total investido and Ganho stay at cost — the one figure that does', () => {
+    //   totalInvested = net 1.800 (not market 2.100)
+    //   gain          = 2.200 − 1.800 = 400; ratio 400 ÷ 1.800 = 0,2222…
+    const result = investedFigures(m('2200'), closing);
+    expect(result.totalInvested.toString()).toBe('1800');
+    expect(result.absoluteGain.toString()).toBe('400');
+    expect(to8(result.gainRatio!)).toBe('0.22222222');
   });
 });

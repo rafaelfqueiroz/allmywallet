@@ -32,10 +32,13 @@ import { FakeAssetCatalog } from '@/core/quotes/test-support';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
 import { computeSnapshots } from '@/core/valuation/snapshot';
 import {
+  aContract,
   FakeFixedIncomeContracts,
   FakeIndexSeriesReader,
   FakePriceHistory,
+  indexPoint,
 } from '@/core/valuation/test-support';
+import { decomposeGrowth } from '@/core/reporting/portfolio-value/decomposition';
 import {
   EarningsTreatment,
   type Benchmark,
@@ -64,11 +67,14 @@ function snapshot(
   totalValue: string,
   netContributions: string,
   earningsToDate: string,
+  /** SPEC-013 BR-013-08: differs from `netContributions` only for an unpaired transfer. */
+  marketFlows = netContributions,
 ): DailyValuationSnapshot {
   return {
     date: day(date),
     totalValue: money(totalValue),
     netContributions: money(netContributions),
+    marketFlows: money(marketFlows),
     earningsToDate: money(earningsToDate),
     byAssetClass: new Map<AssetClass, Money>([['stock', money(totalValue)]]),
     hasEstimates: false,
@@ -862,6 +868,24 @@ describe('SPEC-012 BR-012-10..13 — benchmarks (AC-9, AC-10, AC-12)', () => {
     expect(july?.value.toString()).toBe('600050');
   });
 
+  it('#183 / BR-012-12 — the shadow receives the market-valued flow, not the cost', async () => {
+    // On 01/07 shares arrive from outside carried at 500.000 but worth
+    // 400.000 at that day's close (an unpaired transfer, SPEC-013 BR-013-08):
+    //   net_contributions 100.000 → 600.000; market_flows 100.000 → 500.000
+    //   shadow: 100.000 × 1,0005 = 100.050 on 01/01, + 400.000 on 01/07
+    //         = **500.050** — at cost it would be the AC-11 figure, 600.050
+    const report = await run({
+      snapshots: [
+        snapshot('2026-01-01', '100000', '100000', '0'),
+        snapshot('2026-07-01', '500000', '600000', '0', '500000'),
+        snapshot('2027-01-01', '500000', '600000', '0', '500000'),
+      ],
+      benchmarks: ['CDI'],
+      index,
+    });
+    expect(report.benchmarks[0]?.shadow?.finalValue.toString()).toBe('500050');
+  });
+
   it('carries no shadow where the benchmark line itself is unavailable', async () => {
     const report = await run({ benchmarks: ['IBOV'], index: new FakeIndexSeries({}) });
     expect(errorCode(report.benchmarks[0]!.line)).toBe('PERFORMANCE_BENCHMARK_SERIES_EMPTY');
@@ -1191,5 +1215,325 @@ describe('SPEC-013 BR-013-08 → SPEC-012 BR-012-01: a move between the user’s
     expect(
       received.series.flows.find((flow) => flow.date === '2026-07-01')?.amount.toString(),
     ).toBe('1100');
+  });
+});
+
+describe('#183 — SPEC-012 BR-012-01 (DL-012-08): TWR and XIRR take the market-valued flows', () => {
+  it('seriesFromSnapshots differences market_flows, never net_contributions', () => {
+    //   30/06 market 1.000 (net 1.000); 01/07 market 2.100 (net 1.800)
+    //   flow on 01/07 = 2.100 − 1.000 = 1.100 (at cost it would be 800)
+    const series = seriesFromSnapshots(
+      [
+        snapshot('2026-06-30', '1000', '1000', '0'),
+        snapshot('2026-07-01', '2200', '1800', '0', '2100'),
+      ],
+      EarningsTreatment.WITHOUT_EARNINGS,
+    );
+    expect(series.flows.map((flow) => flow.amount.toString())).toEqual(['1100']);
+    // gain = 2.200 − 1.000 − 1.100 = 100, the 10 % on the 100 already held
+    expect(series.gain.toString()).toBe('100');
+  });
+
+  /**
+   * End to end — ledger → SPEC-009 snapshots → series → TWR/XIRR — over one
+   * day: the period is 30/06 to 01/07, so the one sub-period *is* the
+   * transfer date, and TWR equals that day's return.
+   */
+  const PETR4 = assetIdFor('PETR4');
+
+  interface DayWorld {
+    readonly assets: FakeAssetCatalog;
+    readonly prices: FakePriceHistory;
+    readonly contracts: FakeFixedIncomeContracts;
+    readonly index: FakeIndexSeriesReader;
+  }
+
+  async function dayOf(
+    ledger: readonly Transaction[],
+    closes: readonly (readonly [string, string])[],
+    options: { setup?: (world: DayWorld) => void; currentDate?: string } = {},
+  ) {
+    const assets = new FakeAssetCatalog();
+    assets.add({ id: PETR4, code: 'PETR4', name: 'Petrobras PN', assetClass: 'stock' });
+    const prices = new FakePriceHistory();
+    for (const [date, close] of closes) prices.addClose(PETR4, date, close);
+    const contracts = new FakeFixedIncomeContracts();
+    const index = new FakeIndexSeriesReader().set('CDI', []).set('IPCA', []);
+    options.setup?.({ assets, prices, contracts, index });
+    const snapshots = unwrap(
+      await computeSnapshots(
+        { calendar: new B3TradingCalendar(), prices, contracts, indexSeries: index, assets },
+        ledger,
+        {
+          from: day('2026-06-30'),
+          to: day('2026-07-01'),
+          currentDate: options.currentDate === undefined ? undefined : day(options.currentDate),
+        },
+      ),
+    );
+    const series = seriesFromSnapshots(snapshots, EarningsTreatment.WITH_EARNINGS);
+    const twr = unwrap(computeTwr({ points: series.points, flows: series.flows }));
+    expect(twr.subPeriods).toHaveLength(1);
+    return {
+      // SPEC-013 BR-013-03 over the same day, for the price-change assertions.
+      decomposition: decomposeGrowth({
+        opening: snapshots[0] ?? null,
+        closing: snapshots.at(-1) ?? null,
+      }),
+      points: series.points.map((point) => point.value.toString()),
+      flow: series.flows.map((flow) => flow.amount.toString()),
+      twr: twr.returnRate.toString(),
+      // XIRR's own view of the transfer date: the investor's sign.
+      xirrFlows: cashFlowsFrom(series).map((flow) => flow.amount.toString()),
+    };
+  }
+
+  const held = () => {
+    resetTransactionSequence();
+    return aTransaction()
+      .buy()
+      .of('PETR4')
+      .at('Clear')
+      .on('2026-06-01')
+      .quantity('100')
+      .price('10')
+      .build();
+  };
+
+  it('#145 — a priced credit paired with its debit: the day is price change only, not −22,7 %', async () => {
+    //   100 held at Clear (cost 10,00); 01/07 all move to XP, B3 pricing the
+    //   credit at 12,50. Close 11,00 both days.
+    //   V 1.100 → 1.100, flow 0 (paired) → r = 0
+    //   #181 flowed +250: (1.100 − 1.100 − 250) ÷ 1.100 = −0,2272…
+    const result = await dayOf(
+      [
+        held(),
+        aTransaction()
+          .transferOut()
+          .of('PETR4')
+          .at('Clear')
+          .on('2026-07-01')
+          .quantity('100')
+          .price('0')
+          .build(),
+        aTransaction()
+          .transferIn()
+          .of('PETR4')
+          .at('XP')
+          .on('2026-07-01')
+          .quantity('100')
+          .price('12.50')
+          .build(),
+      ],
+      [
+        ['2026-06-30', '11'],
+        ['2026-07-01', '11'],
+      ],
+    );
+    expect(result.points).toEqual(['1100', '1100']);
+    expect(result.flow).toEqual(['0']);
+    expect(result.twr).toBe('0');
+  });
+
+  it('#112 — a fallback-cost credit paired with a zero-cost debit: the day reads its 10 %', async () => {
+    //   10 bonificação shares at Clear (cost 0); 01/07 they move to XP, the
+    //   credit on a stored 5,00. Close 6,00 → 6,60.
+    //   V 60 → 66, flow 0 → r = 6 ÷ 60 = 0,10
+    //   #181 flowed +50: (66 − 60 − 50) ÷ 60 = −0,7333…
+    resetTransactionSequence();
+    const result = await dayOf(
+      [
+        aTransaction()
+          .bonificacao()
+          .of('PETR4')
+          .at('Clear')
+          .on('2026-06-01')
+          .quantity('10')
+          .build(),
+        aTransaction()
+          .transferOut()
+          .of('PETR4')
+          .at('Clear')
+          .on('2026-07-01')
+          .quantity('10')
+          .price('0')
+          .build(),
+        aTransaction()
+          .transferIn()
+          .of('PETR4')
+          .at('XP')
+          .on('2026-07-01')
+          .quantity('10')
+          .price('5')
+          .imported()
+          .build(),
+      ],
+      [
+        ['2026-06-30', '6'],
+        ['2026-07-01', '6.60'],
+      ],
+    );
+    expect(result.flow).toEqual(['0']);
+    expect(result.twr).toBe('0.1');
+  });
+
+  it('an unpaired transfer out: the day reads 0 %, not −75 %', async () => {
+    //   100 held (cost 10,00), close 40,00 both days; all 100 leave, unpaired.
+    //   V 4.000 → 0, flow −4.000 (market) → r = (0 − 4.000 + 4.000) ÷ 4.000 = 0
+    //   at cost, flow −1.000 → (0 − 4.000 + 1.000) ÷ 4.000 = −0,75
+    //   XIRR sees +4.000 coming back to the investor on 01/07.
+    const result = await dayOf(
+      [
+        held(),
+        aTransaction()
+          .transferOut()
+          .of('PETR4')
+          .at('Clear')
+          .on('2026-07-01')
+          .quantity('100')
+          .price('0')
+          .build(),
+      ],
+      [
+        ['2026-06-30', '40'],
+        ['2026-07-01', '40'],
+      ],
+    );
+    expect(result.points).toEqual(['4000', '0']);
+    expect(result.flow).toEqual(['-4000']);
+    expect(result.twr).toBe('0');
+    expect(result.xirrFlows).toEqual(['-4000', '4000', '0']);
+  });
+
+  it('an unpaired transfer in on a 10 % day: TWR is the 10 %, not 40 %', async () => {
+    //   100 held (cost 10,00), close 10,00 → 11,00; 100 arrive carried at 8,00.
+    //   V 1.000 → 2.200, flow +1.100 (market) → r = (2.200 − 1.000 − 1.100) ÷ 1.000 = 0,10
+    //   at cost, flow +800 → (2.200 − 1.000 − 800) ÷ 1.000 = 0,40
+    const result = await dayOf(
+      [
+        held(),
+        aTransaction()
+          .transferIn()
+          .of('PETR4')
+          .at('XP')
+          .on('2026-07-01')
+          .quantity('100')
+          .price('8')
+          .build(),
+      ],
+      [
+        ['2026-06-30', '10'],
+        ['2026-07-01', '11'],
+      ],
+    );
+    expect(result.points).toEqual(['1000', '2200']);
+    expect(result.flow).toEqual(['1100']);
+    expect(result.twr).toBe('0.1');
+    expect(result.xirrFlows).toEqual(['-1000', '-1100', '2200']);
+  });
+
+  const VALE3 = assetIdFor('VALE3');
+  const CDB = assetIdFor('CDB BANCO X 2028');
+
+  it('review F1: a never-priced arrival with a fee — a flat day reads 0 %, and no price change', async () => {
+    //   100 PETR4 flat at 10,00. 01/07 10 VALE3 (no close, ever) arrive,
+    //   unpaired, at 50,00 + 5,00 of fees → COST_FALLBACK at 50,50.
+    //   V 1.000 → 1.000 + 505 = 1.505; flow +505 → r = (1.505 − 1.000 − 505) ÷ 1.000 = 0
+    //   (on the fee-less 500 the flat day read +0,5 %)
+    //   decomposition: contributions 505, price change 505 − 505 = 0
+    const result = await dayOf(
+      [
+        held(),
+        aTransaction()
+          .transferIn()
+          .of('VALE3')
+          .at('XP')
+          .on('2026-07-01')
+          .quantity('10')
+          .price('50')
+          .fees('5')
+          .build(),
+      ],
+      [
+        ['2026-06-30', '10'],
+        ['2026-07-01', '10'],
+      ],
+      {
+        setup: ({ assets }) =>
+          assets.add({ id: VALE3, code: 'VALE3', name: 'Vale ON', assetClass: 'stock' }),
+      },
+    );
+    expect(result.points).toEqual(['1000', '1505']);
+    expect(result.flow).toEqual(['505']);
+    expect(result.twr).toBe('0');
+    expect(result.decomposition.netContributions.toString()).toBe('505');
+    expect(result.decomposition.priceChange.toString()).toBe('0');
+  });
+
+  it('review F1: bank paper arriving with a fee — accrued on cost with the fee, 0 %', async () => {
+    //   100 PETR4 flat at 10,00. 01/07 1 CDB (110 % CDI, issued 30/06) arrives
+    //   at 10.000,00 + 10,00 fees; CDI 30/06 = 0,05 % → one day's factor
+    //   1 + 1,10 × 0,0005 = 1,00055.
+    //   value added = 10.010,00 × 1,00055 = 10.015,5055
+    //   V 1.000 → 11.015,5055; flow +10.015,5055 → r = 0
+    //   (on the fee-less 10.000 × 1,00055 = 10.005,50 it read +1,00055 %)
+    const result = await dayOf(
+      [
+        held(),
+        aTransaction()
+          .transferIn()
+          .of('CDB BANCO X 2028')
+          .at('XP')
+          .on('2026-07-01')
+          .quantity('1')
+          .price('10000')
+          .fees('10')
+          .build(),
+      ],
+      [
+        ['2026-06-30', '10'],
+        ['2026-07-01', '10'],
+      ],
+      {
+        setup: ({ assets, contracts, index }) => {
+          assets.add({ id: CDB, code: 'CDB BANCO X 2028', name: 'CDB', assetClass: 'cdb' });
+          contracts.set(aContract(CDB, { issueDate: '2026-06-30' }));
+          index.set('CDI', [indexPoint('2026-06-30', '0.05')]);
+        },
+      },
+    );
+    expect(result.points).toEqual(['1000', '11015.5055']);
+    expect(result.flow).toEqual(['10015.5055']);
+    expect(result.twr).toBe('0');
+    expect(result.decomposition.priceChange.toString()).toBe('0');
+  });
+
+  it('review F2: an arrival on the current date is valued at the live quote — the day reads its 5 %', async () => {
+    //   100 PETR4, close 30/06 10,00, live quote 01/07 10,50 (current date).
+    //   01/07 1.000 arrive, unpaired, carried at 8,00.
+    //   V 1.000 → 1.100 × 10,50 = 11.550; flow 1.000 × 10,50 = 10.500
+    //   r = (11.550 − 1.000 − 10.500) ÷ 1.000 = 0,05
+    //   (valued at the close, the flow was 10.000 and the day read 55 %)
+    const result = await dayOf(
+      [
+        held(),
+        aTransaction()
+          .transferIn()
+          .of('PETR4')
+          .at('XP')
+          .on('2026-07-01')
+          .quantity('1000')
+          .price('8')
+          .build(),
+      ],
+      [['2026-06-30', '10']],
+      {
+        setup: ({ prices }) => prices.setLatest(PETR4, '10.50', '2026-07-01T18:00:00Z'),
+        currentDate: '2026-07-01',
+      },
+    );
+    expect(result.points).toEqual(['1000', '11550']);
+    expect(result.flow).toEqual(['10500']);
+    expect(result.twr).toBe('0.05');
   });
 });

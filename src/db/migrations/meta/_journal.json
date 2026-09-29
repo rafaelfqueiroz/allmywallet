@@ -225,6 +225,13 @@
       "when": 1790612573207,
       "tag": "0031_cotahist_regap",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790689892511,
+      "tag": "0032_snapshot_market_flows",
+      "breakpoints": true
     }
   ]
 }

@@ -93,6 +93,7 @@ function snapshotsFor(portfolio: GeneratedPortfolio, dates: readonly string[]) {
     date: day(date),
     totalValue: total,
     netContributions: Money.fromString('1000'),
+    marketFlows: Money.fromString('1000'), // SPEC-013 BR-013-08: no unpaired transfer here, so equal to netContributions
     earningsToDate: Money.fromString('10'),
     byAssetClass: new Map(byAssetClass),
     hasEstimates,

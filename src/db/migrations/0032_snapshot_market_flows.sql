@@ -1,0 +1,39 @@
+-- SPEC-013 BR-013-08 (amended 2026-09-29, DL-013-09, DL-013-10) / SPEC-012
+-- BR-012-01 (DL-012-08) / SPEC-009 BR-009-16 (#183): an unpaired custody
+-- transfer needs two valuations. At cost, for *Total investido* and *Ganho* —
+-- that is the existing `net_contributions`. At market value on the transfer
+-- date, for the growth decomposition, the monthly contribution bars, TWR, XIRR
+-- and the shadow portfolio — that is this column: the cumulative external
+-- flows valued at market on each flow's date. It equals `net_contributions`
+-- except for an unpaired transfer (and a paired transfer whose legs price
+-- differently, which flows zero in both).
+--
+-- AR-69 expand/contract, and this is load-bearing rather than ceremonial:
+-- `start.sh` rolls back to the previous image when a health check fails, and
+-- that image keeps upserting snapshots with an INSERT that does not name this
+-- column. So it is added NULLABLE with NO DEFAULT — a NOT NULL would make every
+-- one of those inserts fail on the rolled-back image. Nullable, no default is a
+-- metadata-only ADD COLUMN (no table rewrite).
+--
+-- NULL means "written by a writer that predates this column" and reads as
+-- equal to `net_contributions`; the snapshot repository and the report loaders
+-- apply that rule, and nothing else interprets NULL. Nothing in this migration
+-- or this release adds NOT NULL — that is a later migration, once no previous
+-- image can still be running.
+--
+-- The backfill below sets every existing row to `net_contributions`, which is
+-- exactly what NULL means, so the column is already populated for history that
+-- pre-dates the change. It is a derived-cache column (BR-009-17): a rebuild
+-- from the ledger overwrites it with the market-valued figure. A row the
+-- previous image writes between this ADD COLUMN and the UPDATE, or after it on
+-- a rolled-back deploy, stays NULL and reads the same way.
+--
+-- Money is NUMERIC(20,8) (AR-28). No policy change: the table already carries
+-- its `tenant_isolation` policy (ENABLE + FORCE, USING + WITH CHECK, from 0008)
+-- and a policy is per table, so a column needs none. The migration runs as
+-- `allmywallet_migrator`, which owns the table; `allmywallet_app` gets the new
+-- column through its existing table-level privileges. No personal data moves
+-- (SPEC-004): a monetary aggregate is copied from a sibling column of the same
+-- row.
+ALTER TABLE "daily_valuation_snapshots" ADD COLUMN "market_flows" numeric(20, 8);--> statement-breakpoint
+UPDATE "daily_valuation_snapshots" SET "market_flows" = "net_contributions";

@@ -31,12 +31,18 @@ function snapshot(
   date: string,
   totalValue: string,
   netContributions = '0',
-  options: { hasEstimates?: boolean; byAssetClass?: ReadonlyMap<AssetClass, Money> } = {},
+  options: {
+    hasEstimates?: boolean;
+    byAssetClass?: ReadonlyMap<AssetClass, Money>;
+    /** SPEC-013 BR-013-08: differs from `netContributions` only for an unpaired transfer. */
+    marketFlows?: string;
+  } = {},
 ): DailyValuationSnapshot {
   return {
     date: d(date),
     totalValue: m(totalValue),
     netContributions: m(netContributions),
+    marketFlows: m(options.marketFlows ?? netContributions),
     earningsToDate: Money.zero(),
     byAssetClass: options.byAssetClass ?? new Map<AssetClass, Money>(),
     hasEstimates: options.hasEstimates ?? false,
@@ -217,6 +223,34 @@ describe('monthlyContributions (BR-013-06) — contributions are a flow', () => 
     );
     expect(bars).toHaveLength(1);
     expect(to8(bars[0]!.amount)).toBe('1100.00000000');
+  });
+
+  /**
+   * #183 / SPEC-013 BR-013-08, DL-013-10: the bars read the market-valued
+   * column, anchor included. In March 100 shares arrive from outside, carried
+   * at 8,00 (cost 800) with a close of 11,00 (market 1.100):
+   *
+   *   Feb close  net 1.000   market 1.000
+   *   Mar close  net 1.800   market 2.100
+   *   March bar  = 2.100 − 1.000 = **1.100** (at cost it would be 800)
+   */
+  it('bars an unpaired transfer at its market value, not its cost', () => {
+    const bars = monthlyContributions(
+      [snapshot('2026-03-31', '2200', '1800', { marketFlows: '2100' })],
+      snapshot('2026-02-28', '1000', '1000', { marketFlows: '1000' }),
+    );
+    expect(bars.map((bar) => bar.amount.toString())).toEqual(['1100']);
+  });
+
+  it('anchors on the opening snapshot’s market column, not its cost column', () => {
+    //   opening net 1.000 / market 1.500; close net 1.800 / market 2.100
+    //   bar = 2.100 − 1.500 = 600 — never 1.800 − 1.000 = 800 (cost) nor
+    //   2.100 − 1.000 = 1.100 (the columns mixed)
+    const bars = monthlyContributions(
+      [snapshot('2026-03-31', '2200', '1800', { marketFlows: '2100' })],
+      snapshot('2026-02-28', '1500', '1000', { marketFlows: '1500' }),
+    );
+    expect(bars.map((bar) => bar.amount.toString())).toEqual(['600']);
   });
 });
 

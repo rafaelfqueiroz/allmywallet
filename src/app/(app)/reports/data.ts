@@ -297,6 +297,9 @@ export class DrizzleReportDataPort implements ReportDataPort {
       date: row.date as BusinessDate,
       totalValue: Money.fromString(String(row.totalValue)),
       netContributions: Money.fromString(String(row.netContributions)),
+      // AR-69: NULL is a row written before `market_flows` existed — it reads
+      // as `net_contributions`.
+      marketFlows: Money.fromString(String(row.marketFlows ?? row.netContributions)),
       earningsToDate: Money.fromString(String(row.earningsToDate)),
       byAssetClass: deserializeAssetClassBreakdown(row.byAssetClass),
       hasEstimates: row.hasEstimates,
@@ -471,6 +474,9 @@ export class DrizzleReportDataPort implements ReportDataPort {
       date: row.date as BusinessDate,
       totalValue: Money.fromString(String(row.totalValue)),
       netContributions: Money.fromString(String(row.netContributions)),
+      // AR-69: NULL is a row written before `market_flows` existed — it reads
+      // as `net_contributions`.
+      marketFlows: Money.fromString(String(row.marketFlows ?? row.netContributions)),
       earningsToDate: Money.fromString(String(row.earningsToDate)),
       byAssetClass: deserializeAssetClassBreakdown(row.byAssetClass),
       hasEstimates: row.hasEstimates,

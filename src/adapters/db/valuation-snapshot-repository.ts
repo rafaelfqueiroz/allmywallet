@@ -43,6 +43,7 @@ export class DrizzleValuationSnapshotRepository implements SnapshotRepositoryPor
           date: serialized.date,
           totalValue: snapshot.totalValue,
           netContributions: snapshot.netContributions,
+          marketFlows: snapshot.marketFlows,
           earningsToDate: snapshot.earningsToDate,
           byAssetClass: serialized.byAssetClass,
           hasEstimates: snapshot.hasEstimates,
@@ -52,6 +53,7 @@ export class DrizzleValuationSnapshotRepository implements SnapshotRepositoryPor
           set: {
             totalValue: snapshot.totalValue,
             netContributions: snapshot.netContributions,
+            marketFlows: snapshot.marketFlows,
             earningsToDate: snapshot.earningsToDate,
             byAssetClass: serialized.byAssetClass,
             hasEstimates: snapshot.hasEstimates,
@@ -102,13 +104,17 @@ export class DrizzleValuationSnapshotRepository implements SnapshotRepositoryPor
 }
 
 // AR-06/AR-07: the `money` custom type already parses NUMERIC -> Money at the
-// driver boundary, so the three figures below are already `Money`. Only
+// driver boundary, so the figures below are already `Money`. Only
 // `by_asset_class` needs converting, because jsonb hands back plain strings.
+//
+// AR-69: `market_flows` is nullable — NULL is a row written by a writer that
+// predates the column (a rolled-back image) and reads as `net_contributions`.
 function toDomain(row: typeof dailyValuationSnapshots.$inferSelect): DailyValuationSnapshot {
   return {
     date: BusinessDate.of(row.date),
     totalValue: row.totalValue,
     netContributions: row.netContributions,
+    marketFlows: row.marketFlows ?? row.netContributions,
     earningsToDate: row.earningsToDate,
     byAssetClass: deserializeAssetClassBreakdown(row.byAssetClass),
     hasEstimates: row.hasEstimates,
