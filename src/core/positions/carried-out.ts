@@ -1,6 +1,6 @@
 import type { DomainError } from '@/core/shared/domain-error';
 import type { TransactionId } from '@/core/shared/ids';
-import { asStored, Money } from '@/core/shared/money';
+import { asStored, Money, type Quantity } from '@/core/shared/money';
 import { type Result, err, ok } from '@/core/shared/result';
 import type { Transaction } from '@/core/ledger/transaction';
 import { applyTransaction } from '@/core/positions/apply-transaction';
@@ -77,6 +77,32 @@ export function costsCarriedOut(
   transactions: readonly Transaction[],
   options: ReplayOptions = {},
 ): Result<ReadonlyMap<TransactionId, Money>, DomainError> {
+  const averages = averagesCarriedOut(transactions, options);
+  if (!averages.ok) return averages;
+  const quantities = new Map(transactions.map((row) => [row.id, row.quantity]));
+  const carried = new Map<TransactionId, Money>();
+  for (const [id, average] of averages.value) {
+    // Every id came from a row of `transactions`, so its quantity is there.
+    carried.set(id, average.times(quantities.get(id) as Quantity));
+  }
+  return ok(carried);
+}
+
+/**
+ * The per-share figure behind `costsCarriedOut`: **round₈ of the source's
+ * *preço médio* immediately before each `transfer_out`**, keyed by the
+ * debit's id. `costsCarriedOut` is exactly this × the debit's quantity.
+ *
+ * SPEC-013 BR-013-08 (#183): the snapshot's flow fold needs the per-share
+ * figure as well, because an unpaired debit's *market* flow is valued the way
+ * SPEC-009 values a holding (`valueHoldingsAt`), and where that falls back to
+ * cost — no close ever, or accrued bank paper — it is the holding's average,
+ * not its total, that the valuation takes.
+ */
+export function averagesCarriedOut(
+  transactions: readonly Transaction[],
+  options: ReplayOptions = {},
+): Result<ReadonlyMap<TransactionId, Money>, DomainError> {
   // BR-007-08: a cost is a fact about one (asset, institution) position.
   const positions = new Map<string, Transaction[]>();
   for (const transaction of selectForReplay(transactions, options)) {
@@ -102,7 +128,7 @@ export function costsCarriedOut(
       if (row.type === 'transfer_out') {
         // SPEC-013 BR-013-08: the source's preço médio immediately before the
         // debit, at the scale the paired credit stores it — see above.
-        carried.set(row.id, Money.fromString(asStored(state.averageCost)).times(row.quantity));
+        carried.set(row.id, Money.fromString(asStored(state.averageCost)));
       }
       state = next.value;
     }
