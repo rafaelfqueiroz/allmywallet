@@ -20,7 +20,22 @@ import {
   type PerformanceReport,
   type PerformanceSeries,
 } from '@/core/reporting/performance/report';
-import { DEFAULT_DIVERGENCE_POINTS } from '@/core/reporting/performance/xirr';
+import { computeXirr, DEFAULT_DIVERGENCE_POINTS } from '@/core/reporting/performance/xirr';
+import { computeTwr } from '@/core/reporting/performance/twr';
+import type { Transaction } from '@/core/ledger/transaction';
+import {
+  aTransaction,
+  assetIdFor,
+  resetTransactionSequence,
+} from '@/core/ledger/test-support/transaction-builder';
+import { FakeAssetCatalog } from '@/core/quotes/test-support';
+import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
+import { computeSnapshots } from '@/core/valuation/snapshot';
+import {
+  FakeFixedIncomeContracts,
+  FakeIndexSeriesReader,
+  FakePriceHistory,
+} from '@/core/valuation/test-support';
 import {
   EarningsTreatment,
   type Benchmark,
@@ -1055,5 +1070,126 @@ describe('SPEC-012 AC-14 — every grouping dimension, and the sum still holds',
 
     const byInstitution = unwrap((await run({ port, grouping: 'institution' })).contribution);
     expect(byInstitution.groups.filter((group) => group.key.synthetic)).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('SPEC-013 BR-013-08 → SPEC-012 BR-012-01: a move between the user’s brokers is no flow (#181)', () => {
+  /**
+   * End to end: ledger → SPEC-009 snapshots → the performance series → TWR
+   * and XIRR. The ledger holds 100 PETR4 bought at Clear on 30/12/2025 for
+   * 1.000,00. Inside 2026 the only event is a move of all 100 to XP on
+   * 01/07/2026 — a price-less debit and a credit carrying 10,00.
+   *
+   *   close 30/12/2025 = 10,00 → V(01/01/2026) = 1.000,00 (carried forward)
+   *   close 01/07/2026 = 11,00 → V(01/07/2026) = 1.100,00, flat to year end
+   *
+   *   flow on 01/07 = debit −100 × 10,00 + credit +100 × 10,00 = 0
+   *   TWR  = 1.100 ÷ 1.000 − 1 = **0,10** — the pure price change
+   *   XIRR : −1.000 at t = 0, +1.100 at t = 365/365, nothing between
+   *        = 1.100 ÷ 1.000 − 1 = **0,10**
+   *
+   * Before #181 the debit flowed R$ 0 and 01/07 carried a +1.000,00 inflow:
+   * r = (1.100 − 1.000 − 1.000) ÷ 1.000 = −0,90, a TWR of −90 %.
+   */
+  const PETR4 = assetIdFor('PETR4');
+  const from = day('2026-01-01');
+  const to = day('2027-01-01');
+
+  async function performanceOf(ledger: readonly Transaction[]) {
+    const assets = new FakeAssetCatalog();
+    assets.add({ id: PETR4, code: 'PETR4', name: 'Petrobras PN', assetClass: 'stock' });
+    const prices = new FakePriceHistory()
+      .addClose(PETR4, '2025-12-30', '10.00')
+      .addClose(PETR4, '2026-07-01', '11.00');
+    const snapshots = await computeSnapshots(
+      {
+        calendar: new B3TradingCalendar(),
+        prices,
+        contracts: new FakeFixedIncomeContracts(),
+        indexSeries: new FakeIndexSeriesReader().set('CDI', []).set('IPCA', []),
+        assets,
+      },
+      ledger,
+      { from, to },
+    );
+    const series = seriesFromSnapshots(unwrap(snapshots), EarningsTreatment.WITH_EARNINGS);
+    return {
+      series,
+      twr: unwrap(computeTwr({ points: series.points, flows: series.flows })),
+      xirr: unwrap(computeXirr({ flows: cashFlowsFrom(series) })),
+    };
+  }
+
+  const bought = () =>
+    aTransaction()
+      .buy()
+      .of('PETR4')
+      .at('Clear')
+      .on('2025-12-30')
+      .quantity('100')
+      .price('10')
+      .build();
+
+  it('an inter-broker transfer leaves TWR at the price change and puts no flow on its date', async () => {
+    resetTransactionSequence();
+    const moved = await performanceOf([
+      bought(),
+      aTransaction()
+        .transferOut()
+        .of('PETR4')
+        .at('Clear')
+        .on('2026-07-01')
+        .quantity('100')
+        .price('0')
+        .build(),
+      aTransaction()
+        .transferIn()
+        .of('PETR4')
+        .at('XP')
+        .on('2026-07-01')
+        .quantity('100')
+        .price('10')
+        .build(),
+    ]);
+    expect(moved.twr.returnRate.toString()).toBe('0.1');
+    expect(moved.xirr.rate.toString()).toBe('0.1');
+
+    // XIRR sees no flow on the transfer date — and none on any other day
+    // between the opening and closing values.
+    const flows = cashFlowsFrom(moved.series);
+    expect(flows.find((flow) => flow.date === '2026-07-01')?.amount.isZero()).toBe(true);
+    expect(flows.slice(1, -1).every((flow) => flow.amount.isZero())).toBe(true);
+
+    // The same holding never moved produces the identical figures.
+    resetTransactionSequence();
+    const stayed = await performanceOf([bought()]);
+    expect(stayed.twr.returnRate.equals(moved.twr.returnRate)).toBe(true);
+    expect(stayed.xirr.rate.equals(moved.xirr.rate)).toBe(true);
+  });
+
+  it('a one-sided transfer in is still a flow, so TWR neutralises it (DL-013-08)', async () => {
+    // 100 more PETR4 arrive at XP from outside on 01/07 at a carried 11,00:
+    //   V(30/06) = 1.000,00; V(01/07) = 200 × 11,00 = 2.200,00; flow +1.100,00
+    //   r(01/07) = (2.200 − 1.000 − 1.100) ÷ 1.000 = 0,10; flat after
+    //   TWR = 0,10 — the price change, not the 1.100,00 of shares brought in.
+    // Excluding transfers outright would have read r = 1,20: the arrival as profit.
+    resetTransactionSequence();
+    const received = await performanceOf([
+      bought(),
+      aTransaction()
+        .transferIn()
+        .of('PETR4')
+        .at('XP')
+        .on('2026-07-01')
+        .quantity('100')
+        .price('11')
+        .build(),
+    ]);
+    expect(received.twr.returnRate.toString()).toBe('0.1');
+    expect(
+      received.series.flows.find((flow) => flow.date === '2026-07-01')?.amount.toString(),
+    ).toBe('1100');
   });
 });

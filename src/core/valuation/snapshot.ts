@@ -1,12 +1,13 @@
 import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
-import type { AssetId } from '@/core/shared/ids';
+import type { AssetId, TransactionId } from '@/core/shared/ids';
 import { Money } from '@/core/shared/money';
 import { ok, type Result } from '@/core/shared/result';
 import Decimal from 'decimal.js';
 import { computeTotalValue, isEarnings, type Transaction } from '@/core/ledger/transaction';
 import { aggregateAcrossInstitutions } from '@/core/positions/aggregate';
-import { amortizationTermsOf } from '@/core/positions/amortization';
+import { type AmortizationTerms, amortizationTermsOf } from '@/core/positions/amortization';
+import { costsCarriedOut } from '@/core/positions/carried-out';
 import { replayPositions } from '@/core/positions/replay';
 import type { Asset, AssetCatalogPort } from '@/core/quotes/ports';
 import { listCalendarDays } from '@/core/valuation/business-days';
@@ -177,6 +178,21 @@ export async function loadValuationContextForAssets(
 // ---------------------------------------------------------------------------
 
 /**
+ * SPEC-007 BR-007-05c: the context already holds every asset of the ledger it
+ * was loaded for, which is exactly what an amortization's principal depends on
+ * — both for valuing a position and for the cost a transfer carries out of one.
+ */
+export function amortizationOf(context: ValuationContext): AmortizationTerms {
+  return amortizationTermsOf(
+    [...context.assets.values()].map((asset) => ({
+      assetId: asset.id,
+      code: asset.code,
+      assetClass: asset.assetClass,
+    })),
+  );
+}
+
+/**
  * BR-009-16 / AC-16 — every open position on `asOf`, valued by the method its
  * asset class demands.
  *
@@ -194,17 +210,10 @@ export function valuePortfolioAt(
   asOf: BusinessDate,
   mode: ListedValuationMode,
 ): Result<readonly ValuedPosition[], DomainError> {
-  // SPEC-007 BR-007-05c: the context already holds every asset of the
-  // ledger it was loaded for, which is exactly what an amortization's
-  // principal depends on.
-  const amortization = amortizationTermsOf(
-    [...context.assets.values()].map((asset) => ({
-      assetId: asset.id,
-      code: asset.code,
-      assetClass: asset.assetClass,
-    })),
-  );
-  const replayed = replayPositions(transactions, { asOf, amortization });
+  const replayed = replayPositions(transactions, {
+    asOf,
+    amortization: amortizationOf(context),
+  });
   if (!replayed.ok) return replayed;
 
   // BR-007-08: positions are held per (asset, institution); a portfolio value
@@ -233,8 +242,47 @@ export function valuePortfolioAt(
  * events move quantity without moving money and contribute nothing. Getting
  * this set wrong is what makes SPEC-012's TWR stop being TWR: TWR neutralises
  * exactly these and nothing else.
+ *
+ * **A transfer is a flow at the cost basis it carries** (SPEC-013 BR-013-08,
+ * amended 2026-09-29 / DL-013-08): a `transfer_in` at the cost it opens its
+ * lot with — `quantity × unitPrice + fees`, exactly what `applyAcquisition`
+ * adds — and a `transfer_out` at the cost it takes away from its source,
+ * which is not on the row at all. B3 exports the debit with no price
+ * (SPEC-005 BR-005-20a), so reading it from `unitPrice` flowed every debit at
+ * R$ 0 and counted each move between the user's own brokers as a deposit of
+ * its whole cost basis (#181: R$ 193.802,75 on the owner's ledger). The debit's
+ * cost is read off the source position by `costsCarriedOut` and passed in as
+ * `carriedOut`; a stated price on a debit is ignored.
+ *
+ * Worked example (DV-17): 100 PETR4 bought at Clear for 3.215,00 move to XP.
+ *
+ *   buy at Clear            +100 × 32,15              = +3.215,00
+ *   transfer_out at Clear   −100 × round₈(32,15)      = −3.215,00  (price-less)
+ *   transfer_in at XP       +100 × 32,15 (carried)    = +3.215,00
+ *   net contributions                                 =  3.215,00  — the buy
+ *
+ * The pair nets to exactly zero; only a one-sided transfer is money in or
+ * out. A credit B3 exported *with its own price* (#145) opens its lot at that
+ * price and so flows in at it, while its debit still flows out at the
+ * carried cost: the pair then nets to the difference, which is real — the
+ * lot's cost basis changed by that much, and net contributions track cost.
+ *
+ * Fees keep the sign convention of every other leg (`computeTotalValue`): a
+ * fee is money the user spent, so it adds to a transfer in and offsets a
+ * transfer out, as it offsets a sale's proceeds.
+ *
+ * `carriedOut` is required for a `transfer_out` and ignored for every other
+ * type. Omitting it throws rather than returning R$ 0 — R$ 0 is the defect.
  */
-export function externalFlow(transaction: Transaction): Money {
+export function externalFlow(transaction: Transaction, carriedOut: Money | null = null): Money {
+  if (transaction.type === 'transfer_out') {
+    if (carriedOut === null) {
+      throw new RangeError(
+        'externalFlow: a transfer_out flows at the cost it carries out (SPEC-013 BR-013-08) — pass it from costsCarriedOut',
+      );
+    }
+    return carriedOut.minus(transaction.fees).negated();
+  }
   /**
    * Recomputed from `quantity`, `unitPrice` and `fees` — **never read from
    * `transaction.totalValue`**.
@@ -259,11 +307,21 @@ export function externalFlow(transaction: Transaction): Money {
     case 'transfer_in':
       return cashEffect;
     case 'sell':
-    case 'transfer_out':
       return cashEffect.negated();
     default:
       return Money.zero();
   }
+}
+
+/** What the flow fold needs beyond the ledger itself. */
+export interface FlowOptions {
+  /**
+   * SPEC-007 BR-007-05c: an amortization before a `transfer_out` lowers the
+   * cost the debit carries away, so the fold needs the same terms as the
+   * valuation (`amortizationOf`). A ledger holding an amortization the terms
+   * do not cover fails rather than guessing.
+   */
+  readonly amortization?: AmortizationTerms | undefined;
 }
 
 interface RunningFlows {
@@ -276,7 +334,11 @@ const NO_FLOWS: RunningFlows = {
   earningsToDate: Money.zero(),
 };
 
-function applyFlow(running: RunningFlows, transaction: Transaction): RunningFlows {
+function applyFlow(
+  running: RunningFlows,
+  transaction: Transaction,
+  carriedOut: ReadonlyMap<TransactionId, Money>,
+): RunningFlows {
   // BR-006-03: only active rows are calculated on. `unclassified` rows stay
   // visible in the ledger and out of the arithmetic.
   if (transaction.status !== 'active') return running;
@@ -289,19 +351,35 @@ function applyFlow(running: RunningFlows, transaction: Transaction): RunningFlow
     };
   }
   return {
-    netContributions: running.netContributions.plus(externalFlow(transaction)),
+    netContributions: running.netContributions.plus(
+      // `costsCarriedOut` values every active debit it was given or fails, so
+      // a debit here always finds its cost; every other type has none.
+      externalFlow(transaction, carriedOut.get(transaction.id) ?? null),
+    ),
     earningsToDate: running.earningsToDate,
   };
 }
 
-/** Every active flow with `tradeDate <= date`, summed from scratch. */
-function flowsThrough(transactions: readonly Transaction[], date: BusinessDate): RunningFlows {
+/**
+ * Every active flow with `tradeDate <= date`, summed from scratch — including
+ * the debits' carried costs, re-derived from the ledger cut at `date`.
+ */
+function flowsThrough(
+  transactions: readonly Transaction[],
+  date: BusinessDate,
+  options: FlowOptions,
+): Result<RunningFlows, DomainError> {
+  const carriedOut = costsCarriedOut(transactions, {
+    asOf: date,
+    amortization: options.amortization,
+  });
+  if (!carriedOut.ok) return carriedOut;
   let running = NO_FLOWS;
   for (const transaction of transactions) {
     if (BusinessDate.isAfter(transaction.tradeDate, date)) continue;
-    running = applyFlow(running, transaction);
+    running = applyFlow(running, transaction, carriedOut.value);
   }
-  return running;
+  return ok(running);
 }
 
 // ---------------------------------------------------------------------------
@@ -339,22 +417,28 @@ function totalsOf(valued: readonly ValuedPosition[]): {
  * This is the *authoritative* definition: the figures for a date are a
  * function of the whole ledger up to that date and nothing else. The
  * carried-forward variant below must agree with it exactly (DM-4 / TS-08).
+ *
+ * A `Result` because a transfer out's flow is read off its source position
+ * (SPEC-013 BR-013-08), and a position that cannot be replayed has no cost to
+ * carry — that is reported, never flowed as zero.
  */
 export function buildSnapshot(
   date: BusinessDate,
   valued: readonly ValuedPosition[],
   transactions: readonly Transaction[],
-): DailyValuationSnapshot {
+  options: FlowOptions = {},
+): Result<DailyValuationSnapshot, DomainError> {
+  const flows = flowsThrough(transactions, date, options);
+  if (!flows.ok) return flows;
   const { total, byAssetClass, hasEstimates } = totalsOf(valued);
-  const flows = flowsThrough(transactions, date);
-  return {
+  return ok({
     date,
     totalValue: total,
-    netContributions: flows.netContributions,
-    earningsToDate: flows.earningsToDate,
+    netContributions: flows.value.netContributions,
+    earningsToDate: flows.value.earningsToDate,
     byAssetClass,
     hasEstimates,
-  };
+  });
 }
 
 /**
@@ -366,12 +450,27 @@ export function buildSnapshot(
  * the whole ledger, this one accumulates; asserting that they agree over a
  * generated history is what catches the accumulation and ordering bugs that
  * every other test walks past.
+ *
+ * The debits' carried costs are folded **once**, over the ledger up to the
+ * last date, where `buildSnapshot` re-folds them per date from a ledger cut
+ * there. The two agree because a debit's cost depends only on rows that sort
+ * before it (`compareForReplay` orders by date first), so no later row can
+ * change it — which is exactly the claim the DM-4 property test puts to them.
  */
 export function buildSnapshotSeries(
   dates: readonly BusinessDate[],
   valuedByDate: ReadonlyMap<BusinessDate, readonly ValuedPosition[]>,
   transactions: readonly Transaction[],
-): readonly DailyValuationSnapshot[] {
+  options: FlowOptions = {},
+): Result<readonly DailyValuationSnapshot[], DomainError> {
+  const last = dates.at(-1);
+  if (last === undefined) return ok([]);
+  const carriedOut = costsCarriedOut(transactions, {
+    asOf: last,
+    amortization: options.amortization,
+  });
+  if (!carriedOut.ok) return carriedOut;
+
   // Ascending by trade date, so the walk below can consume the ledger once.
   const ordered = [...transactions].sort((a, b) => BusinessDate.compare(a.tradeDate, b.tradeDate));
 
@@ -382,7 +481,7 @@ export function buildSnapshotSeries(
     while (cursor < ordered.length) {
       const next = ordered[cursor];
       if (next === undefined || BusinessDate.isAfter(next.tradeDate, date)) break;
-      running = applyFlow(running, next);
+      running = applyFlow(running, next, carriedOut.value);
       cursor += 1;
     }
     const { total, byAssetClass, hasEstimates } = totalsOf(valuedByDate.get(date) ?? []);
@@ -395,7 +494,7 @@ export function buildSnapshotSeries(
       hasEstimates,
     });
   }
-  return snapshots;
+  return ok(snapshots);
 }
 
 /** Exact structural equality — the DM-4 gate compares values, not identity. */
@@ -520,7 +619,9 @@ export async function computeSnapshots(
     valuedByDate.set(date, valued.value);
   }
 
-  return ok(buildSnapshotSeries(dates, valuedByDate, transactions));
+  return buildSnapshotSeries(dates, valuedByDate, transactions, {
+    amortization: amortizationOf(context),
+  });
 }
 
 /**

@@ -43,7 +43,11 @@ export interface ValuePoint {
 export interface GrowthDecomposition {
   readonly opening: Money;
   readonly closing: Money;
-  /** BR-013-08 — buys and transfers in, less sells and transfers out. Never price, never earnings. */
+  /**
+   * BR-013-08 — buys and transfers in, less sells and transfers out; a
+   * transfer at the cost basis it carries, so a move between the user's own
+   * custodians nets to zero (DL-013-08). Never price, never earnings.
+   */
   readonly netContributions: Money;
   /** The residual. Everything the market did, once flows and income are removed. */
   readonly priceChange: Money;
