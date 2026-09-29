@@ -19,15 +19,15 @@ import {
 
 const clock = new FakeClock('2026-06-30T12:00:00Z');
 
-function groupLegs(group: string, outgoingQuantity = '40', cost = '400') {
+function groupLegs(group: string, outgoingQuantity = '40', cost = '400', date = '2026-02-01') {
   return [
     aTransaction()
       .conversionOut(group, cost)
       .of('OLD3')
-      .on('2026-02-01')
+      .on(date)
       .quantity(outgoingQuantity)
       .build(),
-    aTransaction().conversionIn(cost, group).of('NEW3').on('2026-02-01').quantity('20').build(),
+    aTransaction().conversionIn(cost, group).of('NEW3').on(date).quantity('20').build(),
   ] as const;
 }
 
@@ -112,6 +112,39 @@ describe('SPEC-006 BR-006-05 — atomic conversion group management', () => {
     expect(deleted.ok).toBe(true);
     expect(deleted.ok && deleted.value.deletedCount).toBe(2);
     expect(await deps.transactions.listByConversionGroup(ConversionGroupId.of(group))).toEqual([]);
+  });
+});
+
+describe('SPEC-009 BR-009-18 — a conversion write reports the date its figures went stale from', () => {
+  it('create reports the group date; replace reports the earlier of old and new; delete the stored date', async () => {
+    const deps = depsWithSource();
+    const group = ConversionGroupId.of('00000000-c0de-7000-8000-000000000031');
+
+    const created = await createAssetConversionGroup(
+      deps,
+      groupLegs(group, '40', '400', '2026-02-01'),
+    );
+    expect(created.ok && created.value.fromDate).toBe('2026-02-01');
+
+    // Moving the group later leaves February's figures stale too: the boundary
+    // is min(old 2026-02-01, new 2026-03-02), not the new date.
+    const moved = await replaceAssetConversionGroup(
+      deps,
+      group,
+      groupLegs(group, '40', '400', '2026-03-02'),
+    );
+    expect(moved.ok && moved.value.fromDate).toBe('2026-02-01');
+
+    // Moving it earlier: the new date is the earlier one.
+    const earlier = await replaceAssetConversionGroup(
+      deps,
+      group,
+      groupLegs(group, '40', '400', '2026-01-15'),
+    );
+    expect(earlier.ok && earlier.value.fromDate).toBe('2026-01-15');
+
+    const deleted = await deleteAssetConversionGroup(deps, group);
+    expect(deleted.ok && deleted.value.fromDate).toBe('2026-01-15');
   });
 });
 
