@@ -2,14 +2,16 @@
  * SPEC-008 BR-008-07: the calendar's *hours* are data, never hardcoded in
  * polling logic. This file is that data — a small, generated (not scraped)
  * B3 holiday list and the regular/half session hours, all in `America/Sao_Paulo`
- * local time. Out of this spec's scope is sourcing a complete authoritative
- * B3 holiday feed; this is a representative dataset sufficient to prove the
- * calendar mechanism and to drive deterministic tests (TS-26 — no test
- * depends on a live provider, and a calendar dataset is not one).
+ * local time. Each year advertised in `B3_CALENDAR_YEARS` has complete
+ * full-day closure data for `isTradingDay` and D+2; callers must treat any
+ * other year as uncovered rather than extrapolating holidays.
  *
  * Extend this list as real years are needed — it is intentionally not a
  * formula (Brazilian holidays include moveable feasts) and never will be.
  */
+
+/** Years for which every B3 full-day closure is represented below. */
+export const B3_CALENDAR_YEARS: readonly string[] = ['2026'];
 
 /** B3 full-day holidays — regular session does not open at all. `YYYY-MM-DD`. */
 export const B3_HOLIDAYS: readonly string[] = [
@@ -26,14 +28,13 @@ export const B3_HOLIDAYS: readonly string[] = [
   '2026-11-02', // Finados
   '2026-11-15', // Proclamação da República
   '2026-11-20', // Consciência Negra (B3 calendar since 2024)
+  '2026-12-24', // Véspera de Natal — sem negociação
   '2026-12-25', // Natal
+  '2026-12-31', // Véspera de Ano Novo — sem negociação
 ];
 
 /** B3 half-sessions — trades, but the regular session ends early. `YYYY-MM-DD`. */
-export const B3_HALF_SESSIONS: readonly string[] = [
-  '2026-12-24', // Véspera de Natal
-  '2026-12-31', // Véspera de Ano Novo
-];
+export const B3_HALF_SESSIONS: readonly string[] = [];
 
 /** Regular B3 equities session, local time — matches SPEC-008's "~7h session" reference. */
 export const REGULAR_SESSION = { openHour: 10, openMinute: 0, closeHour: 17, closeMinute: 0 };

@@ -1,9 +1,9 @@
-import { FakeClock } from '@/core/shared/clock';
+import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import {
   FakePositionRepository,
   FakeTransactionRepository,
 } from '@/core/ledger/test-support/fake-repositories';
-import type { IngestionDependencies } from '@/core/ingestion/dependencies';
+import type { IngestionDependencies, SettlementCalendar } from '@/core/ingestion/dependencies';
 import {
   FakeAssetResolver,
   FakeClosePriceReader,
@@ -24,9 +24,38 @@ export interface FakeIngestionDeps extends IngestionDependencies {
   readonly institutions: FakeInstitutionResolver;
   readonly fixedIncomeContracts: FakeFixedIncomeContractWriter;
   readonly clock: FakeClock;
+  readonly settlementCalendar: FakeSettlementCalendar;
   readonly corporateEventFactors: FakeCorporateEventFactorReader;
   readonly closePrices: FakeClosePriceReader;
   readonly subscriptionEvidence: FakeSubscriptionEvidenceReader;
+}
+
+/** TS-02: a controllable fake for the narrow D+2 calendar seam. */
+export class FakeSettlementCalendar implements SettlementCalendar {
+  #tradingDays: ReadonlySet<string> | null = null;
+  #coveredYears: ReadonlySet<string> | null = null;
+
+  hasCompleteDataFor(date: BusinessDate): boolean {
+    return this.#coveredYears === null || this.#coveredYears.has(date.slice(0, 4));
+  }
+
+  /**
+   * With no explicit dataset, ordinary weekdays are trading days. A focused
+   * holiday/weekend test supplies the exact sessions it needs instead.
+   */
+  isTradingDay(date: BusinessDate): boolean {
+    if (this.#tradingDays !== null) return this.#tradingDays.has(date);
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+    return weekday !== 0 && weekday !== 6;
+  }
+
+  setTradingDays(dates: readonly string[]): void {
+    this.#tradingDays = new Set(dates.map((date) => BusinessDate.of(date)));
+  }
+
+  setCoveredYears(years: readonly string[]): void {
+    this.#coveredYears = new Set(years);
+  }
 }
 
 /** TS-02/TS-22: a builder with sensible defaults, so a test states only what it cares about. */
@@ -41,6 +70,7 @@ export function buildFakeIngestionDeps(today = '2026-03-15'): FakeIngestionDeps 
     institutions: new FakeInstitutionResolver(),
     fixedIncomeContracts: new FakeFixedIncomeContractWriter(),
     clock: new FakeClock(`${today}T12:00:00-03:00`),
+    settlementCalendar: new FakeSettlementCalendar(),
     corporateEventFactors: new FakeCorporateEventFactorReader(),
     closePrices: new FakeClosePriceReader(),
     subscriptionEvidence: new FakeSubscriptionEvidenceReader(transactions),

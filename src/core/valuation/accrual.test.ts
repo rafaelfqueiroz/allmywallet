@@ -575,18 +575,20 @@ describe('BR-009-11/12 — the estimate marker and the gross-of-tax statement', 
   });
 });
 
-describe('TS-11 — adversarial precision: 248 business days of repeating decimals', () => {
+describe('TS-11 — adversarial precision: 247 business days of repeating decimals', () => {
   /**
    * The test that catches a JS `number` leaking into a money path. Every daily
    * rate below is a non-terminating decimal truncated the way SGS publishes
    * (8 dp) — 1/300 %, 1/400 %, … cycling — compounded across every business
-   * day B3 opens in 2026.
+   * day B3 opens in the tested 2026 window. The official calendar closes 24
+   * and 31 December; the half-open interval already excludes the 31st, so the
+   * corrected 24 December closure reduces the former 248 points to 247.
    *
-   * A float would accumulate error over 248 multiplications and land visibly
+   * A float would accumulate error over 247 multiplications and land visibly
    * away from the expected figure; `Decimal` at 40 significant digits does not.
    * The expected value was computed independently at the same precision.
    */
-  it('248 compounding steps land exactly on the independently computed value', () => {
+  it('247 compounding steps land exactly on the independently computed value', () => {
     const days: IndexSeriesPoint[] = [];
     let cursor = d('2026-01-02');
     let index = 0;
@@ -607,7 +609,7 @@ describe('TS-11 — adversarial precision: 248 business days of repeating decima
       cursor = BusinessDate.of(next.toISOString().slice(0, 10));
     }
 
-    expect(days).toHaveLength(248);
+    expect(days).toHaveLength(247);
     expect(days[0]?.value.toString()).toBe('0.00333333');
     expect(days[3]?.value.toString()).toBe('0.00166666');
 
@@ -623,8 +625,11 @@ describe('TS-11 — adversarial precision: 248 business days of repeating decima
       averageCost: Money.fromString('1000'),
     });
 
-    expect(valued.basis?.businessDays).toBe(248);
+    expect(valued.basis?.businessDays).toBe(247);
     expect(valued.basis?.missingIndexDays).toBe(0);
-    expect(to8(valued.value)).toBe('1005.21618409');
+    // Independent 40-digit evaluator:
+    // Π(i=0..246) [1 + trunc8(1 / ((3 + i mod 7) × 100)) / 100 × 1,1]
+    // = 1,005194069825295122493882337044481886287.
+    expect(to8(valued.value)).toBe('1005.19406982');
   });
 });

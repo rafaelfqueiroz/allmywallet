@@ -33,6 +33,15 @@ describe('B3TradingCalendar — trading days', () => {
     expect(calendar.isTradingDay(on('2026-02-17'))).toBe(false);
     // Corpus Christi is a B3 holiday and not a weekend.
     expect(calendar.isTradingDay(on('2026-06-04'))).toBe(false);
+    // The official 2026 B3 calendar has no negotiation on either year-end eve.
+    expect(calendar.isTradingDay(on('2026-12-24'))).toBe(false);
+    expect(calendar.isTradingDay(on('2026-12-31'))).toBe(false);
+  });
+
+  it('advertises complete data only for the authoritative year', () => {
+    expect(calendar.hasCompleteDataFor(on('2026-01-01'))).toBe(true);
+    expect(calendar.hasCompleteDataFor(on('2025-12-31'))).toBe(false);
+    expect(calendar.hasCompleteDataFor(on('2027-01-01'))).toBe(false);
   });
 
   it('computes the weekday independently of the host timezone', () => {
@@ -54,17 +63,11 @@ describe('B3TradingCalendar — sessions', () => {
     expect(session?.isHalfSession).toBe(false);
   });
 
-  it('closes early on a half-session, and still opens at the regular time', () => {
-    // Christmas Eve: opens 10:00, closes 13:00 local (16:00Z).
-    const session = calendar.sessionFor(on('2026-12-24'));
-    expect(session?.isHalfSession).toBe(true);
-    expect(session?.openUtc.toISOString()).toBe('2026-12-24T13:00:00.000Z');
-    expect(session?.closeUtc.toISOString()).toBe('2026-12-24T16:00:00.000Z');
-  });
-
   it('has no session at all on a non-trading day', () => {
     expect(calendar.sessionFor(on('2026-02-16'))).toBeUndefined();
     expect(calendar.sessionFor(on('2026-03-15'))).toBeUndefined();
+    expect(calendar.sessionFor(on('2026-12-24'))).toBeUndefined();
+    expect(calendar.sessionFor(on('2026-12-31'))).toBeUndefined();
   });
 });
 
@@ -86,11 +89,6 @@ describe('B3TradingCalendar — isSessionOpen', () => {
 
   it('is closed all day on a holiday, including during regular session hours', () => {
     expect(calendar.isSessionOpen(new Date('2026-02-16T16:00:00Z'))).toBe(false);
-  });
-
-  it('closes at 13:00 local on a half-session', () => {
-    expect(calendar.isSessionOpen(new Date('2026-12-24T15:59:00Z'))).toBe(true);
-    expect(calendar.isSessionOpen(new Date('2026-12-24T16:00:00Z'))).toBe(false);
   });
 
   it('reads the date in São Paulo, not UTC', () => {

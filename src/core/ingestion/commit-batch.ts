@@ -7,6 +7,7 @@ import { type Result, err, ok } from '@/core/shared/result';
 import { editTransactions } from '@/core/ledger/edit-transaction';
 import { validateAssetConversionGroup } from '@/core/ledger/manage-asset-conversion';
 import {
+  affectsPosition,
   computeTotalValue,
   type Transaction,
   type TransactionType,
@@ -25,7 +26,7 @@ import { type AmortizationTerms, loadAmortizationTerms } from '@/core/positions/
 import { sortForReplay } from '@/core/positions/ordering';
 import type { CorporateEventFactor } from '@/core/quotes/corporate-event-factors';
 import type { PositionState } from '@/core/positions/position-state';
-import type { IngestionDependencies } from '@/core/ingestion/dependencies';
+import type { IngestionDependencies, SettlementCalendar } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import type { ImportBatch, ImportRow } from '@/core/ingestion/ports';
 import { reconcilePositions, type ReconciliationInput } from '@/core/ingestion/reconcile';
@@ -3872,6 +3873,78 @@ export function buildCandidate(
   };
 }
 
+function nextCalendarDate(date: BusinessDate): BusinessDate {
+  const instant = new Date(`${date}T00:00:00Z`);
+  instant.setUTCDate(instant.getUTCDate() + 1);
+  return BusinessDate.of(instant.toISOString().slice(0, 10));
+}
+
+/**
+ * SPEC-005 BR-005-22/24 (#146): B3 custody reflects a trade at D+2, counted
+ * in trading sessions. Counting only through the confirmed snapshot date
+ * answers the one question reconciliation needs and never guesses with
+ * calendar days.
+ */
+function hasSettledBy(
+  tradeDate: BusinessDate,
+  asOf: BusinessDate,
+  calendar: SettlementCalendar,
+): boolean | null {
+  if (BusinessDate.isAfter(tradeDate, asOf)) return false;
+  if (!calendar.hasCompleteDataFor(tradeDate)) return null;
+  let tradingDays = 0;
+  for (
+    let cursor = nextCalendarDate(tradeDate);
+    !BusinessDate.isAfter(cursor, asOf);
+    cursor = nextCalendarDate(cursor)
+  ) {
+    // SPEC-005 BR-005-24 (#146): an omitted holiday can turn D+2 into D+1.
+    // Unknown calendar data therefore produces no settlement claim at all.
+    if (!calendar.hasCompleteDataFor(cursor)) return null;
+    if (!calendar.isTradingDay(cursor)) continue;
+    tradingDays += 1;
+    if (tradingDays === 2) return true;
+  }
+  return false;
+}
+
+function highestRecordedQuantity(transactions: readonly Transaction[]): Quantity {
+  const prefix: Transaction[] = [];
+  let highest = Quantity.zero();
+  for (const transaction of sortForReplay(
+    transactions.filter((item) => item.status === 'active' && affectsPosition(item.type)),
+  )) {
+    prefix.push(transaction);
+    const replayed = replayQuantity(prefix);
+    if (replayed.ok && replayed.value.comparedTo(highest) > 0) highest = replayed.value;
+  }
+  return highest;
+}
+
+function quantityBeforePostReferenceOrUnsettledTrades(
+  transactions: readonly Transaction[],
+  asOf: BusinessDate,
+  calendar: SettlementCalendar,
+): Quantity | null {
+  const excluded = new Set<Transaction['id']>();
+  for (const transaction of transactions) {
+    if (transaction.status !== 'active') continue;
+    if (transaction.type !== 'buy' && transaction.type !== 'sell') continue;
+    const afterReference = BusinessDate.isAfter(transaction.tradeDate, asOf);
+    const settled = afterReference ? null : hasSettledBy(transaction.tradeDate, asOf, calendar);
+    // A post-reference date is self-contained evidence. A pre-reference D+2
+    // claim is evidence only when every inspected calendar day was covered.
+    if (afterReference || settled === false) {
+      excluded.add(transaction.id);
+    }
+  }
+  if (excluded.size === 0) return null;
+  const replayed = replayQuantity(
+    transactions.filter((transaction) => !excluded.has(transaction.id)),
+  );
+  return replayed.ok ? replayed.value : null;
+}
+
 async function buildReconciliation(
   deps: IngestionDependencies,
   asOf: BusinessDate,
@@ -3968,6 +4041,12 @@ async function buildReconciliation(
       computedQuantity,
       b3Quantity,
       firstComputedTradeDate,
+      highestRecordedQuantity: highestRecordedQuantity(existing),
+      quantityBeforePostReferenceOrUnsettledTrades: quantityBeforePostReferenceOrUnsettledTrades(
+        existing,
+        asOf,
+        deps.settlementCalendar,
+      ),
       // SPEC-005 BR-005-24 (amended, #113): the ledger's own `unclassified`
       // transactions on the position. A Posição batch never holds unclassified
       // rows, so reading its rows could never give this cause — a Desdobro

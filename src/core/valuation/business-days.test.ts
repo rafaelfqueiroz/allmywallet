@@ -101,16 +101,15 @@ describe('countBusinessDays — the [from, toExclusive) convention (DL-009-08)',
     expect(countBusinessDays(calendar, d('2026-03-16'), d('2026-04-30'))).toBe(31);
   });
 
-  it('counts a half-session as a whole business day — the market opened (24 and 31 December)', () => {
+  it('excludes 24 and 31 December, when the official 2026 B3 calendar has no negotiation', () => {
     // [21 Dec 2026, 1 Jan 2027):
     //   Mon 21, Tue 22, Wed 23  ✔
-    //   Thu 24  ✔ half-session — B3 opens, closing at 13:00, so interest accrues
-    //   Fri 25  ✘ Natal
+    //   Thu 24, Fri 25  ✘ sem negociação
     //   Sat 26, Sun 27  ✘ weekend
     //   Mon 28, Tue 29, Wed 30  ✔
-    //   Thu 31  ✔ half-session
-    // = 8 business days.
-    expect(countBusinessDays(calendar, d('2026-12-21'), d('2027-01-01'))).toBe(8);
+    //   Thu 31  ✘ sem negociação
+    // = 6 business days.
+    expect(countBusinessDays(calendar, d('2026-12-21'), d('2027-01-01'))).toBe(6);
   });
 
   it('agrees with the calendar’s own month count for February 2026', () => {
@@ -123,11 +122,11 @@ describe('countBusinessDays — the [from, toExclusive) convention (DL-009-08)',
     expect(calendar.tradingDaysInMonth('2026-02')).toBe(18);
   });
 
-  it('agrees with the calendar for December 2026, the month with both half-sessions', () => {
-    // 31 days from Tue 1 Dec: 8 weekend days, 23 weekdays, less Natal (Fri
-    // 25) = 22. Both half-sessions count.
-    expect(countBusinessDays(calendar, d('2026-12-01'), d('2027-01-01'))).toBe(22);
-    expect(calendar.tradingDaysInMonth('2026-12')).toBe(22);
+  it('agrees with the official calendar for December 2026', () => {
+    // 31 days from Tue 1 Dec: 8 weekend days, 23 weekdays, less 24, 25 and 31
+    // December (all no-negotiation dates) = 20.
+    expect(countBusinessDays(calendar, d('2026-12-01'), d('2027-01-01'))).toBe(20);
+    expect(calendar.tradingDaysInMonth('2026-12')).toBe(20);
   });
 });
 
