@@ -1,4 +1,4 @@
-import type { BusinessDate } from '@/core/shared/clock';
+import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { ConversionGroupId } from '@/core/shared/ids';
 import { Money, sumMoney } from '@/core/shared/money';

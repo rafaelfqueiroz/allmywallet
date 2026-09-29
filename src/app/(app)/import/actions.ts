@@ -20,10 +20,12 @@ import {
   resolveSubscriptionOffer,
 } from '@/core/ingestion/subscription-offer';
 import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
+import { earliestFromDate } from '@/core/ledger/recalculate-from';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { withIngestionAndWalletDeps, withIngestionDeps } from '@/app/(app)/import/composition';
 import { handleImportCancel, saveUploadedFile } from '@/worker/handlers/import';
 import { enqueue } from '@/lib/queue';
+import { requestSnapshotRebuild } from '@/lib/snapshot-rebuild';
 import { QUEUE } from '@/worker/queues';
 import { ClassifySchema } from '@/app/(app)/import/classify-schema';
 
@@ -229,6 +231,10 @@ export async function classifyRowAction(
   // See `action-state.ts` and `components/patterns/action-form.tsx`.
   if (isErr(result)) return failure(result.error);
 
+  // SPEC-009 BR-009-18: the row entered calculations at its trade date (a
+  // created row) or edited a stored one (an unclassified row's own date, or
+  // earlier for carried legs re-derived) — stale from the earliest scope.
+  await requestSnapshotRebuild(userId, earliestFromDate(result.value.recalculations));
   revalidatePath('/import');
   return IDLE;
 }
@@ -276,6 +282,9 @@ export async function resolveSubscriptionOfferAction(
   // screen (`SubscriptionOfferPanel` renders it through `ActionForm`).
   if (isErr(result)) return failure(result.error);
 
+  // SPEC-009 BR-009-18: the credit's re-typed price moves cost from its date,
+  // and every carried leg re-derived downstream of it is in `recalculations`.
+  await requestSnapshotRebuild(userId, earliestFromDate(result.value.recalculations));
   revalidatePath('/import');
   return IDLE;
 }
@@ -314,6 +323,12 @@ export async function keepSubscriptionClassificationAction(
   });
   if (isErr(result)) return failure(result.error);
 
+  // SPEC-009 BR-009-18: superseding an unclassified exercise changes nothing
+  // that replays (only active rows do), so a rebuild is requested only when a
+  // carried leg was re-derived — from the earliest position that moved.
+  if (result.value.rederived.length > 0) {
+    await requestSnapshotRebuild(userId, earliestFromDate(result.value.recalculations));
+  }
   revalidatePath('/import');
   return IDLE;
 }
@@ -356,5 +371,8 @@ export async function acceptAdjustmentAction(formData: FormData): Promise<void> 
   });
   if (isErr(result)) return;
 
+  // SPEC-009 BR-009-18: the adjustment is dated at the reconciliation's
+  // `asOf`, which is usually in the past — the snapshots since are stale.
+  await requestSnapshotRebuild(userId, earliestFromDate([result.value.result.recalculation]));
   revalidatePath(`/import/${batchId}`);
 }
