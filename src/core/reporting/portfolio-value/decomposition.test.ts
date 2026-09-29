@@ -278,9 +278,11 @@ describe('#183 — SPEC-013 BR-013-08 / DL-013-10: an unpaired transfer, at mark
 
   it('an opening snapshot is read on the same column as the closing one', () => {
     // Opening market 1.500 (an earlier unpaired arrival at market) against
-    // net 1.200: contributions = 2.100 − 1.500 = 600, never 2.100 − 1.200.
+    // net 1.000: contributions = 2.100 − 1.500 = 600 — never 1.800 − 1.000 =
+    // 800 (cost) nor 2.100 − 1.000 = 1.100 (the columns mixed).
+    //   price change = (2.200 − 1.500) − 600 = 100
     const result = decomposeGrowth({
-      opening: snapshot('2026-03-09', '1500', '1200', '0', { marketFlows: '1500' }),
+      opening: snapshot('2026-03-09', '1500', '1000', '0', { marketFlows: '1500' }),
       closing,
     });
     expect(result.netContributions.toString()).toBe('600');

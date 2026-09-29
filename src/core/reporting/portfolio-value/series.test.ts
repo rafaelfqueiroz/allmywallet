@@ -243,11 +243,12 @@ describe('monthlyContributions (BR-013-06) — contributions are a flow', () => 
   });
 
   it('anchors on the opening snapshot’s market column, not its cost column', () => {
-    //   opening net 1.200 / market 1.500; March close market 2.100
-    //   bar = 2.100 − 1.500 = 600, never 2.100 − 1.200 = 900
+    //   opening net 1.000 / market 1.500; close net 1.800 / market 2.100
+    //   bar = 2.100 − 1.500 = 600 — never 1.800 − 1.000 = 800 (cost) nor
+    //   2.100 − 1.000 = 1.100 (the columns mixed)
     const bars = monthlyContributions(
       [snapshot('2026-03-31', '2200', '1800', { marketFlows: '2100' })],
-      snapshot('2026-02-28', '1500', '1200', { marketFlows: '1500' }),
+      snapshot('2026-02-28', '1500', '1000', { marketFlows: '1500' }),
     );
     expect(bars.map((bar) => bar.amount.toString())).toEqual(['600']);
   });
