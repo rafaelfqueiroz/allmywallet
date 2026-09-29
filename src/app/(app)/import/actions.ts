@@ -12,7 +12,6 @@ import { resolveConfig } from '@/config/resolve';
 import { AssetId, ImportBatchId, ImportRowId, InstitutionId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
 import { BusinessDate, SystemClock } from '@/core/shared/clock';
-import { isErr } from '@/core/shared/result';
 import type { TransactionType } from '@/core/ledger/transaction';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
 import {
@@ -229,7 +228,7 @@ export async function classifyRowAction(
   // BR-006-15 / #113: a refusal — a missing ratio, an unstated price, a row
   // that is no longer classifiable — is explained on screen, not swallowed.
   // See `action-state.ts` and `components/patterns/action-form.tsx`.
-  if (isErr(result)) return failure(result.error);
+  if (!result.ok) return failure(result.error);
 
   // SPEC-009 BR-009-18: the row entered calculations at its trade date (a
   // created row) or edited a stored one (an unclassified row's own date, or
@@ -280,7 +279,7 @@ export async function resolveSubscriptionOfferAction(
   });
   // BR-006-15: a stale offer, or a race with another edit, is explained on
   // screen (`SubscriptionOfferPanel` renders it through `ActionForm`).
-  if (isErr(result)) return failure(result.error);
+  if (!result.ok) return failure(result.error);
 
   // SPEC-009 BR-009-18: the credit's re-typed price moves cost from its date,
   // and every carried leg re-derived downstream of it is in `recalculations`.
@@ -321,7 +320,7 @@ export async function keepSubscriptionClassificationAction(
 
     return kept;
   });
-  if (isErr(result)) return failure(result.error);
+  if (!result.ok) return failure(result.error);
 
   // SPEC-009 BR-009-18: superseding an unclassified exercise changes nothing
   // that replays (only active rows do), so a rebuild is requested only when a
@@ -369,7 +368,7 @@ export async function acceptAdjustmentAction(formData: FormData): Promise<void> 
 
     return accepted;
   });
-  if (isErr(result)) return;
+  if (!result.ok) return;
 
   // SPEC-009 BR-009-18: the adjustment is dated at the reconciliation's
   // `asOf`, which is usually in the past — the snapshots since are stale.
