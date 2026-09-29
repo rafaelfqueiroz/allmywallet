@@ -44,12 +44,14 @@ function snapshot(
   netContributions = '0',
   earningsToDate = '0',
   byAssetClass: ReadonlyMap<AssetClass, Money> = new Map(),
+  /** SPEC-013 BR-013-08: differs from `netContributions` only for an unpaired transfer. */
+  marketFlows = netContributions,
 ): DailyValuationSnapshot {
   return {
     date: d(date),
     totalValue: m(totalValue),
     netContributions: m(netContributions),
-    marketFlows: m(netContributions), // #183: calc-engine replaces this with market-valued flows
+    marketFlows: m(marketFlows),
     earningsToDate: m(earningsToDate),
     byAssetClass,
     hasEstimates: false,
@@ -235,6 +237,57 @@ describe('buildPortfolioValueReport', () => {
       lastImportAt: null,
     });
     expect(present(result.series).at(-1)!.estimated).toBe(true);
+  });
+
+  /**
+   * #183 / SPEC-013 BR-013-08, DL-013-09, DL-013-10 — one report, both
+   * columns, each where the spec puts it.
+   *
+   *   February  buy 1.000                          net 1.000   market 1.000
+   *   March     buy 500; 100 shares arrive from outside carried at 8,00 with
+   *             a close of 11,00 (net +800, market +1.100); a sale of 300
+   *             close 31/03: net    1.000 + 500 + 800   − 300 = 2.000
+   *                          market 1.000 + 500 + 1.100 − 300 = 2.300
+   *   Valued holdings (and the 31/03 snapshot) = 2.600
+   *
+   *   Monthly bars (market): Feb 1.000; Mar 2.300 − 1.000 = **1.300**
+   *                          (500 + 1.100 − 300; at cost 500 + 800 − 300 = 1.000)
+   *   Decomposition (market), opening at zero: contributions **2.300**,
+   *                          growth 2.600, price change 2.600 − 2.300 = **300**
+   *   Headline (cost):       Total investido **2.000**; Ganho 2.600 − 2.000 = **600**,
+   *                          600 ÷ 2.000 = 0,30
+   */
+  it('bars and decomposes at market, headlines Total investido at cost', () => {
+    const result = buildPortfolioValueReport({
+      query: query(
+        [
+          snapshot('2026-02-28', '1000', '1000'),
+          snapshot('2026-03-31', '2600', '2000', '0', new Map(), '2300'),
+        ],
+        '2600',
+        { from: '2026-02-01' },
+      ),
+      opening: null,
+      grouping: 'asset_class',
+      today,
+      lastImportAt: null,
+    });
+
+    expect(
+      present(result.monthlyContributions).map((bar) => [bar.month, bar.amount.toString()]),
+    ).toEqual([
+      ['2026-02', '1000'],
+      ['2026-03', '1300'],
+    ]);
+
+    const decomposition = present(result.decomposition);
+    expect(decomposition.netContributions.toString()).toBe('2300');
+    expect(decomposition.priceChange.toString()).toBe('300');
+
+    const invested = present(result.headline.invested);
+    expect(invested.totalInvested.toString()).toBe('2000');
+    expect(invested.absoluteGain.toString()).toBe('600');
+    expect(invested.gainRatio?.toString()).toBe('0.3');
   });
 });
 
