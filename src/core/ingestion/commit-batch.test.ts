@@ -446,6 +446,262 @@ describe('SPEC-005 BR-005-13 — commitBatch', () => {
       expect(result.value.batch.reconciliation?.discrepancies).toHaveLength(0);
     });
 
+    it('BR-005-22/24 (#146): Friday sales are unsettled in a Monday snapshot and exactly explain SEER3', async () => {
+      const deps = buildFakeIngestionDeps('2026-09-21');
+      // Friday 11/09 + D+2 trading sessions = Tuesday 15/09. The weekend is
+      // deliberately absent; Monday's export still contains the 130 shares.
+      deps.settlementCalendar.setTradingDays([
+        '2026-09-02',
+        '2026-09-03',
+        '2026-09-14',
+        '2026-09-15',
+      ]);
+      const history = await stagedBatch(deps, {
+        extractType: 'b3_negociacao',
+        records: [
+          buy({
+            assetCode: 'SEER3',
+            assetName: 'Ser Educacional',
+            tradeDate: BusinessDate.of('2026-09-01'),
+            quantity: Quantity.fromString('100'),
+          }),
+          buy({
+            assetCode: 'SEER3',
+            assetName: 'Ser Educacional',
+            tradeDate: BusinessDate.of('2026-09-01'),
+            quantity: Quantity.fromString('30'),
+          }),
+          buy({
+            b3Type: 'Venda',
+            assetCode: 'SEER3',
+            assetName: 'Ser Educacional',
+            tradeDate: BusinessDate.of('2026-09-11'),
+            quantity: Quantity.fromString('100'),
+            unitPrice: Money.fromString('13.74'),
+          }),
+          buy({
+            b3Type: 'Venda',
+            assetCode: 'SEER3',
+            assetName: 'Ser Educacional',
+            tradeDate: BusinessDate.of('2026-09-11'),
+            quantity: Quantity.fromString('30'),
+            unitPrice: Money.fromString('13.73'),
+          }),
+        ],
+      });
+      await commitBatch(deps, userId, { batchId: history });
+      const seerPosition = {
+        ...position,
+        record: {
+          ...position.record,
+          assetCode: 'SEER3',
+          assetName: 'Ser Educacional',
+          quantity: Quantity.fromString('130'),
+        },
+      };
+      const snapshot = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [seerPosition],
+      });
+
+      const result = await commitBatch(deps, userId, {
+        batchId: snapshot,
+        asOf: BusinessDate.of('2026-09-14'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.batch.reconciliation?.discrepancies).toEqual([
+        expect.objectContaining({
+          assetCode: 'SEER3',
+          computedQuantity: '0',
+          b3Quantity: '130',
+          difference: '130',
+          cause: 'post_reference_or_unsettled_trades',
+        }),
+      ]);
+
+      const settledSnapshot = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [seerPosition],
+      });
+      const afterD2 = await commitBatch(deps, userId, {
+        batchId: settledSnapshot,
+        asOf: BusinessDate.of('2026-09-15'),
+      });
+      expect(afterD2.ok).toBe(true);
+      if (!afterD2.ok) return;
+      expect(afterD2.value.batch.reconciliation?.discrepancies[0]?.cause).toBe('undetermined');
+    });
+
+    it('BR-005-22/24 (#146): a 23 December trade reaches D+2 only on 29 December', async () => {
+      const deps = buildFakeIngestionDeps('2026-12-31');
+      // 24/25 are closed, 26/27 are the weekend, 28 is D+1 and 29 is D+2.
+      deps.settlementCalendar.setTradingDays([
+        '2026-12-02',
+        '2026-12-03',
+        '2026-12-28',
+        '2026-12-29',
+      ]);
+      const history = await stagedBatch(deps, {
+        extractType: 'b3_negociacao',
+        records: [
+          buy({ tradeDate: BusinessDate.of('2026-12-01') }),
+          buy({
+            b3Type: 'Venda',
+            tradeDate: BusinessDate.of('2026-12-23'),
+            quantity: Quantity.fromString('10'),
+          }),
+        ],
+      });
+      await commitBatch(deps, userId, { batchId: history });
+
+      const beforeSettlement = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [position],
+      });
+      const onD1 = await commitBatch(deps, userId, {
+        batchId: beforeSettlement,
+        asOf: BusinessDate.of('2026-12-28'),
+      });
+      expect(onD1.ok).toBe(true);
+      if (!onD1.ok) return;
+      expect(onD1.value.batch.reconciliation?.discrepancies[0]?.cause).toBe(
+        'post_reference_or_unsettled_trades',
+      );
+
+      const onSettlement = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [position],
+      });
+      const onD2 = await commitBatch(deps, userId, {
+        batchId: onSettlement,
+        asOf: BusinessDate.of('2026-12-29'),
+      });
+      expect(onD2.ok).toBe(true);
+      if (!onD2.ok) return;
+      expect(onD2.value.batch.reconciliation?.discrepancies[0]?.cause).toBe('undetermined');
+    });
+
+    it('BR-005-24 (#146): an uncovered-year pre-reference trade makes D+2 unknown', async () => {
+      const deps = buildFakeIngestionDeps();
+      deps.settlementCalendar.setCoveredYears(['2026']);
+      const history = await stagedBatch(deps, {
+        extractType: 'b3_negociacao',
+        records: [
+          buy({ tradeDate: BusinessDate.of('2025-01-06') }),
+          buy({
+            b3Type: 'Venda',
+            tradeDate: BusinessDate.of('2025-12-29'),
+            quantity: Quantity.fromString('10'),
+          }),
+        ],
+      });
+      await commitBatch(deps, userId, { batchId: history });
+      const snapshot = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [position],
+      });
+
+      const result = await commitBatch(deps, userId, {
+        batchId: snapshot,
+        asOf: BusinessDate.of('2025-12-30'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.batch.reconciliation?.discrepancies[0]?.cause).toBe('undetermined');
+    });
+
+    it('BR-005-22/24 (#146): a post-reference sale exactly explains the snapshot difference', async () => {
+      const deps = buildFakeIngestionDeps();
+      const history = await stagedBatch(deps, {
+        extractType: 'b3_negociacao',
+        records: [
+          buy({ tradeDate: BusinessDate.of('2026-02-02') }),
+          buy({
+            b3Type: 'Venda',
+            tradeDate: BusinessDate.of('2026-03-10'),
+            quantity: Quantity.fromString('10'),
+          }),
+        ],
+      });
+      await commitBatch(deps, userId, { batchId: history });
+      const snapshot = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [position],
+      });
+
+      const result = await commitBatch(deps, userId, {
+        batchId: snapshot,
+        asOf: BusinessDate.of('2026-03-01'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.batch.reconciliation?.discrepancies[0]?.cause).toBe(
+        'post_reference_or_unsettled_trades',
+      );
+    });
+
+    it('BR-005-24 (#146): a deficit once covered by history is not mislabeled when no recent trade explains it', async () => {
+      const deps = buildFakeIngestionDeps();
+      const history = await stagedBatch(deps, {
+        extractType: 'b3_negociacao',
+        records: [
+          buy({ tradeDate: BusinessDate.of('2026-01-05'), quantity: Quantity.fromString('130') }),
+          buy({
+            b3Type: 'Venda',
+            tradeDate: BusinessDate.of('2026-01-12'),
+            quantity: Quantity.fromString('30'),
+          }),
+        ],
+      });
+      await commitBatch(deps, userId, { batchId: history });
+      const snapshot = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [
+          {
+            ...position,
+            record: { ...position.record, quantity: Quantity.fromString('130') },
+          },
+        ],
+      });
+
+      const result = await commitBatch(deps, userId, {
+        batchId: snapshot,
+        asOf: BusinessDate.of('2026-03-01'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.batch.reconciliation?.discrepancies[0]?.cause).toBe('undetermined');
+    });
+
+    it('BR-005-24 (#146): a genuine deficit never covered by recorded history remains missing history', async () => {
+      const deps = buildFakeIngestionDeps();
+      const history = await stagedBatch(deps, {
+        extractType: 'b3_negociacao',
+        records: [buy({ quantity: Quantity.fromString('90') })],
+      });
+      await commitBatch(deps, userId, { batchId: history });
+      const snapshot = await stagedBatch(deps, {
+        extractType: 'b3_posicao',
+        records: [position],
+      });
+
+      const result = await commitBatch(deps, userId, {
+        batchId: snapshot,
+        asOf: BusinessDate.of('2026-03-01'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.batch.reconciliation?.discrepancies[0]?.cause).toBe(
+        'missing_history_before_import_range',
+      );
+    });
+
     describe('BR-005-22 (amended, #145) — the union of the snapshot and the ledger it covers', () => {
       const fundPosition = {
         raw: { Produto: 'HGLG11 - CSHG LOGISTICA' },

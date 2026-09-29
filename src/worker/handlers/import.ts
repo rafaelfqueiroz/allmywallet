@@ -49,6 +49,9 @@ import {
   DrizzleWalletRepository,
 } from '@/adapters/db/wallet-repository';
 import { XlsxIngestionPort } from '@/adapters/ingestion/xlsx';
+import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
+
+const settlementCalendar = new B3TradingCalendar();
 
 /**
  * SPEC-005 — `import.stage` and `import.commit`. AR-04: thin entrypoints;
@@ -124,6 +127,9 @@ export function buildIngestionDeps(tx: Tx, userId: UserId, clock: Clock): Ingest
     assets: new DrizzleAssetResolver(tx),
     institutions: new DrizzleInstitutionResolver(tx),
     fixedIncomeContracts: new DrizzleFixedIncomeContractRepository(tx, userId),
+    // SPEC-005 BR-005-24 (#146): reconciliation uses covered B3 trading days
+    // for D+2 settlement; core receives only that narrow calendar capability.
+    settlementCalendar,
     // AR-15: shared market data, read through the tenant's handle like `assets`.
     corporateEventFactors: new DrizzleCorporateEventFactorRepository(tx),
     // SPEC-005 BR-005-20d: `price_quotes` is shared reference data (AR-15,

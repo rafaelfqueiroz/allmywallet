@@ -16,6 +16,8 @@ import type { Quantity } from '@/core/shared/money';
 export const DISCREPANCY_CAUSES = [
   /** BR-005-24: the ledger's own history for this asset starts later than it should. */
   'missing_history_before_import_range',
+  /** BR-005-24 (#146): dated-after or not-yet-settled buys/sells exactly explain the snapshot difference. */
+  'post_reference_or_unsettled_trades',
   /** BR-005-24: an unmapped row on this asset is excluded from the replay that produced `computedQuantity`. */
   'unclassified_rows_affecting_asset',
   /**
@@ -46,6 +48,13 @@ export interface ReconciliationInput {
   readonly b3Quantity: Quantity;
   /** Null if the ledger has no `active` transaction for this position at all. */
   readonly firstComputedTradeDate: BusinessDate | null;
+  /** Highest quantity an active-ledger replay has recorded at any point. */
+  readonly highestRecordedQuantity: Quantity;
+  /**
+   * BR-005-22/24 (#146): replay with post-reference and not-yet-settled D+2
+   * buys/sells left out; null when there are no such trades or it cannot replay.
+   */
+  readonly quantityBeforePostReferenceOrUnsettledTrades: Quantity | null;
   /** BR-005-24: at least one `unclassified` row in this batch touches this asset. */
   readonly hasUnclassifiedRowsAffectingAsset: boolean;
   /**
@@ -82,11 +91,21 @@ function attributeCause(input: ReconciliationInput): DiscrepancyCause {
   if (input.hasUnclassifiedRowsAffectingAsset) return 'unclassified_rows_affecting_asset';
   if (!input.inB3Snapshot) return 'absent_from_b3_snapshot';
 
-  // BR-005-24: the ledger holds *less* than B3 does — either no history for
-  // this asset at all, or history that starts too late to have picked up
-  // everything B3 knows about.
+  // SPEC-005 BR-005-22/24 (#146): this is positive evidence, not a guess —
+  // removing only buys/sells B3 could not yet have settled reproduces its
+  // snapshot exactly.
+  if (input.quantityBeforePostReferenceOrUnsettledTrades?.equals(input.b3Quantity) === true) {
+    return 'post_reference_or_unsettled_trades';
+  }
+
+  // SPEC-005 BR-005-24 (#146): a deficit alone is not missing history. A
+  // fully acquired and later fully sold position can be 0 in the ledger and
+  // positive in an older B3 snapshot while still carrying its whole history.
   const deficit = input.b3Quantity.comparedTo(input.computedQuantity) > 0;
-  if (input.firstComputedTradeDate === null || deficit) {
+  if (
+    input.firstComputedTradeDate === null ||
+    (deficit && input.highestRecordedQuantity.comparedTo(input.b3Quantity) < 0)
+  ) {
     return 'missing_history_before_import_range';
   }
 

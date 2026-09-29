@@ -431,7 +431,7 @@
     "cancel": "Cancelar importação",
     "asOf": {
       "label": "Data da posição",
-      "hint": "A B3 não informa essa data no arquivo. Use o dia em que você exportou a posição — a reconciliação compara com ela."
+      "hint": "A Posição mostra a custódia já liquidada no momento da exportação. Use a data em que você exportou o arquivo — não a data do envio, da confirmação ou de hoje."
     },
     "countRead": "Linhas lidas",
     "countNew": "Novas",
@@ -512,6 +512,7 @@
     "columnCause": "Causa provável",
     "discrepancyCause": {
       "missing_history_before_import_range": "Histórico anterior ao período importado está faltando",
+      "post_reference_or_unsettled_trades": "Compras ou vendas após a data da posição, ou ainda não liquidadas em D+2, explicam a diferença",
       "unclassified_rows_affecting_asset": "Há linhas não classificadas afetando este ativo",
       "uncaptured_corporate_event": "Possível evento societário não registrado",
       "absent_from_b3_snapshot": "A B3 não lista este ativo na posição — provável troca de código, incorporação ou deslistagem não registrada",

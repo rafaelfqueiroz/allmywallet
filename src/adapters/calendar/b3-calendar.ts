@@ -1,6 +1,7 @@
 import { BusinessDate, businessDateInSaoPaulo } from '@/core/shared/clock';
 import type { TradingCalendar, TradingSession } from '@/core/quotes/ports';
 import {
+  B3_CALENDAR_YEARS,
   B3_HALF_SESSIONS,
   B3_HOLIDAYS,
   HALF_SESSION_CLOSE,
@@ -39,6 +40,11 @@ function isWeekend(date: string): boolean {
 }
 
 export class B3TradingCalendar implements TradingCalendar {
+  /** SPEC-005 BR-005-24 (#146): D+2 attribution fails closed outside complete years. */
+  hasCompleteDataFor(date: BusinessDate): boolean {
+    return B3_CALENDAR_YEARS.includes(date.slice(0, 4));
+  }
+
   isTradingDay(date: BusinessDate): boolean {
     return !isWeekend(date) && !B3_HOLIDAYS.includes(date);
   }

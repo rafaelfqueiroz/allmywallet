@@ -1,4 +1,4 @@
-import type { Clock } from '@/core/shared/clock';
+import type { BusinessDate, Clock } from '@/core/shared/clock';
 import type { TransactionRepository } from '@/core/ledger/ports';
 import type { PositionRepository } from '@/core/positions/ports';
 import type { CorporateEventFactorReader } from '@/core/quotes/corporate-event-factors';
@@ -11,6 +11,18 @@ import type {
   InstitutionResolverPort,
   SubscriptionEvidenceReader,
 } from '@/core/ingestion/ports';
+
+/**
+ * SPEC-005 BR-005-24 (#146) — the narrow part of B3's calendar reconciliation
+ * needs to decide whether a buy or sale had reached D+2 on the confirmed
+ * Posição date. The worker injects the existing B3 calendar; core depends only
+ * on this capability (AR-01/AR-02), not on its adapter.
+ */
+export interface SettlementCalendar {
+  /** True only where the adapter has an authoritative full-day calendar. */
+  hasCompleteDataFor(date: BusinessDate): boolean;
+  isTradingDay(date: BusinessDate): boolean;
+}
 
 /**
  * What every SPEC-005 use case needs, injected at the composition root
@@ -26,6 +38,7 @@ export interface IngestionDependencies {
   readonly institutions: InstitutionResolverPort;
   readonly fixedIncomeContracts: FixedIncomeContractWriterPort;
   readonly clock: Clock;
+  readonly settlementCalendar: SettlementCalendar;
   /**
    * SPEC-005 BR-005-20b / SPEC-008 BR-008-29 (#113) — B3's published
    * share-ratio factors, read from the shared tables at commit. Fetching them
