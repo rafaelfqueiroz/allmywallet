@@ -28,6 +28,7 @@ import {
   invalidateSnapshotsFrom,
   quantizeSnapshot,
   loadValuationContext,
+  persistSnapshots,
   rebuildSnapshots,
   serializeSnapshot,
   snapshotsEqual,
@@ -1073,6 +1074,35 @@ describe('BR-009-18 / AC-15 — invalidate and rebuild forward from a date', () 
     // whose transactions were all deleted does not leave orphaned rows
     // claiming a value with no ledger under it.
     expect(h.snapshots.deleteCalls).toEqual(['2026-03-16']);
+  });
+
+  it('BR-009-17/18: persistSnapshots deletes from the given date, or everything when none', async () => {
+    const snapshot = (date: string): DailyValuationSnapshot => ({
+      date: d(date),
+      totalValue: Money.fromString('1'),
+      netContributions: Money.fromString('1'),
+      earningsToDate: Money.zero(),
+      byAssetClass: new Map(),
+      hasEstimates: false,
+    });
+    const h = harness();
+    await h.snapshots.upsertMany(['2026-03-10', '2026-03-16', '2026-03-17'].map(snapshot));
+
+    // Scoped: deletion starts at the requested date, which may be earlier than
+    // the first snapshot written — an orphan between the two goes too.
+    await persistSnapshots(h.snapshots, [snapshot('2026-03-17')], d('2026-03-16'));
+    expect([...h.snapshots.rows.keys()]).toEqual(['2026-03-10', '2026-03-17']);
+    expect(h.snapshots.deleteAllCalls).toBe(0);
+
+    // Whole history: nothing before the new series survives either.
+    await persistSnapshots(h.snapshots, [snapshot('2026-03-17')], null);
+    expect([...h.snapshots.rows.keys()]).toEqual(['2026-03-17']);
+    expect(h.snapshots.deleteAllCalls).toBe(1);
+    expect(h.snapshots.deleteCalls).toEqual(['2026-03-16']);
+
+    // An empty series (a tenant whose ledger is gone) still invalidates.
+    await persistSnapshots(h.snapshots, [], null);
+    expect(h.snapshots.rows.size).toBe(0);
   });
 
   it('valuing today may use the intraday quote while every earlier date may not', async () => {
