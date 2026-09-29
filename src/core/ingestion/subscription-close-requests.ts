@@ -1,8 +1,10 @@
 import type { InstitutionId } from '@/core/shared/ids';
+import { SUBSCRIPTION_EXCLUDED_CODES } from '@/core/ingestion/asset-conversion-definitions';
 import { conversionEvidenceMovementOf } from '@/core/ingestion/movement-map';
 import { issuerCodeOf } from '@/core/ingestion/issuer-code';
 import type { ImportRow, SubscriptionEvidenceReader } from '@/core/ingestion/ports';
 import {
+  deriveSubscriptionHandClassification,
   resolveSubscriptions,
   type SubscriptionEvidence,
   type SubscriptionEvidenceState,
@@ -92,6 +94,10 @@ export async function planSubscriptionCloseRequests(
       const isExercise = isExerciseRow(row);
       const isCredit = !isExercise && isCreditRow(row);
       if (!isExercise && !isCredit) continue;
+      // BR-005-20d: "no pair forms when an asset-conversion or liquidation
+      // definition names the credit's code" — refused before evidence is
+      // even gathered for it, same as `planSubscriptions` (#157 review F1).
+      if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(row.record.assetCode)) continue;
       const id = `row:${row.id}`;
       evidence.push({
         id,
@@ -114,6 +120,7 @@ export async function planSubscriptionCloseRequests(
         item.transaction.type === 'subscription' && suffix === 'direitos de subscricao - exercido';
       const isCredit = !isExercise && suffix === 'atualizacao';
       if (!isExercise && !isCredit) continue;
+      if (isCredit && SUBSCRIPTION_EXCLUDED_CODES.has(item.assetCode)) continue;
       const state: SubscriptionEvidenceState =
         imported(item.transaction) && item.transaction.status === 'unclassified'
           ? 'open'
@@ -125,6 +132,13 @@ export async function planSubscriptionCloseRequests(
         tradeDate: item.transaction.tradeDate,
         quantity: item.transaction.quantity,
         state,
+        // SPEC-005 BR-005-20d (#157) — a locked credit's own classification,
+        // so an `offer` pair (a locked, zero-cost hand classification) also
+        // requests a close ahead of the user accepting it (DL-005-22: closes
+        // are fetched before the commit/edit transaction, never inside it).
+        ...(isCredit
+          ? { handClassification: deriveSubscriptionHandClassification(item.transaction) }
+          : {}),
       });
       if (isCredit) {
         creditAssetById.set(item.transaction.id, {
@@ -136,7 +150,7 @@ export async function planSubscriptionCloseRequests(
 
     const resolution = resolveSubscriptions({ evidence, windowDays });
     for (const pair of resolution.pairs) {
-      if (pair.status !== 'resolved') continue;
+      if (pair.status !== 'resolved' && pair.status !== 'offer') continue;
       const asset = creditAssetById.get(pair.plan.creditId);
       if (asset === undefined) continue;
       requests.push({

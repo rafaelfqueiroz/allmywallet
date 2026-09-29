@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
 import { Quantity } from '@/core/shared/money';
 import {
+  aTransaction,
+  resetTransactionSequence,
+} from '@/core/ledger/test-support/transaction-builder';
+import {
+  deriveSubscriptionHandClassification,
   resolveSubscriptions,
+  type EvidenceOnlySubscriptionPair,
+  type OfferedSubscriptionPair,
   type ResolvedSubscriptionPair,
   type SubscriptionEvidence,
 } from '@/core/ingestion/subscription-resolution';
@@ -297,5 +304,184 @@ describe('SPEC-005 BR-005-20d (#144) — an exercised subscription paired with i
     const result = resolve([]);
     expect(result.pairs).toHaveLength(0);
     expect(result.unresolved.size).toBe(0);
+  });
+});
+
+describe('SPEC-005 BR-005-20d (#157, DL-005-25) — a locked credit still decides its exercise', () => {
+  it('evidence_only: a locked credit hand-classified with a cost above zero clears its exercise, no credit write', () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-22'),
+      credit('cr', 'XXXX11', '3', '2024-02-22', { state: 'locked', handClassification: 'costed' }),
+    ]);
+
+    expect(result.pairs).toEqual([
+      { status: 'evidence_only', exerciseId: 'ex', creditId: 'cr' },
+    ] satisfies readonly [EvidenceOnlySubscriptionPair]);
+    expect(result.unresolved.size).toBe(0);
+  });
+
+  it('offer: a locked, zero-cost hand classification offers the same re-type a resolved pair would write', () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-22'),
+      credit('cr', 'XXXX11', '3', '2024-02-22', {
+        state: 'locked',
+        handClassification: 'zero_cost',
+      }),
+    ]);
+
+    expect(result.pairs).toEqual([
+      {
+        status: 'offer',
+        plan: {
+          exerciseId: 'ex',
+          creditId: 'cr',
+          assetCode: 'XXXX11',
+          tradeDate: BusinessDate.of('2024-02-22'),
+          quantity: Quantity.fromString('3'),
+        },
+      },
+    ] satisfies readonly [OfferedSubscriptionPair]);
+    expect(result.unresolved.size).toBe(0);
+  });
+
+  it('a locked credit of a type with no reading here (no handClassification) refuses user_modified, as before #157', () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-22'),
+      credit('cr', 'XXXX11', '3', '2024-02-22', { state: 'locked', handClassification: null }),
+    ]);
+
+    expect(result.pairs).toHaveLength(0);
+    expect(result.unresolved.get('ex')).toBe('user_modified');
+    expect(result.unresolved.get('cr')).toBe('user_modified');
+  });
+
+  it('D8 still refuses balance_statement first, even for a locked, costed credit', () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-22'),
+      credit('cr', 'XXXX11', '3', '2024-02-22', {
+        state: 'locked',
+        handClassification: 'costed',
+        balanceBefore: Quantity.fromString('3'),
+      }),
+    ]);
+
+    expect(result.pairs).toHaveLength(0);
+    expect(result.unresolved.get('cr')).toBe('balance_statement');
+  });
+
+  it('D8 still refuses balance_statement first, even for a locked, zero-cost credit', () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-22'),
+      credit('cr', 'XXXX11', '3', '2024-02-22', {
+        state: 'locked',
+        handClassification: 'zero_cost',
+        balanceBefore: Quantity.fromString('3'),
+      }),
+    ]);
+
+    expect(result.pairs).toHaveLength(0);
+    expect(result.unresolved.get('cr')).toBe('balance_statement');
+  });
+
+  it("applied no-op: a locked credit and an exercise applied through the ordinary BR-005-20d path report applied (#157 review F5 — not the shape #157's own actions leave; see the pure-resolver test below for that one)", () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-22', { state: 'applied' }),
+      credit('cr', 'XXXX11', '3', '2024-02-22', { state: 'locked', handClassification: 'costed' }),
+    ]);
+
+    expect(result.pairs).toEqual([{ status: 'applied', exerciseId: 'ex', creditId: 'cr' }]);
+  });
+
+  it('an exercise the user classified by hand is never touched, whatever the locked credit decided — the actual shape a re-import sees after either #157 action (#157 review F5): `editTransactions` flags the exercise user-modified too, so it reads `locked`, not `applied`', () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-22', { state: 'locked' }),
+      credit('cr', 'XXXX11', '3', '2024-02-22', { state: 'locked', handClassification: 'costed' }),
+    ]);
+
+    expect(result.pairs).toHaveLength(0);
+    expect(result.unresolved.get('ex')).toBe('user_modified');
+    expect(result.unresolved.get('cr')).toBe('user_modified');
+  });
+
+  it('ambiguity still wins over a locked credit — two exercises competing for one locked credit resolve neither', () => {
+    const result = resolve([
+      exercise('ex-a', 'XXXX12', '3', '2024-01-01'),
+      exercise('ex-b', 'XXXX13', '3', '2024-01-05'),
+      credit('cr', 'XXXX11', '3', '2024-01-20', { state: 'locked', handClassification: 'costed' }),
+    ]);
+
+    expect(result.pairs).toHaveLength(0);
+    expect(result.unresolved.get('ex-a')).toBe('ambiguous');
+    expect(result.unresolved.get('ex-b')).toBe('ambiguous');
+    expect(result.unresolved.get('cr')).toBe('ambiguous');
+  });
+
+  it('ambiguity still wins over a locked credit — two same-shape locked credits resolve neither', () => {
+    const result = resolve([
+      exercise('ex', 'XXXX12', '3', '2024-01-01'),
+      credit('cr-a', 'XXXX11', '3', '2024-01-10', {
+        state: 'locked',
+        handClassification: 'zero_cost',
+      }),
+      credit('cr-b', 'XXXX13', '3', '2024-01-20', {
+        state: 'locked',
+        handClassification: 'zero_cost',
+      }),
+    ]);
+
+    expect(result.pairs).toHaveLength(0);
+    expect(result.unresolved.get('ex')).toBe('ambiguous');
+    expect(result.unresolved.get('cr-a')).toBe('ambiguous');
+    expect(result.unresolved.get('cr-b')).toBe('ambiguous');
+  });
+});
+
+describe('SPEC-005 BR-005-20d (#157) — deriveSubscriptionHandClassification', () => {
+  beforeEach(() => {
+    resetTransactionSequence();
+  });
+
+  const costed: readonly [string, () => ReturnType<typeof aTransaction>][] = [
+    ['buy', () => aTransaction().buy().price('10')],
+    ['subscription', () => aTransaction().subscription().price('10')],
+    ['bonificacao', () => aTransaction().bonificacao().price('10')],
+    ['transfer_in', () => aTransaction().transferIn().price('10')],
+    ['a positive adjustment', () => aTransaction().adjustment().quantity('5').price('10')],
+  ];
+  it.each(costed)('%s at a unit price above zero reads costed', (_, make) => {
+    expect(deriveSubscriptionHandClassification(make().build())).toBe('costed');
+  });
+
+  const zeroCost: readonly [string, () => ReturnType<typeof aTransaction>][] = [
+    ['buy', () => aTransaction().buy().price('0')],
+    ['subscription', () => aTransaction().subscription().price('0')],
+    ['bonificacao', () => aTransaction().bonificacao()],
+    ['transfer_in', () => aTransaction().transferIn().price('0')],
+    ['a positive adjustment', () => aTransaction().adjustment().quantity('5').price('0')],
+  ];
+  it.each(zeroCost)('%s at a unit price of zero reads zero_cost', (_, make) => {
+    expect(deriveSubscriptionHandClassification(make().build())).toBe('zero_cost');
+  });
+
+  const noReading: readonly [string, () => ReturnType<typeof aTransaction>][] = [
+    ['sell', () => aTransaction().sell().price('10')],
+    ['transfer_out', () => aTransaction().transferOut()],
+    ['dividend', () => aTransaction().dividend().price('10')],
+    ['split', () => aTransaction().split()],
+    ['a negative adjustment', () => aTransaction().adjustment().quantity('-5').price('10')],
+    ['a negative adjustment at zero price', () => aTransaction().adjustment().quantity('-5')],
+    // #157 review F6 — a status other than `active` adds nothing to any
+    // replay, whatever its type or price says.
+    [
+      'a superseded buy at a real price',
+      () => aTransaction().buy().price('10').status('superseded'),
+    ],
+    [
+      'an unclassified buy at a real price',
+      () => aTransaction().buy().price('10').status('unclassified'),
+    ],
+  ];
+  it.each(noReading)('%s reads no classification at all (null)', (_, make) => {
+    expect(deriveSubscriptionHandClassification(make().build())).toBeNull();
   });
 });

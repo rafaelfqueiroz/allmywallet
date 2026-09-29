@@ -38,6 +38,7 @@ import {
 import {
   ASSET_CONVERSION_DEFINITIONS,
   ASSET_LIQUIDATION_DEFINITIONS,
+  SUBSCRIPTION_EXCLUDED_CODES,
   type AssetLiquidationDefinition,
 } from '@/core/ingestion/asset-conversion-definitions';
 import {
@@ -59,6 +60,7 @@ import {
   resolveCorporateEvents,
 } from '@/core/ingestion/corporate-event-resolution';
 import {
+  deriveSubscriptionHandClassification,
   resolveSubscriptions,
   type SubscriptionEvidence,
   type SubscriptionEvidenceState,
@@ -512,6 +514,7 @@ export async function commitBatch(
     writes: subscriptionCreditWrites,
     supersedes: subscriptionSupersedes,
     claimedCreditIds: subscriptionClaimedCreditIds,
+    evidenceOnlySupersedes,
   } = await planSubscriptions(
     deps,
     rows,
@@ -889,6 +892,29 @@ export async function commitBatch(
   for (const key of survivedSubscriptionKeys) {
     const supersede = subscriptionSupersedes.get(key);
     if (supersede === undefined) continue;
+    claimedRowKeys.add(
+      evidenceClaimKey(
+        supersede.mode === 'insert' ? supersede.row : null,
+        supersede.transaction.id,
+      ),
+    );
+    if (supersede.mode === 'insert') {
+      const row = supersede.row as ImportRow;
+      subscriptionSupersededInserts.push(supersede.transaction);
+      rowToTransaction.set(row.id, supersede.transaction.id);
+      subscriptionRowClassification.set(row.id, 'ignored');
+      subscriptionExerciseRowIds.add(row.id);
+    } else {
+      subscriptionUpdates.push(supersede.transaction);
+    }
+  }
+  // SPEC-005 BR-005-20d (#157, DL-005-25): an `evidence_only` pair's
+  // exercise supersedes unconditionally — there is no credit write to gate
+  // it on, since the hand-classified credit is left exactly as the user
+  // classified it. Never counted in `resolvedSubscriptions` (it wrote no
+  // credit) and applied the same way `survivedSubscriptionKeys` applies a
+  // resolved pair's exercise, just above.
+  for (const supersede of evidenceOnlySupersedes) {
     claimedRowKeys.add(
       evidenceClaimKey(
         supersede.mode === 'insert' ? supersede.row : null,
@@ -1889,32 +1915,6 @@ async function planLiquidations(
   return writes;
 }
 
-/**
- * SPEC-005 BR-005-20d — every asset code any `ASSET_CONVERSION_DEFINITIONS`
- * or `ASSET_LIQUIDATION_DEFINITIONS` entry names, on either side. A code a
- * definition already owns is never read as a subscription's main asset — "an
- * asset-conversion or liquidation definition names the credit's code"
- * refuses the pair outright, before any evidence is even gathered for it.
- * Computed once: the definition tables are module-level constants.
- */
-const SUBSCRIPTION_EXCLUDED_CODES: ReadonlySet<string> = new Set([
-  ...ASSET_CONVERSION_DEFINITIONS.flatMap((definition) => [
-    ...definition.sourceAssetCodes,
-    ...definition.targets.flatMap((target) =>
-      target.evidenceAssetCode === undefined
-        ? [target.assetCode]
-        : [target.assetCode, target.evidenceAssetCode],
-    ),
-  ]),
-  ...ASSET_LIQUIDATION_DEFINITIONS.flatMap((definition) => [
-    ...definition.sources.map((source) => source.assetCode),
-    definition.target.assetCode,
-    ...(definition.target.evidenceAssetCode === undefined
-      ? []
-      : [definition.target.evidenceAssetCode]),
-  ]),
-]);
-
 /** What a resolved pair's exercise write does: insert a fresh superseded copy, or update an existing stored one in place. */
 interface PlannedSubscriptionSupersede {
   readonly mode: 'insert' | 'in_place';
@@ -2002,10 +2002,19 @@ async function planSubscriptions(
    * finishes; this set is what protects the *unwritten* ones too.
    */
   readonly claimedCreditIds: ReadonlySet<string>;
+  /**
+   * SPEC-005 BR-005-20d (#157, DL-005-25) — every `evidence_only` pair's
+   * exercise supersede. Unlike `supersedes`, never gated on a credit write
+   * surviving settlement: there is no credit write to gate on, the
+   * hand-classified credit is left exactly as it is. Applied unconditionally
+   * by the caller.
+   */
+  readonly evidenceOnlySupersedes: readonly PlannedSubscriptionSupersede[];
 }> {
   const writes: ConversionWrite[] = [];
   const supersedes = new Map<string, PlannedSubscriptionSupersede>();
   const claimedCreditIds = new Set<string>();
+  const evidenceOnlySupersedes: PlannedSubscriptionSupersede[] = [];
   const activations = reclassifications.filter((r) => r.kind === 'activate').map((r) => r.updated);
   const carriedTransactions = carriedTransactionsOf(candidates, carryLegs, stored);
   const claimedByLiquidation = new Set(liquidationWrites.map((write) => write.transaction.id));
@@ -2185,12 +2194,36 @@ async function planSubscriptions(
                 institutionId,
                 item.transaction.tradeDate,
               ),
+              // SPEC-005 BR-005-20d (#157) — read only when this credit is
+              // `locked`, but cheap and harmless to derive unconditionally.
+              handClassification: deriveSubscriptionHandClassification(item.transaction),
             }),
       });
     }
 
     const resolution = resolveSubscriptions({ evidence, windowDays });
     for (const pair of resolution.pairs) {
+      // SPEC-005 BR-005-20d (#157, DL-005-25): the credit is hand-classified
+      // at a cost above zero — the cost question is already answered, so
+      // only the exercise supersedes. No credit write: never overwriting a
+      // hand classification (BR-005-20/20b).
+      if (pair.status === 'evidence_only') {
+        const exerciseRef = refById.get(pair.exerciseId);
+        if (exerciseRef === undefined) continue;
+        evidenceOnlySupersedes.push({
+          mode: exerciseRef.row !== null ? 'insert' : 'in_place',
+          row: exerciseRef.row,
+          transaction: {
+            ...exerciseRef.transaction,
+            status: 'superseded',
+            updatedAt: context.now,
+          },
+        });
+        continue;
+      }
+      // `offer` writes nothing at commit — the user decides between
+      // **Resolve as subscription** and **Keep my classification**
+      // (`subscription-offer.ts`); `applied` needs no further write either.
       if (pair.status !== 'resolved') continue;
       const exerciseRef = refById.get(pair.plan.exerciseId);
       const creditRef = refById.get(pair.plan.creditId);
@@ -2263,7 +2296,7 @@ async function planSubscriptions(
     }
   }
 
-  return { writes, supersedes, claimedCreditIds };
+  return { writes, supersedes, claimedCreditIds, evidenceOnlySupersedes };
 }
 
 /** What a resolved position refresh writes: the stored copy superseded, its row (when this batch's own) ignored. */

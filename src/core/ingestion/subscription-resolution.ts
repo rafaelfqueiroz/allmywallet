@@ -1,5 +1,6 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { Quantity } from '@/core/shared/money';
+import type { Transaction, TransactionType } from '@/core/ledger/transaction';
 
 /**
  * SPEC-005 BR-005-20d (#144) — an **exercised subscription** resolved at
@@ -33,6 +34,48 @@ export type SubscriptionEvidenceRole = 'exercise' | 'credit';
  */
 export type SubscriptionEvidenceState = 'open' | 'applied' | 'locked';
 
+/**
+ * SPEC-005 BR-005-20d (#157) — what a *hand-classified* credit already
+ * decided about cost, so a pair whose credit is `locked` can still tell
+ * whether the cost question has an answer: `costed` (a unit price above
+ * zero on a type that adds shares) or `zero_cost` (the same type at a unit
+ * price of zero — a bonificação attributing no value is BR-007-05's own
+ * reading of a quantity B3 states without one).
+ */
+export type SubscriptionCreditHandClassification = 'costed' | 'zero_cost';
+
+/**
+ * SPEC-006 BR-006-05 / SPEC-007's own acquisition types — the transaction
+ * types that add shares to a position. `adjustment` only counts when its own
+ * quantity is positive (`deriveSubscriptionHandClassification`): a negative
+ * adjustment is a withdrawal, not an acquisition (`applyAdjustment`).
+ */
+const ADDS_SHARES_TRANSACTION_TYPES: ReadonlySet<TransactionType> = new Set([
+  'buy',
+  'subscription',
+  'bonificacao',
+  'transfer_in',
+  'adjustment',
+]);
+
+/**
+ * SPEC-005 BR-005-20d (#157) — the one place a locked credit's own
+ * transaction is read for what it already decided about cost, so every
+ * caller (commit, the close-request backfill, the read-time offer) agrees
+ * on the same reading. `null` covers everything BR-005-20d has no view on: a
+ * status other than `active` (#157 review F6 — a `superseded` or
+ * `unclassified` row adds nothing to any replay, whatever its type or
+ * price), a type that does not add shares, or a negative `adjustment`.
+ */
+export function deriveSubscriptionHandClassification(
+  transaction: Transaction,
+): SubscriptionCreditHandClassification | null {
+  if (transaction.status !== 'active') return null;
+  if (!ADDS_SHARES_TRANSACTION_TYPES.has(transaction.type)) return null;
+  if (transaction.type === 'adjustment' && !transaction.quantity.isPositive()) return null;
+  return transaction.unitPrice.isPositive() ? 'costed' : 'zero_cost';
+}
+
 export interface SubscriptionEvidence {
   readonly id: string;
   readonly role: SubscriptionEvidenceRole;
@@ -49,6 +92,15 @@ export interface SubscriptionEvidence {
    * be a balance statement (DL-007-10), not an acquisition.
    */
   readonly balanceBefore?: Quantity | null | undefined;
+  /**
+   * `role: 'credit'` and `state: 'locked'` only (#157) — what the user's own
+   * classification already decided about cost, from
+   * `deriveSubscriptionHandClassification`. Absent or `null` for anything
+   * else: an `open`/`applied` credit's cost question is not this field's to
+   * answer, and a locked credit of a type that does not add shares, or that
+   * removes them, has no reading here either.
+   */
+  readonly handClassification?: SubscriptionCreditHandClassification | null | undefined;
 }
 
 /** What a resolved pair writes: the credit becomes this `subscription`, the exercise is superseded. */
@@ -74,7 +126,37 @@ export interface AppliedSubscriptionPair {
   readonly creditId: string;
 }
 
-export type SubscriptionPairResolution = ResolvedSubscriptionPair | AppliedSubscriptionPair;
+/**
+ * SPEC-005 BR-005-20d (#157, DL-005-25) — the credit is `locked` and its own
+ * hand classification already carries a cost (`costed`): the cost question
+ * is answered, so the exercise clears on its own. No credit write — the
+ * user's classification is never overwritten (BR-005-20/20b) — only the
+ * exercise supersedes.
+ */
+export interface EvidenceOnlySubscriptionPair {
+  readonly status: 'evidence_only';
+  readonly exerciseId: string;
+  readonly creditId: string;
+}
+
+/**
+ * SPEC-005 BR-005-20d (#157, DL-005-25) — the credit is `locked` at
+ * `zero_cost`: a paid subscription entered as a zero-cost bonificação is
+ * plausible but not certain (a genuine bonificação can carry no value), so
+ * nothing is written. `plan` is the same re-type a `resolved` pair would
+ * write, offered rather than applied — **Resolve as subscription** and
+ * **Keep my classification** are the two actions built from it.
+ */
+export interface OfferedSubscriptionPair {
+  readonly status: 'offer';
+  readonly plan: SubscriptionPairPlan;
+}
+
+export type SubscriptionPairResolution =
+  | ResolvedSubscriptionPair
+  | AppliedSubscriptionPair
+  | EvidenceOnlySubscriptionPair
+  | OfferedSubscriptionPair;
 
 export type SubscriptionUnresolvedReason =
   /** More than one candidate on the other side, or the match is not mutual. */
@@ -108,7 +190,9 @@ function dayNumber(date: BusinessDate): number {
  * credit, or says why it could not. Never partial: a pair with any
  * ambiguity, a window miss, a balance statement or a locked row on either
  * side writes nothing — the rows stay exactly as they are, for a later
- * import once the evidence is unambiguous (BR-005-17).
+ * import once the evidence is unambiguous (BR-005-17). The one exception
+ * (#157, DL-005-25) is a **locked credit whose own classification already
+ * decides the cost question** — see the `locked` branch below.
  */
 export function resolveSubscriptions(input: ResolveSubscriptionsInput): ResolveSubscriptionsResult {
   const unresolved = new Map<string, SubscriptionUnresolvedReason>();
@@ -158,7 +242,59 @@ export function resolveSubscriptions(input: ResolveSubscriptionsInput): ResolveS
       continue;
     }
 
-    if (exercise.state === 'locked' || creditRow.state === 'locked') {
+    // SPEC-005 BR-005-20d (#157): an exercise the user classified by hand is
+    // never touched, whatever the credit's own state — unchanged from before
+    // #157, and taking precedence over every branch below.
+    if (exercise.state === 'locked') {
+      unresolved.set(exercise.id, 'user_modified');
+      unresolved.set(creditRow.id, 'user_modified');
+      continue;
+    }
+
+    if (creditRow.state === 'locked') {
+      // A credit locked at commit and an exercise `applied` through the
+      // ordinary BR-005-20d path (superseded with no user flag) — reachable,
+      // for instance, when the credit is reclassified again after a
+      // *resolved* pair already applied. Note this is **not** the state
+      // #157's own two actions leave: `editTransactions` flags the exercise
+      // user-modified too (the default), so after **Resolve as
+      // subscription** or **Keep my classification** the exercise itself
+      // reads `locked`, and a later import takes the `exercise.state ===
+      // 'locked'` branch above instead — still a no-op (BR-005-17), just via
+      // that branch rather than this one (#157 review F5).
+      if (exercise.state === 'applied') {
+        pairs.push({ status: 'applied', exerciseId: exercise.id, creditId: creditRow.id });
+        continue;
+      }
+
+      // D8 still applies first: a locked credit that merely restates the
+      // balance is not evidence of an acquisition either.
+      const balanceBefore = creditRow.balanceBefore ?? null;
+      if (balanceBefore !== null && balanceBefore.equals(creditRow.quantity)) {
+        unresolved.set(creditRow.id, 'balance_statement');
+        continue;
+      }
+
+      const handClassification = creditRow.handClassification ?? null;
+      if (handClassification === 'costed') {
+        pairs.push({ status: 'evidence_only', exerciseId: exercise.id, creditId: creditRow.id });
+        continue;
+      }
+      if (handClassification === 'zero_cost') {
+        pairs.push({
+          status: 'offer',
+          plan: {
+            exerciseId: exercise.id,
+            creditId: creditRow.id,
+            assetCode: creditRow.assetCode,
+            tradeDate: creditRow.tradeDate,
+            quantity: creditRow.quantity,
+          },
+        });
+        continue;
+      }
+      // Locked as some other type entirely (a sale, a transfer out, …) — the
+      // classification answers no cost question at all.
       unresolved.set(exercise.id, 'user_modified');
       unresolved.set(creditRow.id, 'user_modified');
       continue;

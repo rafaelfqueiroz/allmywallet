@@ -23,6 +23,10 @@ import {
   resolveCorporateEvents,
 } from '@/core/ingestion/corporate-event-resolution';
 import { buildCorporateEventRows } from '@/core/ingestion/corporate-event-evidence';
+import {
+  findSubscriptionOffers,
+  type SubscriptionOffer,
+} from '@/core/ingestion/subscription-offer';
 import { withIngestionDeps } from '@/app/(app)/import/composition';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
 
@@ -42,6 +46,17 @@ async function loadCorporateEventWindows(): Promise<CorporateEventWindows> {
     originDays: (await resolveConfig('import.fraction_origin_window_days', { db })).value,
     auctionDays: (await resolveConfig('import.fraction_auction_window_days', { db })).value,
   };
+}
+
+/**
+ * SPEC-005 BR-005-20d (#157) — the window `findSubscriptionOffers` needs to
+ * derive offers the same way `commit-batch.ts`'s `planSubscriptions` would at
+ * commit: `import.subscription_credit_window_days` is deployment-level
+ * (SPEC-002), so a plain pooled `db` read is enough, exactly as
+ * `loadCorporateEventWindows` reads its own three windows.
+ */
+async function loadSubscriptionCreditWindowDays(): Promise<number> {
+  return (await resolveConfig('import.subscription_credit_window_days', { db })).value;
 }
 
 /**
@@ -139,6 +154,14 @@ export interface ImportBatchDetail {
    */
   readonly corporateEvents: ReadonlyMap<string, CorporateEventOutcome>;
   /**
+   * SPEC-005 BR-005-20d (#157, D3) — for a `needsAttention` exercise row
+   * whose credit is a hand-classified, **zero-cost** credit: the pairing
+   * that would resolve it, offering **Resolve as subscription** and **Keep
+   * my classification**. Derived at read time over the stored ledger,
+   * exactly as `refusals`/`corporateEvents` are — no new column or table.
+   */
+  readonly subscriptionOffers: ReadonlyMap<string, SubscriptionOffer>;
+  /**
    * SPEC-010 BR-010-15 — `null` until the batch is committed. Before that
    * nothing has been allocated and a summary would be describing a future.
    */
@@ -153,6 +176,13 @@ export async function loadImportBatchDetail(
     const batch = await deps.batches.findById(batchId);
     if (batch === null) return null;
     const rows = await deps.rows.listByBatch(batchId);
+    // SPEC-005 BR-005-20d (#157, D3): computed once, up front — reused both
+    // to derive subscription offers below and as the returned
+    // `needsAttention` list, so the two can never disagree about which rows
+    // they cover.
+    const needsAttentionRows = rows.filter(
+      (row) => row.classification === 'unclassified' || row.classification === 'invalid',
+    );
 
     const acceptBlockers = new Map<string, AdjustmentBlocker>();
     const reconciliation = batch.reconciliation;
@@ -292,15 +322,23 @@ export async function loadImportBatchDetail(
       }
     }
 
+    // SPEC-005 BR-005-20d (#157, D3): the pairing a hand-classified,
+    // zero-cost credit's exercise could resolve against, derived at read
+    // time exactly as `refusals` and `corporateEvents` are above.
+    const subscriptionOffers = await findSubscriptionOffers(
+      deps,
+      needsAttentionRows,
+      await loadSubscriptionCreditWindowDays(),
+    );
+
     return {
       batch,
       rows,
       acceptBlockers,
       refusals,
       corporateEvents,
-      needsAttention: rows.filter(
-        (row) => row.classification === 'unclassified' || row.classification === 'invalid',
-      ),
+      subscriptionOffers,
+      needsAttention: needsAttentionRows,
       ignored: rows.filter((row) => row.classification === 'ignored'),
     };
   });

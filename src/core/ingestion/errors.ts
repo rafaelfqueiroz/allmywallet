@@ -43,6 +43,20 @@ export const IngestionUseCaseErrorCode = {
    * has to carry to the new asset — the history is the correction.
    */
   ADJUSTMENT_ABSENT_FROM_SNAPSHOT: 'IMPORT_ADJUSTMENT_ABSENT_FROM_SNAPSHOT',
+  /**
+   * SPEC-005 BR-005-20d (#157) — the offer a `findSubscriptionOffers` read
+   * showed for this row no longer holds: the credit or exercise changed
+   * since (edited, reclassified, superseded by another resolver), so
+   * `resolveSubscriptionOffer`/`keepSubscriptionClassification` recomputed
+   * it and found no `offer` pair any more.
+   */
+  SUBSCRIPTION_OFFER_UNAVAILABLE: 'IMPORT_SUBSCRIPTION_OFFER_UNAVAILABLE',
+  /**
+   * SPEC-005 BR-005-20d (#157) / DL-005-22 D1 — no stored close on or before
+   * the credit's date. Never invented; a later import or quote poll fetches
+   * one, and the offer can be resolved again then.
+   */
+  SUBSCRIPTION_CLOSE_MISSING: 'IMPORT_SUBSCRIPTION_CLOSE_MISSING',
 } as const;
 export type IngestionUseCaseErrorCode =
   (typeof IngestionUseCaseErrorCode)[keyof typeof IngestionUseCaseErrorCode];

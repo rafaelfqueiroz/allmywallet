@@ -228,6 +228,8 @@
     "IMPORT_ROW_NOT_FOUND": "Este item não existe mais.",
     "IMPORT_ROW_NOT_UNCLASSIFIED": "Este item já foi classificado.",
     "IMPORT_ROW_PRICE_NOT_STATED": "A B3 não informou o preço desta linha. Este tipo precisa de um preço para ser classificado.",
+    "IMPORT_SUBSCRIPTION_OFFER_UNAVAILABLE": "Esta linha não está mais disponível para esta ação — o crédito ou o exercício mudaram desde que a página foi carregada. Atualize a página e tente de novo.",
+    "IMPORT_SUBSCRIPTION_CLOSE_MISSING": "Ainda não há um preço de fechamento guardado para esta data. Importe a Movimentação de novo para buscá-lo.",
     "INGESTION_UNRECOGNIZED_STRUCTURE": "Não reconhecemos a estrutura deste arquivo. Confira se é um extrato de Movimentação, Negociação ou Posição exportado da B3.",
     "INGESTION_AMBIGUOUS_STRUCTURE": "Este arquivo corresponde a mais de um tipo de extrato — não foi possível decidir automaticamente.",
     "INGESTION_FILE_TOO_LARGE": "Cada arquivo precisa ter no máximo {maxUploadMb} MB. Nenhum dos arquivos foi enviado.",
@@ -464,6 +466,14 @@
     "classifyRatioLabel": "Proporção",
     "classifyRatioHint": "Só para desdobramento e grupamento — 10 para desdobramento 1:10, 0,1 para grupamento 10:1.",
     "classifySubmit": "Classificar",
+    "subscriptionOffer": {
+      "pairing": "Esta linha é o exercício de uma subscrição cujo crédito — {quantity} {assetCode} em {date} — você classificou como {type}, a custo zero.",
+      "priceHint": "Resolver como subscrição vai precificá-lo pelo fechamento de {closeDate} ({closeValue}), marcado como estimativa.",
+      "closeMissing": "Ainda não há um preço de fechamento guardado para essa data. Importe a Movimentação de novo para buscá-lo.",
+      "estimateBadge": "Preço estimado",
+      "resolve": "Resolver como subscrição",
+      "keep": "Manter minha classificação"
+    },
     "corporateEvent": {
       "figures": "Antes do evento (P): {basis} · Quantidade informada pela B3: {stated} · Proporção derivada: {derived}",
       "factor": "Fator publicado pela B3: {factor} (multiplicador {multiplier}) · última data com: {date}",

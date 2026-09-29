@@ -3,18 +3,25 @@ import { getTranslations } from 'next-intl/server';
 import { ImportBatchId } from '@/core/shared/ids';
 import { positionKeyString } from '@/core/positions/replay';
 import { SystemClock } from '@/core/shared/clock';
-import { formatBusinessDate, formatDateTime, formatQuantity } from '@/i18n/format';
+import { formatBusinessDate, formatCurrency, formatDateTime, formatQuantity } from '@/i18n/format';
 import type { RowRefusal } from '@/core/ingestion/refusal';
 import type { CorporateEventOutcome } from '@/core/ingestion/corporate-event-resolution';
 import { ratioPrefillFor } from '@/core/ingestion/corporate-event-evidence';
+import type { SubscriptionOffer } from '@/core/ingestion/subscription-offer';
 import {
   acceptAdjustmentAction,
   cancelBatchAction,
   classifyRowAction,
   commitBatchAction,
+  keepSubscriptionClassificationAction,
+  resolveSubscriptionOfferAction,
 } from '@/app/(app)/import/actions';
 import { loadImportBatchDetail } from '@/app/(app)/import/data';
 import { ClassifyForm } from '@/app/(app)/import/[batchId]/_components/ClassifyForm';
+import {
+  SubscriptionOfferPanel,
+  type SubscriptionOfferLabels,
+} from '@/app/(app)/import/[batchId]/_components/SubscriptionOfferPanel';
 import { corporateEventRefusalKey } from '@/app/(app)/import/[batchId]/_components/corporate-event-refusal';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletOptions, walletName } from '@/app/(app)/import/wallet-options';
@@ -84,6 +91,7 @@ export default async function ImportBatchDetailPage({
     acceptBlockers,
     refusals,
     corporateEvents,
+    subscriptionOffers,
   } = detail;
   // SPEC-005 #117 BR-005-24: a refused row says why, with the figures behind it.
   const refusalText = (refusal: RowRefusal) => {
@@ -178,6 +186,29 @@ export default async function ImportBatchDetailPage({
       </Stack>
     );
   };
+  // SPEC-005 BR-005-20d (#157, DL-005-25): the pairing sentence and the
+  // stored-close price hint (or the reason it is missing), all pre-translated
+  // (AR-44) so `SubscriptionOfferPanel` stays a plain component with no
+  // `next-intl` server machinery in its own test.
+  const subscriptionOfferLabels = (offer: SubscriptionOffer): SubscriptionOfferLabels => ({
+    pairing: t('subscriptionOffer.pairing', {
+      quantity: formatQuantity(offer.quantity),
+      assetCode: offer.creditAssetCode,
+      date: formatBusinessDate(offer.tradeDate),
+      type: t(`transactionType.${offer.creditType}`),
+    }),
+    priceHint:
+      offer.close === null
+        ? null
+        : t('subscriptionOffer.priceHint', {
+            closeDate: formatBusinessDate(offer.close.date),
+            closeValue: formatCurrency(offer.close.close),
+          }),
+    closeMissingReason: offer.close === null ? t('subscriptionOffer.closeMissing') : null,
+    estimateBadge: t('subscriptionOffer.estimateBadge'),
+    resolve: t('subscriptionOffer.resolve'),
+    keep: t('subscriptionOffer.keep'),
+  });
   const classifyForm = (rowId: string, outcome?: CorporateEventOutcome) => (
     <ClassifyForm
       rowId={rowId}
@@ -360,6 +391,7 @@ export default async function ImportBatchDetailPage({
           <List gap="md">
             {needsAttention.map((row) => {
               const corporateEvent = corporateEvents.get(row.id);
+              const subscriptionOffer = subscriptionOffers.get(row.id);
               return (
                 <ListItem key={row.id} separated>
                   <Stack gap="sm" align="start">
@@ -381,7 +413,20 @@ export default async function ImportBatchDetailPage({
                         </Text>
                       )}
                     {corporateEvent !== undefined && corporateEventEvidence(corporateEvent)}
-                    {row.classification === 'unclassified' && classifyForm(row.id, corporateEvent)}
+                    {/* SPEC-005 BR-005-20d (#157): an offered exercise never
+                        gets the generic classify form — classifying it as any
+                        type would count its shares a second time, on top of
+                        what its credit already added (#157 description). */}
+                    {subscriptionOffer !== undefined ? (
+                      <SubscriptionOfferPanel
+                        rowId={row.id}
+                        resolveAction={resolveSubscriptionOfferAction}
+                        keepAction={keepSubscriptionClassificationAction}
+                        labels={subscriptionOfferLabels(subscriptionOffer)}
+                      />
+                    ) : (
+                      row.classification === 'unclassified' && classifyForm(row.id, corporateEvent)
+                    )}
                   </Stack>
                 </ListItem>
               );
