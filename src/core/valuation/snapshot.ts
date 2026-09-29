@@ -566,11 +566,14 @@ export interface RebuildRange {
  * ledger, the price history and the index series, and persist them.
  *
  * BR-009-18: the caller supplies `from`. For a backdated edit that is the
- * edited transaction's trade date; for a full rebuild it is
+ * edited transaction's trade date — the date *before* any clamp to
  * `earliestTradeDate`. Snapshots at or after `from` are deleted before the new
  * ones are written, so a range that has shrunk (every transaction in a period
  * deleted) does not leave orphaned rows behind claiming a value that no longer
- * has a ledger under it.
+ * has a ledger under it. **Not for a full rebuild**: passing
+ * `earliestTradeDate` here would keep every snapshot dated before the ledger's
+ * current first trade (#182). The worker's `rebuildTenant` invalidates with
+ * `persistSnapshots(…, null)` for that case.
  */
 export async function rebuildSnapshots(
   deps: SnapshotDependencies,
