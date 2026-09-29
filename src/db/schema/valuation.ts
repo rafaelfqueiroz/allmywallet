@@ -45,7 +45,9 @@ export const dailyValuationSnapshots = pgTable(
     totalValue: money('total_value').notNull(),
     /**
      * External flows only — buys and transfers in, less sells and transfers
-     * out. Not price change, never earnings. SPEC-012's TWR neutralises
+     * out, with each transfer at the cost basis it carries (SPEC-013
+     * BR-013-08), so a move between custodians nets to zero. Not price
+     * change, never earnings. SPEC-012's TWR neutralises
      * exactly this column and nothing else, which is why it is stored rather
      * than re-derived: the definition must not drift between reports.
      */
