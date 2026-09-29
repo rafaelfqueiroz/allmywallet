@@ -261,6 +261,12 @@ export interface SnapshotRepositoryPort {
   upsertMany(snapshots: readonly DailyValuationSnapshot[]): Promise<void>;
   /** BR-009-18: invalidation. Returns how many rows were removed. */
   deleteFrom(date: BusinessDate): Promise<number>;
+  /**
+   * BR-009-17 / BR-009-18: invalidation of the tenant's **whole** history — a
+   * full rebuild's delete. Explicit rather than `deleteFrom` with a very early
+   * date, so "everything" never depends on a magic date being early enough.
+   */
+  deleteAll(): Promise<number>;
   listRange(from: BusinessDate, to: BusinessDate): Promise<readonly DailyValuationSnapshot[]>;
 }
 

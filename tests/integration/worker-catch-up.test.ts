@@ -287,6 +287,7 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
                     await real.upsertMany(snapshots);
                   },
                   deleteFrom: (date) => real.deleteFrom(date),
+                  deleteAll: () => real.deleteAll(),
                   listRange: (a, b) => real.listRange(a, b),
                 };
               },

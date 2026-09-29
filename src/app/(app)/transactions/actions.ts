@@ -25,6 +25,7 @@ import {
   replaceAssetConversionGroup,
 } from '@/core/ledger/manage-asset-conversion';
 import { USER_EDITABLE_TRANSACTION_TYPES, type Transaction } from '@/core/ledger/transaction';
+import { earliestFromDate } from '@/core/ledger/recalculate-from';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { assignTransactionsToWallet } from '@/core/wallets/assign-transactions';
 import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
@@ -35,6 +36,7 @@ import {
 } from '@/app/(app)/transactions/composition';
 import { normalizeDecimalInput } from '@/lib/decimal-input';
 import { requireUserId } from '@/lib/session';
+import { requestSnapshotRebuild } from '@/lib/snapshot-rebuild';
 
 /**
  * SPEC-006 BR-006-11..17 — the write side of the ledger.
@@ -54,6 +56,13 @@ import { requireUserId } from '@/lib/session';
  * leaves goes through `reconcileAllocationsToHoldings`, because a deletion
  * produces nothing to fold and would otherwise leave BR-010-05's sum invariant
  * broken with no retry that repairs it.
+ *
+ * **Snapshots follow the ledger** (SPEC-009 BR-009-18, SPEC-006 BR-006-14).
+ * Every action that changes the ledger reads the earliest stale date off its
+ * use case's result and, once the transaction has committed and only on
+ * success, asks the worker to rebuild `valuation.snapshot` from it
+ * (`requestSnapshotRebuild`). Wallet assignment writes no ledger row and so
+ * requests nothing.
  */
 
 const decimal = z
@@ -134,6 +143,7 @@ export async function createTransactionAction(
   if (!parsed.success) return INVALID_INPUT;
   const input = parsed.data;
 
+  let rebuildFrom: BusinessDate | null = null;
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
     const assetId = await resolveAsset(deps, input);
     if (assetId === null) return INVALID_INPUT;
@@ -163,10 +173,13 @@ export async function createTransactionAction(
     );
     if (!effects.ok) return failure(effects.error);
 
+    // SPEC-009 BR-009-18: a backdated create is stale from its own date.
+    rebuildFrom = earliestFromDate([created.value.recalculation]);
     return IDLE;
   });
 
   if (outcome.status === 'error') return outcome;
+  await requestSnapshotRebuild(userId, rebuildFrom);
   revalidateLedger();
   redirect('/transactions');
 }
@@ -189,6 +202,7 @@ export async function createAssetConversionGroupAction(
   const parsed = CreateConversionGroupSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return INVALID_INPUT;
   const input = parsed.data;
+  let rebuildFrom: BusinessDate | null = null;
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
     const groupId = ConversionGroupId.generate();
     const now = deps.ledger.clock.now();
@@ -235,9 +249,12 @@ export async function createAssetConversionGroupAction(
     if (!created.ok) return failure(created.error);
     const effects = await applyLedgerEffects(deps.assign, userId, legs);
     if (!effects.ok) return failure(effects.error);
+    // SPEC-009 BR-009-18: stale from the group's date on both positions.
+    rebuildFrom = created.value.fromDate;
     return IDLE;
   });
   if (outcome.status === 'error') return outcome;
+  await requestSnapshotRebuild(userId, rebuildFrom);
   revalidateLedger();
   redirect('/transactions');
 }
@@ -255,6 +272,7 @@ export async function editTransactionAction(
   if (!parsed.success) return INVALID_INPUT;
   const input = parsed.data;
 
+  let rebuildFrom: BusinessDate | null = null;
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
     const target = await deps.ledger.transactions.findById(TransactionId.of(input.transactionId));
     if (isConversion(target)) return INVALID_INPUT;
@@ -280,14 +298,20 @@ export async function editTransactionAction(
      * the row moved asset or institution), because either can now hold fewer
      * shares than its wallets claim.
      */
-    return reconcile(
+    const reconciled = await reconcile(
       deps,
       userId,
       edited.value.recalculations.map((each) => each.scope.assetId),
     );
+    // SPEC-009 BR-009-18: each scope's `fromDate` is already
+    // min(old tradeDate, new tradeDate) — moving a trade later leaves the old
+    // dates stale too — and carried legs re-derived downstream are in the list.
+    rebuildFrom = earliestFromDate(edited.value.recalculations);
+    return reconciled;
   });
 
   if (outcome.status === 'error') return outcome;
+  await requestSnapshotRebuild(userId, rebuildFrom);
   revalidateLedger();
   redirect('/transactions');
 }
@@ -316,6 +340,7 @@ export async function editAssetConversionGroupAction(
   }
 
   const groupId = ConversionGroupId.of(parsed.data.conversionGroupId);
+  let rebuildFrom: BusinessDate | null = null;
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
     const existing = await deps.ledger.transactions.listByConversionGroup(groupId);
     if (existing.length !== ids.length || new Set(ids).size !== ids.length) return INVALID_INPUT;
@@ -336,6 +361,8 @@ export async function editAssetConversionGroupAction(
     }
     const replaced = await replaceAssetConversionGroup(deps.ledger, groupId, replacements);
     if (!replaced.ok) return failure(replaced.error);
+    // SPEC-009 BR-009-18: earliest of the group's old and new legs, per position.
+    rebuildFrom = replaced.value.fromDate;
     return reconcile(
       deps,
       userId,
@@ -344,6 +371,7 @@ export async function editAssetConversionGroupAction(
   });
 
   if (outcome.status === 'error') return outcome;
+  await requestSnapshotRebuild(userId, rebuildFrom);
   revalidateLedger();
   redirect('/transactions');
 }
@@ -359,12 +387,15 @@ export async function deleteTransactionAction(
   if (!parsed.success) return INVALID_INPUT;
   const id = TransactionId.of(parsed.data.transactionId);
 
+  let rebuildFrom: BusinessDate | null = null;
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
     const target = await deps.ledger.transactions.findById(id);
     if (isConversion(target)) {
       const group = await deps.ledger.transactions.listByConversionGroup(target.conversionGroupId);
       const deleted = await deleteAssetConversionGroup(deps.ledger, target.conversionGroupId);
       if (!deleted.ok) return failure(deleted.error);
+      // SPEC-009 BR-009-18: the earliest date of any leg of the deleted group.
+      rebuildFrom = deleted.value.fromDate;
       return reconcile(
         deps,
         userId,
@@ -373,10 +404,14 @@ export async function deleteTransactionAction(
     }
     const deleted = await deleteTransaction(deps.ledger, id);
     if (!deleted.ok) return failure(deleted.error);
+    // SPEC-009 BR-009-18: the deleted row's date, or earlier if a carried leg
+    // re-derived downstream sits before it.
+    rebuildFrom = earliestFromDate([deleted.value.recalculation, ...deleted.value.downstream]);
     return reconcile(deps, userId, target === null ? [] : [target.assetId]);
   });
 
   if (outcome.status === 'error') return outcome;
+  await requestSnapshotRebuild(userId, rebuildFrom);
   revalidateLedger();
   redirect('/transactions');
 }
@@ -405,6 +440,7 @@ export async function bulkTransactionsAction(
     .filter((value): value is string => typeof value === 'string')
     .map((value) => TransactionId.of(value));
 
+  let rebuildFrom: BusinessDate | null = null;
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
     if (parsed.data.operation === 'assign') {
       if (parsed.data.walletId === null) return INVALID_INPUT;
@@ -435,6 +471,8 @@ export async function bulkTransactionsAction(
 
     const deleted = await bulkDeleteTransactions(deps.ledger, ids);
     if (!deleted.ok) return failure(deleted.error);
+    // SPEC-009 BR-009-18: the earliest date across every deleted row.
+    rebuildFrom = earliestFromDate(deleted.value.recalculations);
 
     const reconciled = await reconcile(deps, userId, touched);
     if (reconciled.status === 'error') return reconciled;
@@ -445,6 +483,9 @@ export async function bulkTransactionsAction(
   if (outcome.status === 'error') return outcome;
   // No redirect: the form is on `/transactions` already, so revalidating is
   // what refreshes the list, and the returned state is what says it happened.
+  // `rebuildFrom` stays null for the wallet-assignment branch: it writes no
+  // ledger row, so no derived figure is stale.
+  await requestSnapshotRebuild(userId, rebuildFrom);
   revalidateLedger();
   return outcome;
 }

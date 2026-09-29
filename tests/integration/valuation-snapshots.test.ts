@@ -601,6 +601,168 @@ describe('SPEC-009 valuation snapshots (integration)', () => {
       expect(rows[0]?.n).toBe(0);
     });
 
+    /**
+     * SPEC-009 BR-009-17/18 (#182) — a ledger write, then the rebuild job it
+     * requests (`{ userId, from }`, or the nightly job with no payload): the
+     * stored snapshots must agree with the ledger as it now stands. Ledger
+     * edits are applied straight to the table, as the write path leaves it;
+     * the job is the real handler against real Postgres.
+     */
+    describe('a ledger write, then the rebuild job (#182)', () => {
+      const overrides = () => ({
+        database: db,
+        clock: new FakeClock('2026-03-20T22:00:00Z'),
+        calendar,
+        contracts: contracts(),
+      });
+
+      async function stored(user: UserId = userId) {
+        const { rows } = await migratorPool.query<{ date: string; net: string }>(
+          `SELECT date::text AS date, net_contributions AS net
+             FROM daily_valuation_snapshots WHERE user_id = $1 ORDER BY date`,
+          [user],
+        );
+        return rows.map((row) => ({ date: row.date, net: Number(row.net).toFixed(2) }));
+      }
+
+      async function seedOrphan(user: UserId, date: string): Promise<void> {
+        await migratorPool.query(
+          `INSERT INTO daily_valuation_snapshots
+             (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class,
+              has_estimates)
+           VALUES ($1, $2, '999', '999', '0', '{}'::jsonb, false)`,
+          [user, date],
+        );
+      }
+
+      it('(a) a backdated edit — snapshots from its date reflect it, earlier ones stay', async () => {
+        await seedPrices();
+        const buyA = tx(petr, 'buy', '2026-03-16', '100', '32.15');
+        const buyB = tx(petr, 'buy', '2026-03-18', '50', '30');
+        const sale = tx(petr, 'sell', '2026-03-19', '20', '35');
+        await seedLedgerRows([buyA, buyB, sale]);
+        await handleValuationSnapshot({ userId }, overrides());
+
+        // Hand-reasoned: 100 × 32,15 = 3.215,00; + 50 × 30 = 4.715,00; − 20 × 35 = 4.015,00.
+        expect((await stored()).map((row) => row.net)).toEqual([
+          '3215.00',
+          '3215.00',
+          '4715.00',
+          '4015.00',
+          '4015.00',
+        ]);
+
+        // The user corrects the 18 March buy to 80 shares: 80 × 30 = 2.400,00.
+        await migratorPool.query(
+          `UPDATE transactions SET quantity = '80', total_value = '2400' WHERE id = $1`,
+          [buyB.id],
+        );
+        await handleValuationSnapshot({ userId, from: '2026-03-18' }, overrides());
+
+        // 16 and 17 March are before the edit and untouched; from the 18th:
+        // 3.215,00 + 2.400,00 = 5.615,00; − 700,00 on the 19th = 4.915,00.
+        expect(await stored()).toEqual([
+          { date: '2026-03-16', net: '3215.00' },
+          { date: '2026-03-17', net: '3215.00' },
+          { date: '2026-03-18', net: '5615.00' },
+          { date: '2026-03-19', net: '4915.00' },
+          { date: '2026-03-20', net: '4915.00' },
+        ]);
+      });
+
+      it('(b) the earliest trade moved later — no snapshot remains before the new earliest date', async () => {
+        await seedPrices();
+        const first = tx(petr, 'buy', '2026-03-16', '100', '32.15');
+        await seedLedgerRows([first, tx(petr, 'buy', '2026-03-18', '50', '30')]);
+        await handleValuationSnapshot({ userId }, overrides());
+        expect((await stored()).map((row) => row.date)).toEqual([
+          '2026-03-16',
+          '2026-03-17',
+          '2026-03-18',
+          '2026-03-19',
+          '2026-03-20',
+        ]);
+
+        // 16 March -> 19 March; the write's `from` is min(old, new) = 16 March.
+        await migratorPool.query(
+          `UPDATE transactions SET trade_date = '2026-03-19' WHERE id = $1`,
+          [first.id],
+        );
+        await handleValuationSnapshot({ userId, from: '2026-03-16' }, overrides());
+
+        // The ledger now starts on the 18th (the 50-share buy).
+        expect(await stored()).toEqual([
+          { date: '2026-03-18', net: '1500.00' },
+          { date: '2026-03-19', net: '4715.00' },
+          { date: '2026-03-20', net: '4715.00' },
+        ]);
+      });
+
+      it('(c) the earliest trade deleted while a later one remains — same', async () => {
+        await seedPrices();
+        const first = tx(petr, 'buy', '2026-03-16', '100', '32.15');
+        await seedLedgerRows([first, tx(petr, 'buy', '2026-03-18', '50', '30')]);
+        await handleValuationSnapshot({ userId }, overrides());
+
+        await migratorPool.query('DELETE FROM transactions WHERE id = $1', [first.id]);
+        await handleValuationSnapshot({ userId, from: '2026-03-16' }, overrides());
+
+        expect(await stored()).toEqual([
+          { date: '2026-03-18', net: '1500.00' },
+          { date: '2026-03-19', net: '1500.00' },
+          { date: '2026-03-20', net: '1500.00' },
+        ]);
+      });
+
+      it('(d) the last transaction deleted — the tenant has no snapshots', async () => {
+        await seedPrices();
+        const only = tx(petr, 'buy', '2026-03-16', '100', '32.15');
+        await seedLedgerRows([only]);
+        await handleValuationSnapshot({ userId }, overrides());
+        expect(await stored()).toHaveLength(5);
+
+        await migratorPool.query('DELETE FROM transactions WHERE id = $1', [only.id]);
+        const summary = await handleValuationSnapshot({ userId, from: '2026-03-16' }, overrides());
+
+        expect(summary).toEqual({ tenants: 1, snapshots: 0, failures: 0 });
+        expect(await stored()).toEqual([]);
+      });
+
+      it('(e) the nightly full rebuild removes orphans before the earliest trade — and a ledger-less tenant’s', async () => {
+        await seedPrices();
+        const other = UserId.generate();
+        await seedUser(database.migrationUrl, other);
+        await seedLedgerRows([tx(petr, 'buy', '2026-03-18', '50', '30')]);
+        // Left behind by earlier writes that moved or deleted the earliest trades.
+        await seedOrphan(userId, '2026-03-16');
+        await seedOrphan(userId, '2026-03-17');
+        await seedOrphan(other, '2026-03-10');
+
+        // No payload at all: what the nightly cron delivers.
+        const summary = await handleValuationSnapshot(undefined, overrides());
+        expect(summary.failures).toBe(0);
+
+        expect(await stored()).toEqual([
+          { date: '2026-03-18', net: '1500.00' },
+          { date: '2026-03-19', net: '1500.00' },
+          { date: '2026-03-20', net: '1500.00' },
+        ]);
+        expect(await stored(other)).toEqual([]);
+      });
+
+      it('a job scoped to a later date leaves earlier snapshots alone', async () => {
+        await seedPrices();
+        await seedLedgerRows([tx(petr, 'buy', '2026-03-16', '100', '32.15')]);
+        await handleValuationSnapshot({ userId }, overrides());
+        await seedOrphan(userId, '2026-03-01');
+
+        await handleValuationSnapshot({ userId, from: '2026-03-19' }, overrides());
+
+        // Scoped invalidation is "from that date forward": 1 March predates it.
+        expect((await stored()).map((row) => row.date)[0]).toBe('2026-03-01');
+      });
+    });
+
     it('BR-009-14/AR-18: fixedincome.accrue does nothing on a B3 holiday', async () => {
       await seedPrices();
       await seedCdi();

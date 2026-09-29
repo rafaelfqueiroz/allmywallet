@@ -7,6 +7,7 @@ import { UserId } from '@/core/shared/ids';
 import type { Transaction } from '@/core/ledger/transaction';
 import type { TradingCalendar } from '@/core/quotes/ports';
 import type {
+  DailyValuationSnapshot,
   FixedIncomeContractPort,
   IndexSeriesReaderPort,
   PriceHistoryPort,
@@ -169,18 +170,34 @@ async function rebuildTenant(
   );
 
   const earliest = earliestTradeDate(ledger);
-  // A tenant with no transactions has no snapshots — a different state from
-  // "snapshots that are all zero", and the chart says so.
-  if (earliest === null) return 0;
 
-  // Never start before the ledger does: a `from` earlier than the first trade
-  // would write a run of zero-valued days that never existed, which reads on
-  // the chart as a flat line the user never had.
+  // SPEC-009 BR-009-17/18: **invalidation** starts at the requested `from` (or
+  // is the whole history when none was requested), *not* at the clamped
+  // computation start below. A write that moves the tenant's earliest trade
+  // later, or deletes it, leaves snapshots before the new earliest date that
+  // no ledger backs any more; clamping the delete too would keep them forever,
+  // the nightly full rebuild included.
+  const invalidateFrom = requestedFrom ?? null;
+
+  // A tenant with no transactions has no snapshots — a different state from
+  // "snapshots that are all zero", and the chart says so. Whatever was stored
+  // is now orphaned, so it is invalidated and nothing is written.
+  if (earliest === null) {
+    await persistInTenant(deps, userId, [], invalidateFrom);
+    return 0;
+  }
+
+  // Never *compute* before the ledger starts: a `from` earlier than the first
+  // trade would write a run of zero-valued days that never existed, which
+  // reads on the chart as a flat line the user never had.
   const from =
     requestedFrom === undefined || BusinessDate.isBefore(requestedFrom, earliest)
       ? earliest
       : requestedFrom;
-  if (BusinessDate.isAfter(from, today)) return 0;
+  if (BusinessDate.isAfter(from, today)) {
+    await persistInTenant(deps, userId, [], invalidateFrom);
+    return 0;
+  }
 
   // 2. Compute with **no transaction open** for the shared reference tables
   //    (AR-15) this also reads — holding the tenant connection across a
@@ -211,12 +228,27 @@ async function rebuildTenant(
 
   // 3. Write under tenant context, delete-then-insert in one transaction so a
   //    crash between them cannot leave a hole in the history.
+  await persistInTenant(deps, userId, computed.value, invalidateFrom);
+  return computed.value.length;
+}
+
+/**
+ * The write half in one `withTenant` transaction (AR-11/AR-13): the delete and
+ * the upsert commit together or not at all, so a crash between them cannot
+ * leave a hole. Idempotent (AR-19): deleting from a date (or everything) and
+ * upserting the same computed series is the same result however often it runs.
+ */
+async function persistInTenant(
+  deps: ValuationHandlerDeps,
+  userId: UserId,
+  snapshots: readonly DailyValuationSnapshot[],
+  invalidateFrom: BusinessDate | null,
+): Promise<void> {
   await withTenant(
     userId,
-    async (tx) => persistSnapshots(deps.snapshotsFor(tx, userId), computed.value, from),
+    async (tx) => persistSnapshots(deps.snapshotsFor(tx, userId), snapshots, invalidateFrom),
     deps.database,
   );
-  return computed.value.length;
 }
 
 /**

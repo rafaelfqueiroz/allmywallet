@@ -10,7 +10,9 @@ import { Money, Quantity } from '@/core/shared/money';
 import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
 import { createTransaction } from '@/core/ledger/create-transaction';
+import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
 import { deleteTransaction } from '@/core/ledger/delete-transaction';
+import { earliestFromDate } from '@/core/ledger/recalculate-from';
 import { editTransaction } from '@/core/ledger/edit-transaction';
 import { exportTransactionsCsv } from '@/core/ledger/export-transactions';
 import { listTransactions } from '@/core/ledger/list-transactions';
@@ -915,6 +917,66 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
         return deps.positions.list();
       });
       expect(rebuilt.map(serialize)).toEqual(incremental.map(serialize));
+    });
+  });
+
+  describe('SPEC-009 BR-009-18 — the date a write leaves derived figures stale from', () => {
+    // What the actions hand to `requestSnapshotRebuild`, computed here against
+    // the real repositories: a backdated edit that moves a trade *later* still
+    // reports the old date, and a bulk delete reports the earliest row.
+    const buy = (date: string, price: string) => ({
+      assetId: petr4,
+      institutionId: clear,
+      type: 'buy' as const,
+      tradeDate: BusinessDate.of(date),
+      quantity: Quantity.fromString('10'),
+      unitPrice: Money.fromString(price),
+      fees: Money.zero(),
+    });
+
+    it('a create reports its own trade date', async () => {
+      await asTenant(async (deps) => {
+        await createTransaction(deps, userId, buy('2020-05-04', '10.00'));
+        const backdated = await createTransaction(deps, userId, buy('2020-01-13', '9.00'));
+        if (!backdated.ok) throw new Error('create failed');
+        expect(earliestFromDate([backdated.value.recalculation])).toBe('2020-01-13');
+      });
+    });
+
+    it('an edit moving a trade later reports the old date, not the new one', async () => {
+      await asTenant(async (deps) => {
+        const first = await createTransaction(deps, userId, buy('2020-01-13', '9.00'));
+        if (!first.ok) throw new Error('create failed');
+
+        const edited = await editTransaction(deps, first.value.transaction.id, {
+          tradeDate: BusinessDate.of('2020-03-02'),
+          unitPrice: Money.fromString('9.50'),
+        });
+        if (!edited.ok) throw new Error('edit failed');
+        expect(earliestFromDate(edited.value.recalculations)).toBe('2020-01-13');
+      });
+    });
+
+    it('a delete reports the deleted row’s date; a bulk delete the earliest across the selection', async () => {
+      await asTenant(async (deps) => {
+        const a = await createTransaction(deps, userId, buy('2020-01-13', '9.00'));
+        const b = await createTransaction(deps, userId, buy('2020-05-04', '10.00'));
+        const c = await createTransaction(deps, userId, buy('2021-09-02', '11.00'));
+        if (!a.ok || !b.ok || !c.ok) throw new Error('create failed');
+
+        const single = await deleteTransaction(deps, c.value.transaction.id);
+        if (!single.ok) throw new Error('delete failed');
+        expect(earliestFromDate([single.value.recalculation, ...single.value.downstream])).toBe(
+          '2021-09-02',
+        );
+
+        const bulk = await bulkDeleteTransactions(deps, [
+          b.value.transaction.id,
+          a.value.transaction.id,
+        ]);
+        if (!bulk.ok) throw new Error('bulk delete failed');
+        expect(earliestFromDate(bulk.value.recalculations)).toBe('2020-01-13');
+      });
     });
   });
 

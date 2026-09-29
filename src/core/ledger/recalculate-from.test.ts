@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { guardReplayable, without } from '@/core/ledger/guard-replayable';
-import { recalculatePositionFrom } from '@/core/ledger/recalculate-from';
+import {
+  earliestFromDate,
+  recalculatePositionFrom,
+  type RecalculationOutcome,
+} from '@/core/ledger/recalculate-from';
 import type { Transaction } from '@/core/ledger/transaction';
 import {
   FakePositionRepository,
@@ -59,9 +63,9 @@ describe('SPEC-006 BR-006-14 / DL-006-03 — recalculatePositionFrom', () => {
 
   it('carries fromDate forward as the invalidation boundary for SPEC-009', async () => {
     // DL-006-03's "forward from the transaction date" is about *which derived
-    // artefacts go stale*, not about how the position is computed. Nothing
-    // consumes this yet; recording it now is what stops SPEC-009 needing a
-    // second pass over every write path.
+    // artefacts go stale*, not about how the position is computed. The app
+    // layer reads it (`earliestFromDate`) to request a snapshot rebuild from
+    // that date (SPEC-009 BR-009-18).
     const state = deps([aTransaction().buy().build()]);
     const result = await recalculatePositionFrom(state, scope);
     expect(result.ok && result.value.scope.fromDate).toBe('2026-02-01');
@@ -198,5 +202,34 @@ describe('without', () => {
   it('removes nothing when the set is empty', () => {
     const rows = [aTransaction().build()];
     expect(without(rows, new Set())).toHaveLength(1);
+  });
+});
+
+describe('SPEC-009 BR-009-18 — earliestFromDate', () => {
+  const outcome = (date: string): RecalculationOutcome => ({
+    scope: {
+      assetId: assetIdFor('PETR4'),
+      institutionId: null,
+      fromDate: BusinessDate.of(date),
+    },
+    position: null,
+  });
+
+  it('is null when nothing was recalculated', () => {
+    expect(earliestFromDate([])).toBeNull();
+  });
+
+  it('is the date itself for a single recalculation', () => {
+    expect(earliestFromDate([outcome('2020-01-13')])).toBe('2020-01-13');
+  });
+
+  it('is the earliest of several positions, whatever their order', () => {
+    // Hand-reasoned: an edit that moved a row from one asset (March) to another
+    // (June) leaves both stale from March; a carried leg re-derived in
+    // September does not move the boundary.
+    expect(
+      earliestFromDate([outcome('2026-06-10'), outcome('2026-03-05'), outcome('2026-09-01')]),
+    ).toBe('2026-03-05');
+    expect(earliestFromDate([outcome('2026-03-05'), outcome('2026-06-10')])).toBe('2026-03-05');
   });
 });

@@ -1,4 +1,4 @@
-import type { BusinessDate } from '@/core/shared/clock';
+import { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { ConversionGroupId } from '@/core/shared/ids';
 import { Money, sumMoney } from '@/core/shared/money';
@@ -55,10 +55,26 @@ export function validateAssetConversionGroup(
   return ok(groupId);
 }
 
+/**
+ * What a conversion-group write hands back. `fromDate` is the earliest date
+ * whose derived figures are now stale across every position the group touched
+ * (SPEC-009 BR-009-18 / DL-006-03) — the boundary the app layer requests a
+ * snapshot rebuild from.
+ */
+export interface AssetConversionWrite {
+  readonly groupId: ConversionGroupId;
+  readonly fromDate: BusinessDate;
+}
+
+export interface AssetConversionDelete {
+  readonly deletedCount: number;
+  readonly fromDate: BusinessDate;
+}
+
 export async function createAssetConversionGroup(
   deps: LedgerDependencies,
   legs: readonly Transaction[],
-): Promise<Result<{ readonly groupId: ConversionGroupId }, DomainError>> {
+): Promise<Result<AssetConversionWrite, DomainError>> {
   const valid = validateAssetConversionGroup(legs);
   if (!valid.ok) return valid;
   const guarded = await guardReplacement(deps, [], legs);
@@ -67,14 +83,14 @@ export async function createAssetConversionGroup(
   await deps.transactions.insertMany(marked);
   const recalculated = await recalculateTouched(deps, [], marked);
   if (!recalculated.ok) return recalculated;
-  return ok({ groupId: valid.value });
+  return ok({ groupId: valid.value, fromDate: recalculated.value });
 }
 
 export async function replaceAssetConversionGroup(
   deps: LedgerDependencies,
   groupId: ConversionGroupId,
   replacements: readonly Transaction[],
-): Promise<Result<{ readonly groupId: ConversionGroupId }, DomainError>> {
+): Promise<Result<AssetConversionWrite, DomainError>> {
   const existing = await deps.transactions.listByConversionGroup(groupId);
   if (existing.length === 0) {
     return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { conversionGroupId: groupId }));
@@ -91,13 +107,13 @@ export async function replaceAssetConversionGroup(
   await deps.transactions.insertMany(marked);
   const recalculated = await recalculateTouched(deps, existing, marked);
   if (!recalculated.ok) return recalculated;
-  return ok({ groupId });
+  return ok({ groupId, fromDate: recalculated.value });
 }
 
 export async function deleteAssetConversionGroup(
   deps: LedgerDependencies,
   groupId: ConversionGroupId,
-): Promise<Result<{ readonly deletedCount: number }, DomainError>> {
+): Promise<Result<AssetConversionDelete, DomainError>> {
   const existing = await deps.transactions.listByConversionGroup(groupId);
   if (existing.length === 0) {
     return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { conversionGroupId: groupId }));
@@ -109,7 +125,7 @@ export async function deleteAssetConversionGroup(
   const deletedCount = await deps.transactions.deleteByIds(existing.map((leg) => leg.id));
   const recalculated = await recalculateTouched(deps, existing, []);
   if (!recalculated.ok) return recalculated;
-  return ok({ deletedCount });
+  return ok({ deletedCount, fromDate: recalculated.value });
 }
 
 /**
@@ -205,13 +221,19 @@ async function recalculateTouched(
   deps: LedgerDependencies,
   existing: readonly Transaction[],
   replacements: readonly Transaction[],
-): Promise<Result<void, DomainError>> {
-  for (const touched of touchedPositions(existing, replacements)) {
+): Promise<Result<BusinessDate, DomainError>> {
+  const positions = touchedPositions(existing, replacements);
+  let earliest: BusinessDate | null = null;
+  for (const touched of positions) {
     const result = await recalculatePositionFrom(deps, {
       ...touched.key,
       fromDate: touched.fromDate,
     });
     if (!result.ok) return result;
+    if (earliest === null || BusinessDate.isBefore(touched.fromDate, earliest)) {
+      earliest = touched.fromDate;
+    }
   }
-  return ok(undefined);
+  // A conversion group always has legs, so `positions` is never empty.
+  return ok(earliest as BusinessDate);
 }
