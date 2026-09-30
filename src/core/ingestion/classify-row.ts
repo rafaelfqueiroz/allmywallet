@@ -7,6 +7,7 @@ import { editTransaction, type EditTransactionResult } from '@/core/ledger/edit-
 import type { TransactionType } from '@/core/ledger/transaction';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
+import { isResolvedSubscriptionExercise } from '@/core/ingestion/resolved-subscription-exercise';
 import { PRICE_BEARING_TYPES } from '@/core/ingestion/stage-batch';
 
 /**
@@ -44,6 +45,14 @@ export async function classifyImportRow(
   const row = await deps.rows.findById(input.rowId);
   if (row === null) {
     return err(ingestionError(IngestionUseCaseErrorCode.ROW_NOT_FOUND, { rowId: input.rowId }));
+  }
+
+  // SPEC-005 BR-005-19/20/20d (#179): an ignored exercise was consumed by
+  // the credit on the main asset. Restoring it would count those shares twice.
+  // Keep this guard in the use case: hiding the batch form alone cannot stop
+  // a stale or direct server-action submission.
+  if (isResolvedSubscriptionExercise(row)) {
+    return notClassifiable(row.id, row.classification);
   }
 
   // #108/#110: B3 gave no price, and a zero would open a lot at no cost or pay

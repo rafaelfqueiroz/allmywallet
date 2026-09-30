@@ -17,7 +17,7 @@ export const IngestionUseCaseErrorCode = {
   /** A structurally valid extract with zero business rows — nothing to stage. */
   EMPTY_EXTRACT: 'IMPORT_EMPTY_EXTRACT',
   ROW_NOT_FOUND: 'IMPORT_ROW_NOT_FOUND',
-  /** BR-005-20: only an `unclassified` row can be manually classified. */
+  /** BR-005-20 (#179): unclassified and ordinary ignored rows only; resolved exercises are excluded. */
   ROW_NOT_UNCLASSIFIED: 'IMPORT_ROW_NOT_UNCLASSIFIED',
   /** #108/#110: B3 gave no price, so a type whose effect depends on price would commit at zero. */
   ROW_PRICE_NOT_STATED: 'IMPORT_ROW_PRICE_NOT_STATED',

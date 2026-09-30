@@ -418,6 +418,15 @@ describe('resolveSubscriptionOffer (SPEC-005 BR-005-20d, #157, DL-005-25) — Re
     const updatedExerciseRow = await deps.rows.findById(exerciseRow.id);
     expect(updatedExerciseRow?.classification).toBe('ignored');
 
+    // SPEC-005 BR-005-20d (#179): the resolved exercise cannot be
+    // classified from Ignored, including by a stale form submission.
+    const ledgerBefore = await deps.transactions.listAll();
+    const rejected = await classifyImportRow(deps, { rowId: exerciseRow.id, type: 'bonificacao' });
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.error.code).toBe(IngestionUseCaseErrorCode.ROW_NOT_UNCLASSIFIED);
+    expect(await deps.transactions.listAll()).toEqual(ledgerBefore);
+
     // SPEC-005 BR-005-20d (#157 review F2): recomputed from the batch's own
     // rows, not a ±1 adjustment — the credit's row is `new` (classified
     // earlier) and the exercise's is now `ignored`, so nothing is left
@@ -615,6 +624,13 @@ describe('keepSubscriptionClassification (SPEC-005 BR-005-20d, #157, DL-005-25) 
     expect(exerciseTransaction?.status).toBe('superseded');
     const updatedExerciseRow = await deps.rows.findById(exerciseRow.id);
     expect(updatedExerciseRow?.classification).toBe('ignored');
+
+    const ledgerBefore = await deps.transactions.listAll();
+    const rejected = await classifyImportRow(deps, { rowId: exerciseRow.id, type: 'bonificacao' });
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.error.code).toBe(IngestionUseCaseErrorCode.ROW_NOT_UNCLASSIFIED);
+    expect(await deps.transactions.listAll()).toEqual(ledgerBefore);
 
     const creditRowAfter = await deps.rows.findById(creditRow.id);
     expect(creditRowAfter?.classification).toBe('new'); // Unchanged by Keep — set by `classifyImportRow` earlier.

@@ -18,6 +18,7 @@ import {
 } from '@/app/(app)/import/actions';
 import { loadImportBatchDetail } from '@/app/(app)/import/data';
 import { ClassifyForm } from '@/app/(app)/import/[batchId]/_components/ClassifyForm';
+import { IgnoredRow } from '@/app/(app)/import/[batchId]/_components/IgnoredRow';
 import {
   SubscriptionOfferPanel,
   type SubscriptionOfferLabels,
@@ -452,17 +453,13 @@ export default async function ImportBatchDetailPage({
               )}
               <List gap="md">
                 {ignored.map((row) => (
-                  <ListItem key={row.id} separated>
-                    <Stack gap="sm" align="start">
-                      <span className="font-medium">{row.record.assetCode}</span>
-                      <Text as="span" size="xs" tone="muted">
-                        {row.record.kind === 'transaction'
-                          ? `${row.record.b3Type} · ${formatBusinessDate(row.record.tradeDate)}`
-                          : ''}
-                      </Text>
-                      {batch.status === 'committed' && classifyForm(row.id)}
-                    </Stack>
-                  </ListItem>
+                  <IgnoredRow
+                    key={row.id}
+                    row={row}
+                    committed={batch.status === 'committed'}
+                    resolvedExerciseLabel={t('ignored.resolvedExercise')}
+                    classifyForm={classifyForm}
+                  />
                 ))}
               </List>
             </Stack>
