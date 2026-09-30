@@ -8,7 +8,6 @@ import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
 import { planCarriedLegUpdates } from '@/core/ledger/carried-legs';
 import { guardReplayable, type PositionLookupKey, without } from '@/core/ledger/guard-replayable';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
-import { UNCLASSIFIED_PLACEHOLDER_TYPE } from '@/core/ingestion/occurrence';
 import {
   computeTotalValue,
   type Transaction,
@@ -343,71 +342,28 @@ function estimateAfterEdit(
 }
 
 /**
- * SPEC-005 BR-005-17 (#110; amended #157 review F0) — an imported row whose
- * key is **not** derived from its own fields keeps that key while the B3 row
- * it records is still the same row. What "still the same row" checks
- * **differs by key form**, because the two seven-segment forms
- * `importNaturalKeyFor` produces (`stage-batch.ts`'s `keyFormsFor`) disagree
- * on whether the ledger type is part of the B3 row's identity or a decision
- * made about it:
+ * SPEC-005 BR-005-17 / SPEC-006 BR-006-04 (#178) — every seven-segment
+ * import-form key identifies the B3 source row by asset, institution, date
+ * and quantity. Its type slot records how staging first understood the raw
+ * movement; it is not part of the source row's identity after a person
+ * classifies or re-types that row. Price and fees likewise do not identify a
+ * price-less source row. Keeping this key lets every form `keyFormsFor`
+ * derives find the edited row on an identical re-import.
  *
- * - **`unmapped`** — B3's movement type resolves to no `TransactionType` at
- *   all (`classifyMovement` returns `null`, or conversion evidence claims
- *   it), so staging keys it with `UNCLASSIFIED_PLACEHOLDER_TYPE` in the type
- *   slot: the key identifies *the B3 row*, never the type a later
- *   classification (or re-type) gives it. So re-typing such a row
- *   (bonificação → buy, say) must keep the key: it is still the same
- *   Atualização credit, decided differently. Before this fix, `naturalKeyFor`
- *   was compared against `original`'s **current** fields, which already
- *   reflect the earlier classification — so the check never recognised this
- *   form as what it was, and a type change (only) rederived a key no future
- *   import's staging (always keyed with the placeholder for a B3 type the
- *   map does not resolve) can ever recompute. The next import of the file
- *   then found no match, staged the credit fresh, and SPEC-005 BR-005-20d
- *   paired it with the exercise a **second** time: 50 shares held, a
- *   7-share credit re-typed bonificação → buy, and a re-import's second
- *   7-share subscription counted 64 shares against a real 57 (#157 review
- *   F0).
- * - **`priceless`** — B3's movement type *does* resolve (a price-less
- *   `Transferência` credit staged `unclassified` only for want of a price,
- *   BR-005-20a) — the key's type slot is the real, resolved type, so the
- *   type genuinely identifies which B3 row this is and stays part of the
- *   check, unchanged.
- *
- * Rederiving either key on a fees-only or price-only edit produced a key no
- * re-import computes, and the next import of the file wrote the row a second
- * time — the original #110 finding, unaffected by this fix.
- *
- * A manual row, and an imported row keyed by `naturalKeyFor` itself, are
- * untouched: for them this is never true, and BR-006-04 applies as before.
+ * Changing asset, institution, date or quantity means it is no longer the
+ * same B3 row, so the key is rederived. Manual rows and six-segment imported
+ * rows keyed by `naturalKeyFor` retain BR-006-04's ordinary field-derived
+ * behaviour.
  */
 function keepsImportKey(original: Transaction, input: EditTransactionInput): boolean {
   if (original.importBatchId === null) return false;
 
-  // `importNaturalKeyFor` always appends exactly one segment to
-  // `naturalKeyFor`'s six — the same structural read `storedB3TypeOf` uses
-  // elsewhere to recover it. The `unmapped` form's type slot is always the
-  // placeholder; a `priceless` form carries its resolved type, which is the
-  // placeholder's own value only for a price-less `Rendimento` — kept here
-  // too, harmlessly, since that key likewise records the B3 row, not a type.
   const segments = original.naturalKey.split('|');
-  if (segments.length === 7 && segments[3] === UNCLASSIFIED_PLACEHOLDER_TYPE) {
-    return (
-      (input.assetId ?? original.assetId) === original.assetId &&
-      (input.institutionId === undefined ? original.institutionId : input.institutionId) ===
-        original.institutionId &&
-      (input.tradeDate ?? original.tradeDate) === original.tradeDate &&
-      (input.quantity ?? original.quantity).equals(original.quantity)
-    );
-  }
-
-  const derived = naturalKeyFor(original);
-  if (original.naturalKey === derived) return false;
+  if (segments.length !== 7) return false;
   return (
     (input.assetId ?? original.assetId) === original.assetId &&
     (input.institutionId === undefined ? original.institutionId : input.institutionId) ===
       original.institutionId &&
-    (input.type ?? original.type) === original.type &&
     (input.tradeDate ?? original.tradeDate) === original.tradeDate &&
     (input.quantity ?? original.quantity).equals(original.quantity)
   );
