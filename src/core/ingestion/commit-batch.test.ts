@@ -5231,6 +5231,22 @@ describe('SPEC-005 BR-005-20d (#144) — an exercised subscription pairs with it
     const exerciseRow = await rowForCode(deps, batchId, 'XXXX12');
     const updatedRow = await deps.rows.findById(exerciseRow.id);
     expect(updatedRow?.classification).toBe('ignored');
+
+    // SPEC-005 BR-005-20d (#179): a direct classification request cannot
+    // restore the consumed exercise and add the same three shares again.
+    const before = await deps.transactions.listAll();
+    const positionBefore = replayPosition(before.filter((t) => t.assetId === mainAssetId));
+    expect(positionBefore.ok && positionBefore.value.quantity.toString()).toBe('3');
+    const rejected = await classifyImportRow(deps, { rowId: exerciseRow.id, type: 'bonificacao' });
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.error.code).toBe('IMPORT_ROW_NOT_UNCLASSIFIED');
+    expect(await deps.transactions.listAll()).toEqual(before);
+    const positionAfter = replayPosition(
+      (await deps.transactions.listAll()).filter((t) => t.assetId === mainAssetId),
+    );
+    expect(positionAfter).toEqual(positionBefore);
+    expect((await deps.rows.findById(exerciseRow.id))?.classification).toBe('ignored');
   });
 
   it('resolves a stock right (generated fixture, DV-24) whose credit falls 78 days later', async () => {

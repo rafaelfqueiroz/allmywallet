@@ -442,7 +442,8 @@
       "title": "Ignoradas",
       "description": "Linhas que não entram nos cálculos, por dois motivos possíveis: repetem um registro que outro extrato já traz — liquidações de negócios que a Negociação registra e proventos transferidos entre corretoras — ou são papelada de um evento de subscrição que, por si só, não move a posição (aviso, pedido, direitos ou sobras não exercidos, cessão de direitos, recibo). Ficam guardadas, mas fora dos cálculos.",
       "show": "Ver {count} linha(s) ignorada(s)",
-      "classifyHint": "Classifique à mão só se tiver certeza do que a linha representa: uma liquidação ou um provento repassado deve virar lançamento apenas se você não importa a Negociação, senão o negócio conta duas vezes. Papelada de subscrição normalmente não deve ser classificada — o exercício em si chega como uma linha própria."
+      "classifyHint": "Classifique à mão só se tiver certeza do que a linha representa: uma liquidação ou um provento repassado deve virar lançamento apenas se você não importa a Negociação, senão o negócio conta duas vezes. Papelada de subscrição normalmente não deve ser classificada — o exercício em si chega como uma linha própria.",
+      "resolvedExercise": "Exercício resolvido: as cotas já foram contabilizadas no ativo principal. Para corrigir a classificação ou o custo, edite o lançamento de crédito."
     },
     "needsAttentionTitle": "Precisa de atenção",
     "needsAttentionEmpty": "Nada esperando classificação nesta importação.",
