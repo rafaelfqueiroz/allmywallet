@@ -166,7 +166,6 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
 
     it.each([
       ['quantity', { quantity: Quantity.fromString('90') }],
-      ['type', { type: 'buy' as const }],
       ['trade date', { tradeDate: BusinessDate.of('2026-01-06') }],
       ['institution', { institutionId: null }],
       ['asset', { assetId: assetIdFor('VALE3') }],
@@ -254,7 +253,7 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
       expect(result.ok && result.value.transaction.naturalKey).not.toBe(row.naturalKey);
     });
 
-    it('a price-less, mapped row (the `priceless` key form) still rederives on a type change — unaffected by this fix', async () => {
+    it('a price-less mapped row keeps its import key when re-typed with a price', async () => {
       // Keyed exactly as `keyFormsFor`'s `priceless` form: a real resolved
       // type (`transfer_in`) in the type slot, not the placeholder.
       const built = aTransaction()
@@ -270,9 +269,16 @@ describe('SPEC-006 BR-006-12 — editTransaction', () => {
       };
       const state = deps([row]);
 
-      const result = await editTransaction(state, row.id, { type: 'buy' });
+      const result = await editTransaction(state, row.id, {
+        type: 'buy',
+        unitPrice: Money.fromString('112.95'),
+      });
 
-      expect(result.ok && result.value.transaction.naturalKey).not.toBe(row.naturalKey);
+      // SPEC-005 BR-005-17 / SPEC-006 BR-006-04 (#178): the seven-segment
+      // key identifies the B3 row, whose asset, institution, date and quantity
+      // did not change; the ledger type and entered price are decisions about it.
+      expect(result.ok && result.value.transaction.naturalKey).toBe(row.naturalKey);
+      expect(result.ok && result.value.transaction.type).toBe('buy');
     });
   });
 

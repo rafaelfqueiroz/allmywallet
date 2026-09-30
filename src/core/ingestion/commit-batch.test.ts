@@ -2663,6 +2663,43 @@ describe('SPEC-005 BR-005-20a (#110) — a price-less transfer carries its sourc
     });
   });
 
+  it('#178: classifying then re-typing a price-less transfer keeps its source key, so re-import adds no shares', async () => {
+    const deps = buildFakeIngestionDeps();
+    const first = await importFile(deps, [credit()]);
+    const [sourceRow] = await deps.rows.listByBatch(first.batchId);
+    if (sourceRow === undefined) throw new Error('no staged transfer credit');
+
+    const classified = await classifyImportRow(deps, {
+      rowId: sourceRow.id,
+      type: 'bonificacao',
+    });
+    expect(classified.ok).toBe(true);
+    if (!classified.ok) return;
+    const sourceKey = classified.value.transaction.naturalKey;
+
+    const retyped = await editTransaction(deps, classified.value.transaction.id, {
+      type: 'buy',
+      unitPrice: Money.fromString('10'),
+      fees: Money.fromString('1'),
+    });
+    expect(retyped.ok).toBe(true);
+    if (!retyped.ok) return;
+    // SPEC-005 BR-005-17 / SPEC-006 BR-006-04 (#178): the edit changes how
+    // the ledger reads the row, not the B3 source row the import key identifies.
+    expect(retyped.value.transaction.naturalKey).toBe(sourceKey);
+
+    const again = await importFile(deps, [credit()]);
+
+    expect(again.outcome.batch.rowCounts).toMatchObject({ new: 0, duplicates: 1 });
+    expect(again.outcome).toMatchObject({ applied: 0, skippedDuplicates: 1 });
+    expect(deps.transactions.rows).toHaveLength(1);
+    expect(await positionAt(deps, DESTINO)).toEqual({
+      quantity: '100',
+      averageCost: '10.01',
+      totalCost: '1001',
+    });
+  });
+
   it('review 1: several promotions into one position are applied together, and their origin batch counts move', async () => {
     const deps = buildFakeIngestionDeps();
     const B = 'Corretora B';
