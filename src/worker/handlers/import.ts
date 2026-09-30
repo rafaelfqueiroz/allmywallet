@@ -4,7 +4,7 @@ import { logger } from '@/lib/logger';
 import { resolveConfig } from '@/config/resolve';
 import { env } from '@/lib/env';
 import { db as globalDb, type Database } from '@/db/client';
-import { withTenant, type Tx } from '@/db/tenant';
+import { withTenant, withTenantResult, type Tx } from '@/db/tenant';
 import { BusinessDate, SystemClock, type Clock } from '@/core/shared/clock';
 import { ImportBatchId, UserId } from '@/core/shared/ids';
 import type { IngestionPort } from '@/core/ingestion/ports';
@@ -335,7 +335,7 @@ export async function handleImportCommit(
     subscriptionCloseLookbackDays,
   );
 
-  const result = await withTenant(
+  const result = await withTenantResult(
     userId,
     async (tx) => {
       const committed = await commitBatch(buildIngestionDeps(tx, userId, deps.clock), userId, {
@@ -353,7 +353,8 @@ export async function handleImportCommit(
        * same transaction. Returning the error rather than logging and
        * continuing is deliberate: a commit whose wallet effects failed has a
        * ledger that no longer agrees with its allocations, and BR-010-05 is an
-       * invariant, not a preference. The rollback is the repair.
+       * invariant, not a preference. `withTenantResult` turns the returned
+       * refusal into a transaction rollback, then restores that same value.
        */
       const effects = await applyLedgerEffects(
         buildWalletDeps(tx, userId, deps.clock),

@@ -21,6 +21,7 @@ import {
 import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
 import { earliestFromDate } from '@/core/ledger/recalculate-from';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
+import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
 import { withIngestionAndWalletDeps, withIngestionDeps } from '@/app/(app)/import/composition';
 import { handleImportCancel, saveUploadedFile } from '@/worker/handlers/import';
 import { enqueue } from '@/lib/queue';
@@ -265,15 +266,15 @@ export async function resolveSubscriptionOfferAction(
     });
     if (!resolved.ok) return resolved;
 
-    // SPEC-010 BR-010-05: the credit's re-typed price and every carried leg
-    // re-derived downstream of it move cost, so allocations see the same
-    // edit as the ledger, in the same transaction — as `classifyRowAction`
-    // does for its own edit.
-    const effects = await applyLedgerEffects(wallets, userId, [
-      ...resolved.value.transactions,
-      ...resolved.value.rederived,
-    ]);
-    if (!effects.ok) return effects;
+    // SPEC-010 BR-010-05: this is an edit to active ledger history, so fit
+    // allocations to the recalculated holdings. Replaying the returned active
+    // rows would apply their historical wallet reductions a second time.
+    const reconciled = await reconcileAllocationsToHoldings(
+      wallets,
+      userId,
+      affectedAssets(resolved.value.recalculations),
+    );
+    if (!reconciled.ok) return reconciled;
 
     return resolved;
   });
@@ -291,9 +292,9 @@ export async function resolveSubscriptionOfferAction(
 /**
  * SPEC-005 BR-005-20d (#157, DL-005-25) — **Keep my classification**: the
  * credit is left exactly as the user classified it; only the exercise
- * supersedes (`keepSubscriptionClassification`). Nothing that replays
- * changes, so no wallet effect is expected — the call still runs, for
- * safety, in case a future change ever makes it carry a transaction.
+ * supersedes (`keepSubscriptionClassification`). Any carried transaction it
+ * re-derives is an edit to active history, so allocations are reconciled to
+ * the resulting holdings rather than replaying those rows a second time.
  */
 export async function keepSubscriptionClassificationAction(
   _state: ActionState,
@@ -312,11 +313,12 @@ export async function keepSubscriptionClassificationAction(
     });
     if (!kept.ok) return kept;
 
-    const changed = [...kept.value.transactions, ...kept.value.rederived];
-    if (changed.length > 0) {
-      const effects = await applyLedgerEffects(wallets, userId, changed);
-      if (!effects.ok) return effects;
-    }
+    const reconciled = await reconcileAllocationsToHoldings(
+      wallets,
+      userId,
+      affectedAssets(kept.value.recalculations),
+    );
+    if (!reconciled.ok) return reconciled;
 
     return kept;
   });
@@ -338,14 +340,17 @@ const AcceptAdjustmentSchema = z.object({
   institutionId: z.string().optional(),
 });
 
-export async function acceptAdjustmentAction(formData: FormData): Promise<void> {
+export async function acceptAdjustmentAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
   const userId = await requireUserId();
   const parsed = AcceptAdjustmentSchema.safeParse({
     batchId: formData.get('batchId'),
     assetId: formData.get('assetId'),
     institutionId: formData.get('institutionId') || undefined,
   });
-  if (!parsed.success) return;
+  if (!parsed.success) return INVALID_INPUT;
 
   const batchId = ImportBatchId.of(parsed.data.batchId);
   const result = await withIngestionAndWalletDeps(userId, async (deps, wallets) => {
@@ -360,18 +365,25 @@ export async function acceptAdjustmentAction(formData: FormData): Promise<void> 
      * SPEC-010 BR-010-05 — the adjustment is signed, so accepting B3's
      * *lower* figure removes shares. Allocations that did not follow left
      * allocated > held, on a user-triggered path with none of the import
-     * commit's wiring behind it. Returning the error rolls the whole thing
-     * back, for the reason `handleImportCommit` states.
+     * commit's wiring behind it. `withIngestionAndWalletDeps` rolls a returned
+     * error back, for the reason `handleImportCommit` states.
      */
     const effects = await applyLedgerEffects(wallets, userId, [accepted.value.result.transaction]);
     if (!effects.ok) return effects;
 
     return accepted;
   });
-  if (!result.ok) return;
+  if (!result.ok) return failure(result.error);
 
   // SPEC-009 BR-009-18: the adjustment is dated at the reconciliation's
   // `asOf`, which is usually in the past — the snapshots since are stale.
   await requestSnapshotRebuild(userId, earliestFromDate([result.value.result.recalculation]));
   revalidatePath(`/import/${batchId}`);
+  return IDLE;
+}
+
+function affectedAssets(
+  recalculations: readonly { readonly scope: { readonly assetId: AssetId } }[],
+): ReadonlySet<AssetId> {
+  return new Set(recalculations.map((recalculation) => recalculation.scope.assetId));
 }

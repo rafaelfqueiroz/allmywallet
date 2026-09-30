@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { db, type Database } from '@/db/client';
 import type { UserId } from '@/core/shared/ids';
+import type { Result } from '@/core/shared/result';
 
 /**
  * ARCHITECTURE §5 / SPEC-003 BR-003-04: tenant context is set from the
@@ -39,6 +40,64 @@ export async function withTenant<T>(
     await tx.execute(sql`SELECT set_config('app.user_id', ${userId}, true)`);
     return fn(tx);
   });
+}
+
+/**
+ * An expected refusal still has to leave Drizzle through a thrown value: a
+ * transaction callback that merely returns an error commits every write made
+ * before that return. The instance is private to this module and compared by
+ * identity, so a genuine exception — including one with the same message —
+ * can never be mistaken for an expected outcome.
+ */
+class ExpectedTransactionRefusal<T> extends Error {
+  constructor(readonly value: T) {
+    super('Expected transaction refusal');
+    this.name = 'ExpectedTransactionRefusal';
+  }
+}
+
+/**
+ * Runs a tenant callback atomically when the callback reports expected
+ * failures as values rather than exceptions.
+ *
+ * SPEC-010 BR-010-05 / SPEC-006 BR-006-15: a late allocation or ledger
+ * refusal must undo writes already made in the same operation while preserving
+ * the structured refusal the caller needs to explain. Genuine faults continue
+ * to throw and successful values commit normally.
+ */
+export async function withTenantRollbackOn<T>(
+  userId: UserId,
+  fn: (tx: Tx) => Promise<T>,
+  shouldRollback: (value: T) => boolean,
+  database: Database = db,
+): Promise<T> {
+  let refusal: ExpectedTransactionRefusal<T> | undefined;
+  try {
+    return await withTenant(
+      userId,
+      async (tx) => {
+        const value = await fn(tx);
+        if (shouldRollback(value)) {
+          refusal = new ExpectedTransactionRefusal(value);
+          throw refusal;
+        }
+        return value;
+      },
+      database,
+    );
+  } catch (error) {
+    if (refusal !== undefined && error === refusal) return refusal.value;
+    throw error;
+  }
+}
+
+/** Result-aware form used by core use-case composition roots (AR-36). */
+export async function withTenantResult<T, E>(
+  userId: UserId,
+  fn: (tx: Tx) => Promise<Result<T, E>>,
+  database: Database = db,
+): Promise<Result<T, E>> {
+  return withTenantRollbackOn(userId, fn, (result) => !result.ok, database);
 }
 
 /**

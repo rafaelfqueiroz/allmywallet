@@ -231,6 +231,120 @@ describe('SPEC-005 — import pipeline (integration)', () => {
   });
 
   /**
+   * SPEC-010 BR-010-05 / AC-010-04 and SPEC-006 BR-006-15 / AC-006-10:
+   * a wallet refusal happens after `commitBatch` has written the batch,
+   * transaction and position. The expected error must therefore cross the
+   * Result boundary while all three writes roll back together.
+   */
+  it('rolls back the complete import commit when wallet effects refuse', async () => {
+    const seedBatch = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      seedBatch,
+      await buildMovimentacaoXlsx([
+        {
+          data: '10/01/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '100',
+          precoUnitario: '10,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: seedBatch, userId }, handlerDeps());
+    await handleImportCommit({ batchId: seedBatch, userId }, handlerDeps());
+
+    const { rows: assetRows } = await migratorPool.query(
+      "SELECT id FROM assets WHERE code = 'PETR4'",
+    );
+    const rawAssetId = assetRows[0]?.id;
+    if (typeof rawAssetId !== 'string') throw new Error('asset setup failed');
+    const assetId = AssetId.of(rawAssetId);
+    const wallet = await withTenant(
+      userId,
+      async (tx) => {
+        const deps = buildWalletDeps(tx, userId, clock);
+        const created = await createWallet(deps, userId, { name: 'Reserva' });
+        if (!created.ok) throw new Error('wallet setup failed');
+        const allocated = await allocateToWallet(deps, userId, {
+          walletId: created.value.id,
+          assetId,
+        });
+        if (!allocated.ok) throw new Error('allocation setup failed');
+        return created.value;
+      },
+      appDb,
+    );
+
+    // Arrange a pre-existing impossible allocation so the refusal is reached
+    // only after commitBatch has applied the next buy. The migrator role is
+    // intentional test setup; production writes cannot create this state.
+    await migratorPool.query(
+      'UPDATE wallet_allocations SET quantity = $1 WHERE wallet_id = $2 AND asset_id = $3',
+      ['200', wallet.id, assetId],
+    );
+    const { rows: eventCountsBefore } = await migratorPool.query(
+      'SELECT count(*)::int AS count FROM wallet_allocation_events WHERE wallet_id = $1 AND asset_id = $2',
+      [wallet.id, assetId],
+    );
+    snapshotJobs = [];
+
+    const refusedBatch = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(
+      uploadDir,
+      refusedBatch,
+      await buildMovimentacaoXlsx([
+        {
+          data: '20/02/2026',
+          movimentacao: 'Compra',
+          produto: 'PETR4 - Petrobras PN',
+          quantidade: '10',
+          precoUnitario: '12,00',
+        },
+      ]),
+    );
+    await handleImportStage({ batchId: refusedBatch, userId }, handlerDeps());
+
+    await expect(
+      handleImportCommit({ batchId: refusedBatch, userId }, handlerDeps()),
+    ).rejects.toThrow('import.commit: ALLOCATION_EXCEEDS_HOLDINGS');
+
+    expect((await batchRow(refusedBatch))?.status).toBe('previewed');
+    const { rows: refusedTransactions } = await migratorPool.query(
+      'SELECT count(*)::int AS count FROM transactions WHERE import_batch_id = $1',
+      [refusedBatch],
+    );
+    expect(refusedTransactions[0]?.count).toBe(0);
+    const { rows: stagedRows } = await migratorPool.query(
+      'SELECT transaction_id FROM import_rows WHERE batch_id = $1',
+      [refusedBatch],
+    );
+    expect(stagedRows).toHaveLength(1);
+    expect(stagedRows[0]?.transaction_id).toBeNull();
+
+    const { rows: held } = await migratorPool.query(
+      'SELECT quantity::text AS quantity FROM positions WHERE user_id = $1 AND asset_id = $2',
+      [userId, assetId],
+    );
+    expect(held[0]?.quantity).toBe('100.00000000');
+
+    const { rows: allocations } = await migratorPool.query(
+      'SELECT quantity::text AS quantity FROM wallet_allocations WHERE wallet_id = $1 AND asset_id = $2',
+      [wallet.id, assetId],
+    );
+    expect(allocations[0]?.quantity).toBe('200.00000000');
+    const { rows: eventCountsAfter } = await migratorPool.query(
+      'SELECT count(*)::int AS count FROM wallet_allocation_events WHERE wallet_id = $1 AND asset_id = $2',
+      [wallet.id, assetId],
+    );
+    expect(eventCountsAfter[0]?.count).toBe(eventCountsBefore[0]?.count);
+
+    // A refused commit is retryable and therefore keeps its source artefact.
+    expect((await readFile(join(uploadDir, `${refusedBatch}.xlsx`))).byteLength).toBeGreaterThan(0);
+    expect(snapshotJobs).toEqual([]);
+  });
+
+  /**
    * SPEC-010 BR-010-05 — a batch carrying a round trip in an allocated asset.
    *
    * This is the case that could not commit *at all*. `applyBuy` checked the

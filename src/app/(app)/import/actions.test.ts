@@ -29,6 +29,9 @@ vi.mock('@/core/ingestion/subscription-offer', () => ({
 }));
 vi.mock('@/core/ingestion/accept-adjustment', () => ({ acceptReconciliationAdjustment: vi.fn() }));
 vi.mock('@/core/wallets/apply-ledger-effects', () => ({ applyLedgerEffects: vi.fn() }));
+vi.mock('@/core/wallets/reconcile-allocations', () => ({
+  reconcileAllocationsToHoldings: vi.fn(),
+}));
 
 import { resolveConfig } from '@/config/resolve';
 import { enqueue } from '@/lib/queue';
@@ -42,6 +45,7 @@ import {
 } from '@/core/ingestion/subscription-offer';
 import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustment';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
+import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
 import {
   acceptAdjustmentAction,
   classifyRowAction,
@@ -88,6 +92,7 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       callback({} as never, {} as never),
     );
     vi.mocked(applyLedgerEffects).mockResolvedValue(ok(undefined) as never);
+    vi.mocked(reconcileAllocationsToHoldings).mockResolvedValue(ok([]));
     vi.mocked(enqueue).mockResolvedValue(undefined);
   });
 
@@ -169,6 +174,12 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       const result = await resolveSubscriptionOfferAction(IDLE_STATE, rowForm());
 
       expect(result).toEqual({ status: 'idle' });
+      expect(reconcileAllocationsToHoldings).toHaveBeenCalledWith(
+        expect.anything(),
+        USER,
+        new Set([ASSET]),
+      );
+      expect(applyLedgerEffects).not.toHaveBeenCalled();
       expectRebuildFrom('2020-01-13');
     });
 
@@ -180,6 +191,22 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       const result = await resolveSubscriptionOfferAction(IDLE_STATE, rowForm());
 
       expect(result).toMatchObject({ status: 'error' });
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('returns the exact allocation reconciliation refusal', async () => {
+      vi.mocked(resolveSubscriptionOffer).mockResolvedValue(resolved('2020-01-13'));
+      vi.mocked(reconcileAllocationsToHoldings).mockResolvedValue(
+        err(domainError('ALLOCATION_EXCEEDS_HOLDINGS', { held: '10', requested: '11' })),
+      );
+
+      const result = await resolveSubscriptionOfferAction(IDLE_STATE, rowForm());
+
+      expect(result).toEqual({
+        status: 'error',
+        code: 'ALLOCATION_EXCEEDS_HOLDINGS',
+        context: { held: '10', requested: '11' },
+      });
       expect(enqueue).not.toHaveBeenCalled();
     });
 
@@ -207,6 +234,12 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       const result = await keepSubscriptionClassificationAction(IDLE_STATE, rowForm());
 
       expect(result).toEqual({ status: 'idle' });
+      expect(reconcileAllocationsToHoldings).toHaveBeenCalledWith(
+        expect.anything(),
+        USER,
+        new Set([ASSET]),
+      );
+      expect(applyLedgerEffects).not.toHaveBeenCalled();
       expect(enqueue).not.toHaveBeenCalled();
     });
 
@@ -234,6 +267,28 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       expect(result).toMatchObject({ status: 'error' });
       expect(enqueue).not.toHaveBeenCalled();
     });
+
+    it('returns the exact allocation reconciliation refusal', async () => {
+      vi.mocked(keepSubscriptionClassification).mockResolvedValue(
+        ok({
+          transactions: [aTransaction],
+          recalculations: [recalculated('2020-01-13')],
+          rederived: [],
+        }),
+      );
+      vi.mocked(reconcileAllocationsToHoldings).mockResolvedValue(
+        err(domainError('ALLOCATION_EXCEEDS_HOLDINGS', { assetId: ASSET })),
+      );
+
+      const result = await keepSubscriptionClassificationAction(IDLE_STATE, rowForm());
+
+      expect(result).toEqual({
+        status: 'error',
+        code: 'ALLOCATION_EXCEEDS_HOLDINGS',
+        context: { assetId: ASSET },
+      });
+      expect(enqueue).not.toHaveBeenCalled();
+    });
   });
 
   describe('acceptAdjustmentAction', () => {
@@ -252,8 +307,9 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
         }) as never,
       );
 
-      await acceptAdjustmentAction(form());
+      const result = await acceptAdjustmentAction(IDLE_STATE, form());
 
+      expect(result).toEqual({ status: 'idle' });
       expectRebuildFrom('2026-03-02');
     });
 
@@ -262,8 +318,30 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
         err(domainError('ADJUSTMENT_STALE')),
       );
 
-      await acceptAdjustmentAction(form());
+      const result = await acceptAdjustmentAction(IDLE_STATE, form());
 
+      expect(result).toMatchObject({ status: 'error', code: 'ADJUSTMENT_STALE' });
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('returns the exact allocation refusal after rolling the adjustment back', async () => {
+      vi.mocked(acceptReconciliationAdjustment).mockResolvedValue(
+        ok({
+          batch: {},
+          result: { transaction: aTransaction, recalculation: recalculated('2026-03-02') },
+        }) as never,
+      );
+      vi.mocked(applyLedgerEffects).mockResolvedValue(
+        err(domainError('ALLOCATION_EXCEEDS_HOLDINGS', { held: '10', allocated: '12' })),
+      );
+
+      const result = await acceptAdjustmentAction(IDLE_STATE, form());
+
+      expect(result).toEqual({
+        status: 'error',
+        code: 'ALLOCATION_EXCEEDS_HOLDINGS',
+        context: { held: '10', allocated: '12' },
+      });
       expect(enqueue).not.toHaveBeenCalled();
     });
 
@@ -276,7 +354,7 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       );
       vi.mocked(enqueue).mockRejectedValue(new Error('pg-boss unreachable'));
 
-      await expect(acceptAdjustmentAction(form())).resolves.toBeUndefined();
+      await expect(acceptAdjustmentAction(IDLE_STATE, form())).resolves.toEqual({ status: 'idle' });
 
       expect(logger.error).toHaveBeenCalledTimes(1);
     });
@@ -341,7 +419,7 @@ describe('import actions — SPEC-009 BR-009-18 snapshot rebuild request', () =>
       data.set('batchId', BATCH);
       data.set('assetId', ASSET);
 
-      await acceptAdjustmentAction(data);
+      await acceptAdjustmentAction(IDLE_STATE, data);
 
       expect(events).toEqual(['callback-start', 'commit', 'enqueue']);
     });
