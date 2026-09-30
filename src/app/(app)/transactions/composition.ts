@@ -19,7 +19,7 @@ import {
   DrizzleWalletRepository,
 } from '@/adapters/db/wallet-repository';
 import { db } from '@/db/client';
-import { withTenant, type Tx } from '@/db/tenant';
+import { withTenant, withTenantRollbackOn, type Tx } from '@/db/tenant';
 
 /**
  * The composition root for `/transactions` (AR-02): the one place that wires
@@ -80,7 +80,7 @@ export async function withTransactionWriteDeps<T>(
   userId: UserId,
   fn: (deps: TransactionWriteDeps) => Promise<T>,
 ): Promise<T> {
-  return withTenant(
+  return withTenantRollbackOn(
     userId,
     (tx) => {
       const transactions = new DrizzleTransactionRepository(tx, userId);
@@ -112,6 +112,14 @@ export async function withTransactionWriteDeps<T>(
         institutions: new DrizzleInstitutionResolver(tx),
       });
     },
+    (value) => isErrorActionState(value),
     db,
+  );
+}
+
+/** AR-34: expected action failures are values, and therefore need an explicit rollback predicate. */
+function isErrorActionState(value: unknown): boolean {
+  return (
+    typeof value === 'object' && value !== null && 'status' in value && value.status === 'error'
   );
 }

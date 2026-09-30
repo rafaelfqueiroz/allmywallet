@@ -2,9 +2,10 @@ import { SystemClock } from '@/core/shared/clock';
 import type { UserId } from '@/core/shared/ids';
 import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import type { WalletDependencies } from '@/core/wallets/dependencies';
+import type { Result } from '@/core/shared/result';
 import { buildIngestionDeps, buildWalletDeps } from '@/worker/handlers/import';
 import { db } from '@/db/client';
-import { withTenant } from '@/db/tenant';
+import { withTenant, withTenantResult } from '@/db/tenant';
 
 /**
  * The composition root (AR-02) for `/import` — reuses
@@ -32,11 +33,11 @@ export async function withIngestionDeps<T>(
  * adjustment creates a signed `adjustment` row with exactly the same power to
  * break BR-010-05, so it needs the same treatment and the same transaction.
  */
-export async function withIngestionAndWalletDeps<T>(
+export async function withIngestionAndWalletDeps<T, E>(
   userId: UserId,
-  fn: (deps: IngestionDependencies, wallets: WalletDependencies) => Promise<T>,
-): Promise<T> {
-  return withTenant(
+  fn: (deps: IngestionDependencies, wallets: WalletDependencies) => Promise<Result<T, E>>,
+): Promise<Result<T, E>> {
+  return withTenantResult(
     userId,
     (tx) => fn(buildIngestionDeps(tx, userId, clock), buildWalletDeps(tx, userId, clock)),
     db,

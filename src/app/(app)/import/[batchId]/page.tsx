@@ -519,7 +519,7 @@ export default async function ImportBatchDetailPage({
                             {t(`acceptAdjustmentBlocked.${blocker}`)}
                           </Text>
                         ) : (
-                          <form action={acceptAdjustmentAction}>
+                          <ActionForm action={acceptAdjustmentAction}>
                             <input type="hidden" name="batchId" value={batch.id} />
                             <input type="hidden" name="assetId" value={d.assetId} />
                             {d.institutionId && (
@@ -528,7 +528,7 @@ export default async function ImportBatchDetailPage({
                             <Button type="submit" size="xs" variant="outline">
                               {t('acceptAdjustment')}
                             </Button>
-                          </form>
+                          </ActionForm>
                         )}
                       </TableCell>
                     </TableRow>
