@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
 import { ImportBatchId, TransactionId, UserId } from '@/core/shared/ids';
-import { aTransaction, assetIdFor } from '@/core/ledger/test-support/transaction-builder';
+import {
+  aTransaction,
+  assetIdFor,
+  institutionIdFor,
+} from '@/core/ledger/test-support/transaction-builder';
+import { editTransaction } from '@/core/ledger/edit-transaction';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import { rebuildPositions } from '@/core/positions/rebuild';
 import { serializePosition } from '@/core/positions/position-state';
@@ -48,6 +53,7 @@ async function committedUnclassifiedRow(
   b3Type?: string,
   commit = true,
   priceStated = true,
+  recordOverrides: Partial<NormalizedTransactionRecord> = {},
 ) {
   const batchId = ImportBatchId.generate();
   deps.batches.seed({
@@ -61,9 +67,10 @@ async function committedUnclassifiedRow(
     reconciliation: null,
     failureCode: null,
   });
+  const parsed = unmapped(b3Type, priceStated);
   const extract: ParsedExtract = {
     extractType: 'b3_movimentacao',
-    records: [unmapped(b3Type, priceStated)],
+    records: [{ ...parsed, record: { ...parsed.record, ...recordOverrides } }],
   };
   await stageBatch(deps, userId, { batchId, extract });
   if (commit) await commitBatch(deps, userId, { batchId });
@@ -219,6 +226,199 @@ describe('SPEC-005 BR-005-20 — classifyImportRow', () => {
   );
 
   describe('BR-005-19 (amended, #110) — an ignored row', () => {
+    it('#195 — protects a stated transfer credit before planning and across later derivation and re-import', async () => {
+      // Buy 100 @ 10; user-classified credit 100 @ 20 applies before the
+      // same-position debit of 100: 200 / 3.000 → 100 / 1.500 at average 15.
+      // Later correction of the buy to 12 changes the average to 16, while
+      // the human-stated credit remains 20 and its import key stays raw.
+      const deps = buildFakeIngestionDeps('2026-06-30');
+      const assetId = await deps.assets.resolve({
+        code: 'PETR4',
+        name: 'Petrobras PN',
+        assetClass: 'stock',
+        nameStated: true,
+        classStated: true,
+      });
+      const institutionId = await deps.institutions.resolve('Corretora Teste');
+      const buy = {
+        ...aTransaction().buy().on('2026-01-05').quantity('100').price('10').build(),
+        userId,
+        assetId,
+        institutionId,
+      };
+      const debit = {
+        ...aTransaction()
+          .transferOut()
+          .on('2026-01-10')
+          .quantity('100')
+          .price('0')
+          .imported()
+          .build(),
+        userId,
+        assetId,
+        institutionId,
+      };
+      await deps.transactions.insertMany([buy, debit]);
+      const overrides = {
+        unitPrice: Money.fromString('20'),
+        fees: Money.zero(),
+        direction: 'credit' as const,
+      };
+      const row = await committedUnclassifiedRow(
+        deps,
+        'Transferência - Liquidação',
+        true,
+        true,
+        overrides,
+      );
+      expect(row.classification).toBe('ignored');
+
+      const result = await classifyImportRow(deps, { rowId: row.id, type: 'transfer_in' });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.transaction.unitPrice.toString()).toBe('20');
+      expect(result.value.transaction.totalValue.toString()).toBe('2000');
+      expect(result.value.transaction.isUserModified).toBe(true);
+      expect(result.value.transaction.naturalKey).toBe(row.naturalKey);
+      expect(result.value.rederived).toEqual([]);
+      expect(await deps.transactions.findById(result.value.transaction.id)).toEqual(
+        result.value.transaction,
+      );
+      const position = (await deps.positions.list()).find(
+        (snapshot) => snapshot.assetId === assetId && snapshot.institutionId === institutionId,
+      );
+      expect(position?.state.quantity.toString()).toBe('100');
+      expect(position?.state.totalCost.toString()).toBe('1500');
+      expect(position?.state.averageCost.toString()).toBe('15');
+
+      const correction = await editTransaction(deps, buy.id, { unitPrice: Money.fromString('12') });
+      expect(correction.ok).toBe(true);
+      expect(correction.ok && correction.value.rederived).toEqual([]);
+      const afterCorrection = await deps.transactions.findById(result.value.transaction.id);
+      expect(afterCorrection?.unitPrice.toString()).toBe('20');
+      expect(afterCorrection?.isUserModified).toBe(true);
+      const again = await committedUnclassifiedRow(
+        deps,
+        'Transferência - Liquidação',
+        true,
+        true,
+        overrides,
+      );
+      expect(again.classification).toBe('duplicate');
+      expect(await deps.transactions.findById(result.value.transaction.id)).toEqual(
+        afterCorrection,
+      );
+      expect(
+        (await deps.positions.list())
+          .find(
+            (snapshot) => snapshot.assetId === assetId && snapshot.institutionId === institutionId,
+          )
+          ?.state.totalCost.toString(),
+      ).toBe('1600');
+    });
+
+    it('#195 — protects the classified credit while re-deriving the later transfer to B', async () => {
+      // A buys 200 @ 10, adds classified 100 @ 20, then its same-position
+      // debit removes 100 at 4.000 / 300 = 13,333333… . The later 100 to B
+      // carry the stored 13,33333333 → cost 1.333,333333, not the old 1.000.
+      const deps = buildFakeIngestionDeps('2026-06-30');
+      const assetId = await deps.assets.resolve({
+        code: 'PETR4',
+        name: 'Petrobras PN',
+        assetClass: 'stock',
+        nameStated: true,
+        classStated: true,
+      });
+      const institutionId = await deps.institutions.resolve('Corretora Teste');
+      const buy = {
+        ...aTransaction().buy().on('2026-01-05').quantity('200').price('10').build(),
+        userId,
+        assetId,
+        institutionId,
+      };
+      const samePositionDebit = {
+        ...aTransaction()
+          .transferOut()
+          .on('2026-01-10')
+          .quantity('100')
+          .price('0')
+          .imported()
+          .build(),
+        userId,
+        assetId,
+        institutionId,
+      };
+      const laterDebit = {
+        ...aTransaction()
+          .transferOut()
+          .on('2026-02-01')
+          .quantity('100')
+          .price('0')
+          .imported()
+          .build(),
+        userId,
+        assetId,
+        institutionId,
+      };
+      const creditBase = {
+        ...aTransaction()
+          .transferIn()
+          .at('B')
+          .on('2026-02-01')
+          .quantity('100')
+          .price('10')
+          .imported()
+          .build(),
+        userId,
+        assetId,
+      };
+      const laterCredit = {
+        ...creditBase,
+        naturalKey: naturalKeyFor({ ...creditBase, unitPrice: Money.zero() }),
+      };
+      await deps.transactions.insertMany([buy, samePositionDebit, laterDebit, laterCredit]);
+      const initial = await rebuildPositions(deps);
+      expect(initial.ok).toBe(true);
+      const row = await committedUnclassifiedRow(deps, 'Transferência - Liquidação', true, true, {
+        unitPrice: Money.fromString('20'),
+        fees: Money.zero(),
+        direction: 'credit',
+      });
+
+      const result = await classifyImportRow(deps, { rowId: row.id, type: 'transfer_in' });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.transaction.unitPrice.toString()).toBe('20');
+      expect(result.value.transaction.isUserModified).toBe(true);
+      expect(result.value.transaction.naturalKey).toBe(row.naturalKey);
+      expect(result.value.rederived.map((leg) => leg.id)).toEqual([laterCredit.id]);
+      expect(result.value.recalculations).toHaveLength(2);
+      const storedCredit = await deps.transactions.findById(laterCredit.id);
+      expect(storedCredit?.unitPrice.toString()).toBe('13.33333333');
+      expect(storedCredit?.totalValue.toString()).toBe('1333.333333');
+      const b = (await deps.positions.list()).find(
+        (snapshot) => snapshot.institutionId === institutionIdFor('B'),
+      );
+      expect(b?.state.quantity.toString()).toBe('100');
+      expect(b?.state.totalCost.toString()).toBe('1333.333333');
+      const print = (snapshots: readonly PositionSnapshot[]) =>
+        JSON.stringify(
+          [...snapshots]
+            .sort((a, b) => (positionKeyString(a) < positionKeyString(b) ? -1 : 1))
+            .map((snapshot) => ({
+              key: positionKeyString(snapshot),
+              ...serializePosition(snapshot.state),
+              costEstimated: snapshot.costEstimated,
+            })),
+        );
+      const incremental = print(await deps.positions.list());
+      const rebuilt = await rebuildPositions(deps);
+      expect(rebuilt.ok).toBe(true);
+      if (rebuilt.ok) expect(print(rebuilt.value)).toBe(incremental);
+    });
+
     it('creates its transaction on classification, attaches it and recalculates', async () => {
       const deps = buildFakeIngestionDeps();
       const row = await committedUnclassifiedRow(deps, 'Transferência - Liquidação');

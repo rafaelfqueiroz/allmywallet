@@ -179,6 +179,23 @@ describe('SPEC-006 BR-006-11 — createTransaction', () => {
     expect(result.value.transaction.importBatchId).toBe(importBatchIdFor('batch-a'));
   });
 
+  it('BR-006-16 — a caller can identify a human classification before the row is stored', async () => {
+    const state = deps();
+    const result = await createTransaction(
+      state,
+      TEST_USER_ID,
+      buyInput({ importBatchId: importBatchIdFor('classified') }),
+      { flagUserModified: true },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.transaction.isUserModified).toBe(true);
+    expect((await state.transactions.findById(result.value.transaction.id))?.isUserModified).toBe(
+      true,
+    );
+  });
+
   it('BR-006-03 — an unclassified row is stored but stays out of the position', async () => {
     const state = deps();
     await createTransaction(state, TEST_USER_ID, buyInput());

@@ -67,6 +67,12 @@ export interface CreateTransactionResult {
 }
 
 export interface CreateTransactionOptions {
+  /**
+   * SPEC-006 BR-006-16 / SPEC-005 BR-005-20: a human classification owns
+   * its figure from the outset, including while carries are planned. Defaults
+   * to false for ordinary creation and automatic import writes.
+   */
+  readonly flagUserModified?: boolean;
   /** SPEC-005 BR-005-20a: batch callers resolving carries themselves opt out. */
   readonly rederiveCarriedLegs?: boolean;
 }
@@ -129,7 +135,7 @@ export async function createTransaction(
     occurrence: input.importKey?.occurrence ?? (await deps.transactions.nextOccurrence(naturalKey)),
     importBatchId: input.importBatchId ?? null,
     isManual: (input.importBatchId ?? null) === null,
-    isUserModified: false,
+    isUserModified: options.flagUserModified === true,
     // SPEC-007 BR-007-06 / SPEC-005 BR-005-20d: manual single-row entry never
     // creates an estimate — only the import/reconciliation path can classify
     // a row that way.
