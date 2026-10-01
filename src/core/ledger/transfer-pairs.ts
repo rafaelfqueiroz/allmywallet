@@ -13,8 +13,9 @@ import { isActive, type Transaction } from '@/core/ledger/transaction';
  * trip. What this module adds is only how a stored row becomes a
  * `TransferLeg`, so the two readers of the stored ledger — the carried-leg
  * re-derivation (`carried-legs.ts`, SPEC-007 BR-007-06) and the snapshot's
- * flow fold (SPEC-013 BR-013-08, `core/valuation/snapshot.ts`) — cannot pair
- * the same ledger two different ways.
+ * flow fold (SPEC-013 BR-013-08, `core/valuation/snapshot.ts`) — agree on
+ * cost-carry pairs. `internalLedgerTransferIds` separately recognises the
+ * flow-only round trips required by DL-013-11, without changing cost carry.
  */
 
 /** Written by import and never edited by a user (BR-006-16). */
@@ -73,4 +74,62 @@ export function pairLedgerTransfers(
   );
   // The ids went in as transaction ids and come back unchanged.
   return pairs as ReadonlyMap<TransactionId, TransactionId>;
+}
+
+/**
+ * SPEC-013 BR-013-08 / DL-013-11: the legs that move no money. Cost-carry
+ * pairs remain authoritative; a same-position round trip is also internal
+ * regardless of stated prices, import ownership or user edits.
+ *
+ * Round trips require a known institution and equal occurrence counts for
+ * one asset, institution, date and exact quantity. Two debits of 3 and two
+ * credits of 3 are internal; two debits against one credit are not. Choosing
+ * which debit or differently priced credit to cancel would invent a residual
+ * cost flow. Nor do we aggregate 3 + 3 against 6: equal totals alone do not
+ * establish the same-quantity relation the spec names.
+ *
+ * Worked example (DV-17): buy 3 for 10,00; two credits of 3 at 3,33333333
+ * and 3,50, and two debits of 3 at the same custodian/date add zero to both
+ * flow columns. Total invested remains 10,00, whatever cost the replayed lot
+ * now carries. All competing occurrences share a date, so this classification
+ * is cut-invariant and preserves rebuild-equals-incremental (DM-4).
+ */
+export function internalLedgerTransferIds(
+  transactions: readonly Transaction[],
+): ReadonlySet<TransactionId> {
+  const internal = new Set<TransactionId>();
+  for (const [credit, debit] of pairLedgerTransfers(transactions)) {
+    internal.add(credit);
+    internal.add(debit);
+  }
+
+  const groups = new Map<string, { credits: TransactionId[]; debits: TransactionId[] }>();
+  for (const transaction of transactions) {
+    if (
+      !isActive(transaction) ||
+      transaction.institutionId === null ||
+      internal.has(transaction.id) ||
+      (transaction.type !== 'transfer_in' && transaction.type !== 'transfer_out')
+    ) {
+      continue;
+    }
+    const key = [
+      transaction.assetId,
+      transaction.institutionId,
+      transaction.tradeDate,
+      transaction.quantity.toString(),
+    ].join('|');
+    let group = groups.get(key);
+    if (group === undefined) {
+      group = { credits: [], debits: [] };
+      groups.set(key, group);
+    }
+    if (transaction.type === 'transfer_in') group.credits.push(transaction.id);
+    else group.debits.push(transaction.id);
+  }
+  for (const { credits, debits } of groups.values()) {
+    if (credits.length !== debits.length) continue;
+    for (const id of [...credits, ...debits]) internal.add(id);
+  }
+  return internal;
 }
