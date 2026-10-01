@@ -253,6 +253,8 @@ describe('transaction actions — SPEC-009 BR-009-18 snapshot rebuild request', 
         ok({
           transaction: plain,
           recalculation: recalculated('2020-01-13'),
+          recalculations: [recalculated('2020-01-13')],
+          rederived: [],
         }),
       );
     });
@@ -555,7 +557,12 @@ describe('transaction actions — SPEC-009 BR-009-18 snapshot rebuild request', 
 
     it('create', async () => {
       vi.mocked(createTransaction).mockResolvedValue(
-        ok({ transaction: plain, recalculation: recalculated('2020-01-13') }),
+        ok({
+          transaction: plain,
+          recalculation: recalculated('2020-01-13'),
+          recalculations: [recalculated('2020-01-13')],
+          rederived: [],
+        }),
       );
 
       await createTransactionAction(IDLE_STATE, createForm());

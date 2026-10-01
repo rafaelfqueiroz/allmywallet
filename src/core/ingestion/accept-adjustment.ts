@@ -17,8 +17,8 @@ import type { Discrepancy } from '@/core/ingestion/reconcile';
  * **adjustment transaction**. History is never edited in place (DL-005-06).
  *
  * A single row, not a bulk path — this reuses `core/ledger/create-transaction`
- * directly (its guard and single-position recalculation are exactly right
- * for one row, unlike `commit-batch.ts`'s grouped replay, which exists only
+ * directly (its guards and downstream recalculations cover this insertion,
+ * unlike `commit-batch.ts`'s grouped replay, which exists only
  * for the 10.000-row case).
  */
 export interface AcceptAdjustmentInput {

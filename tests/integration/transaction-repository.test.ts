@@ -5,11 +5,19 @@ import * as schema from '@/db/schema';
 import { withTenant } from '@/db/tenant';
 import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import type { AssetId, InstitutionId } from '@/core/shared/ids';
-import { ConversionGroupId, TransactionId, UserId, WalletId } from '@/core/shared/ids';
+import {
+  ConversionGroupId,
+  ImportBatchId,
+  TransactionId,
+  UserId,
+  WalletId,
+} from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { DrizzlePositionRepository } from '@/adapters/db/position-repository';
 import { DrizzleTransactionRepository } from '@/adapters/db/transaction-repository';
 import { createTransaction } from '@/core/ledger/create-transaction';
+import { naturalKeyFor } from '@/core/ledger/natural-key';
+import { aTransaction } from '@/core/ledger/test-support/transaction-builder';
 import { bulkDeleteTransactions } from '@/core/ledger/bulk-delete-transactions';
 import { deleteTransaction } from '@/core/ledger/delete-transaction';
 import { earliestFromDate } from '@/core/ledger/recalculate-from';
@@ -664,6 +672,81 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
   });
 
   describe('DM-4 — rebuild equals the incrementally-maintained cache, against real Postgres', () => {
+    it.each([
+      { added: '100', average: '15', carriedCost: '1500' },
+      { added: '50', average: '13.33333333', carriedCost: '1333.333333' },
+    ])(
+      're-derives an imported carry after adding $added backdated shares (#155)',
+      async ({ added, average, carriedCost }) => {
+        // SPEC-005 BR-005-20a / SPEC-006 BR-006-18: 100 @ 10 at Clear,
+        // transferred to Rico, then a backdated buy @ 20. Before the transfer:
+        // 100 added → (1000 + 2000) / 200 = 15; 50 added → 2000 / 150,
+        // stored as 13.33333333, so Rico carries exactly 1333.333333.
+        const fixtures = [
+          aTransaction().buy().on('2026-01-05').quantity('100').price('10'),
+          aTransaction().transferOut().on('2026-06-01').quantity('100').price('0').imported(),
+          aTransaction().transferIn().on('2026-06-01').quantity('100').price('10').imported(),
+        ].map((builder, index) => ({
+          ...builder.build(),
+          id: TransactionId.generate(),
+          userId,
+          assetId: petr4,
+          institutionId: index === 2 ? rico : clear,
+          importBatchId: index === 0 ? null : ImportBatchId.of(batchId),
+        }));
+        const rows = fixtures.map((row) => ({
+          ...row,
+          naturalKey: naturalKeyFor({
+            ...row,
+            unitPrice: row.type === 'transfer_in' ? Money.zero() : row.unitPrice,
+          }),
+        }));
+        const credit = rows[2];
+        if (credit === undefined) throw new Error('missing carried fixture');
+        await asTenant(async (deps) => {
+          await deps.transactions.insertMany(rows);
+          expect((await rebuildPositions(deps)).ok).toBe(true);
+        });
+
+        await asTenant(async (deps) => {
+          const result = await createTransaction(deps, userId, {
+            assetId: petr4,
+            institutionId: clear,
+            type: 'buy',
+            tradeDate: BusinessDate.of('2026-05-01'),
+            quantity: Quantity.fromString(added),
+            unitPrice: Money.fromString('20'),
+            fees: Money.zero(),
+          });
+          expect(result.ok).toBe(true);
+          if (!result.ok) return;
+          expect(result.value.rederived.map((row) => row.id)).toEqual([credit.id]);
+        });
+
+        // Read from a fresh transaction, after both insert and carry update have
+        // crossed the real NUMERIC boundary; a fake repository cannot prove this.
+        const incremental = await asTenant(async (deps) => {
+          const stored = await deps.transactions.findById(credit.id);
+          expect(stored?.unitPrice.toString()).toBe(average);
+          expect(stored?.naturalKey).toBe(credit.naturalKey);
+          expect(stored?.isUserModified).toBe(false);
+          return deps.positions.list();
+        });
+        expect(
+          incremental.find((row) => row.institutionId === rico)?.state.totalCost.toString(),
+        ).toBe(carriedCost);
+        const rebuilt = await asTenant(async (deps) => {
+          expect((await rebuildPositions(deps)).ok).toBe(true);
+          return deps.positions.list();
+        });
+        const byInstitution = (a: (typeof incremental)[number], b: (typeof incremental)[number]) =>
+          (a.institutionId ?? '').localeCompare(b.institutionId ?? '');
+        expect([...rebuilt].sort(byInstitution).map(serialize)).toEqual(
+          [...incremental].sort(byInstitution).map(serialize),
+        );
+      },
+    );
+
     it('agrees after a backdated insertion, through the NUMERIC round trip', async () => {
       // The same hand-computed sequence as the unit property test, but every
       // intermediate figure now survives a write to NUMERIC(20,8) and a read

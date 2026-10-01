@@ -101,28 +101,38 @@ export async function classifyImportRow(
       return restored;
     }
 
-    const created = await createTransaction(deps, batch.userId, {
-      assetId: row.assetId,
-      institutionId: row.institutionId,
-      type: input.type,
-      tradeDate: row.record.tradeDate,
-      quantity: row.record.quantity,
-      unitPrice: row.record.unitPrice,
-      fees: row.record.fees,
-      ratio: input.ratio ?? null,
-      importBatchId: row.batchId,
-      // BR-005-17: the staged key, so re-importing this file reports the row
-      // as a duplicate instead of offering to classify it a second time.
-      importKey: { naturalKey: row.naturalKey, occurrence: row.occurrence },
-    });
+    const created = await createTransaction(
+      deps,
+      batch.userId,
+      {
+        assetId: row.assetId,
+        institutionId: row.institutionId,
+        type: input.type,
+        tradeDate: row.record.tradeDate,
+        quantity: row.record.quantity,
+        unitPrice: row.record.unitPrice,
+        fees: row.record.fees,
+        ratio: input.ratio ?? null,
+        importBatchId: row.batchId,
+        // BR-005-17: the staged key, so re-importing this file reports the row
+        // as a duplicate instead of offering to classify it a second time.
+        importKey: { naturalKey: row.naturalKey, occurrence: row.occurrence },
+      },
+      {
+        // SPEC-006 BR-006-16 / SPEC-005 BR-005-20: the chosen type and stated
+        // price are the user's, as on the edit path. Protect the candidate
+        // before planning, so its raw import key cannot make it an auto-carry.
+        flagUserModified: true,
+      },
+    );
     if (!created.ok) return created;
 
     await deps.rows.attachTransactions(new Map([[row.id, created.value.transaction.id]]));
     await deps.rows.updateClassification(row.id, 'new');
     return ok({
       transaction: created.value.transaction,
-      recalculations: [created.value.recalculation],
-      rederived: [],
+      recalculations: created.value.recalculations,
+      rederived: created.value.rederived,
     });
   }
 
