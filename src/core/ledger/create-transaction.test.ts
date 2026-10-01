@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { BusinessDate, FakeClock } from '@/core/shared/clock';
 import { Money, Quantity } from '@/core/shared/money';
+import { serializePosition } from '@/core/positions/position-state';
+import { rebuildPositions } from '@/core/positions/rebuild';
+import { positionKeyString, type PositionSnapshot } from '@/core/positions/replay';
 import { createTransaction, type CreateTransactionInput } from '@/core/ledger/create-transaction';
 import type { LedgerDependencies } from '@/core/ledger/dependencies';
 import { naturalKeyFor } from '@/core/ledger/natural-key';
 import {
   TRANSACTION_TYPES,
   USER_EDITABLE_TRANSACTION_TYPES,
+  type Transaction,
   type TransactionType,
 } from '@/core/ledger/transaction';
 import {
@@ -20,6 +24,7 @@ import {
   importBatchIdFor,
   institutionIdFor,
   resetTransactionSequence,
+  type TransactionBuilder,
 } from '@/core/ledger/test-support/transaction-builder';
 
 const CLOCK = new FakeClock('2026-06-30T12:00:00Z');
@@ -46,6 +51,47 @@ function buyInput(overrides: Partial<CreateTransactionInput> = {}): CreateTransa
     fees: Money.zero(),
     ...overrides,
   };
+}
+
+async function seeded(rows: readonly Transaction[]) {
+  const state = deps();
+  for (const row of rows) await state.transactions.insert(row);
+  const rebuilt = await rebuildPositions(state);
+  if (!rebuilt.ok) throw new Error(`fixture does not replay: ${rebuilt.error.code}`);
+  state.transactions.insertCount = 0;
+  return state;
+}
+
+function carried(builder: TransactionBuilder): Transaction {
+  const credit = builder.imported().build();
+  return { ...credit, naturalKey: naturalKeyFor({ ...credit, unitPrice: Money.zero() }) };
+}
+
+function transferPair(from: string, to: string, on = '2026-03-01', price = '10') {
+  return [
+    aTransaction().transferOut().at(from).on(on).quantity('100').price('0').imported().build(),
+    carried(aTransaction().transferIn().at(to).on(on).quantity('100').price(price)),
+  ] as const;
+}
+
+function snapshotsAsBytes(snapshots: readonly PositionSnapshot[]): string {
+  return JSON.stringify(
+    [...snapshots]
+      .sort((a, b) => (positionKeyString(a) < positionKeyString(b) ? -1 : 1))
+      .map((snapshot) => ({
+        key: positionKeyString(snapshot),
+        ...serializePosition(snapshot.state),
+        costEstimated: snapshot.costEstimated,
+      })),
+  );
+}
+
+async function expectRebuildEqualsIncremental(state: ReturnType<typeof deps>) {
+  const incremental = snapshotsAsBytes(await state.positions.list());
+  const rebuilt = await rebuildPositions(state);
+  expect(rebuilt.ok).toBe(true);
+  if (!rebuilt.ok) return;
+  expect(snapshotsAsBytes(rebuilt.value)).toBe(incremental);
 }
 
 describe('SPEC-006 BR-006-11 — createTransaction', () => {
@@ -337,6 +383,324 @@ describe('SPEC-006 BR-006-11 — createTransaction', () => {
       expect(positions[0]?.state.quantity.toString()).toBe('200');
       expect(positions[0]?.state.totalCost.toString()).toBe('1600');
       expect(positions[0]?.state.averageCost.toString()).toBe('8');
+    });
+  });
+
+  describe('#155 — insertion re-derives downstream carried legs', () => {
+    const backdatedBuy = (at = 'A') =>
+      buyInput({
+        institutionId: institutionIdFor(at),
+        tradeDate: BusinessDate.of('2026-02-01'),
+        unitPrice: Money.fromString('20'),
+      });
+
+    it('100 @ 10 plus backdated 100 @ 20 carries 100 @ 15 to B and recalculates both positions', async () => {
+      // A before its transfer: 100×10 + 100×20 = 3.000 over 200 = 15.
+      // 100 leave: A keeps 100 / 1.500 and B receives 100 / 1.500.
+      const [debit, credit] = transferPair('A', 'B');
+      const state = await seeded([aTransaction().buy().at('A').build(), debit, credit]);
+
+      const result = await createTransaction(state, TEST_USER_ID, backdatedBuy());
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rederived.map((leg) => leg.id)).toEqual([credit.id]);
+      expect(result.value.recalculation).toBe(result.value.recalculations[0]);
+      expect(result.value.recalculations.map((outcome) => outcome.scope)).toEqual([
+        {
+          assetId: assetIdFor('PETR4'),
+          institutionId: institutionIdFor('A'),
+          fromDate: '2026-02-01',
+        },
+        {
+          assetId: assetIdFor('PETR4'),
+          institutionId: institutionIdFor('B'),
+          fromDate: '2026-03-01',
+        },
+      ]);
+      expect((await state.transactions.findById(credit.id))?.unitPrice.toString()).toBe('15');
+      expect(state.transactions.updateCount).toBe(1);
+      const positions = await state.positions.list();
+      expect(positions.map((snapshot) => serializePosition(snapshot.state))).toEqual([
+        { quantity: '100', totalCost: '1500', averageCost: '15', realizedGain: '0' },
+        { quantity: '100', totalCost: '1500', averageCost: '15', realizedGain: '0' },
+      ]);
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('re-carries an X→A→B chain to its fixed point', async () => {
+      // X 200 / 3.000 sends 100 / 1.500 to A, which sends it all to B.
+      const [xOut, toA] = transferPair('X', 'A');
+      const [aOut, toB] = transferPair('A', 'B', '2026-04-01');
+      const state = await seeded([aTransaction().buy().at('X').build(), xOut, toA, aOut, toB]);
+
+      const result = await createTransaction(state, TEST_USER_ID, backdatedBuy('X'));
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rederived.map((leg) => leg.id).sort()).toEqual([toA.id, toB.id].sort());
+      expect(result.value.recalculations).toHaveLength(3);
+      expect((await state.transactions.findById(toA.id))?.unitPrice.toString()).toBe('15');
+      expect((await state.transactions.findById(toB.id))?.unitPrice.toString()).toBe('15');
+      const b = (await state.positions.list()).find(
+        (p) => p.institutionId === institutionIdFor('B'),
+      );
+      expect(b?.state.totalCost.toString()).toBe('1500');
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('a valid backdated sale changes the weighted average carried after the next buy', async () => {
+      // Jan 100 @ 10, Feb sell 50: 50 / 500; Mar buy 100 @ 20:
+      // 150 / 2.500 = 16,666666…, stored carry 16,66666667.
+      // Apr sends 100 to B: B cost 100×16,66666667 = 1.666,666667.
+      const [debit, credit] = transferPair('A', 'B', '2026-04-01', '15');
+      const state = await seeded([
+        aTransaction().buy().at('A').build(),
+        aTransaction().buy().at('A').on('2026-03-01').price('20').build(),
+        debit,
+        credit,
+      ]);
+
+      const result = await createTransaction(state, TEST_USER_ID, {
+        ...backdatedBuy(),
+        type: 'sell',
+        quantity: Quantity.fromString('50'),
+        unitPrice: Money.fromString('12'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rederived.map((leg) => leg.id)).toEqual([credit.id]);
+      expect((await state.transactions.findById(credit.id))?.unitPrice.toString()).toBe(
+        '16.66666667',
+      );
+      const positions = await state.positions.list();
+      const a = positions.find((p) => p.institutionId === institutionIdFor('A'));
+      const b = positions.find((p) => p.institutionId === institutionIdFor('B'));
+      expect(a?.state.quantity.toString()).toBe('50');
+      expect(a?.state.realizedGain.toString()).toBe('100');
+      expect(b?.state.totalCost.toString()).toBe('1666.666667');
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('an exact acquisition keeps the estimate of an open source lot on its carried credit', async () => {
+      // Estimated 100 @ 10 + exact 100 @ 20 = 200 / 3.000, estimated.
+      // The manual acquisition is exact; the carried mixed average is not.
+      const [debit, credit] = transferPair('A', 'B');
+      const state = await seeded([
+        aTransaction().subscription().at('A').costEstimate('2026-01-05').imported().build(),
+        debit,
+        { ...credit, costIsEstimate: true },
+      ]);
+
+      const result = await createTransaction(state, TEST_USER_ID, backdatedBuy());
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.transaction.costIsEstimate).toBe(false);
+      expect(result.value.transaction.estimateCloseDate).toBeNull();
+      expect(result.value.rederived[0]?.unitPrice.toString()).toBe('15');
+      expect(result.value.rederived[0]?.costIsEstimate).toBe(true);
+      expect((await state.positions.list()).every((position) => position.costEstimated)).toBe(true);
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('re-derives the conversion source before guarding it and carries its proportional cost', async () => {
+      // OLD3 200 / 3.000 converts 100 shares into 50 NEW3: cost out/in 1.500.
+      // Source keeps 100 / 1.500; NEW3 average = 1.500 / 50 = 30.
+      const out = aTransaction()
+        .conversionOut(undefined, '1000')
+        .of('OLD3')
+        .at('A')
+        .on('2026-03-01')
+        .quantity('100')
+        .imported()
+        .build();
+      const into = aTransaction()
+        .conversionIn('1000')
+        .of('NEW3')
+        .at('A')
+        .on('2026-03-01')
+        .quantity('50')
+        .imported()
+        .build();
+      const state = await seeded([aTransaction().buy().of('OLD3').at('A').build(), out, into]);
+
+      const result = await createTransaction(state, TEST_USER_ID, {
+        ...backdatedBuy(),
+        assetId: assetIdFor('OLD3'),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.rederived.map((leg) => leg.id)).toEqual([out.id, into.id]);
+      expect((await state.transactions.findById(out.id))?.costBasis?.toString()).toBe('1500');
+      expect((await state.transactions.findById(into.id))?.costBasis?.toString()).toBe('1500');
+      expect(result.value.recalculations).toHaveLength(2);
+      const target = (await state.positions.list()).find((p) => p.assetId === assetIdFor('NEW3'));
+      expect(target?.state.averageCost.toString()).toBe('30');
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('a zero-cost bonus re-derives the source conversion cost before the source guard', async () => {
+      // OLD3 100 / 1.000 plus 100 free shares → 200 / 1.000.
+      // Conversion of 100 now removes 500, which is allocated to NEW3.
+      // Source and destination are guarded with that new 500 allocation.
+      const out = aTransaction()
+        .conversionOut(undefined, '1000')
+        .of('OLD3')
+        .at('A')
+        .on('2026-03-01')
+        .quantity('100')
+        .imported()
+        .build();
+      const into = aTransaction()
+        .conversionIn('1000')
+        .of('NEW3')
+        .at('A')
+        .on('2026-03-01')
+        .quantity('50')
+        .imported()
+        .build();
+      const state = await seeded([aTransaction().buy().of('OLD3').at('A').build(), out, into]);
+
+      const result = await createTransaction(state, TEST_USER_ID, {
+        ...backdatedBuy(),
+        assetId: assetIdFor('OLD3'),
+        type: 'bonificacao',
+        unitPrice: Money.zero(),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect((await state.transactions.findById(out.id))?.costBasis?.toString()).toBe('500');
+      expect((await state.transactions.findById(into.id))?.costBasis?.toString()).toBe('500');
+      const positions = await state.positions.list();
+      expect(
+        positions.find((p) => p.assetId === assetIdFor('OLD3'))?.state.totalCost.toString(),
+      ).toBe('500');
+      expect(
+        positions.find((p) => p.assetId === assetIdFor('NEW3'))?.state.averageCost.toString(),
+      ).toBe('10');
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('refuses before any write when a lower downstream cost cannot cover a user-owned conversion', async () => {
+      // Zero-cost bonus: A 200 / 1.000, average 5, sends B 100 / 500.
+      // B's manually stated conversion removes 1.000, more than its new 500.
+      const [debit, credit] = transferPair('A', 'B');
+      const out = aTransaction()
+        .conversionOut(undefined, '1000')
+        .at('B')
+        .on('2026-04-01')
+        .quantity('100')
+        .build();
+      const into = aTransaction()
+        .conversionIn('1000')
+        .of('NEW3')
+        .at('B')
+        .on('2026-04-01')
+        .quantity('50')
+        .build();
+      const state = await seeded([aTransaction().buy().at('A').build(), debit, credit, out, into]);
+      const before = snapshotsAsBytes(await state.positions.list());
+
+      const result = await createTransaction(state, TEST_USER_ID, {
+        ...backdatedBuy(),
+        type: 'bonificacao',
+        unitPrice: Money.zero(),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      // The conversion cost guard uses the engine's existing quantity code
+      // even when held quantity suffices: the cost, not the shares, is short.
+      expect(result.error.code).toBe('INSUFFICIENT_QUANTITY');
+      expect(result.error.context).toEqual({ held: '100', requested: '100', date: '2026-04-01' });
+      expect(state.transactions.insertCount).toBe(0);
+      expect(state.transactions.updateCount).toBe(0);
+      expect(state.positions.upsertCount).toBe(0);
+      expect(snapshotsAsBytes(await state.positions.list())).toBe(before);
+      expect((await state.transactions.findById(credit.id))?.unitPrice.toString()).toBe('10');
+    });
+
+    it('refuses an insertion that strands a later source debit without writing carried legs', async () => {
+      const [debit, credit] = transferPair('A', 'B');
+      const state = await seeded([aTransaction().buy().at('A').build(), debit, credit]);
+
+      const result = await createTransaction(state, TEST_USER_ID, {
+        ...backdatedBuy(),
+        type: 'sell',
+        quantity: Quantity.fromString('1'),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.context['held']).toBe('99');
+      expect(state.transactions.insertCount).toBe(0);
+      expect(state.transactions.updateCount).toBe(0);
+      expect(state.positions.upsertCount).toBe(0);
+    });
+
+    it('a buy after the transfer leaves the stored credit and its position untouched', async () => {
+      const [debit, credit] = transferPair('A', 'B');
+      const state = await seeded([aTransaction().buy().at('A').build(), debit, credit]);
+
+      const result = await createTransaction(state, TEST_USER_ID, {
+        ...backdatedBuy(),
+        tradeDate: BusinessDate.of('2026-04-01'),
+      });
+
+      expect(result.ok && result.value.rederived).toEqual([]);
+      expect(result.ok && result.value.recalculations).toHaveLength(1);
+      expect(state.transactions.updateCount).toBe(0);
+      expect(await state.transactions.findById(credit.id)).toEqual(credit);
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('an unclassified insertion changes no carried figure or marker', async () => {
+      const [debit, credit] = transferPair('A', 'B');
+      const state = await seeded([aTransaction().buy().at('A').build(), debit, credit]);
+
+      const result = await createTransaction(state, TEST_USER_ID, {
+        ...backdatedBuy(),
+        status: 'unclassified',
+      });
+
+      expect(result.ok && result.value.rederived).toEqual([]);
+      expect(state.transactions.updateCount).toBe(0);
+      expect(await state.transactions.findById(credit.id)).toEqual(credit);
+      await expectRebuildEqualsIncremental(state);
+    });
+
+    it('supports batch callers opting out of the stored-ledger derivation', async () => {
+      const [debit, credit] = transferPair('A', 'B');
+      const state = await seeded([aTransaction().buy().at('A').build(), debit, credit]);
+
+      const result = await createTransaction(state, TEST_USER_ID, backdatedBuy(), {
+        rederiveCarriedLegs: false,
+      });
+
+      expect(result.ok && result.value.rederived).toEqual([]);
+      expect(result.ok && result.value.recalculations).toHaveLength(1);
+      expect(state.transactions.updateCount).toBe(0);
+      expect((await state.transactions.findById(credit.id))?.unitPrice.toString()).toBe('10');
+    });
+
+    it('a same-position round trip recalculates once from the earliest affected date', async () => {
+      // A 200 / 3.000 → remove 100 / 1.500 → restore 100 / 1.500.
+      const [debit, credit] = transferPair('A', 'A');
+      const state = await seeded([aTransaction().buy().at('A').build(), debit, credit]);
+
+      const result = await createTransaction(state, TEST_USER_ID, backdatedBuy());
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.recalculations).toHaveLength(1);
+      expect(result.value.recalculation.scope.fromDate).toBe('2026-02-01');
+      expect((await state.positions.list())[0]?.state.totalCost.toString()).toBe('3000');
+      expect(state.positions.upsertCount).toBe(1);
+      await expectRebuildEqualsIncremental(state);
     });
   });
 

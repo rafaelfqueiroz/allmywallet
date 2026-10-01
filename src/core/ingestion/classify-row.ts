@@ -121,8 +121,8 @@ export async function classifyImportRow(
     await deps.rows.updateClassification(row.id, 'new');
     return ok({
       transaction: created.value.transaction,
-      recalculations: [created.value.recalculation],
-      rederived: [],
+      recalculations: created.value.recalculations,
+      rederived: created.value.rederived,
     });
   }
 

@@ -174,7 +174,7 @@ export async function createTransactionAction(
     if (!effects.ok) return failure(effects.error);
 
     // SPEC-009 BR-009-18: a backdated create is stale from its own date.
-    rebuildFrom = earliestFromDate([created.value.recalculation]);
+    rebuildFrom = earliestFromDate(created.value.recalculations);
     return IDLE;
   });
 
