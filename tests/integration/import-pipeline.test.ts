@@ -144,6 +144,100 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     },
   });
 
+  it('#153 BR-005-17: duplicate-only reimport settles historical refusals and recounts their batch without changing the ledger', async () => {
+    const payment = {
+      data: '13/02/2026',
+      movimentacao: 'Rendimento',
+      produto: 'TEST11 - Fundo de teste',
+      quantidade: '10',
+      precoUnitario: '1,10',
+      valorOperacao: '11,00',
+    };
+    const file = await buildMovimentacaoXlsx([payment]);
+    const active = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, active, file);
+    await handleImportStage({ batchId: active, userId }, handlerDeps());
+    await handleImportCommit({ batchId: active, userId }, handlerDeps());
+    const legacy = await newPendingBatch('b3_movimentacao');
+    const legacyFile = await buildMovimentacaoXlsx([
+      payment,
+      {
+        ...payment,
+        data: '20/02/2026',
+        movimentacao: 'Transferência',
+        entradaSaida: 'Débito',
+        precoUnitario: '-',
+        valorOperacao: '-',
+      },
+    ]);
+    await saveUploadedFile(uploadDir, legacy, legacyFile);
+    await handleImportStage({ batchId: legacy, userId }, handlerDeps());
+    // Before #117, both rows of an unreplayable position were refused and
+    // its cached counts still reported them as new, even with an active copy.
+    await withTenant(
+      userId,
+      async (tx) => {
+        const rows = new DrizzleImportRowRepository(tx, userId);
+        for (const row of await rows.listByBatch(legacy)) {
+          await rows.updateClassification(row.id, 'invalid');
+        }
+        const batches = new DrizzleImportBatchRepository(tx, userId);
+        const batch = await batches.findById(legacy);
+        if (batch?.rowCounts === null || batch === null) throw new Error('missing batch counts');
+        await batches.update({
+          ...batch,
+          status: 'committed',
+          rowCounts: { ...batch.rowCounts, new: 2, duplicates: 0, needsAttention: 0 },
+        });
+      },
+      appDb,
+    );
+    const before = await withTenant(
+      userId,
+      async (tx) => ({
+        ledger: await new DrizzleTransactionRepository(tx, userId).listAll(),
+        positions: await new DrizzlePositionRepository(tx, userId).list(),
+      }),
+      appDb,
+    );
+    snapshotJobs = [];
+    const again = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, again, file);
+    await handleImportStage({ batchId: again, userId }, handlerDeps());
+    await handleImportCommit({ batchId: again, userId }, handlerDeps());
+
+    await withTenant(
+      userId,
+      async (tx) => {
+        const rows = new DrizzleImportRowRepository(tx, userId);
+        expect((await rows.listByBatch(legacy)).map((row) => row.classification)).toEqual([
+          'duplicate',
+          'invalid',
+        ]);
+        const batches = new DrizzleImportBatchRepository(tx, userId);
+        expect((await batches.findById(legacy))?.rowCounts).toMatchObject({
+          read: 2,
+          new: 0,
+          duplicates: 1,
+          needsAttention: 1,
+        });
+        expect((await batches.findById(again))?.rowCounts).toMatchObject({
+          read: 1,
+          new: 0,
+          duplicates: 1,
+          needsAttention: 0,
+        });
+        expect(await rows.countNeedsAttentionByBatch()).toEqual([{ batchId: legacy, count: 1 }]);
+        expect(await new DrizzleTransactionRepository(tx, userId).listAll()).toEqual(before.ledger);
+        expect(await new DrizzlePositionRepository(tx, userId).list()).toEqual(before.positions);
+      },
+      appDb,
+    );
+    expect(before.ledger).toHaveLength(1);
+    expect(before.ledger[0]?.totalValue.toString()).toBe('11');
+    expect(snapshotJobs).toEqual([]);
+  });
+
   it('#158: an exact cash total survives the JSON boundary and reimports without another payment', async () => {
     const file = await buildMovimentacaoXlsx([
       {
