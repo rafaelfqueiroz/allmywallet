@@ -1223,6 +1223,10 @@ function storedCopyOf(stored: StoredLedger, row: ImportRow): Transaction | undef
  * `planReclassifications` uses: `keyFormsFor`, same occurrence.
  */
 function storedCopyAcrossKeyForms(stored: StoredLedger, row: ImportRow): Transaction | undefined {
+  if (row.record.kind === 'transaction' && row.record.historicalTransactionId !== undefined) {
+    const historicalTransactionId = row.record.historicalTransactionId;
+    return stored(row).find((transaction) => transaction.id === historicalTransactionId);
+  }
   const exact = storedCopyOf(stored, row);
   if (exact !== undefined || row.record.kind !== 'transaction' || row.ledgerType === null) {
     return exact;
@@ -1309,8 +1313,9 @@ function planReclassifications(
     const copy = stored(row).find(
       (t) =>
         t.naturalKey !== null &&
-        storedKeys.includes(t.naturalKey) &&
-        t.occurrence === row.occurrence &&
+        (record.historicalTransactionId !== undefined
+          ? t.id === record.historicalTransactionId
+          : storedKeys.includes(t.naturalKey) && t.occurrence === row.occurrence) &&
         t.status === 'unclassified' &&
         !t.isUserModified &&
         !t.isManual &&

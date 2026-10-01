@@ -3,6 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import {
   type AssetId,
   ImportBatchId,
+  ImportRowId,
   type InstitutionId,
   TransactionId,
   UserId,
@@ -695,14 +696,38 @@ describe('#158 total-derived cash earnings preserve historical identity', () => 
         'dividend',
         record.b3Type,
       );
+      const historicalBatchId = ImportBatchId.generate();
+      const historicalId = TransactionId.generate();
       await deps.transactions.insert({
         ...aTransaction().rendimento().on(record.tradeDate).quantity('25').price('0').build(),
+        id: historicalId,
+        importBatchId: historicalBatchId,
         assetId,
         institutionId,
         status: 'unclassified',
         naturalKey: forms[form],
         occurrence: 1,
       });
+      await deps.rows.insertMany([
+        {
+          id: ImportRowId.generate(),
+          batchId: historicalBatchId,
+          raw: {},
+          record: {
+            ...record,
+            priceStated: false,
+            priceDerivedFromTotal: false,
+            unitPrice: Money.zero(),
+          },
+          assetId,
+          institutionId,
+          classification: 'unclassified',
+          naturalKey: forms[form],
+          occurrence: 1,
+          ledgerType: 'dividend',
+          transactionId: historicalId,
+        },
+      ]);
       const batchId = await seedPendingBatch(deps);
       const result = await stageBatch(deps, userId, {
         batchId,
@@ -747,5 +772,82 @@ describe('#158 total-derived cash earnings preserve historical identity', () => 
     expect(result.value.rows.map((row) => row.classification)).toEqual(['new', 'new']);
     expect(result.value.rows.map((row) => row.occurrence)).toEqual([1, 1]);
     expect(result.value.rows[0]?.naturalKey).not.toBe(result.value.rows[1]?.naturalKey);
+  });
+  it('selects the original missing-price ordinal #2 after a stated-zero ordinal #1', async () => {
+    const deps = buildFakeIngestionDeps();
+    const parsed = transactionRecord({
+      b3Type: 'Dividendo',
+      quantity: Quantity.fromString('25'),
+      unitPrice: Money.fromString('0.0004'),
+      fees: Money.zero(),
+      priceStated: true,
+      priceDerivedFromTotal: true,
+    });
+    if (parsed.record.kind !== 'transaction') throw new Error('expected transaction');
+    const record = parsed.record;
+    const assetId = await deps.assets.resolve({
+      code: record.assetCode,
+      name: record.assetName,
+      assetClass: record.assetClass,
+      classStated: false,
+      nameStated: true,
+    });
+    const institutionId = await deps.institutions.resolve('Corretora Teste');
+    const forms = keyFormsFor(
+      {
+        assetId,
+        institutionId,
+        tradeDate: record.tradeDate,
+        quantity: record.quantity,
+        unitPrice: Money.zero(),
+      },
+      'dividend',
+      record.b3Type,
+    );
+    const historicalBatchId = ImportBatchId.generate();
+    const ids = [TransactionId.generate(), TransactionId.generate()];
+    for (const [index, id] of ids.entries()) {
+      await deps.transactions.insert({
+        ...aTransaction().rendimento().on(record.tradeDate).quantity('25').price('0').build(),
+        id,
+        importBatchId: historicalBatchId,
+        assetId,
+        institutionId,
+        status: 'unclassified',
+        naturalKey: forms.unmapped,
+        occurrence: index + 1,
+      });
+      await deps.rows.insertMany([
+        {
+          id: ImportRowId.generate(),
+          batchId: historicalBatchId,
+          raw: {},
+          record: {
+            ...record,
+            unitPrice: Money.zero(),
+            priceStated: index === 0,
+            priceDerivedFromTotal: false,
+          },
+          assetId,
+          institutionId,
+          classification: 'unclassified',
+          naturalKey: forms.unmapped,
+          occurrence: index + 1,
+          ledgerType: 'rendimento',
+          transactionId: id,
+        },
+      ]);
+    }
+    const batchId = await seedPendingBatch(deps);
+    const result = await stageBatch(deps, userId, {
+      batchId,
+      extract: { extractType: 'b3_movimentacao', records: [parsed] },
+    });
+    if (!result.ok) throw new Error('stage failed');
+    const staged = result.value.rows[0];
+    expect(staged?.classification).toBe('duplicate');
+    expect(staged?.occurrence).toBe(2);
+    if (staged?.record.kind !== 'transaction') throw new Error('expected transaction');
+    expect(staged.record.historicalTransactionId).toBe(ids[1]);
   });
 });

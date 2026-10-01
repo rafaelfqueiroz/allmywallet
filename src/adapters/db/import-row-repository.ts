@@ -1,5 +1,4 @@
-import type { OccurrenceTally } from '@/core/ledger/ports';
-import { and, count, eq, inArray, max, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { chunked } from '@/adapters/db/chunk';
 import { importRows } from '@/db/schema/import-rows';
 import { importBatches, transactions } from '@/db/schema/transactions';
@@ -22,6 +21,7 @@ import type {
   ImportRowRepository,
   NormalizedRecord,
   RawRow,
+  SourcePriceOccurrence,
 } from '@/core/ingestion/ports';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { FixedIncomeIndexer } from '@/core/valuation/ports';
@@ -43,32 +43,32 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
     private readonly userId: UserId,
   ) {}
 
-  async statedPriceOccurrenceTallies(
-    keys: readonly string[],
-  ): Promise<ReadonlyMap<string, OccurrenceTally>> {
-    if (keys.length === 0) return new Map();
-    // SPEC-005 BR-005-17: only the original source row proves a stated price;
-    // a later re-import may attach its own different provenance to the same transaction.
+  async sourcePriceOccurrences(keys: readonly string[]): Promise<readonly SourcePriceOccurrence[]> {
+    if (keys.length === 0) return [];
+    // SPEC-005 BR-005-17: the original source, never a later attached import, identifies each historical ordinal.
     const rows = await this.tx
       .select({
+        transactionId: transactions.id,
         naturalKey: transactions.naturalKey,
-        highest: max(transactions.occurrence),
-        count: count(),
+        occurrence: transactions.occurrence,
+        sourcePriceStated: sql<boolean>`(${importRows.parsedPayload}->>'priceStated' is distinct from 'false' and ${importRows.parsedPayload}->>'priceDerivedFromTotal' is distinct from 'true')`,
       })
       .from(transactions)
-      .where(
+      .innerJoin(
+        importRows,
         and(
-          inArray(transactions.naturalKey, [...keys]),
-          sql`exists (select 1 from ${importRows} where ${importRows.transactionId} = ${transactions.id}
-          and ${importRows.batchId} = ${transactions.importBatchId}
-          and ${importRows.parsedPayload}->>'priceStated' is distinct from 'false'
-          and ${importRows.parsedPayload}->>'priceDerivedFromTotal' is distinct from 'true')`,
+          eq(importRows.transactionId, transactions.id),
+          eq(importRows.batchId, transactions.importBatchId),
         ),
       )
-      .groupBy(transactions.naturalKey);
-    return new Map(
-      rows.map((row) => [row.naturalKey, { count: row.count, highest: row.highest ?? 0 }]),
+      .where(inArray(transactions.naturalKey, [...keys]));
+    const unique = new Map(
+      rows.map((row) => [
+        row.transactionId,
+        { ...row, transactionId: TransactionId.of(row.transactionId) },
+      ]),
     );
+    return [...unique.values()];
   }
 
   /**
@@ -217,6 +217,9 @@ function serializeRecord(record: NormalizedRecord): Record<string, unknown> {
       fees: record.fees.toString(),
       priceStated: record.priceStated,
       ...(record.priceDerivedFromTotal ? { priceDerivedFromTotal: true } : {}),
+      ...(record.historicalTransactionId
+        ? { historicalTransactionId: record.historicalTransactionId }
+        : {}),
       ratio: record.ratio === null ? null : record.ratio.toString(),
     };
   }
@@ -268,6 +271,9 @@ function deserializeRecord(raw: Record<string, unknown>): NormalizedRecord {
       // #108: rows staged before `priceStated` existed always had a price.
       priceStated: raw['priceStated'] !== false,
       ...(raw['priceDerivedFromTotal'] === true ? { priceDerivedFromTotal: true } : {}),
+      ...(typeof raw['historicalTransactionId'] === 'string'
+        ? { historicalTransactionId: TransactionId.of(raw['historicalTransactionId']) }
+        : {}),
       ratio: raw['ratio'] === null ? null : Quantity.fromString(String(raw['ratio'])),
     };
   }

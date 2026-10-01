@@ -10,7 +10,6 @@ import type {
 } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { Result } from '@/core/shared/result';
-import type { OccurrenceTally } from '@/core/ledger/ports';
 import type { Transaction, TransactionType } from '@/core/ledger/transaction';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import type { AssetClass } from '@/core/quotes/ports';
@@ -87,6 +86,8 @@ export interface NormalizedTransactionRecord {
   readonly priceStated: boolean;
   /** #158: effective price recovered from the stated total; preserves historical zero-price key lookup. */
   readonly priceDerivedFromTotal?: boolean;
+  /** BR-005-17: exact historical occurrence selected from original source-price provenance. */
+  readonly historicalTransactionId?: TransactionId;
   readonly fees: Money;
   /** BR-007-04 — split/grupamento only. */
   readonly ratio: Quantity | null;
@@ -277,11 +278,15 @@ export interface ImportRowAttentionCount {
   readonly count: number;
 }
 
+export interface SourcePriceOccurrence {
+  readonly transactionId: TransactionId;
+  readonly naturalKey: string;
+  readonly occurrence: number;
+  readonly sourcePriceStated: boolean;
+}
+
 export interface ImportRowRepository {
-  /** SPEC-005 BR-005-17: legacy aliases whose original import stated a unit price, excluding recovered totals. */
-  statedPriceOccurrenceTallies(
-    keys: readonly string[],
-  ): Promise<ReadonlyMap<string, OccurrenceTally>>;
+  sourcePriceOccurrences(keys: readonly string[]): Promise<readonly SourcePriceOccurrence[]>;
   insertMany(rows: readonly ImportRow[]): Promise<void>;
   findById(id: ImportRowId): Promise<ImportRow | null>;
   listByBatch(batchId: ImportBatchId): Promise<readonly ImportRow[]>;

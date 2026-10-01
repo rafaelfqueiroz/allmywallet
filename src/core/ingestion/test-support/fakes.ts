@@ -1,5 +1,4 @@
 import type { Transaction } from '@/core/ledger/transaction';
-import type { OccurrenceTally } from '@/core/ledger/ports';
 import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
 import type { ImportRowId, TransactionId } from '@/core/shared/ids';
 import type { BusinessDate } from '@/core/shared/clock';
@@ -26,6 +25,7 @@ import type {
   InstitutionResolverPort,
   SubscriptionEvidenceReader,
   SubscriptionEvidenceRow,
+  SourcePriceOccurrence,
 } from '@/core/ingestion/ports';
 
 /**
@@ -70,30 +70,23 @@ export class FakeImportRowRepository implements ImportRowRepository {
 
   constructor(private readonly transactions: () => readonly Transaction[] = () => []) {}
 
-  async statedPriceOccurrenceTallies(
-    keys: readonly string[],
-  ): Promise<ReadonlyMap<string, OccurrenceTally>> {
+  async sourcePriceOccurrences(keys: readonly string[]): Promise<readonly SourcePriceOccurrence[]> {
     const wanted = new Set(keys);
-    const tallies = new Map<string, OccurrenceTally>();
+    const result: SourcePriceOccurrence[] = [];
     for (const transaction of this.transactions()) {
-      const key = transaction.naturalKey;
-      if (key === null || !wanted.has(key)) continue;
+      if (transaction.naturalKey === null || !wanted.has(transaction.naturalKey)) continue;
       const source = this.all.find(
         (row) => row.transactionId === transaction.id && row.batchId === transaction.importBatchId,
       );
-      if (
-        source?.record.kind !== 'transaction' ||
-        !source.record.priceStated ||
-        source.record.priceDerivedFromTotal
-      )
-        continue;
-      const tally = tallies.get(key) ?? { count: 0, highest: 0 };
-      tallies.set(key, {
-        count: tally.count + 1,
-        highest: Math.max(tally.highest, transaction.occurrence),
+      if (source?.record.kind !== 'transaction') continue;
+      result.push({
+        transactionId: transaction.id,
+        naturalKey: transaction.naturalKey,
+        occurrence: transaction.occurrence,
+        sourcePriceStated: source.record.priceStated && !source.record.priceDerivedFromTotal,
       });
     }
-    return tallies;
+    return result;
   }
 
   get all(): readonly ImportRow[] {

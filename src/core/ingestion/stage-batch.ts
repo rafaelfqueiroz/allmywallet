@@ -206,7 +206,7 @@ async function stageTransactionRows(
     readonly naturalKey: string;
     /** Every other key this same B3 row has had or could have — see `keyForms`. */
     readonly otherKeys: readonly string[];
-    readonly requireStatedPriceAliases: boolean;
+    readonly sourcePriceStated: boolean | null;
   }
 
   const resolved: Resolved[] = [];
@@ -299,11 +299,13 @@ async function stageTransactionRows(
       isUnclassified,
       ledgerType,
       naturalKey,
-      requireStatedPriceAliases:
-        record.priceStated &&
-        !record.priceDerivedFromTotal &&
-        record.unitPrice.isZero() &&
-        ['dividend', 'jcp', 'rendimento', 'amortization'].includes(ledgerType),
+      sourcePriceStated: record.priceDerivedFromTotal
+        ? false
+        : record.priceStated &&
+            record.unitPrice.isZero() &&
+            ['dividend', 'jcp', 'rendimento', 'amortization'].includes(ledgerType)
+          ? true
+          : null,
       otherKeys:
         forms === null
           ? []
@@ -333,16 +335,64 @@ async function stageTransactionRows(
     ]),
   ];
   const tallies = await deps.transactions.occurrenceTallies(uniqueKeys);
-  const statedAliasKeys = [
+  const provenanceKeys = [
     ...new Set(
-      resolved.filter((row) => row.requireStatedPriceAliases).flatMap((row) => row.otherKeys),
+      resolved
+        .filter((row) => row.sourcePriceStated !== null)
+        .flatMap((row) => [row.naturalKey, ...row.otherKeys]),
     ),
   ];
-  const statedTallies =
-    statedAliasKeys.length === 0
-      ? new Map<string, OccurrenceTally>()
-      : await deps.rows.statedPriceOccurrenceTallies(statedAliasKeys);
-  const planned = planOccurrences(resolved, countsAcrossKeyForms(resolved, tallies, statedTallies));
+  const provenance =
+    provenanceKeys.length === 0 ? [] : await deps.rows.sourcePriceOccurrences(provenanceKeys);
+  // BR-005-17: union the aliases of every row sharing a canonical key before assigning ordinals.
+  const sourceGroups = new Map<string, { stated: boolean; keys: Set<string> }>();
+  for (const row of resolved) {
+    if (row.sourcePriceStated === null) continue;
+    const group = sourceGroups.get(row.naturalKey) ?? {
+      stated: row.sourcePriceStated,
+      keys: new Set<string>(),
+    };
+    group.keys.add(row.naturalKey);
+    for (const key of row.otherKeys) group.keys.add(key);
+    sourceGroups.set(row.naturalKey, group);
+  }
+  const provenanceByKey = new Map<string, (typeof provenance)[number][]>();
+  for (const copy of provenance) {
+    const copies = provenanceByKey.get(copy.naturalKey) ?? [];
+    copies.push(copy);
+    provenanceByKey.set(copy.naturalKey, copies);
+  }
+  const matchesByKey = new Map<string, typeof provenance>();
+  for (const [key, group] of sourceGroups) {
+    const matches = [...group.keys]
+      .flatMap((form) => provenanceByKey.get(form) ?? [])
+      .filter((copy) => copy.sourcePriceStated === group.stated)
+      .sort((a, b) => a.occurrence - b.occurrence || a.naturalKey.localeCompare(b.naturalKey));
+    matchesByKey.set(key, matches);
+  }
+  const seen = new Map<string, number>();
+  const newOccurrences = new Map<string, number>();
+  const planned = planOccurrences(resolved, countsAcrossKeyForms(resolved, tallies)).map((row) => {
+    if (row.sourcePriceStated === null) return row;
+    const ordinal = (seen.get(row.naturalKey) ?? 0) + 1;
+    seen.set(row.naturalKey, ordinal);
+    const matches = matchesByKey.get(row.naturalKey) ?? [];
+    const copy = matches[ordinal - 1];
+    if (copy !== undefined)
+      return {
+        ...row,
+        occurrence: copy.occurrence,
+        isDuplicate: true,
+        record: { ...row.record, historicalTransactionId: copy.transactionId },
+      };
+    // BR-005-16/17: retain canonical gaps while allocating genuinely new occurrences above its maximum.
+    const historicalHighest = matches[matches.length - 1]?.occurrence ?? 0;
+    const occurrence =
+      (newOccurrences.get(row.naturalKey) ??
+        Math.max(tallies.get(row.naturalKey)?.highest ?? 0, historicalHighest)) + 1;
+    newOccurrences.set(row.naturalKey, occurrence);
+    return { ...row, occurrence, isDuplicate: false };
+  });
   const plannedIgnored = planOccurrences(
     ignoredInFileOrder,
     new Map([...tallies].map(([key, tally]) => [key, tally.highest])),
@@ -443,10 +493,8 @@ function countsAcrossKeyForms(
   rows: readonly {
     readonly naturalKey: string;
     readonly otherKeys: readonly string[];
-    readonly requireStatedPriceAliases: boolean;
   }[],
   tallies: ReadonlyMap<string, OccurrenceTally>,
-  statedTallies: ReadonlyMap<string, OccurrenceTally>,
 ): ReadonlyMap<string, number> {
   const forms = new Map<string, Set<string>>();
   for (const row of rows) {
@@ -454,17 +502,9 @@ function countsAcrossKeyForms(
     for (const key of row.otherKeys) set.add(key);
     forms.set(row.naturalKey, set);
   }
-  const requireStated = new Set(
-    rows.filter((row) => row.requireStatedPriceAliases).map((row) => row.naturalKey),
-  );
   const counts = new Map<string, number>();
   for (const [key, set] of forms) {
-    const counted = [...set].reduce(
-      (sum, form) =>
-        sum +
-        ((form !== key && requireStated.has(key) ? statedTallies : tallies).get(form)?.count ?? 0),
-      0,
-    );
+    const counted = [...set].reduce((sum, form) => sum + (tallies.get(form)?.count ?? 0), 0);
     counts.set(key, Math.max(counted, tallies.get(key)?.highest ?? 0));
   }
   return counts;

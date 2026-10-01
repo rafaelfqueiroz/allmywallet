@@ -3222,6 +3222,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
     const staged = await deps.rows.listByBatch(batchId);
     const transactions: Transaction[] = [];
     const rows: ImportRow[] = [];
+    const occurrences = new Map<string, number>();
     for (const row of staged) {
       const record = row.record as NormalizedTransactionRecord;
       const naturalKey = importNaturalKeyFor(
@@ -3235,6 +3236,8 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         },
         record.b3Type,
       );
+      const occurrence = (occurrences.get(naturalKey) ?? 0) + 1;
+      occurrences.set(naturalKey, occurrence);
       const transaction: Transaction = {
         id: TransactionId.generate(),
         userId,
@@ -3256,7 +3259,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         conversionGroupId: null,
         costBasis: null,
         naturalKey,
-        occurrence: 1,
+        occurrence,
         importBatchId: batchId,
         isManual: false,
         isUserModified: false,
@@ -3270,7 +3273,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         ...row,
         classification: 'unclassified',
         naturalKey,
-        occurrence: 1,
+        occurrence,
         ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE,
         transactionId: transaction.id,
       });
@@ -3316,6 +3319,131 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
       priceDerivedFromTotal: derived,
       fees: Money.zero(),
     });
+
+  const legacyZeroJcp = (priceStated: boolean) =>
+    buy({
+      ...reactivatedJcp().record,
+      quantity: Quantity.fromString('25'),
+      unitPrice: Money.zero(),
+      priceStated,
+    });
+  const recoveredJcp = (price = '0.0004') =>
+    buy({
+      ...legacyZeroJcp(false).record,
+      priceStated: true,
+      priceDerivedFromTotal: true,
+      unitPrice: Money.fromString(price),
+    });
+
+  it('BR-005-14/17 (#158): a v6 explicitly zero-priced JCP is not overwritten by a distinct recovered payment', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [legacyZeroJcp(true)]);
+    const [original] = transactions as [Transaction];
+
+    const recovered = await importFile(deps, [recoveredJcp()]);
+
+    expect(recovered.outcome).toMatchObject({ applied: 1, reclassified: 0 });
+    expect(await deps.transactions.findById(original.id)).toEqual(original);
+    expect(deps.transactions.rows).toHaveLength(2);
+    const both = await importFile(deps, [legacyZeroJcp(true), recoveredJcp()]);
+    expect(both.outcome).toMatchObject({ applied: 0, reclassified: 1, skippedDuplicates: 2 });
+    expect(deps.transactions.rows).toHaveLength(2);
+    expect(
+      deps.transactions.rows.every(
+        (transaction) => transaction.type === 'jcp' && transaction.status === 'active',
+      ),
+    ).toBe(true);
+    expect((await deps.transactions.findById(original.id))?.totalValue.toString()).toBe('0');
+    const updates = deps.transactions.updateCount;
+    const again = await importFile(deps, [legacyZeroJcp(true), recoveredJcp()]);
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 2 });
+    expect(deps.transactions.updateCount).toBe(updates);
+  });
+
+  it.each([false, true])(
+    'BR-005-14/17/20 (#158): mixed legacy JCP sources preserve ordinals when explicit zero first is %s',
+    async (explicitFirst) => {
+      const deps = buildFakeIngestionDeps();
+      const records = explicitFirst
+        ? [legacyZeroJcp(true), legacyZeroJcp(false)]
+        : [legacyZeroJcp(false), legacyZeroJcp(true)];
+      const { transactions } = await commitUnderMapV2(deps, records);
+      const explicitIndex = explicitFirst ? 0 : 1;
+      const missingIndex = explicitFirst ? 1 : 0;
+      const [explicitStored, missingStored] = [
+        transactions[explicitIndex],
+        transactions[missingIndex],
+      ] as [Transaction, Transaction];
+      expect(transactions.map((transaction) => transaction.occurrence)).toEqual([1, 2]);
+
+      const recovered = await importFile(deps, [recoveredJcp()]);
+      expect(recovered.outcome).toMatchObject({ applied: 0, reclassified: 1 });
+      expect(await deps.transactions.findById(explicitStored.id)).toEqual(explicitStored);
+      expect(await deps.transactions.findById(missingStored.id)).toMatchObject({
+        type: 'jcp',
+        status: 'active',
+        naturalKey: missingStored.naturalKey,
+        occurrence: missingStored.occurrence,
+      });
+      expect((await deps.transactions.findById(missingStored.id))?.totalValue.toString()).toBe(
+        '0.01',
+      );
+      const bothRecords = explicitFirst
+        ? [legacyZeroJcp(true), recoveredJcp()]
+        : [recoveredJcp(), legacyZeroJcp(true)];
+      const both = await importFile(deps, bothRecords);
+      expect(both.outcome).toMatchObject({ applied: 0, reclassified: 1 });
+      expect((await deps.transactions.findById(explicitStored.id))?.totalValue.toString()).toBe(
+        '0',
+      );
+      expect(deps.transactions.rows).toHaveLength(2);
+      const updates = deps.transactions.updateCount;
+      const again = await importFile(deps, bothRecords);
+      expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 2 });
+      expect(deps.transactions.updateCount).toBe(updates);
+    },
+  );
+
+  it('BR-005-14/17 (#158): multiple missing JCP prices interleaved with explicit zero preserve their historical occurrences', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [
+      legacyZeroJcp(false),
+      legacyZeroJcp(true),
+      legacyZeroJcp(false),
+    ]);
+    expect(transactions.map((transaction) => transaction.occurrence)).toEqual([1, 2, 3]);
+    const recovered = [recoveredJcp(), recoveredJcp('0.0008')];
+    await importFile(deps, recovered);
+    expect(deps.transactions.rows).toHaveLength(3);
+    for (const [index, stored] of transactions.entries()) {
+      const actual = await deps.transactions.findById(stored.id);
+      expect(actual?.naturalKey).toBe(stored.naturalKey);
+      expect(actual?.occurrence).toBe(stored.occurrence);
+      expect(actual?.totalValue.toString()).toBe(['0.01', '0', '0.02'][index]);
+    }
+    const all = [recovered[0] as ParsedRecord, legacyZeroJcp(true), recovered[1] as ParsedRecord];
+    await importFile(deps, all);
+    const updates = deps.transactions.updateCount;
+    const again = await importFile(deps, all);
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 3 });
+    expect(deps.transactions.updateCount).toBe(updates);
+    expect(deps.transactions.rows).toHaveLength(3);
+  });
+
+  it('BR-005-20/BR-006-16 (#158): recovery preserves a user-edited legacy missing-price JCP without duplicating it', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [
+      legacyZeroJcp(true),
+      legacyZeroJcp(false),
+    ]);
+    const stored = transactions[1] as Transaction;
+    const edited = { ...stored, isUserModified: true };
+    await deps.transactions.update(edited);
+    const again = await importFile(deps, [recoveredJcp()]);
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0 });
+    expect(await deps.transactions.findById(stored.id)).toEqual(edited);
+    expect(deps.transactions.rows).toHaveLength(2);
+  });
 
   it('BR-005-17/20 (#158): a total-derived dividend promotes two genuine priceless occurrences and re-imports as a no-op', async () => {
     const deps = buildFakeIngestionDeps();
