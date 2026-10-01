@@ -1085,7 +1085,7 @@ export async function commitBatch(
   // until now. `ignored`, not `new`: neither ever moves a position.
   await markSubscriptionOriginsIgnored(deps, [...subscriptionUpdates, ...positionRefreshUpdates]);
 
-  await settleEarlierRefusals(deps, batch.id, toInsert);
+  await settleEarlierRefusals(deps, batch.id, toInsert, duplicates, stored);
 
   // BR-005-06: create/update fixed-income contracts from the Posição
   // fixed-income tab before reconciliation reads the ledger.
@@ -3582,11 +3582,28 @@ async function settleEarlierRefusals(
   deps: IngestionDependencies,
   batchId: ImportBatchId,
   applied: readonly Transaction[],
+  duplicates: readonly ImportRow[],
+  stored: StoredLedger,
 ): Promise<void> {
-  if (applied.length === 0) return;
-  const appliedKeys = new Set(applied.map((t) => `${t.naturalKey}#${t.occurrence}`));
+  // SPEC-005 BR-005-17 (#153): a duplicate can prove an older refusal was
+  // already applied. Resolve its real source identity, including old key
+  // forms, against the final ledger: this commit may just have activated or
+  // superseded its stored copy. Refresh once per position, never per row.
+  const refreshed = new Set<string>();
+  const active = applied.filter((transaction) => transaction.status === 'active');
+  for (const row of duplicates) {
+    const position = positionKeyString(row);
+    if (!refreshed.has(position)) {
+      stored.prime(row, await deps.transactions.listForPosition(row.assetId, row.institutionId));
+      refreshed.add(position);
+    }
+    const copy = storedCopyAcrossKeyForms(stored, row);
+    if (copy?.status === 'active') active.push(copy);
+  }
+  if (active.length === 0) return;
+  const appliedKeys = new Set(active.map((t) => `${t.naturalKey}#${t.occurrence}`));
   const earlier = (
-    await deps.rows.listInvalidByNaturalKeys(applied.map((t) => t.naturalKey))
+    await deps.rows.listInvalidByNaturalKeys([...new Set(active.map((t) => t.naturalKey))])
   ).filter(
     (row) => row.batchId !== batchId && appliedKeys.has(`${row.naturalKey}#${row.occurrence}`),
   );

@@ -4077,6 +4077,136 @@ describe('SPEC-005 #117 — a failing position refuses only the rows it cannot r
       fees: Money.zero(),
     });
 
+  /** #153: old whole-position refusals can coexist with an already-applied ledger copy. */
+  async function legacyRefusals(deps: FakeIngestionDeps, records: readonly ParsedRecord[]) {
+    const batchId = await stagedBatch(deps, { extractType: 'b3_movimentacao', records });
+    for (const row of await deps.rows.listByBatch(batchId)) {
+      await deps.rows.updateClassification(row.id, 'invalid');
+    }
+    const batch = await deps.batches.findById(batchId);
+    if (batch === null) throw new Error('missing legacy batch');
+    await deps.batches.update({ ...batch, status: 'committed' });
+    return batchId;
+  }
+
+  it('#153 BR-005-17: duplicate-only reimport settles earlier refusals without any ledger or position write', async () => {
+    const deps = buildFakeIngestionDeps();
+    const record = rendimento('2026-02-13');
+    await importFile(deps, [holding(), record]);
+    const legacy = await legacyRefusals(deps, [record, record, transferOut('2026-02-20')]);
+    const anotherLegacy = await legacyRefusals(deps, [record]);
+    const ledger = [...deps.transactions.rows];
+    const positions = await deps.positions.list();
+    const writes = [
+      deps.transactions.insertCount,
+      deps.transactions.updateCount,
+      deps.positions.upsertCount,
+    ];
+    const batchId = await stagedBatch(deps, {
+      extractType: 'b3_movimentacao',
+      records: [record, record],
+    });
+    const [duplicate, currentRefusal] = await deps.rows.listByBatch(batchId);
+    if (duplicate === undefined || currentRefusal === undefined) throw new Error('missing rows');
+    // A current-batch refusal with the very same identity remains this batch's concern.
+    await deps.rows.insertMany([
+      { ...currentRefusal, occurrence: duplicate.occurrence, classification: 'invalid' },
+    ]);
+
+    const result = await commitBatch(deps, userId, { batchId });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toMatchObject({ applied: 0, skippedDuplicates: 1, committed: [] });
+    expect(result.value.batch.rowCounts).toMatchObject({
+      read: 2,
+      new: 0,
+      duplicates: 1,
+      needsAttention: 1,
+    });
+    expect((await deps.rows.listByBatch(legacy)).map((row) => row.classification)).toEqual([
+      'duplicate',
+      'invalid',
+      'invalid',
+    ]);
+    expect((await deps.batches.findById(legacy))?.rowCounts).toMatchObject({
+      read: 3,
+      new: 0,
+      duplicates: 1,
+      needsAttention: 2,
+    });
+    expect((await deps.batches.findById(anotherLegacy))?.rowCounts).toMatchObject({
+      read: 1,
+      new: 0,
+      duplicates: 1,
+      needsAttention: 0,
+    });
+    expect((await deps.rows.findById(currentRefusal.id))?.classification).toBe('invalid');
+    expect(deps.transactions.rows).toEqual(ledger);
+    expect(await deps.positions.list()).toEqual(positions);
+    expect([
+      deps.transactions.insertCount,
+      deps.transactions.updateCount,
+      deps.positions.upsertCount,
+    ]).toEqual(writes);
+  });
+
+  it.each(['unclassified', 'superseded'] as const)(
+    '#153: a duplicate whose stored copy remains %s never clears a refusal',
+    async (status) => {
+      const deps = buildFakeIngestionDeps();
+      const record = rendimento('2026-02-13');
+      await importFile(deps, [record]);
+      const [transaction] = deps.transactions.rows;
+      if (transaction === undefined) throw new Error('missing transaction');
+      await deps.transactions.update({ ...transaction, status, isUserModified: true });
+      const legacy = await legacyRefusals(deps, [record]);
+
+      const { outcome } = await importFile(deps, [record]);
+
+      expect(outcome).toMatchObject({ applied: 0, skippedDuplicates: 1, committed: [] });
+      expect((await deps.rows.listByBatch(legacy))[0]?.classification).toBe('invalid');
+      expect((await deps.transactions.findById(transaction.id))?.status).toBe(status);
+    },
+  );
+
+  it('#153 BR-005-17: settlement follows the stored unmapped key, after its duplicate is activated in place', async () => {
+    const deps = buildFakeIngestionDeps();
+    const record = rendimento('2026-02-13');
+    const { batchId: origin } = await importFile(deps, [record]);
+    const [transaction] = deps.transactions.rows;
+    const [source] = await deps.rows.listByBatch(origin);
+    if (transaction === undefined || source === undefined) throw new Error('missing source');
+    const { unmapped } = keyFormsFor(transaction, 'rendimento', record.record.b3Type);
+    await deps.transactions.update({
+      ...transaction,
+      naturalKey: unmapped,
+      status: 'unclassified',
+    });
+    await deps.rows.insertMany([
+      { ...source, naturalKey: unmapped, classification: 'unclassified' },
+    ]);
+    const legacy = await legacyRefusals(deps, [record]);
+    const [refusal] = await deps.rows.listByBatch(legacy);
+    if (refusal === undefined) throw new Error('missing refusal');
+    await deps.rows.insertMany([{ ...refusal, naturalKey: unmapped }]);
+
+    const { outcome } = await importFile(deps, [record]);
+
+    expect(outcome).toMatchObject({ applied: 0, skippedDuplicates: 1, reclassified: 1 });
+    expect(await deps.transactions.findById(transaction.id)).toMatchObject({
+      status: 'active',
+      naturalKey: unmapped,
+    });
+    expect((await deps.rows.listByBatch(legacy))[0]?.classification).toBe('duplicate');
+    expect((await deps.batches.findById(legacy))?.rowCounts).toMatchObject({
+      new: 0,
+      duplicates: 1,
+      needsAttention: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
+
   it('#117 review: a stored sale a staged transfer starves refuses only that transfer, and a later valid sale still applies — on every import', async () => {
     const deps = buildFakeIngestionDeps();
     await importFile(deps, [holding(), sale('2026-02-20', '10')]);
