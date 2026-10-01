@@ -244,3 +244,93 @@ describe('SPEC-005 — parseMovimentacao', () => {
     });
   });
 });
+
+describe('#158 exact cash-earnings operation totals', () => {
+  it.each(['Dividendo', 'Juros Sobre Capital Próprio', 'Rendimento', 'Restituição de Capital'])(
+    'derives %s: R$0.01 / 25 units = R$0.0004 per unit',
+    (movimentacao) => {
+      const rows = rowsFor([
+        movimentacaoRow({
+          data: '10/01/2026',
+          movimentacao,
+          produto: 'TEST3 - Synthetic',
+          quantidade: '25',
+          precoUnitario: '-',
+          valorOperacao: '0,01',
+        }),
+      ]);
+      const record = parseMovimentacao(rows, structureOf(rows))[0]?.record;
+      if (record?.kind !== 'transaction') throw new Error('expected transaction');
+      expect(record.unitPrice.toString()).toBe('0.0004');
+      expect(record.priceStated).toBe(true);
+      expect(record.priceDerivedFromTotal).toBe(true);
+    },
+  );
+  it.each([
+    ['Dividendo', '3', '0,01'],
+    ['Dividendo', '1000000000', '0,01'],
+    ['Dividendo', '0', '0,01'],
+    ['Dividendo', '-25', '0,01'],
+    ['Dividendo', '25', '-0,01'],
+    ['Dividendo', '25', '-'],
+    ['Dividendo', '25', ''],
+    ['Dividendo', '1', '1000000000000'],
+    ['Compra', '25', '0,01'],
+    ['Transferência', '25', '0,01'],
+    ['Tipo desconhecido', '25', '0,01'],
+  ])(
+    'leaves unsafe %s quantity %s total %s unpriced',
+    (movimentacao, quantidade, valorOperacao) => {
+      const rows = rowsFor([
+        movimentacaoRow({
+          data: '10/01/2026',
+          movimentacao,
+          produto: 'TEST3 - Synthetic',
+          quantidade,
+          precoUnitario: '-',
+          valorOperacao,
+        }),
+      ]);
+      const record = parseMovimentacao(rows, structureOf(rows))[0]?.record;
+      if (record?.kind !== 'transaction') throw new Error('expected transaction');
+      expect(record.priceStated).toBe(false);
+      expect(record.priceDerivedFromTotal).toBeUndefined();
+      expect(record.unitPrice.toString()).toBe('0');
+    },
+  );
+  it.each(['0', '2,50'])(
+    'keeps explicitly stated unit price %s over the operation total',
+    (precoUnitario) => {
+      const rows = rowsFor([
+        movimentacaoRow({
+          data: '10/01/2026',
+          movimentacao: 'Dividendo',
+          produto: 'TEST3 - Synthetic',
+          quantidade: '25',
+          precoUnitario,
+          valorOperacao: '0,01',
+        }),
+      ]);
+      const record = parseMovimentacao(rows, structureOf(rows))[0]?.record;
+      if (record?.kind !== 'transaction') throw new Error('expected transaction');
+      expect(record.unitPrice.toString()).toBe(precoUnitario === '0' ? '0' : '2.5');
+      expect(record.priceDerivedFromTotal).toBeUndefined();
+    },
+  );
+  it('accepts an explicitly stated zero operation total', () => {
+    const rows = rowsFor([
+      movimentacaoRow({
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'TEST3 - Synthetic',
+        quantidade: '25',
+        precoUnitario: '-',
+        valorOperacao: '0',
+      }),
+    ]);
+    const record = parseMovimentacao(rows, structureOf(rows))[0]?.record;
+    if (record?.kind !== 'transaction') throw new Error('expected transaction');
+    expect(record.priceStated).toBe(true);
+    expect(record.unitPrice.toString()).toBe('0');
+  });
+});

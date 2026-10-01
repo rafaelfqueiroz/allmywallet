@@ -27,6 +27,26 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
     expect(classifyMovement('AMORTIZACAO')).toBe('amortization');
   });
 
+  it.each([
+    'Juros Sobre Capital Próprio - Reativado',
+    'JUROS SOBRE CAPITAL PROPRIO - REATIVADO',
+    '  juros   sobre capital próprio -   reativado  ',
+  ])('BR-005-18 (#158): maps the explicit reactivated JCP payment %s', (type) => {
+    for (const direction of ['credit', 'debit', null] as const) {
+      expect(classifyMovement(type, direction)).toBe('jcp');
+    }
+    expect(isIgnoredMovement(type)).toBe(false);
+  });
+
+  it.each([
+    'Juros Sobre Capital Próprio - Reativado Parcial',
+    'Juros Sobre Capital Próprio - Cancelado',
+    'Dividendo - Reativado',
+  ])('BR-005-19 (#158): leaves an unlisted payment variant %s unclassified', (type) => {
+    expect(classifyMovement(type)).toBeNull();
+    expect(isIgnoredMovement(type)).toBe(false);
+  });
+
   it('disambiguates a direction-dependent string by the Entrada/Saída column', () => {
     expect(classifyMovement('Transferência', 'credit')).toBe('transfer_in');
     expect(classifyMovement('Transferência', 'debit')).toBe('transfer_out');
@@ -90,9 +110,9 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
 });
 
 describe('SPEC-005 BR-005-18 v5 — corporate-event and conversion rows are named, not mapped', () => {
-  it('is version 6', () => {
-    // SPEC-005 BR-005-18 (v6, #144): subscription paperwork joined the map.
-    expect(MOVEMENT_MAP_VERSION).toBe(6);
+  it('is version 7', () => {
+    // SPEC-005 BR-005-18 (v7, #158): reactivated JCP payments joined the map.
+    expect(MOVEMENT_MAP_VERSION).toBe(7);
   });
 
   it('names the four rows BR-005-20b resolves at commit, whatever the casing', () => {

@@ -17,7 +17,7 @@ import type {
   ParsedExtract,
   ParsedRecord,
 } from '@/core/ingestion/ports';
-import { stageBatch } from '@/core/ingestion/stage-batch';
+import { keyFormsFor, stageBatch } from '@/core/ingestion/stage-batch';
 import { buildFakeIngestionDeps } from '@/core/ingestion/test-support/build-deps';
 
 const userId = UserId.generate();
@@ -658,5 +658,94 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe('IMPORT_EMPTY_EXTRACT');
+  });
+});
+
+describe('#158 total-derived cash earnings preserve historical identity', () => {
+  it.each(['priceless', 'unmapped'] as const)(
+    'counts old zero-price %s keys without consuming an extra occurrence',
+    async (form) => {
+      const deps = buildFakeIngestionDeps();
+      const parsed = transactionRecord({
+        b3Type: 'Dividendo',
+        quantity: Quantity.fromString('25'),
+        unitPrice: Money.fromString('0.0004'),
+        fees: Money.zero(),
+        priceStated: true,
+        priceDerivedFromTotal: true,
+      });
+      if (parsed.record.kind !== 'transaction') throw new Error('expected transaction');
+      const record = parsed.record;
+      const assetId = await deps.assets.resolve({
+        code: record.assetCode,
+        name: record.assetName,
+        assetClass: record.assetClass,
+        classStated: false,
+        nameStated: true,
+      });
+      const institutionId = await deps.institutions.resolve('Corretora Teste');
+      const forms = keyFormsFor(
+        {
+          assetId,
+          institutionId,
+          tradeDate: record.tradeDate,
+          quantity: record.quantity,
+          unitPrice: Money.zero(),
+        },
+        'dividend',
+        record.b3Type,
+      );
+      await deps.transactions.insert({
+        ...aTransaction().rendimento().on(record.tradeDate).quantity('25').price('0').build(),
+        assetId,
+        institutionId,
+        status: 'unclassified',
+        naturalKey: forms[form],
+        occurrence: 1,
+      });
+      const batchId = await seedPendingBatch(deps);
+      const result = await stageBatch(deps, userId, {
+        batchId,
+        extract: {
+          extractType: 'b3_movimentacao',
+          records: [
+            parsed,
+            { ...parsed, record: { ...record, unitPrice: Money.fromString('0.0008') } },
+          ],
+        },
+      });
+      if (!result.ok) throw new Error('stage failed');
+      expect(result.value.rows.map((row) => row.classification)).toEqual(['duplicate', 'new']);
+      expect(result.value.rows.map((row) => row.occurrence)).toEqual([1, 2]);
+      expect(result.value.rows.map((row) => row.ledgerType)).toEqual(['dividend', 'dividend']);
+      expect(result.value.rows.map((row) => row.naturalKey)).toEqual([
+        forms.priceless,
+        forms.priceless,
+      ]);
+    },
+  );
+  it('keeps explicitly stated zero earnings separate from an unstated price recovered from total', async () => {
+    const deps = buildFakeIngestionDeps();
+    const batchId = await seedPendingBatch(deps);
+    const source = { b3Type: 'Dividendo', quantity: Quantity.fromString('25'), fees: Money.zero() };
+    const result = await stageBatch(deps, userId, {
+      batchId,
+      extract: {
+        extractType: 'b3_movimentacao',
+        records: [
+          transactionRecord({ ...source, unitPrice: Money.zero(), priceStated: true }),
+          transactionRecord({
+            ...source,
+            unitPrice: Money.fromString('0.0004'),
+            priceStated: true,
+            priceDerivedFromTotal: true,
+          }),
+        ],
+      },
+    });
+    if (!result.ok) throw new Error('stage failed');
+    expect(result.value.rows.map((row) => row.classification)).toEqual(['new', 'new']);
+    expect(result.value.rows.map((row) => row.occurrence)).toEqual([1, 1]);
+    expect(result.value.rows[0]?.naturalKey).not.toBe(result.value.rows[1]?.naturalKey);
   });
 });

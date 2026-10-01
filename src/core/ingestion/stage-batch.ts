@@ -1,3 +1,4 @@
+import { Money } from '@/core/shared/money';
 import type { BusinessDate } from '@/core/shared/clock';
 import type { DomainError } from '@/core/shared/domain-error';
 import type { ImportBatchId, UserId } from '@/core/shared/ids';
@@ -205,6 +206,7 @@ async function stageTransactionRows(
     readonly naturalKey: string;
     /** Every other key this same B3 row has had or could have — see `keyForms`. */
     readonly otherKeys: readonly string[];
+    readonly requireStatedPriceAliases: boolean;
   }
 
   const resolved: Resolved[] = [];
@@ -280,11 +282,12 @@ async function stageTransactionRows(
       institutionId,
       tradeDate: record.tradeDate,
       quantity: record.quantity,
-      unitPrice: record.unitPrice,
+      // SPEC-005 BR-005-14/17: identity keeps the source's unstated price, not its recovered amount.
+      unitPrice: record.priceDerivedFromTotal ? Money.zero() : record.unitPrice,
     };
     const naturalKey = importNaturalKeyFor(
       { ...keyParts, type: ledgerType },
-      isUnclassified ? record.b3Type : null,
+      isUnclassified || record.priceDerivedFromTotal ? record.b3Type : null,
     );
     const forms = resolvedType === null ? null : keyFormsFor(keyParts, resolvedType, record.b3Type);
 
@@ -296,7 +299,17 @@ async function stageTransactionRows(
       isUnclassified,
       ledgerType,
       naturalKey,
-      otherKeys: forms === null ? [] : otherKeysThan(forms, naturalKey),
+      requireStatedPriceAliases:
+        record.priceStated &&
+        !record.priceDerivedFromTotal &&
+        record.unitPrice.isZero() &&
+        ['dividend', 'jcp', 'rendimento', 'amortization'].includes(ledgerType),
+      otherKeys:
+        forms === null
+          ? []
+          : record.priceDerivedFromTotal
+            ? [forms.unmapped].filter((key) => key !== naturalKey)
+            : otherKeysThan(forms, naturalKey),
     });
   }
 
@@ -320,7 +333,16 @@ async function stageTransactionRows(
     ]),
   ];
   const tallies = await deps.transactions.occurrenceTallies(uniqueKeys);
-  const planned = planOccurrences(resolved, countsAcrossKeyForms(resolved, tallies));
+  const statedAliasKeys = [
+    ...new Set(
+      resolved.filter((row) => row.requireStatedPriceAliases).flatMap((row) => row.otherKeys),
+    ),
+  ];
+  const statedTallies =
+    statedAliasKeys.length === 0
+      ? new Map<string, OccurrenceTally>()
+      : await deps.rows.statedPriceOccurrenceTallies(statedAliasKeys);
+  const planned = planOccurrences(resolved, countsAcrossKeyForms(resolved, tallies, statedTallies));
   const plannedIgnored = planOccurrences(
     ignoredInFileOrder,
     new Map([...tallies].map(([key, tally]) => [key, tally.highest])),
@@ -418,8 +440,13 @@ function otherKeysThan(forms: KeyForms, key: string): readonly string[] {
  * its key, which is what `max(occurrence)` guaranteed before.
  */
 function countsAcrossKeyForms(
-  rows: readonly { readonly naturalKey: string; readonly otherKeys: readonly string[] }[],
+  rows: readonly {
+    readonly naturalKey: string;
+    readonly otherKeys: readonly string[];
+    readonly requireStatedPriceAliases: boolean;
+  }[],
   tallies: ReadonlyMap<string, OccurrenceTally>,
+  statedTallies: ReadonlyMap<string, OccurrenceTally>,
 ): ReadonlyMap<string, number> {
   const forms = new Map<string, Set<string>>();
   for (const row of rows) {
@@ -427,9 +454,17 @@ function countsAcrossKeyForms(
     for (const key of row.otherKeys) set.add(key);
     forms.set(row.naturalKey, set);
   }
+  const requireStated = new Set(
+    rows.filter((row) => row.requireStatedPriceAliases).map((row) => row.naturalKey),
+  );
   const counts = new Map<string, number>();
   for (const [key, set] of forms) {
-    const counted = [...set].reduce((sum, form) => sum + (tallies.get(form)?.count ?? 0), 0);
+    const counted = [...set].reduce(
+      (sum, form) =>
+        sum +
+        ((form !== key && requireStated.has(key) ? statedTallies : tallies).get(form)?.count ?? 0),
+      0,
+    );
     counts.set(key, Math.max(counted, tallies.get(key)?.highest ?? 0));
   }
   return counts;

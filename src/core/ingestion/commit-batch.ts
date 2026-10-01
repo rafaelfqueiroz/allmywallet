@@ -1233,7 +1233,7 @@ function storedCopyAcrossKeyForms(stored: StoredLedger, row: ImportRow): Transac
       institutionId: row.institutionId,
       tradeDate: row.record.tradeDate,
       quantity: row.record.quantity,
-      unitPrice: row.record.unitPrice,
+      unitPrice: row.record.priceDerivedFromTotal ? Money.zero() : row.record.unitPrice,
     },
     row.ledgerType,
     row.record.b3Type,
@@ -1281,7 +1281,7 @@ function planReclassifications(
     }
     const record = row.record;
     const mirror = isIgnoredMovement(record.b3Type);
-    let storedKey = row.naturalKey;
+    let storedKeys = [row.naturalKey];
     if (!mirror) {
       if (isCarryCandidate(row)) continue;
       const forms = keyFormsFor(
@@ -1290,19 +1290,26 @@ function planReclassifications(
           institutionId: row.institutionId,
           tradeDate: record.tradeDate,
           quantity: record.quantity,
-          unitPrice: record.unitPrice,
+          unitPrice: record.priceDerivedFromTotal ? Money.zero() : record.unitPrice,
         },
         row.ledgerType,
         record.b3Type,
       );
-      // Still unmapped, or mapped but staged for want of a price: nothing to activate.
-      if (row.naturalKey !== forms.mapped) continue;
-      storedKey = forms.unmapped;
+      // SPEC-005 BR-005-14/17/20: derived cash keeps its original zero-price raw identity.
+      if (record.priceDerivedFromTotal) {
+        if (row.naturalKey !== forms.priceless) continue;
+        storedKeys = [forms.priceless, forms.unmapped];
+      } else {
+        // Still unmapped, or staged for want of a price: nothing to activate.
+        if (row.naturalKey !== forms.mapped) continue;
+        storedKeys = [forms.unmapped, forms.priceless];
+      }
     }
 
     const copy = stored(row).find(
       (t) =>
-        t.naturalKey === storedKey &&
+        t.naturalKey !== null &&
+        storedKeys.includes(t.naturalKey) &&
         t.occurrence === row.occurrence &&
         t.status === 'unclassified' &&
         !t.isUserModified &&
@@ -1319,7 +1326,13 @@ function planReclassifications(
           type: row.ledgerType,
           status: 'active',
           ratio: record.ratio,
-          totalValue: computeTotalValue(row.ledgerType, copy.quantity, copy.unitPrice, copy.fees),
+          unitPrice: record.priceDerivedFromTotal ? record.unitPrice : copy.unitPrice,
+          totalValue: computeTotalValue(
+            row.ledgerType,
+            copy.quantity,
+            record.priceDerivedFromTotal ? record.unitPrice : copy.unitPrice,
+            copy.fees,
+          ),
         };
     if (
       !mirror &&

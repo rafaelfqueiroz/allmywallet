@@ -1,7 +1,8 @@
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import type { OccurrenceTally } from '@/core/ledger/ports';
+import { and, count, eq, inArray, max, sql } from 'drizzle-orm';
 import { chunked } from '@/adapters/db/chunk';
 import { importRows } from '@/db/schema/import-rows';
-import { importBatches } from '@/db/schema/transactions';
+import { importBatches, transactions } from '@/db/schema/transactions';
 import type { Tx } from '@/db/tenant';
 import { BusinessDate, SystemClock } from '@/core/shared/clock';
 import {
@@ -41,6 +42,34 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
     private readonly tx: Tx,
     private readonly userId: UserId,
   ) {}
+
+  async statedPriceOccurrenceTallies(
+    keys: readonly string[],
+  ): Promise<ReadonlyMap<string, OccurrenceTally>> {
+    if (keys.length === 0) return new Map();
+    // SPEC-005 BR-005-17: only the original source row proves a stated price;
+    // a later re-import may attach its own different provenance to the same transaction.
+    const rows = await this.tx
+      .select({
+        naturalKey: transactions.naturalKey,
+        highest: max(transactions.occurrence),
+        count: count(),
+      })
+      .from(transactions)
+      .where(
+        and(
+          inArray(transactions.naturalKey, [...keys]),
+          sql`exists (select 1 from ${importRows} where ${importRows.transactionId} = ${transactions.id}
+          and ${importRows.batchId} = ${transactions.importBatchId}
+          and ${importRows.parsedPayload}->>'priceStated' is distinct from 'false'
+          and ${importRows.parsedPayload}->>'priceDerivedFromTotal' is distinct from 'true')`,
+        ),
+      )
+      .groupBy(transactions.naturalKey);
+    return new Map(
+      rows.map((row) => [row.naturalKey, { count: row.count, highest: row.highest ?? 0 }]),
+    );
+  }
 
   /**
    * Chunked — see `chunk.ts`. One statement per 10.000 staged rows overflows
@@ -187,6 +216,7 @@ function serializeRecord(record: NormalizedRecord): Record<string, unknown> {
       unitPrice: record.unitPrice.toString(),
       fees: record.fees.toString(),
       priceStated: record.priceStated,
+      ...(record.priceDerivedFromTotal ? { priceDerivedFromTotal: true } : {}),
       ratio: record.ratio === null ? null : record.ratio.toString(),
     };
   }
@@ -237,6 +267,7 @@ function deserializeRecord(raw: Record<string, unknown>): NormalizedRecord {
       fees: Money.fromString(String(raw['fees'])),
       // #108: rows staged before `priceStated` existed always had a price.
       priceStated: raw['priceStated'] !== false,
+      ...(raw['priceDerivedFromTotal'] === true ? { priceDerivedFromTotal: true } : {}),
       ratio: raw['ratio'] === null ? null : Quantity.fromString(String(raw['ratio'])),
     };
   }

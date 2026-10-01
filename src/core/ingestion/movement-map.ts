@@ -23,7 +23,7 @@ import type { TransactionType } from '@/core/ledger/transaction';
  * own casing and accenting of these strings is not perfectly consistent
  * across extracts.
  */
-export const MOVEMENT_MAP_VERSION = 6;
+export const MOVEMENT_MAP_VERSION = 7;
 
 function normalize(value: string): string {
   return value
@@ -59,6 +59,9 @@ const MOVEMENT_MAP: ReadonlyMap<string, readonly MappedEntry[]> = new Map(
       ['venda', [{ type: 'sell', direction: null }]],
       ['dividendo', [{ type: 'dividend', direction: null }]],
       ['juros sobre capital proprio', [{ type: 'jcp', direction: null }]],
+      // SPEC-005 BR-005-18 (#158): a reactivated JCP is an actual payment,
+      // unlike the broker-transfer mirror BR-005-19 ignores.
+      ['juros sobre capital proprio - reativado', [{ type: 'jcp', direction: null }]],
       ['rendimento', [{ type: 'rendimento', direction: null }]],
       ['amortizacao', [{ type: 'amortization', direction: null }]],
       // #110 (v3): Tesouro Direto and bank paper, which Negociação never

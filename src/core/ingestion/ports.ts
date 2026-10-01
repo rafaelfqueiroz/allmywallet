@@ -10,6 +10,7 @@ import type {
 } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { Result } from '@/core/shared/result';
+import type { OccurrenceTally } from '@/core/ledger/ports';
 import type { Transaction, TransactionType } from '@/core/ledger/transaction';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import type { AssetClass } from '@/core/quotes/ports';
@@ -78,11 +79,14 @@ export interface NormalizedTransactionRecord {
   readonly quantity: Quantity;
   readonly unitPrice: Money;
   /**
-   * #108 — `false` when the extract left the price blank (B3's `-`), so
+   * #158 — an exact cash-earnings total also states an effective unit price.
+   * #108 — otherwise `false` when the extract left the price blank (B3's `-`), so
    * `unitPrice` is a placeholder zero rather than a price. `stage-batch.ts`
    * stages such a row `unclassified` when its type's effect depends on price.
    */
   readonly priceStated: boolean;
+  /** #158: effective price recovered from the stated total; preserves historical zero-price key lookup. */
+  readonly priceDerivedFromTotal?: boolean;
   readonly fees: Money;
   /** BR-007-04 — split/grupamento only. */
   readonly ratio: Quantity | null;
@@ -274,6 +278,10 @@ export interface ImportRowAttentionCount {
 }
 
 export interface ImportRowRepository {
+  /** SPEC-005 BR-005-17: legacy aliases whose original import stated a unit price, excluding recovered totals. */
+  statedPriceOccurrenceTallies(
+    keys: readonly string[],
+  ): Promise<ReadonlyMap<string, OccurrenceTally>>;
   insertMany(rows: readonly ImportRow[]): Promise<void>;
   findById(id: ImportRowId): Promise<ImportRow | null>;
   listByBatch(batchId: ImportBatchId): Promise<readonly ImportRow[]>;

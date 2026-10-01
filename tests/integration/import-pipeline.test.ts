@@ -143,6 +143,82 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     },
   });
 
+  it('#158: an exact cash total survives the JSON boundary and reimports without another payment', async () => {
+    const file = await buildMovimentacaoXlsx([
+      {
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'TEST3 - Empresa de teste',
+        quantidade: '25',
+        precoUnitario: '-',
+        valorOperacao: '0,01',
+      },
+    ]);
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, file);
+    await handleImportStage({ batchId: first, userId }, handlerDeps());
+    await withTenant(
+      userId,
+      async (tx) => {
+        const [row] = await new DrizzleImportRowRepository(tx, userId).listByBatch(first);
+        expect(row?.record).toMatchObject({ priceStated: true, priceDerivedFromTotal: true });
+        if (row?.record.kind !== 'transaction') throw new Error('expected dividend');
+        expect(row.record.unitPrice.toString()).toBe('0.0004');
+      },
+      appDb,
+    );
+    await handleImportCommit({ batchId: first, userId }, handlerDeps());
+
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, file);
+    await handleImportStage({ batchId: second, userId }, handlerDeps());
+    await handleImportCommit({ batchId: second, userId }, handlerDeps());
+    await withTenant(
+      userId,
+      async (tx) => {
+        const transactions = await new DrizzleTransactionRepository(tx, userId).listAll();
+        expect(transactions).toHaveLength(1);
+        expect(transactions[0]?.status).toBe('active');
+        expect(transactions[0]?.totalValue.toString()).toBe('0.01');
+      },
+      appDb,
+    );
+    // A directly stated zero is a distinct source row, whichever arrives first.
+    const mixedFile = await buildMovimentacaoXlsx([
+      {
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'TEST3 - Empresa de teste',
+        quantidade: '25',
+        precoUnitario: '0',
+        valorOperacao: '0',
+      },
+      {
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'TEST3 - Empresa de teste',
+        quantidade: '25',
+        precoUnitario: '-',
+        valorOperacao: '0,01',
+      },
+    ]);
+    for (let index = 0; index < 2; index += 1) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, mixedFile);
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+    }
+    await withTenant(
+      userId,
+      async (tx) => {
+        const transactions = await new DrizzleTransactionRepository(tx, userId).listAll();
+        expect(transactions).toHaveLength(2);
+        expect(transactions.map((t) => t.totalValue.toString()).sort()).toEqual(['0', '0.01']);
+      },
+      appDb,
+    );
+  });
+
   /**
    * SPEC-010 BR-010-10/17 — the wiring test.
    *

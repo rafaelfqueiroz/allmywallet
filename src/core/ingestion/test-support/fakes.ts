@@ -1,3 +1,5 @@
+import type { Transaction } from '@/core/ledger/transaction';
+import type { OccurrenceTally } from '@/core/ledger/ports';
 import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
 import type { ImportRowId, TransactionId } from '@/core/shared/ids';
 import type { BusinessDate } from '@/core/shared/clock';
@@ -65,6 +67,34 @@ export class FakeImportBatchRepository implements ImportBatchRepository {
 
 export class FakeImportRowRepository implements ImportRowRepository {
   #rows = new Map<string, ImportRow>();
+
+  constructor(private readonly transactions: () => readonly Transaction[] = () => []) {}
+
+  async statedPriceOccurrenceTallies(
+    keys: readonly string[],
+  ): Promise<ReadonlyMap<string, OccurrenceTally>> {
+    const wanted = new Set(keys);
+    const tallies = new Map<string, OccurrenceTally>();
+    for (const transaction of this.transactions()) {
+      const key = transaction.naturalKey;
+      if (key === null || !wanted.has(key)) continue;
+      const source = this.all.find(
+        (row) => row.transactionId === transaction.id && row.batchId === transaction.importBatchId,
+      );
+      if (
+        source?.record.kind !== 'transaction' ||
+        !source.record.priceStated ||
+        source.record.priceDerivedFromTotal
+      )
+        continue;
+      const tally = tallies.get(key) ?? { count: 0, highest: 0 };
+      tallies.set(key, {
+        count: tally.count + 1,
+        highest: Math.max(tally.highest, transaction.occurrence),
+      });
+    }
+    return tallies;
+  }
 
   get all(): readonly ImportRow[] {
     return [...this.#rows.values()];
