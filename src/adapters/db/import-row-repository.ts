@@ -1,7 +1,7 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { chunked } from '@/adapters/db/chunk';
 import { importRows } from '@/db/schema/import-rows';
-import { importBatches } from '@/db/schema/transactions';
+import { importBatches, transactions } from '@/db/schema/transactions';
 import type { Tx } from '@/db/tenant';
 import { BusinessDate, SystemClock } from '@/core/shared/clock';
 import {
@@ -21,6 +21,7 @@ import type {
   ImportRowRepository,
   NormalizedRecord,
   RawRow,
+  SourcePriceOccurrence,
 } from '@/core/ingestion/ports';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { FixedIncomeIndexer } from '@/core/valuation/ports';
@@ -41,6 +42,34 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
     private readonly tx: Tx,
     private readonly userId: UserId,
   ) {}
+
+  async sourcePriceOccurrences(keys: readonly string[]): Promise<readonly SourcePriceOccurrence[]> {
+    if (keys.length === 0) return [];
+    // SPEC-005 BR-005-17: the original source, never a later attached import, identifies each historical ordinal.
+    const rows = await this.tx
+      .select({
+        transactionId: transactions.id,
+        naturalKey: transactions.naturalKey,
+        occurrence: transactions.occurrence,
+        sourcePriceStated: sql<boolean>`(${importRows.parsedPayload}->>'priceStated' is distinct from 'false' and ${importRows.parsedPayload}->>'priceDerivedFromTotal' is distinct from 'true')`,
+      })
+      .from(transactions)
+      .innerJoin(
+        importRows,
+        and(
+          eq(importRows.transactionId, transactions.id),
+          eq(importRows.batchId, transactions.importBatchId),
+        ),
+      )
+      .where(inArray(transactions.naturalKey, [...keys]));
+    const unique = new Map(
+      rows.map((row) => [
+        row.transactionId,
+        { ...row, transactionId: TransactionId.of(row.transactionId) },
+      ]),
+    );
+    return [...unique.values()];
+  }
 
   /**
    * Chunked — see `chunk.ts`. One statement per 10.000 staged rows overflows
@@ -187,6 +216,10 @@ function serializeRecord(record: NormalizedRecord): Record<string, unknown> {
       unitPrice: record.unitPrice.toString(),
       fees: record.fees.toString(),
       priceStated: record.priceStated,
+      ...(record.priceDerivedFromTotal ? { priceDerivedFromTotal: true } : {}),
+      ...(record.historicalTransactionId
+        ? { historicalTransactionId: record.historicalTransactionId }
+        : {}),
       ratio: record.ratio === null ? null : record.ratio.toString(),
     };
   }
@@ -237,6 +270,10 @@ function deserializeRecord(raw: Record<string, unknown>): NormalizedRecord {
       fees: Money.fromString(String(raw['fees'])),
       // #108: rows staged before `priceStated` existed always had a price.
       priceStated: raw['priceStated'] !== false,
+      ...(raw['priceDerivedFromTotal'] === true ? { priceDerivedFromTotal: true } : {}),
+      ...(typeof raw['historicalTransactionId'] === 'string'
+        ? { historicalTransactionId: TransactionId.of(raw['historicalTransactionId']) }
+        : {}),
       ratio: raw['ratio'] === null ? null : Quantity.fromString(String(raw['ratio'])),
     };
   }

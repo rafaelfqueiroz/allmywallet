@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
@@ -141,6 +142,82 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     enqueueSnapshot: async (payload: { userId?: string; from?: string }) => {
       snapshotJobs.push(payload);
     },
+  });
+
+  it('#158: an exact cash total survives the JSON boundary and reimports without another payment', async () => {
+    const file = await buildMovimentacaoXlsx([
+      {
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'TEST3 - Empresa de teste',
+        quantidade: '25',
+        precoUnitario: '-',
+        valorOperacao: '0,01',
+      },
+    ]);
+    const first = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, first, file);
+    await handleImportStage({ batchId: first, userId }, handlerDeps());
+    await withTenant(
+      userId,
+      async (tx) => {
+        const [row] = await new DrizzleImportRowRepository(tx, userId).listByBatch(first);
+        expect(row?.record).toMatchObject({ priceStated: true, priceDerivedFromTotal: true });
+        if (row?.record.kind !== 'transaction') throw new Error('expected dividend');
+        expect(row.record.unitPrice.toString()).toBe('0.0004');
+      },
+      appDb,
+    );
+    await handleImportCommit({ batchId: first, userId }, handlerDeps());
+
+    const second = await newPendingBatch('b3_movimentacao');
+    await saveUploadedFile(uploadDir, second, file);
+    await handleImportStage({ batchId: second, userId }, handlerDeps());
+    await handleImportCommit({ batchId: second, userId }, handlerDeps());
+    await withTenant(
+      userId,
+      async (tx) => {
+        const transactions = await new DrizzleTransactionRepository(tx, userId).listAll();
+        expect(transactions).toHaveLength(1);
+        expect(transactions[0]?.status).toBe('active');
+        expect(transactions[0]?.totalValue.toString()).toBe('0.01');
+      },
+      appDb,
+    );
+    // A directly stated zero is a distinct source row, whichever arrives first.
+    const mixedFile = await buildMovimentacaoXlsx([
+      {
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'TEST3 - Empresa de teste',
+        quantidade: '25',
+        precoUnitario: '0',
+        valorOperacao: '0',
+      },
+      {
+        data: '10/01/2026',
+        movimentacao: 'Dividendo',
+        produto: 'TEST3 - Empresa de teste',
+        quantidade: '25',
+        precoUnitario: '-',
+        valorOperacao: '0,01',
+      },
+    ]);
+    for (let index = 0; index < 2; index += 1) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, mixedFile);
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+    }
+    await withTenant(
+      userId,
+      async (tx) => {
+        const transactions = await new DrizzleTransactionRepository(tx, userId).listAll();
+        expect(transactions).toHaveLength(2);
+        expect(transactions.map((t) => t.totalValue.toString()).sort()).toEqual(['0', '0.01']);
+      },
+      appDb,
+    );
   });
 
   /**
@@ -2260,6 +2337,154 @@ describe('SPEC-005 — import pipeline (integration)', () => {
    * Re-importing the same file supersedes the mirror, activates the
    * `APLICAÇÃO` as a buy, and empties Needs attention.
    */
+  it.each([false, true])(
+    '#192 review: mixed historical JCP source prices retain both original occurrences (missing first: %s)',
+    async (missingFirst) => {
+      const common = {
+        entradaSaida: 'Credito',
+        data: '10/03/2026',
+        movimentacao: 'Juros Sobre Capital Próprio - Reativado',
+        produto: 'TEST3 - Empresa de teste',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '25',
+      };
+      const stated = { ...common, precoUnitario: '0', valorOperacao: '0' };
+      const missing = { ...common, precoUnitario: '-', valorOperacao: '0,01' };
+      const file = await buildMovimentacaoXlsx(
+        missingFirst ? [missing, stated] : [stated, missing],
+      );
+      const origin = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, origin, file);
+      await handleImportStage({ batchId: origin, userId }, handlerDeps());
+
+      // Generated legacy map-v6 state: both original records used one unmapped
+      // zero-price key, even though only one source actually stated that price.
+      const originals = await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          const rows = await deps.rows.listByBatch(origin);
+          const originals: Transaction[] = [];
+          for (const [index, row] of rows.entries()) {
+            if (row.record.kind !== 'transaction') throw new Error('expected JCP');
+            const transaction: Transaction = {
+              id: TransactionId.generate(),
+              userId,
+              assetId: row.assetId,
+              institutionId: row.institutionId,
+              type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+              status: 'unclassified',
+              tradeDate: row.record.tradeDate,
+              quantity: row.record.quantity,
+              unitPrice: Money.zero(),
+              fees: Money.zero(),
+              totalValue: Money.zero(),
+              ratio: null,
+              conversionGroupId: null,
+              costBasis: null,
+              naturalKey: importNaturalKeyFor(
+                {
+                  assetId: row.assetId,
+                  institutionId: row.institutionId,
+                  type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+                  tradeDate: row.record.tradeDate,
+                  quantity: row.record.quantity,
+                  unitPrice: Money.zero(),
+                },
+                row.record.b3Type,
+              ),
+              occurrence: index + 1,
+              importBatchId: origin,
+              isManual: false,
+              isUserModified: false,
+              costIsEstimate: false,
+              estimateCloseDate: null,
+              createdAt: clock.now(),
+              updatedAt: clock.now(),
+            };
+            await deps.transactions.insert(transaction);
+            const sourceMissing = row.record.priceDerivedFromTotal === true;
+            await tx
+              .update(schema.importRows)
+              .set({
+                classification: 'unclassified',
+                naturalKey: transaction.naturalKey,
+                occurrence: transaction.occurrence,
+                ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE,
+                transactionId: transaction.id,
+                parsedPayload: {
+                  kind: 'transaction',
+                  b3Type: row.record.b3Type,
+                  direction: row.record.direction,
+                  assetCode: row.record.assetCode,
+                  assetName: row.record.assetName,
+                  assetClass: row.record.assetClass,
+                  institutionName: row.record.institutionName,
+                  tradeDate: row.record.tradeDate,
+                  quantity: row.record.quantity.toString(),
+                  unitPrice: '0',
+                  fees: '0',
+                  ratio: null,
+                  priceStated: !sourceMissing,
+                },
+              })
+              .where(eq(schema.importRows.id, row.id));
+            originals.push(transaction);
+          }
+          await tx
+            .update(schema.importBatches)
+            .set({
+              status: 'committed',
+              committedAt: clock.now(),
+              rowCounts: {
+                read: 2,
+                new: 0,
+                duplicates: 0,
+                needsAttention: 2,
+                ignored: 0,
+                fromDate: '2026-03-10',
+                toDate: '2026-03-10',
+              },
+            })
+            .where(eq(schema.importBatches.id, origin));
+          return originals;
+        },
+        appDb,
+      );
+
+      for (let index = 0; index < 2; index += 1) {
+        const batchId = await newPendingBatch('b3_movimentacao');
+        await saveUploadedFile(uploadDir, batchId, file);
+        await handleImportStage({ batchId, userId }, handlerDeps());
+        await handleImportCommit({ batchId, userId }, handlerDeps());
+        await withTenant(
+          userId,
+          async (tx) => {
+            const deps = buildIngestionDeps(tx, userId, clock);
+            const current = await deps.transactions.listAll();
+            expect(current).toHaveLength(2);
+            for (const [ordinal, original] of originals.entries()) {
+              const payment = await deps.transactions.findById(original.id);
+              expect(payment).toMatchObject({
+                type: 'jcp',
+                status: 'active',
+                naturalKey: original.naturalKey,
+                occurrence: original.occurrence,
+              });
+              expect(payment?.totalValue.toString()).toBe(
+                (ordinal === 0) === missingFirst ? '0.01' : '0',
+              );
+            }
+            expect(
+              (await deps.rows.countNeedsAttentionByBatch()).filter((r) => r.batchId === origin),
+            ).toEqual([]);
+          },
+          appDb,
+        );
+      }
+    },
+  );
+
   it('#110: a re-import supersedes mirrors and activates newly mapped rows an older map stored unclassified', async () => {
     const file = [
       {

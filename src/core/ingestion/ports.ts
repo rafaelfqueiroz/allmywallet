@@ -78,11 +78,16 @@ export interface NormalizedTransactionRecord {
   readonly quantity: Quantity;
   readonly unitPrice: Money;
   /**
-   * #108 — `false` when the extract left the price blank (B3's `-`), so
+   * #158 — an exact cash-earnings total also states an effective unit price.
+   * #108 — otherwise `false` when the extract left the price blank (B3's `-`), so
    * `unitPrice` is a placeholder zero rather than a price. `stage-batch.ts`
    * stages such a row `unclassified` when its type's effect depends on price.
    */
   readonly priceStated: boolean;
+  /** #158: effective price recovered from the stated total; preserves historical zero-price key lookup. */
+  readonly priceDerivedFromTotal?: boolean;
+  /** BR-005-17: exact historical occurrence selected from original source-price provenance. */
+  readonly historicalTransactionId?: TransactionId;
   readonly fees: Money;
   /** BR-007-04 — split/grupamento only. */
   readonly ratio: Quantity | null;
@@ -273,7 +278,15 @@ export interface ImportRowAttentionCount {
   readonly count: number;
 }
 
+export interface SourcePriceOccurrence {
+  readonly transactionId: TransactionId;
+  readonly naturalKey: string;
+  readonly occurrence: number;
+  readonly sourcePriceStated: boolean;
+}
+
 export interface ImportRowRepository {
+  sourcePriceOccurrences(keys: readonly string[]): Promise<readonly SourcePriceOccurrence[]>;
   insertMany(rows: readonly ImportRow[]): Promise<void>;
   findById(id: ImportRowId): Promise<ImportRow | null>;
   listByBatch(batchId: ImportBatchId): Promise<readonly ImportRow[]>;

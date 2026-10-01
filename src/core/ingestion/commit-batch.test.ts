@@ -3222,6 +3222,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
     const staged = await deps.rows.listByBatch(batchId);
     const transactions: Transaction[] = [];
     const rows: ImportRow[] = [];
+    const occurrences = new Map<string, number>();
     for (const row of staged) {
       const record = row.record as NormalizedTransactionRecord;
       const naturalKey = importNaturalKeyFor(
@@ -3235,6 +3236,8 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         },
         record.b3Type,
       );
+      const occurrence = (occurrences.get(naturalKey) ?? 0) + 1;
+      occurrences.set(naturalKey, occurrence);
       const transaction: Transaction = {
         id: TransactionId.generate(),
         userId,
@@ -3256,7 +3259,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         conversionGroupId: null,
         costBasis: null,
         naturalKey,
-        occurrence: 1,
+        occurrence,
         importBatchId: batchId,
         isManual: false,
         isUserModified: false,
@@ -3270,7 +3273,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
         ...row,
         classification: 'unclassified',
         naturalKey,
-        occurrence: 1,
+        occurrence,
         ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE,
         transactionId: transaction.id,
       });
@@ -3296,6 +3299,404 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
 
   const rowFor = async (deps: FakeIngestionDeps, batchId: ImportBatchId, id: TransactionId) =>
     (await deps.rows.listByBatch(batchId)).find((row) => row.transactionId === id);
+
+  const reactivatedJcp = () =>
+    buy({
+      b3Type: 'Juros Sobre Capital Próprio - Reativado',
+      direction: 'credit',
+      quantity: Quantity.fromString('40'),
+      unitPrice: Money.fromString('0.23'),
+      fees: Money.zero(),
+    });
+
+  const dividendFromTotal = (derived: boolean) =>
+    buy({
+      b3Type: 'Dividendo',
+      direction: 'credit',
+      quantity: Quantity.fromString('25'),
+      unitPrice: derived ? Money.fromString('0.0004') : Money.zero(),
+      priceStated: derived,
+      priceDerivedFromTotal: derived,
+      fees: Money.zero(),
+    });
+
+  const legacyZeroJcp = (priceStated: boolean) =>
+    buy({
+      ...reactivatedJcp().record,
+      quantity: Quantity.fromString('25'),
+      unitPrice: Money.zero(),
+      priceStated,
+    });
+  const recoveredJcp = (price = '0.0004') =>
+    buy({
+      ...legacyZeroJcp(false).record,
+      priceStated: true,
+      priceDerivedFromTotal: true,
+      unitPrice: Money.fromString(price),
+    });
+
+  it('BR-005-14/17 (#158): a v6 explicitly zero-priced JCP is not overwritten by a distinct recovered payment', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [legacyZeroJcp(true)]);
+    const [original] = transactions as [Transaction];
+
+    const recovered = await importFile(deps, [recoveredJcp()]);
+
+    expect(recovered.outcome).toMatchObject({ applied: 1, reclassified: 0 });
+    expect(await deps.transactions.findById(original.id)).toEqual(original);
+    expect(deps.transactions.rows).toHaveLength(2);
+    const both = await importFile(deps, [legacyZeroJcp(true), recoveredJcp()]);
+    expect(both.outcome).toMatchObject({ applied: 0, reclassified: 1, skippedDuplicates: 2 });
+    expect(deps.transactions.rows).toHaveLength(2);
+    expect(
+      deps.transactions.rows.every(
+        (transaction) => transaction.type === 'jcp' && transaction.status === 'active',
+      ),
+    ).toBe(true);
+    expect((await deps.transactions.findById(original.id))?.totalValue.toString()).toBe('0');
+    const updates = deps.transactions.updateCount;
+    const again = await importFile(deps, [legacyZeroJcp(true), recoveredJcp()]);
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 2 });
+    expect(deps.transactions.updateCount).toBe(updates);
+  });
+
+  it.each([false, true])(
+    'BR-005-14/17/20 (#158): mixed legacy JCP sources preserve ordinals when explicit zero first is %s',
+    async (explicitFirst) => {
+      const deps = buildFakeIngestionDeps();
+      const records = explicitFirst
+        ? [legacyZeroJcp(true), legacyZeroJcp(false)]
+        : [legacyZeroJcp(false), legacyZeroJcp(true)];
+      const { transactions } = await commitUnderMapV2(deps, records);
+      const explicitIndex = explicitFirst ? 0 : 1;
+      const missingIndex = explicitFirst ? 1 : 0;
+      const [explicitStored, missingStored] = [
+        transactions[explicitIndex],
+        transactions[missingIndex],
+      ] as [Transaction, Transaction];
+      expect(transactions.map((transaction) => transaction.occurrence)).toEqual([1, 2]);
+
+      const recovered = await importFile(deps, [recoveredJcp()]);
+      expect(recovered.outcome).toMatchObject({ applied: 0, reclassified: 1 });
+      expect(await deps.transactions.findById(explicitStored.id)).toEqual(explicitStored);
+      expect(await deps.transactions.findById(missingStored.id)).toMatchObject({
+        type: 'jcp',
+        status: 'active',
+        naturalKey: missingStored.naturalKey,
+        occurrence: missingStored.occurrence,
+      });
+      expect((await deps.transactions.findById(missingStored.id))?.totalValue.toString()).toBe(
+        '0.01',
+      );
+      const bothRecords = explicitFirst
+        ? [legacyZeroJcp(true), recoveredJcp()]
+        : [recoveredJcp(), legacyZeroJcp(true)];
+      const both = await importFile(deps, bothRecords);
+      expect(both.outcome).toMatchObject({ applied: 0, reclassified: 1 });
+      expect((await deps.transactions.findById(explicitStored.id))?.totalValue.toString()).toBe(
+        '0',
+      );
+      expect(deps.transactions.rows).toHaveLength(2);
+      const updates = deps.transactions.updateCount;
+      const again = await importFile(deps, bothRecords);
+      expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 2 });
+      expect(deps.transactions.updateCount).toBe(updates);
+    },
+  );
+
+  it('BR-005-14/17 (#158): multiple missing JCP prices interleaved with explicit zero preserve their historical occurrences', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [
+      legacyZeroJcp(false),
+      legacyZeroJcp(true),
+      legacyZeroJcp(false),
+    ]);
+    expect(transactions.map((transaction) => transaction.occurrence)).toEqual([1, 2, 3]);
+    const recovered = [recoveredJcp(), recoveredJcp('0.0008')];
+    await importFile(deps, recovered);
+    expect(deps.transactions.rows).toHaveLength(3);
+    for (const [index, stored] of transactions.entries()) {
+      const actual = await deps.transactions.findById(stored.id);
+      expect(actual?.naturalKey).toBe(stored.naturalKey);
+      expect(actual?.occurrence).toBe(stored.occurrence);
+      expect(actual?.totalValue.toString()).toBe(['0.01', '0', '0.02'][index]);
+    }
+    const all = [recovered[0] as ParsedRecord, legacyZeroJcp(true), recovered[1] as ParsedRecord];
+    await importFile(deps, all);
+    const updates = deps.transactions.updateCount;
+    const again = await importFile(deps, all);
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 3 });
+    expect(deps.transactions.updateCount).toBe(updates);
+    expect(deps.transactions.rows).toHaveLength(3);
+  });
+
+  it('BR-005-20/BR-006-16 (#158): recovery preserves a user-edited legacy missing-price JCP without duplicating it', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { transactions } = await commitUnderMapV2(deps, [
+      legacyZeroJcp(true),
+      legacyZeroJcp(false),
+    ]);
+    const stored = transactions[1] as Transaction;
+    const edited = { ...stored, isUserModified: true };
+    await deps.transactions.update(edited);
+    const again = await importFile(deps, [recoveredJcp()]);
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0 });
+    expect(await deps.transactions.findById(stored.id)).toEqual(edited);
+    expect(deps.transactions.rows).toHaveLength(2);
+  });
+
+  it('BR-005-17/20 (#158): a total-derived dividend promotes two genuine priceless occurrences and re-imports as a no-op', async () => {
+    const deps = buildFakeIngestionDeps();
+    const original = await importFile(deps, [dividendFromTotal(false), dividendFromTotal(false)]);
+    const stored = [...deps.transactions.rows];
+    expect(stored).toHaveLength(2);
+    expect(stored.map((transaction) => transaction.status)).toEqual([
+      'unclassified',
+      'unclassified',
+    ]);
+    expect(stored.map((transaction) => transaction.type)).toEqual(['dividend', 'dividend']);
+
+    const again = await importFile(deps, [dividendFromTotal(true), dividendFromTotal(true)]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 2, superseded: 0 });
+    expect(deps.transactions.rows).toHaveLength(2);
+    for (const transaction of stored) {
+      const promoted = await deps.transactions.findById(transaction.id);
+      expect(promoted).toMatchObject({
+        type: 'dividend',
+        status: 'active',
+        naturalKey: transaction.naturalKey,
+        occurrence: transaction.occurrence,
+      });
+      // Generated B3 total: 25 × 0,0004 = 0,01 per genuine occurrence.
+      expect(promoted?.unitPrice.toString()).toBe('0.0004');
+      expect(promoted?.totalValue.toString()).toBe('0.01');
+      expect((await rowFor(deps, original.batchId, transaction.id))?.classification).toBe('new');
+    }
+    expect((await deps.batches.findById(original.batchId))?.rowCounts).toMatchObject({
+      new: 2,
+      needsAttention: 0,
+    });
+
+    const updates = deps.transactions.updateCount;
+    const third = await importFile(deps, [dividendFromTotal(true), dividendFromTotal(true)]);
+    expect(third.outcome).toMatchObject({
+      applied: 0,
+      reclassified: 0,
+      skippedDuplicates: 2,
+      committed: [],
+    });
+    expect(deps.transactions.updateCount).toBe(updates);
+    expect(deps.transactions.rows).toHaveLength(2);
+  });
+
+  it('BR-006-16 (#158): a total-derived dividend preserves a user-edited priceless copy without adding another', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [dividendFromTotal(false)]);
+    const [stored] = deps.transactions.rows as [Transaction];
+    const edited = { ...stored, isUserModified: true };
+    await deps.transactions.update(edited);
+
+    const again = await importFile(deps, [dividendFromTotal(true)]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, superseded: 0 });
+    expect(await deps.transactions.findById(stored.id)).toEqual(edited);
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
+
+  it('BR-005-17/20 (#158): a total-derived dividend also promotes an older unmapped copy', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [dividendFromTotal(false)]);
+    const [stored] = transactions as [Transaction];
+
+    const again = await importFile(deps, [dividendFromTotal(true)]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 1 });
+    const promoted = await deps.transactions.findById(stored.id);
+    expect(promoted).toMatchObject({
+      type: 'dividend',
+      status: 'active',
+      naturalKey: stored.naturalKey,
+    });
+    expect(promoted?.totalValue.toString()).toBe('0.01');
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('new');
+    expect((await deps.batches.findById(batchId))?.rowCounts?.needsAttention).toBe(0);
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
+
+  it('BR-005-17/20 (#158): distinct derived totals preserve the original zero-price occurrence order', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [dividendFromTotal(false), dividendFromTotal(false)]);
+    const stored = [...deps.transactions.rows];
+    const first = dividendFromTotal(true);
+    const second = buy({ ...first.record, unitPrice: Money.fromString('0.0008') });
+
+    const again = await importFile(deps, [first, second]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 2 });
+    expect(deps.transactions.rows).toHaveLength(2);
+    for (const [index, transaction] of stored.entries()) {
+      const promoted = await deps.transactions.findById(transaction.id);
+      expect(promoted).toMatchObject({
+        status: 'active',
+        naturalKey: transaction.naturalKey,
+        occurrence: transaction.occurrence,
+      });
+      expect(promoted?.totalValue.toString()).toBe(index === 0 ? '0.01' : '0.02');
+    }
+    // 25 × 0,0004 + 25 × 0,0008 = 0,03 across two genuine payments.
+    expect(
+      deps.transactions.rows
+        .reduce((sum, row) => sum.plus(row.totalValue), Money.zero())
+        .toString(),
+    ).toBe('0.03');
+    const updates = deps.transactions.updateCount;
+    const third = await importFile(deps, [first, second]);
+    expect(third.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 2 });
+    expect(deps.transactions.updateCount).toBe(updates);
+  });
+
+  it('BR-005-17 (#158): an actual zero-priced active dividend is separate from a total-derived payment', async () => {
+    const deps = buildFakeIngestionDeps();
+    const explicitZero = buy({ ...dividendFromTotal(false).record, priceStated: true });
+    await importFile(deps, [explicitZero]);
+    const [zeroPayment] = deps.transactions.rows as [Transaction];
+    expect(zeroPayment.status).toBe('active');
+
+    const again = await importFile(deps, [dividendFromTotal(true)]);
+
+    expect(again.outcome).toMatchObject({ applied: 1, reclassified: 0 });
+    expect(await deps.transactions.findById(zeroPayment.id)).toEqual(zeroPayment);
+    expect(deps.transactions.rows).toHaveLength(2);
+    expect(again.outcome.committed[0]?.totalValue.toString()).toBe('0.01');
+    const third = await importFile(deps, [dividendFromTotal(true)]);
+    expect(third.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 1 });
+    expect(deps.transactions.rows).toHaveLength(2);
+  });
+
+  it('BR-005-17 (#158): a derived payment imported first stays distinct from a later explicitly zero-priced payment', async () => {
+    const deps = buildFakeIngestionDeps();
+    const derived = dividendFromTotal(true);
+    const explicitZero = buy({ ...dividendFromTotal(false).record, priceStated: true });
+    await importFile(deps, [derived]);
+
+    const again = await importFile(deps, [explicitZero, derived]);
+
+    expect(again.outcome).toMatchObject({ applied: 1, reclassified: 0, skippedDuplicates: 1 });
+    expect(deps.transactions.rows).toHaveLength(2);
+    expect(deps.transactions.rows.every((transaction) => transaction.status === 'active')).toBe(
+      true,
+    );
+    expect(
+      deps.transactions.rows.map((transaction) => transaction.totalValue.toString()).sort(),
+    ).toEqual(['0', '0.01']);
+    const third = await importFile(deps, [explicitZero, derived]);
+    expect(third.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 2 });
+    expect(deps.transactions.rows).toHaveLength(2);
+  });
+
+  it('BR-005-17 (#158): a total-derived zero payment and an explicitly priced zero payment retain separate identities', async () => {
+    const deps = buildFakeIngestionDeps();
+    const derivedZero = buy({ ...dividendFromTotal(true).record, unitPrice: Money.zero() });
+    const explicitZero = buy({ ...dividendFromTotal(false).record, priceStated: true });
+    await importFile(deps, [derivedZero]);
+
+    const again = await importFile(deps, [derivedZero, explicitZero]);
+
+    expect(again.outcome).toMatchObject({ applied: 1, reclassified: 0, skippedDuplicates: 1 });
+    expect(deps.transactions.rows).toHaveLength(2);
+    expect(deps.transactions.rows.every((transaction) => transaction.status === 'active')).toBe(
+      true,
+    );
+    expect(deps.transactions.rows.map((transaction) => transaction.totalValue.toString())).toEqual([
+      '0',
+      '0',
+    ]);
+    expect(new Set(deps.transactions.rows.map((transaction) => transaction.naturalKey)).size).toBe(
+      2,
+    );
+    const third = await importFile(deps, [derivedZero, explicitZero]);
+    expect(third.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 2 });
+    expect(deps.transactions.rows).toHaveLength(2);
+  });
+
+  it('BR-005-18/20 (#158): an explicitly zero-priced reactivated JCP promotes its historical unmapped copy', async () => {
+    const deps = buildFakeIngestionDeps();
+    const explicitZero = buy({ ...reactivatedJcp().record, unitPrice: Money.zero() });
+    const { transactions } = await commitUnderMapV2(deps, [explicitZero]);
+    const [stored] = transactions as [Transaction];
+
+    const again = await importFile(deps, [explicitZero]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 1 });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      type: 'jcp',
+      status: 'active',
+      naturalKey: stored.naturalKey,
+    });
+    expect(deps.transactions.rows).toHaveLength(1);
+    const third = await importFile(deps, [explicitZero]);
+    expect(third.outcome).toMatchObject({ applied: 0, reclassified: 0, skippedDuplicates: 1 });
+  });
+
+  it('BR-005-18/20 (#158): promotes a v6 reactivated JCP in place and a second re-import changes nothing', async () => {
+    const deps = buildFakeIngestionDeps();
+    // The older-map helper reproduces v6's unmapped state for this string too.
+    const { batchId, transactions } = await commitUnderMapV2(deps, [reactivatedJcp()]);
+    const [stored] = transactions as [Transaction];
+
+    const again = await importFile(deps, [reactivatedJcp()]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 1, superseded: 0 });
+    expect(again.outcome.committed.map((transaction) => transaction.id)).toEqual([stored.id]);
+    const promoted = await deps.transactions.findById(stored.id);
+    expect(promoted).toMatchObject({
+      type: 'jcp',
+      status: 'active',
+      naturalKey: stored.naturalKey,
+      isUserModified: false,
+    });
+    // Generated payment: 40 × 0,23 = 9,20, with no fee or tax inference.
+    expect(promoted?.totalValue.toString()).toBe('9.2');
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('new');
+    expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+      new: 1,
+      needsAttention: 0,
+      ignored: 0,
+    });
+    expect(deps.transactions.rows).toHaveLength(1);
+
+    const updates = deps.transactions.updateCount;
+    const upserts = deps.positions.upsertCount;
+    const third = await importFile(deps, [reactivatedJcp()]);
+
+    expect(third.outcome).toMatchObject({
+      applied: 0,
+      reclassified: 0,
+      superseded: 0,
+      skippedDuplicates: 1,
+      committed: [],
+    });
+    expect(deps.transactions.updateCount).toBe(updates);
+    expect(deps.positions.upsertCount).toBe(upserts);
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
+
+  it('BR-006-16 (#158): preserves a user-edited reactivated JCP on re-import', async () => {
+    const deps = buildFakeIngestionDeps();
+    const { batchId, transactions } = await commitUnderMapV2(deps, [reactivatedJcp()]);
+    const [stored] = transactions as [Transaction];
+    const edited = { ...stored, isUserModified: true, unitPrice: Money.fromString('0.31') };
+    await deps.transactions.update(edited);
+
+    const again = await importFile(deps, [reactivatedJcp()]);
+
+    expect(again.outcome).toMatchObject({ applied: 0, reclassified: 0, superseded: 0 });
+    expect(await deps.transactions.findById(stored.id)).toEqual(edited);
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('unclassified');
+    expect((await deps.batches.findById(batchId))?.rowCounts?.needsAttention).toBe(1);
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
 
   it('a row that now mirrors another extract is superseded, and its origin row and counts become ignored', async () => {
     const deps = buildFakeIngestionDeps();

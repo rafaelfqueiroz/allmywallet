@@ -1,4 +1,5 @@
-import { Money } from '@/core/shared/money';
+import { Money, STORED_SCALE, type Quantity } from '@/core/shared/money';
+import { classifyMovement } from '@/core/ingestion/movement-map';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { NormalizedTransactionRecord, ParsedRecord } from '@/core/ingestion/ports';
 import type { DetectedStructure } from '@/adapters/ingestion/xlsx/detect';
@@ -42,6 +43,19 @@ export function parseMovimentacao(
     const priceStated = precoText !== null && precoText !== '' && precoText !== '-';
     const direction = parseDirection(cellAt(row, structure.columns, 'entrada/saida'));
 
+    const quantity = parseQuantity(quantidadeText, 'quantidade');
+    const statedPrice =
+      priceStated && precoText !== null ? parseMoney(precoText, 'preco unitario') : null;
+    const derivedPrice =
+      statedPrice === null
+        ? cashEarningsPrice(
+            b3Type,
+            direction,
+            quantity,
+            cellAt(row, structure.columns, 'valor da operacao'),
+          )
+        : null;
+
     const record: NormalizedTransactionRecord = {
       kind: 'transaction',
       b3Type,
@@ -53,10 +67,10 @@ export function parseMovimentacao(
       assetClass: guessAssetClass(BANK_PAPER_CODE.test(produto.trim()) ? produto : code),
       institutionName: cellAt(row, structure.columns, 'instituicao'),
       tradeDate: parseBrDate(dataText, 'data'),
-      quantity: parseQuantity(quantidadeText, 'quantidade'),
-      unitPrice:
-        priceStated && precoText !== null ? parseMoney(precoText, 'preco unitario') : Money.zero(),
-      priceStated,
+      quantity,
+      unitPrice: statedPrice ?? derivedPrice ?? Money.zero(),
+      priceStated: priceStated || derivedPrice !== null,
+      ...(derivedPrice === null ? {} : { priceDerivedFromTotal: true }),
       // Movimentação carries no distinct fee column — see `negociacao.ts` for
       // where B3 actually states fees (BR-005-01's "authoritative trade
       // record"). Corretagem/nota-de-corretagem parsing is explicitly out of
@@ -152,3 +166,27 @@ function rawRowOf(
 }
 
 export { guessAssetClass, splitProduct };
+
+/** SPEC-005 BR-005-01/19: only cash earnings can recover an unstated price from cash paid. */
+function cashEarningsPrice(
+  b3Type: string,
+  direction: 'credit' | 'debit' | null,
+  quantity: Quantity,
+  totalText: string | null,
+): Money | null {
+  const type = classifyMovement(b3Type, direction);
+  if (type === null || !['dividend', 'jcp', 'rendimento', 'amortization'].includes(type))
+    return null;
+  if (!quantity.isPositive() || totalText === null || ['', '-'].includes(totalText.trim()))
+    return null;
+  const total = parseMoney(totalText, 'valor da operacao');
+  if (total.isNegative()) return null;
+  const price = total.dividedBy(quantity);
+  // AR-06–10: reject values that NUMERIC(20,8) would round or overflow.
+  if (
+    price.toDecimal().decimalPlaces() > STORED_SCALE ||
+    price.comparedTo(Money.fromString('1000000000000')) >= 0
+  )
+    return null;
+  return price.times(quantity).equals(total) ? price : null;
+}

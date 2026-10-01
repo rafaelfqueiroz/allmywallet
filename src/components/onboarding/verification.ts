@@ -95,6 +95,14 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-09-21'),
     parserFingerprint: '1628d2f394f6560c5059f69aa5d02a8f5f5b76452db1bdebbc719a18a1a2e3cd',
   },
+  {
+    // #158: same stored Movimentação layout and export paths as the verified
+    // guide; only a cash total and an existing JCP label are now interpreted.
+    // Checked B3's official Área do Investidor export documentation; no
+    // columns or guide steps changed. No authenticated screen was inspected.
+    asOf: BusinessDate.of('2026-10-01'),
+    parserFingerprint: '6d8befa4cdb0f66c5534ce1f2436a3cbda43751025a77aa3ea7e14fb19f69b97',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

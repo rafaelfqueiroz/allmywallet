@@ -63,7 +63,7 @@ export function buildFakeIngestionDeps(today = '2026-03-15'): FakeIngestionDeps 
   const transactions = new FakeTransactionRepository();
   return {
     batches: new FakeImportBatchRepository(),
-    rows: new FakeImportRowRepository(),
+    rows: new FakeImportRowRepository(() => transactions.rows),
     transactions,
     positions: new FakePositionRepository(),
     assets: new FakeAssetResolver((id, descriptor) => transactions.describeAsset(id, descriptor)),
