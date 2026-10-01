@@ -10,7 +10,7 @@ import { type AmortizationTerms, amortizationTermsOf } from '@/core/positions/am
 import { applyAcquisition } from '@/core/positions/average-cost';
 import { averagesCarriedOut } from '@/core/positions/carried-out';
 import { EMPTY_POSITION } from '@/core/positions/position-state';
-import { pairLedgerTransfers } from '@/core/ledger/transfer-pairs';
+import { internalLedgerTransferIds, pairLedgerTransfers } from '@/core/ledger/transfer-pairs';
 import { replayPositions } from '@/core/positions/replay';
 import type { Asset, AssetCatalogPort } from '@/core/quotes/ports';
 import { listCalendarDays } from '@/core/valuation/business-days';
@@ -370,8 +370,8 @@ const NO_FLOWS: RunningFlows = {
 interface FlowFacts {
   /** `averagesCarriedOut`: round₈ of each debit's source *preço médio*. */
   readonly averages: ReadonlyMap<TransactionId, Money>;
-  /** Both legs of every BR-005-20a pair (`pairedTransferIds`). */
-  readonly paired: ReadonlySet<TransactionId>;
+  /** Cost-carry pairs and flow-only round trips (SPEC-013 DL-013-11). */
+  readonly internal: ReadonlySet<TransactionId>;
   readonly context: ValuationContext | undefined;
   readonly currentDate: BusinessDate | undefined;
 }
@@ -415,7 +415,7 @@ function flowFactsOf(
   if (!averages.ok) return averages;
   return ok({
     averages: averages.value,
-    paired: pairedTransferIds(transactions),
+    internal: internalLedgerTransferIds(transactions),
     context: options.context,
     currentDate: options.currentDate,
   });
@@ -432,6 +432,8 @@ function flowFactsOf(
  *   one-to-one — is a move between the user's own custodians and contributes
  *   **zero to both**, whatever price either leg carries. Pairing, not price,
  *   is what makes a move internal.
+ * - **A balanced same-position round trip** also contributes zero to both,
+ *   even when a priced credit prevents cost-carry pairing (DL-013-11).
  * - **An unpaired transfer** is money in or out. `netContributions` takes it
  *   at the cost it carries (`externalFlow`, DL-013-08); `marketFlows` at the
  *   **market value of the shares that moved on the transfer date** (GIPS: an
@@ -504,8 +506,8 @@ function flowOf(transaction: Transaction, facts: FlowFacts): Result<RowFlow, Dom
     const cash = externalFlow(transaction);
     return ok({ contribution: cash, market: cash, estimated: false });
   }
-  // SPEC-013 BR-013-08 (DL-013-09): internal, whatever either leg's price says.
-  if (facts.paired.has(transaction.id)) return ok(INTERNAL);
+  // SPEC-013 BR-013-08 (DL-013-09, DL-013-11): internal whatever the prices.
+  if (facts.internal.has(transaction.id)) return ok(INTERNAL);
 
   const inbound = transaction.type === 'transfer_in';
   // `averagesCarriedOut` values every active debit on or before its cut, or
@@ -723,9 +725,10 @@ export function buildSnapshot(
  * last date, where `buildSnapshot` re-folds them per date from a ledger cut
  * there. The two agree because a debit's cost depends only on rows that sort
  * before it (`compareForReplay` orders by date first), so no later row can
- * change it. The transfer pairing (#183) is taken over the whole ledger by
- * both, and is cut-invariant for the same reason: a pair and every leg that
- * could compete with it share one trade date (`pairLedgerTransfers`). An
+ * change it. Internal transfer classification (#183, #186) is taken over the
+ * whole ledger by both, and is cut-invariant for the same reason: a pair or
+ * same-position group and every competing leg share one trade date
+ * (`internalLedgerTransferIds`). An
  * unpaired leg's market value depends only on its own date and the context.
  * Those are exactly the claims the DM-4 property test puts to them.
  */
@@ -928,7 +931,8 @@ export async function computeSnapshots(
  * other date exactly as before: each added close is the latest one on or
  * before its transfer, and precedes the range's anchor.
  *
- * Paired transfers need no price (they flow zero); bank paper has no closes
+ * Internal pairs and round trips need no price (they flow zero, DL-013-11);
+ * bank paper has no closes
  * (it accrues from its contract and index series, loaded from issue date);
  * a transfer on or after `from` is already covered by the range's own closes.
  */
@@ -938,7 +942,7 @@ export async function withTransferCloses(
   transactions: readonly Transaction[],
   from: BusinessDate,
 ): Promise<ValuationContext> {
-  const paired = pairedTransferIds(transactions);
+  const internal = internalLedgerTransferIds(transactions);
   const closes = new Map(context.closes);
   const asked = new Set<string>();
   for (const transaction of transactions) {
@@ -947,7 +951,7 @@ export async function withTransferCloses(
       transaction.status !== 'active' ||
       (transaction.type !== 'transfer_in' && transaction.type !== 'transfer_out') ||
       !BusinessDate.isBefore(transaction.tradeDate, from) ||
-      paired.has(transaction.id) ||
+      internal.has(transaction.id) ||
       asked.has(key)
     ) {
       continue;
