@@ -23,7 +23,7 @@ import type { TransactionType } from '@/core/ledger/transaction';
  * own casing and accenting of these strings is not perfectly consistent
  * across extracts.
  */
-export const MOVEMENT_MAP_VERSION = 7;
+export const MOVEMENT_MAP_VERSION = 8;
 
 function normalize(value: string): string {
   return value
@@ -145,10 +145,10 @@ export function classifyMovement(
 }
 
 /**
- * SPEC-005 BR-005-19 (amended, #110, #144) — rows staged `ignored`: stored
+ * SPEC-005 BR-005-19 (amended, #110, #144, #159) — rows staged `ignored`: stored
  * and visible on the batch, never written to the ledger and never in Needs
  * attention, and still classifiable by hand (BR-005-20) by a user who
- * exported only Movimentação. Two different reasons share this staging path:
+ * exported only Movimentação. These reasons share this staging path:
  *
  * - Rows that **mirror a record another extract owns**:
  *   - `Transferência - Liquidação` is a trade settling; Negociação is the
@@ -163,10 +163,15 @@ export function classifyMovement(
  *   exercised, arrives as `Direitos de Subscrição - Exercido` (mapped above,
  *   price-less, kept as evidence for BR-005-20d's resolver) paired at commit
  *   with the `Atualização` credit that settles it.
+ * - SPEC-005 BR-005-18 v8 (#159) — **cash custody fees**:
+ *   `Cobrança de Taxa Semestral` states a cash debit, no shares and no unit
+ *   price. It changes neither holdings nor acquisition cost nor proventos.
  *
  * Checked before `classifyMovement`, whatever the direction.
  */
 const IGNORED_MOVEMENTS: ReadonlySet<string> = new Set([
+  // SPEC-005 BR-005-18/19 v8 (#159): Tesouro custody cash debit, no ledger effect.
+  'cobranca de taxa semestral',
   'transferencia - liquidacao',
   'juros sobre capital proprio - transferido',
   'dividendo - transferido',

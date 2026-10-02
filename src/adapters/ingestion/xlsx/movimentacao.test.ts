@@ -20,6 +20,38 @@ function structureOf(rows: (string | null)[][]) {
 }
 
 describe('SPEC-005 — parseMovimentacao', () => {
+  it('#159: keeps a synthetic zero-quantity Tesouro custody debit visible without deriving a price', () => {
+    // DV-24 / TS-19/20: invented title, date, institution and cash total.
+    const rows = rowsFor([
+      movimentacaoRow({
+        entradaSaida: 'Debito',
+        data: '12/02/2026',
+        movimentacao: 'Cobrança de Taxa Semestral',
+        produto: 'Tesouro Selic 2037',
+        instituicao: 'Corretora Horizonte Sintética',
+        quantidade: '0',
+        precoUnitario: '-',
+        valorOperacao: '17,43',
+      }),
+    ]);
+
+    const [parsed] = parseMovimentacao(rows, structureOf(rows));
+    if (parsed?.record.kind !== 'transaction') throw new Error('expected custody debit');
+    expect(parsed.record).toMatchObject({
+      b3Type: 'Cobrança de Taxa Semestral',
+      direction: 'debit',
+      assetCode: 'Tesouro Selic 2037',
+      assetClass: 'tesouro_direto',
+      tradeDate: '2026-02-12',
+      priceStated: false,
+    });
+    expect(parsed.record.quantity.toString()).toBe('0');
+    expect(parsed.record.unitPrice.toString()).toBe('0');
+    expect(parsed.record.fees.toString()).toBe('0');
+    expect(parsed.record.priceDerivedFromTotal).toBeUndefined();
+    expect(parsed.raw['valor da operacao']).toBe('17,43');
+  });
+
   it('parses a buy row into a NormalizedTransactionRecord', () => {
     const row = movimentacaoRow({
       data: '10/01/2026',

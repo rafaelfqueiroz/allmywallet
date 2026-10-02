@@ -3199,6 +3199,31 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
   const aplicacao = (overrides: Partial<NormalizedTransactionRecord> = {}) =>
     buy({ b3Type: 'APLICAÇÃO', direction: 'credit', ...overrides });
   const liquidacao = () => buy({ b3Type: 'Transferência - Liquidação', direction: 'credit' });
+  // DV-24 / TS-19: generated custody-fee evidence, no owner's extract values.
+  const custodyFee = () =>
+    buy({
+      b3Type: 'Cobrança de Taxa Semestral',
+      direction: 'debit',
+      assetCode: 'Tesouro Selic 2037',
+      assetName: 'Tesouro Selic 2037',
+      assetClass: 'tesouro_direto',
+      institutionName: 'Corretora Horizonte Sintética',
+      tradeDate: BusinessDate.of('2026-02-12'),
+      quantity: Quantity.zero(),
+      unitPrice: Money.zero(),
+      fees: Money.zero(),
+      priceStated: false,
+    });
+  const treasuryBuy = () =>
+    buy({
+      ...custodyFee().record,
+      b3Type: 'APLICAÇÃO',
+      direction: 'credit',
+      tradeDate: BusinessDate.of('2026-01-08'),
+      quantity: Quantity.fromString('2'),
+      unitPrice: Money.fromString('1250'),
+      priceStated: true,
+    });
   /** Resgate of a CDB never bought — v3's `sell`, which cannot replay. */
   const resgate = () =>
     buy({ b3Type: 'Resgate', direction: 'credit', assetCode: 'CDB-X', assetName: 'CDB X' });
@@ -3299,6 +3324,80 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
 
   const rowFor = async (deps: FakeIngestionDeps, batchId: ImportBatchId, id: TransactionId) =>
     (await deps.rows.listByBatch(batchId)).find((row) => row.transactionId === id);
+
+  it('BR-005-18/19 (#159): a fresh cash custody fee commits visible without a ledger row or position effect', async () => {
+    const deps = buildFakeIngestionDeps();
+    const first = await importFile(deps, [treasuryBuy(), custodyFee()]);
+    expect(first.outcome).toMatchObject({ applied: 1, invalid: 0 });
+    expect(first.outcome.batch.rowCounts).toMatchObject({ new: 1, ignored: 1, needsAttention: 0 });
+    expect(deps.transactions.rows).toHaveLength(1);
+    const [position] = await deps.positions.list();
+    // 2 units × 1,250 = 2,500; the custody cash debit changes none of these.
+    expect(position?.state.quantity.toString()).toBe('2');
+    expect(position?.state.totalCost.toString()).toBe('2500');
+    expect(position?.state.averageCost.toString()).toBe('1250');
+    expect((await deps.rows.listByBatch(first.batchId))[1]).toMatchObject({
+      classification: 'ignored',
+      transactionId: null,
+    });
+
+    const again = await importFile(deps, [treasuryBuy(), custodyFee()]);
+    expect(again.outcome).toMatchObject({ applied: 0, superseded: 0, reclassified: 0 });
+    expect(deps.transactions.rows).toHaveLength(1);
+    expect(await deps.positions.list()).toEqual([position]);
+  });
+
+  it('BR-005-17/19 (#159): supersedes an untouched old cash custody fee, clears its attention and preserves holdings and cost on repeat imports', async () => {
+    const deps = buildFakeIngestionDeps();
+    await importFile(deps, [treasuryBuy()]);
+    const {
+      batchId,
+      transactions: [stored],
+    } = await commitUnderMapV2(deps, [custodyFee()]);
+    if (stored === undefined) throw new Error('missing legacy fee');
+    const positions = await deps.positions.list();
+
+    const again = await importFile(deps, [custodyFee()]);
+    expect(again.outcome).toMatchObject({ applied: 0, superseded: 1, reclassified: 0 });
+    expect(await deps.transactions.findById(stored.id)).toMatchObject({
+      status: 'superseded',
+      naturalKey: stored.naturalKey,
+      isUserModified: false,
+    });
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('ignored');
+    expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+      new: 0,
+      ignored: 1,
+      needsAttention: 0,
+    });
+    expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([]);
+    expect(await deps.positions.list()).toEqual(positions);
+
+    const updates = deps.transactions.updateCount;
+    const repeated = await importFile(deps, [custodyFee()]);
+    expect(repeated.outcome).toMatchObject({ applied: 0, superseded: 0, reclassified: 0 });
+    expect(deps.transactions.updateCount).toBe(updates);
+    expect(deps.transactions.rows).toHaveLength(2);
+    expect(await deps.positions.list()).toEqual(positions);
+  });
+
+  it('BR-005-20/BR-006-16 (#159): preserves a user-edited old custody fee and its origin row on reimport', async () => {
+    const deps = buildFakeIngestionDeps();
+    const {
+      batchId,
+      transactions: [stored],
+    } = await commitUnderMapV2(deps, [custodyFee()]);
+    if (stored === undefined) throw new Error('missing legacy fee');
+    const edited = { ...stored, isUserModified: true };
+    await deps.transactions.update(edited);
+
+    const again = await importFile(deps, [custodyFee()]);
+    expect(again.outcome).toMatchObject({ applied: 0, superseded: 0, reclassified: 0 });
+    expect(await deps.transactions.findById(stored.id)).toEqual(edited);
+    expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('unclassified');
+    expect((await deps.batches.findById(batchId))?.rowCounts?.needsAttention).toBe(1);
+    expect(deps.transactions.rows).toHaveLength(1);
+  });
 
   const reactivatedJcp = () =>
     buy({
