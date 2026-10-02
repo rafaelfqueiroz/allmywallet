@@ -107,12 +107,31 @@ describe('SPEC-005 BR-005-18 — classifyMovement', () => {
   it('normalizeMovementType folds case, accents and whitespace', () => {
     expect(normalizeMovementType('  Ação   Ordinária ')).toBe('acao ordinaria');
   });
+
+  it.each([
+    'Cobrança de Taxa Semestral',
+    'COBRANCA DE TAXA SEMESTRAL',
+    '  cobrança   de\tTaxa  semestral  ',
+  ])('BR-005-18/19 (#159): ignores the explicit cash custody fee %s', (type) => {
+    expect(isIgnoredMovement(type)).toBe(true);
+    for (const direction of ['credit', 'debit', null] as const) {
+      expect(classifyMovement(type, direction)).toBeNull();
+    }
+  });
+
+  it.each(['Cobrança de Taxa', 'Cobrança de Taxa Semestral - Ajuste', 'Taxa Semestral'])(
+    'BR-005-19 (#159): does not guess an unlisted fee variant %s',
+    (type) => {
+      expect(isIgnoredMovement(type)).toBe(false);
+      expect(classifyMovement(type)).toBeNull();
+    },
+  );
 });
 
 describe('SPEC-005 BR-005-18 v5 — corporate-event and conversion rows are named, not mapped', () => {
-  it('is version 7', () => {
-    // SPEC-005 BR-005-18 (v7, #158): reactivated JCP payments joined the map.
-    expect(MOVEMENT_MAP_VERSION).toBe(7);
+  it('is version 8', () => {
+    // SPEC-005 BR-005-18 (v8, #159): cash custody fees joined the ignored set.
+    expect(MOVEMENT_MAP_VERSION).toBe(8);
   });
 
   it('names the four rows BR-005-20b resolves at commit, whatever the casing', () => {

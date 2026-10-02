@@ -103,6 +103,14 @@ export const B3_GUIDE_VERIFICATIONS: readonly B3GuideVerification[] = [
     asOf: BusinessDate.of('2026-10-01'),
     parserFingerprint: '6d8befa4cdb0f66c5534ce1f2436a3cbda43751025a77aa3ea7e14fb19f69b97',
   },
+  {
+    // #159: v8 names an existing cash custody-fee label; export columns and
+    // guide steps are unchanged. Reviewed B3's official Área do Investidor
+    // page and Excel-export documentation; no authenticated screen inspected.
+    // https://www.b3.com.br/pt_br/produtos-e-servicos/central-depositaria/canal-com-investidores/area-do-investidor/
+    asOf: BusinessDate.of('2026-10-02'),
+    parserFingerprint: 'b81081d4ba8f39f3a09731b507c7f94e450fa5858579b869f6d692e4de4d65d6',
+  },
 ];
 
 function latestVerification(): B3GuideVerification {

@@ -144,6 +144,189 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     },
   });
 
+  describe('#159 — cash custody fees', () => {
+    // DV-24 / TS-19/20: generated title, broker, dates and cash value.
+    const fee = {
+      entradaSaida: 'Debito',
+      data: '12/02/2026',
+      movimentacao: 'Cobrança de Taxa Semestral',
+      produto: 'Tesouro Selic 2037',
+      instituicao: 'Corretora Horizonte Sintética',
+      quantidade: '0',
+      precoUnitario: '-',
+      valorOperacao: '17,43',
+    };
+    const acquisition = {
+      ...fee,
+      entradaSaida: 'Credito',
+      data: '08/01/2026',
+      movimentacao: 'APLICAÇÃO',
+      quantidade: '2',
+      precoUnitario: '1250,00',
+      valorOperacao: '2500,00',
+    };
+
+    async function stageFile(file: Uint8Array) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, file);
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+
+    async function importFile(file: Uint8Array) {
+      const batchId = await stageFile(file);
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+
+    it('BR-005-18/19: a fresh zero-quantity debit stays visible, writes no fee transaction and reimports without changing positions', async () => {
+      const file = await buildMovimentacaoXlsx([acquisition, fee]);
+      const first = await importFile(file);
+      const before = await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          const row = (await deps.rows.listByBatch(first)).find(
+            (row) => row.record.kind === 'transaction' && row.record.b3Type === fee.movimentacao,
+          );
+          expect(row).toMatchObject({ classification: 'ignored', transactionId: null });
+          if (row?.record.kind !== 'transaction') throw new Error('expected custody fee');
+          expect(row.record.quantity.toString()).toBe('0');
+          expect(row.record.unitPrice.toString()).toBe('0');
+          expect(row.record.priceStated).toBe(false);
+          expect(row.record.priceDerivedFromTotal).toBeUndefined();
+          expect(row.raw['valor da operacao']).toBe('17,43');
+          expect((await deps.batches.findById(first))?.rowCounts).toMatchObject({
+            new: 1,
+            ignored: 1,
+            needsAttention: 0,
+          });
+          expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([]);
+          const ledger = await deps.transactions.listAll();
+          expect(ledger).toHaveLength(1);
+          expect(ledger[0]).toMatchObject({ type: 'buy', status: 'active' });
+          const positions = await deps.positions.list();
+          const [position] = positions;
+          // 2 × 1,250 = 2,500; custody cash fees affect none of these figures.
+          expect(position?.state.quantity.toString()).toBe('2');
+          expect(position?.state.totalCost.toString()).toBe('2500');
+          expect(position?.state.averageCost.toString()).toBe('1250');
+          return { ledger, positions };
+        },
+        appDb,
+      );
+
+      await importFile(file);
+      await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          expect(await deps.transactions.listAll()).toEqual(before.ledger);
+          expect(await deps.positions.list()).toEqual(before.positions);
+          expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([]);
+        },
+        appDb,
+      );
+    });
+
+    it.each([false, true])(
+      'BR-005-17/19/20: historical cash fees clear attention on reimport unless user edited (edited: %s)',
+      async (isUserModified) => {
+        await importFile(await buildMovimentacaoXlsx([acquisition]));
+        const file = await buildMovimentacaoXlsx([fee]);
+        const origin = await stageFile(file);
+        const before = await withTenant(
+          userId,
+          async (tx) => {
+            const deps = buildIngestionDeps(tx, userId, clock);
+            const [row] = await deps.rows.listByBatch(origin);
+            if (
+              row?.record.kind !== 'transaction' ||
+              row.naturalKey === null ||
+              row.occurrence === null
+            )
+              throw new Error('expected custody fee');
+            const transaction: Transaction = {
+              id: TransactionId.generate(),
+              userId,
+              assetId: row.assetId,
+              institutionId: row.institutionId,
+              type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+              status: 'unclassified',
+              tradeDate: row.record.tradeDate,
+              quantity: row.record.quantity,
+              unitPrice: Money.zero(),
+              fees: Money.zero(),
+              totalValue: Money.zero(),
+              ratio: null,
+              conversionGroupId: null,
+              costBasis: null,
+              naturalKey: row.naturalKey,
+              occurrence: row.occurrence,
+              importBatchId: origin,
+              isManual: false,
+              isUserModified,
+              costIsEstimate: false,
+              estimateCloseDate: null,
+              createdAt: clock.now(),
+              updatedAt: clock.now(),
+            };
+            // Map v7 wrote the same source key as an unclassified placeholder.
+            await deps.transactions.insert(transaction);
+            await deps.rows.attachTransactions(new Map([[row.id, transaction.id]]));
+            await deps.rows.updateClassification(row.id, 'unclassified');
+            await tx
+              .update(schema.importRows)
+              .set({ ledgerType: UNCLASSIFIED_PLACEHOLDER_TYPE })
+              .where(eq(schema.importRows.id, row.id));
+            const batch = await deps.batches.findById(origin);
+            if (batch?.rowCounts === null || batch === null) throw new Error('missing batch');
+            await deps.batches.update({
+              ...batch,
+              status: 'committed',
+              committedAt: clock.now(),
+              rowCounts: { ...batch.rowCounts, ignored: 0, needsAttention: 1 },
+            });
+            expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([
+              { batchId: origin, count: 1 },
+            ]);
+            return { transaction, positions: await deps.positions.list() };
+          },
+          appDb,
+        );
+
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          await importFile(file);
+          await withTenant(
+            userId,
+            async (tx) => {
+              const deps = buildIngestionDeps(tx, userId, clock);
+              const stored = await deps.transactions.findById(before.transaction.id);
+              expect(stored).toMatchObject({
+                status: isUserModified ? 'unclassified' : 'superseded',
+                naturalKey: before.transaction.naturalKey,
+                isUserModified,
+              });
+              if (isUserModified) expect(stored).toEqual(before.transaction);
+              expect(await deps.transactions.listAll()).toHaveLength(2);
+              const [row] = await deps.rows.listByBatch(origin);
+              expect(row?.classification).toBe(isUserModified ? 'unclassified' : 'ignored');
+              expect((await deps.batches.findById(origin))?.rowCounts).toMatchObject({
+                ignored: isUserModified ? 0 : 1,
+                needsAttention: isUserModified ? 1 : 0,
+              });
+              expect(await deps.rows.countNeedsAttentionByBatch()).toEqual(
+                isUserModified ? [{ batchId: origin, count: 1 }] : [],
+              );
+              expect(await deps.positions.list()).toEqual(before.positions);
+            },
+            appDb,
+          );
+        }
+      },
+    );
+  });
+
   it('#153 BR-005-17: duplicate-only reimport settles historical refusals and recounts their batch without changing the ledger', async () => {
     const payment = {
       data: '13/02/2026',

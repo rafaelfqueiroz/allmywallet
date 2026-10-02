@@ -246,6 +246,38 @@ describe('SPEC-005 BR-005-09..11 — stageBatch', () => {
     });
   });
 
+  it('BR-005-18/19 (#159): stages the zero-quantity custody cash fee ignored and keeps unknown fee variants in attention', async () => {
+    const deps = buildFakeIngestionDeps();
+    const batchId = await seedPendingBatch(deps);
+    const fee = {
+      direction: 'debit',
+      assetCode: 'Tesouro Selic 2037',
+      assetName: 'Tesouro Selic 2037',
+      assetClass: 'tesouro_direto',
+      institutionName: 'Corretora Horizonte Sintética',
+      quantity: Quantity.zero(),
+      unitPrice: Money.zero(),
+      fees: Money.zero(),
+      priceStated: false,
+    } as const;
+    const result = await stageBatch(deps, userId, {
+      batchId,
+      extract: {
+        extractType: 'b3_movimentacao',
+        records: [
+          transactionRecord({ ...fee, b3Type: '  COBRANCA   DE TAXA SEMESTRAL  ' }),
+          transactionRecord({ ...fee, b3Type: 'Cobrança de Taxa Semestral - Ajuste' }),
+        ],
+      },
+    });
+
+    if (!result.ok) throw new Error('stage failed');
+    expect(result.value.rows.map((row) => row.classification)).toEqual(['ignored', 'unclassified']);
+    expect(result.value.counts).toMatchObject({ read: 2, new: 0, needsAttention: 1, ignored: 1 });
+    expect(result.value.unmappedTypes).toEqual(['Cobrança de Taxa Semestral - Ajuste']);
+    expect(deps.transactions.insertCount).toBe(0);
+  });
+
   describe('SPEC-005 BR-005-18 v6 / BR-005-19 (#144) — subscription paperwork', () => {
     // Generated fixtures only (DV-24) — no real B3 extract.
     const paperworkTypes = [
