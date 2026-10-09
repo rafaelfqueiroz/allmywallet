@@ -197,9 +197,10 @@ function NavLink({
       className={cn(
         'flex items-center gap-2 rounded-md px-2 py-field text-sm outline-none',
         'focus-visible:ring-3 focus-visible:ring-ring/50',
-        active
-          ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
-          : 'hover:bg-sidebar-accent/60',
+        // SPEC-022 BR-022-33 — the active item is a navy-tinted fill, the focus
+        // ring an outline: never the same token, so the two cannot be confused.
+        // Hover is the neutral `accent`, so it cannot pass for "active" either.
+        active ? 'bg-nav-active font-medium text-nav-active-foreground' : 'hover:bg-accent',
         collapsed && 'justify-center',
       )}
     >

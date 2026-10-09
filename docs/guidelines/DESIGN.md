@@ -5,6 +5,8 @@ How the interface is built. The prose companion to [`src/app/globals.css`](../..
 Rules are numbered `DS-nn` and are citable from code and PRs the same way `AR-`, `DV-` and `TS-` rules are. The scoping decisions behind them are recorded as `DL-nn` in the Decision log of [#33](https://github.com/rafaelfqueiroz/allmywallet/issues/33); where this document explains *what the rule is*, the Decision log explains *why that option was chosen over the others*.
 
 > **Status.** Complete. All three PRs under [#33](https://github.com/rafaelfqueiroz/allmywallet/issues/33) have landed: tokens and primitives, layout/patterns/shell/charts, and the retrofit with its enforcement. Every rule below describes code that exists.
+>
+> **M10 amendments** ([SPEC-022](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-022-Interface-Design-Navigation), [#201](https://github.com/rafaelfqueiroz/allmywallet/issues/201)). [#203](https://github.com/rafaelfqueiroz/allmywallet/issues/203) replaced the palette with the one approved with the M10 prototype (SPEC-022 DL-022-13): §2–§4 below. The wiki's [Approved tokens](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-022-Interface-Design-Navigation#approved-tokens) table records what was approved; this document and `globals.css` hold the living values.
 
 ## 1. What this is, and what it is not
 
@@ -29,22 +31,33 @@ Five layers. The design system owns the first four. The fifth belongs to the spe
 
 **DS-04 — A component never hardcodes a colour, a radius or a raw pixel.** Every value comes from a token. Tailwind v4 reads them from `@theme`, so a token is also a utility: `--color-positive` gives `text-positive`, `--spacing-row` gives `py-row`.
 
-The vocabulary is shadcn's, adopted wholesale rather than renamed (DL-02), plus four project additions.
+The vocabulary is shadcn's, adopted wholesale rather than renamed (DL-02), plus the project additions marked below.
 
 | Token | Means |
 |---|---|
-| `background` / `foreground` | The page and its text |
-| `card` / `popover` (+ `-foreground`) | Raised surfaces |
-| `primary` (+ `-foreground`) | The main action colour. Placeholder hue — DL-08 defers the brand |
-| `secondary`, `muted`, `accent` (+ `-foreground`) | Recessive surfaces, in increasing order of emphasis |
+| `background` / `foreground` | The page and its text. Near-neutral graphite: a trace of the brand hue in the chroma, never a tint you can name |
+| `card` / `popover` (+ `-foreground`) | The card layer and the raised layer (menus, dialogs). Distinct lightness steps in dark — see DS-46 |
+| `primary` (+ `-foreground`) | The brand: a **navy** (SPEC-022 DL-022-05). Actions, navigation state, focus. Never a figure — DS-45. *DL-08 resolved by #202.* |
+| `primary-hover` | **M10.** The primary button's hover. A token rather than `primary/80`, because a translucent navy over graphite drifts toward grey and loses contrast |
+| `nav-active` (+ `-foreground`) | **M10.** The active navigation item's fill and text. A different token from `ring` — DS-48 |
+| `secondary`, `muted`, `accent` (+ `-foreground`) | Recessive surfaces. `secondary` aliases `muted`; `accent` is the hover surface |
 | `destructive` (+ `-foreground`) | A dangerous **action** — delete, revoke |
-| `border`, `input`, `ring` | Hairlines, field outlines, focus rings |
+| `border`, `input`, `ring` | Hairlines, field outlines, focus rings. `input` reaches 3:1 against card and page (WCAG 1.4.11); `border` is a hairline between regions and is exempt |
 | `chart-1` … `chart-8` | **Project addition.** Categorical series. See §4 |
 | `positive`, `negative` | **Project addition.** A gain or a loss — a **figure**, not an action |
+| `success`, `progress`, `warning`, `danger`, `neutral` (+ `-surface`) | **M10.** Status, for badges: the text colour on its own `-surface`. See DS-47 |
+| `opportunity-buy` / `-hold` / `-sell` | **Project addition.** SPEC-018's watch-rule state (DL-018-06). Used only by `StateBadge` |
+| `sidebar-*` | shadcn's sidebar vocabulary, aliased onto `primary`, `nav-active`, `border` and `ring` so the sidebar cannot grow a palette of its own |
+| `--shadow-raised` | **M10.** The shadow of the raised layer — `Select`'s menu and `Dialog`. Used as `shadow-(--shadow-raised)` |
+| `--radius` | `0.625rem`. Every `rounded-*` derives from it |
+
+**An alias is declared once.** A token whose value is `var(--other)` — `ring`, `secondary`, every surface's `-foreground`, every `sidebar-*` — lives on `:root` only and follows its target into each theme. Re-declaring it in the dark blocks would only create a second place for it to drift. The structural test enforces both halves: every non-alias token is in all three blocks, and no alias is overridden.
 
 **DS-05 — `destructive` and `negative` are not interchangeable.** They share a hue and mean different things: `destructive` is an action the user might regret, `negative` is a number that went down. A loss is not a warning, and a delete button is not a performance figure.
 
-**DS-06 — The focus ring is the primary hue, never a neutral.** `--ring` deliberately tracks `--primary` so it stays visible on every surface it can land on. Every interactive primitive is tested for it.
+**DS-06 — The focus ring is the primary hue, never a neutral.** `--ring` is `var(--primary)`, so it stays visible on every surface it can land on. Every interactive primitive is tested for it.
+
+**DS-45 — The brand never sits on a figure** (SPEC-022 BR-022-28). A navy number would read as a link, or as a third kind of gain. Figures are `foreground`, or `positive`/`negative` with their sign (DS-09). The brand marks what the user can *do* — a button, a link, the current destination, focus.
 
 ## 3. Theming
 
@@ -59,6 +72,8 @@ Three states (DL-03). An explicit user choice wins; with no choice the system pr
 
 **DS-07 — Never give a token its only definition inside a media query or a `.dark` block.** Define it on `:root` first, then override. A token that exists only in dark is a light-theme gap.
 
+**DS-46 — The dark theme is layered, never one black plane** (BR-022-29). Page (`background`, L 0.17), card (`card`, 0.215) and raised (`popover`, 0.265) step up in lightness, with `sidebar` (0.195) between page and card. A card is visible because it is lighter than the page, not because it has a border.
+
 **DS-08 — The two dark blocks must stay identical.** CSS cannot share one block between a media query and a class, so the duplication is permanent. [`tests/structural/design-tokens.test.ts`](../../tests/structural/design-tokens.test.ts) fails the build if they drift — which is what makes the duplication safe. A token changed in one block and not the other yields a theme that is correct until the user touches the toggle: it passes review, it passes a screenshot, and it breaks for exactly the users who went looking for the setting.
 
 The `dark:` Tailwind variant is redefined in `globals.css` to match all three states, so `dark:` utilities work under system preference and not only when the class is present.
@@ -69,11 +84,27 @@ The `dark:` Tailwind variant is redefined in `globals.css` to match all three st
 
 **DS-09 — Green is up and red is down, and colour never carries the meaning alone.** Every figure that uses `positive`/`negative` also renders a sign or an arrow (`+`, `−`, `▲`, `▼`). Green/red matches every Brazilian broker, so changing it would make the product read as wrong (DL-05); WCAG 1.4.1 is satisfied by the redundant cue, not by abandoning the convention. `Money` *(PR2)* enforces this in one place so no screen can forget it.
 
+### The brand under colour-vision deficiency
+
+**DS-49 — The navy stays distinguishable from gain, loss and in-progress under protanopia and deuteranopia, by measurement** (BR-022-28). [`tests/structural/design-token-colour.test.ts`](../../tests/structural/design-token-colour.test.ts) paints each token to 8-bit sRGB, applies the Machado, Oliveira & Fernandes (2009) matrices at severity 1.0 in linear RGB, and asserts the OKLab distance from `primary` to `positive`, `negative` and `progress` stays above 0.03 in both themes. The approved palette sits at gain 0.160, loss 0.165, in-progress 0.035: the floor is below those so the test guards regressions rather than re-litigating the approval. The same file asserts 4.5:1 for every text pair the tokens promise and 3:1 for `input`, in both themes — axe in the browser only measures pairs that are rendered.
+
+### Status
+
+**DS-47 — A status badge uses a status colour: `success`, `progress`, `warning`, `danger` or `neutral`** (SPEC-022 BR-022-31). Each is text on its own `-surface`, ≥ 5.5:1 in both themes, and `Badge` has a variant per status. **A warning is never `negative` or `destructive`**: an open reconciliation divergence, a wallet drifting out of tolerance and an unpriced holding are `warning`; a failed import and `ErrorState` are `danger`. `negative` is a figure and `destructive` an action (DS-05), and reusing either for a status tells the user they lost money or are about to delete something. A structural test fails the build on a `Badge` in `src/app/` that uses either.
+
+`progress` is violet, never the brand hue, so an in-progress badge cannot be mistaken for a button.
+
+### Navigation
+
+**DS-48 — The active navigation item is a fill (`nav-active`); focus is a ring (`ring`).** Different tokens, different shapes, so the current destination and the keyboard position can be on different items without either being mistaken for the other (BR-022-33). Hover uses the neutral `accent`, so it cannot pass for "active" either. Paired with DS-27's `aria-current`.
+
 ### Categorical charts
 
 **DS-10 — The eight chart tokens are the Okabe–Ito palette, bound one-to-one and permanently to the eight asset classes.** Ações, FIIs, BDRs, ETFs, Tesouro Direto, CDB, LCI, LCA. Not per chart, not per report — an asset class is the same colour everywhere in the product, or two reports contradict each other.
 
 Okabe–Ito was chosen because its colour-vision-deficiency validation is already done and published (DL-04). The values are stored **in hex rather than oklch** specifically so they stay auditable against the source; converting them would make it impossible to tell at a glance whether they are still the published palette.
+
+Verified against the M10 surfaces: light `card` is unchanged (white) and dark `card` moved from L 0.21 to 0.215, so every series keeps its previous contrast within 0.1.
 
 Two caveats carried forward:
 

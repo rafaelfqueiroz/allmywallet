@@ -35,7 +35,9 @@ export async function ValuationMarkers({ markers }: { readonly markers: Markers 
     badges.push(
       <Badge
         key="attention"
-        variant="destructive"
+        // SPEC-022 BR-022-31 — asks for attention, so a warning; not a loss and
+        // not a destructive action (DS-05).
+        variant="warning"
         title={t('attention.explanation', { count: markers.unpriced })}
       >
         {t('attention.badge')}

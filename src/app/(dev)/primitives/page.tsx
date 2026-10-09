@@ -17,6 +17,14 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { NativeSelect } from '@/components/ui/native-select';
+import { Card, CardContent } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Text } from '@/components/ui/text';
 import { ChartLegend } from '@/components/charts/chart-legend';
@@ -67,7 +75,19 @@ const BUTTON_VARIANTS = [
   'destructive',
   'link',
 ] as const;
-const BADGE_VARIANTS = ['default', 'secondary', 'destructive', 'outline', 'ghost', 'link'] as const;
+const BADGE_VARIANTS = [
+  'default',
+  'secondary',
+  'destructive',
+  'outline',
+  'ghost',
+  'link',
+  'success',
+  'progress',
+  'warning',
+  'danger',
+  'neutral',
+] as const;
 
 /**
  * Fixture data, not copy. Ticker codes are proper nouns that render identically
@@ -128,6 +148,37 @@ export default async function PrimitivesPage() {
             <Checkbox defaultChecked />
           </Field>
         </Cluster>
+      </Section>
+
+      {/* Controls on a card, where their hover fills land on the card layer.
+       * tests/e2e/screens.spec.ts hovers each and runs axe on the settled
+       * state — the review of #218 found a placeholder at 4.28:1 only there. */}
+      <Section title={vocabulary('precoMedio')}>
+        <Card>
+          <CardContent>
+            <Cluster gap="md" align="end">
+              <Select>
+                <SelectTrigger aria-label={vocabulary('composicao')} data-hover-subject="">
+                  <SelectValue placeholder={vocabulary('patrimonio')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="patrimonio">{vocabulary('patrimonio')}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                aria-label={vocabulary('proventos')}
+                placeholder={vocabulary('proventos')}
+                data-hover-subject=""
+              />
+              <NativeSelect aria-label={vocabulary('rentabilidade')} data-hover-subject="">
+                <option>{vocabulary('rentabilidade')}</option>
+              </NativeSelect>
+              <Button variant="outline" data-hover-subject="">
+                {t('save')}
+              </Button>
+            </Cluster>
+          </CardContent>
+        </Card>
       </Section>
 
       <Section title={vocabulary('rentabilidade')}>

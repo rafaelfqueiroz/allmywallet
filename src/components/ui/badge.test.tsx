@@ -4,7 +4,19 @@ import { audit, render, screen } from '@/components/test-utils';
 
 describe('Badge', () => {
   it('renders every variant', () => {
-    const variants = ['default', 'secondary', 'destructive', 'outline', 'ghost', 'link'] as const;
+    const variants = [
+      'default',
+      'secondary',
+      'destructive',
+      'outline',
+      'ghost',
+      'link',
+      'success',
+      'progress',
+      'warning',
+      'danger',
+      'neutral',
+    ] as const;
 
     for (const variant of variants) {
       const { unmount } = render(<Badge variant={variant}>FII</Badge>);

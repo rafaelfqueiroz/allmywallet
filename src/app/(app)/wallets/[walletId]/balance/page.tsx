@@ -182,7 +182,8 @@ export default async function WalletBalancePage({
                         <Stack gap="xs" align="start">
                           <span>{nameOf(row.assetId)}</span>
                           {row.outOfTolerance && (
-                            <Badge variant="destructive">{t('outOfTolerance')}</Badge>
+                            // SPEC-022 BR-022-31 — drift is a warning (DS-05).
+                            <Badge variant="warning">{t('outOfTolerance')}</Badge>
                           )}
                         </Stack>
                       </TableCell>

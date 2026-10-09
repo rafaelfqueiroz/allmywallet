@@ -238,7 +238,7 @@ export default async function ImportBatchDetailPage({
       title={t(`extractType.${batch.source}`)}
       description={t('uploadedAt', { date: formatDateTime(batch.uploadedAt) })}
       actions={
-        <Badge variant={batch.status === 'failed' ? 'destructive' : 'secondary'}>
+        <Badge variant={batch.status === 'failed' ? 'danger' : 'secondary'}>
           {t(`status.${batch.status}`)}
         </Badge>
       }

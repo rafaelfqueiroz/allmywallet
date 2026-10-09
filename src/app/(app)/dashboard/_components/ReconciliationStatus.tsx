@@ -55,7 +55,9 @@ export async function ReconciliationStatus({
               state === 'reconciled'
                 ? 'secondary'
                 : state === 'discrepancies_found'
-                  ? 'destructive'
+                  ? // SPEC-022 BR-022-31 — an open divergence is a warning,
+                    // never the loss or destructive-action colour (DS-05).
+                    'warning'
                   : 'outline'
             }
           >
