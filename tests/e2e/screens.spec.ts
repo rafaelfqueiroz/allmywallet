@@ -78,6 +78,30 @@ for (const colorScheme of ['light', 'dark'] as const) {
 }
 
 /**
+ * BR-022-29 again, for the state a static scan never sees: a control under the
+ * pointer. The review of #218 found a select's placeholder at 4.28:1 once its
+ * dark hover fill had settled, while the same control passed at rest. Reduced
+ * motion makes the transition instant, so axe measures the settled colour.
+ */
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`/primitives controls keep their contrast under hover in the ${colorScheme} theme`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+    await page.goto('/primitives');
+
+    const subjects = page.locator('[data-hover-subject]');
+    await expect(subjects).toHaveCount(4);
+
+    for (const subject of await subjects.all()) {
+      await subject.hover();
+      const results = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
+      expect(results.violations, await subject.evaluate((el) => el.outerHTML)).toEqual([]);
+    }
+  });
+}
+
+/**
  * SPEC-011 BR-011-16 — "an explanatory empty state, never a misleading zero".
  * A blank region and "R$ 0,00" are the two failure modes; both would pass a
  * smoke test that only checked the page loaded.

@@ -169,3 +169,23 @@ describe('status badges', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * `--input` is a 3:1 boundary colour (WCAG 1.4.11), so used as a fill it sits
+ * too close to text: shadcn's `dark:hover:bg-input/50` put a select's
+ * placeholder at 4.28:1 (PR #218 review). Controls fill from `muted` and hover
+ * to `accent`, whose text pairs `design-token-colour.test.ts` measures.
+ */
+describe('field boundary token', () => {
+  const srcDir = fileURLToPath(new URL('../../src', import.meta.url));
+  const files = (readdirSync(srcDir, { recursive: true }) as string[]).filter((file) =>
+    /\.tsx?$/.test(file),
+  );
+
+  it('is never used as a fill', () => {
+    const offenders = files.filter((file) =>
+      /\bbg-input\b/.test(readFileSync(join(srcDir, file), 'utf8')),
+    );
+    expect(offenders).toEqual([]);
+  });
+});

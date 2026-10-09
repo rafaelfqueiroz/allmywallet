@@ -137,6 +137,9 @@ const TEXT_PAIRS = [
   ['--muted-foreground', '--background'],
   ['--muted-foreground', '--card'],
   ['--muted-foreground', '--muted'],
+  // A field's placeholder on a hovered control — PR #218 review: a control
+  // that hovered to a translucent `--input` fill dropped this to 4.28:1.
+  ['--muted-foreground', '--accent'],
   ['--primary-foreground', '--primary'],
   ['--primary-foreground', '--primary-hover'],
   ['--primary', '--card'],

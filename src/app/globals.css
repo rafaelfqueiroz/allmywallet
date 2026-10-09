@@ -177,7 +177,9 @@
   --border: oklch(0.91 0.0018 260);
   /* WCAG 1.4.11 — a field's boundary is a UI component and needs 3:1 against
    * the card and the page it sits on: measured 3.13–3.47:1 across both themes.
-   * `--border` is a hairline between regions and is exempt. */
+   * `--border` is a hairline between regions and is exempt. It is a boundary
+   * colour only — never a fill: at 3:1 it is far too close to text to sit
+   * behind a placeholder. Controls fill from `--muted`, and hover to `--accent`. */
   --input: oklch(0.64 0.0036 260);
   /* The focus ring is the primary hue, not a neutral: it has to be visible
    * against every surface it can land on. Tested per primitive. */
