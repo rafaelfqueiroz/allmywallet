@@ -79,7 +79,7 @@ export default async function ImportPage() {
                     </Text>
                   </span>
                   <Cluster gap="sm">
-                    <Badge variant={batch.status === 'failed' ? 'destructive' : 'secondary'}>
+                    <Badge variant={batch.status === 'failed' ? 'danger' : 'secondary'}>
                       {t(`status.${batch.status}`)}
                     </Badge>
                     <Button asChild variant="link" size="sm">

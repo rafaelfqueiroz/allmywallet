@@ -27,13 +27,15 @@ export function ErrorState({ title, description, action, className, ...props }: 
       data-slot="error-state"
       role="alert"
       className={cn(
-        'rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-8 text-center',
+        // SPEC-022 BR-022-31 — a failure is the `danger` status, not the
+        // `destructive` action colour (DS-05).
+        'rounded-xl border border-danger/30 bg-danger-surface px-6 py-8 text-center',
         className,
       )}
       {...props}
     >
       <Stack gap="sm" align="center">
-        <CircleAlert aria-hidden="true" className="size-6 text-destructive" />
+        <CircleAlert aria-hidden="true" className="size-6 text-danger" />
         <p className="font-medium">{title}</p>
         {description && <p className="max-w-prose text-sm text-muted-foreground">{description}</p>}
         {action}

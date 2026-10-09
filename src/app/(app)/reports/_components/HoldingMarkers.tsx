@@ -40,7 +40,8 @@ export async function HoldingMarkers({ holding }: { readonly holding: ReportHold
 
   if (holding.needsAttention !== null) {
     markers.push(
-      <Badge key="attention" variant="destructive" title={t(`attention.${holding.needsAttention}`)}>
+      // SPEC-022 BR-022-31 — a warning, not the loss colour (DS-05).
+      <Badge key="attention" variant="warning" title={t(`attention.${holding.needsAttention}`)}>
         {t('attention.badge')}
       </Badge>,
     );

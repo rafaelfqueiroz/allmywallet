@@ -67,7 +67,19 @@ const BUTTON_VARIANTS = [
   'destructive',
   'link',
 ] as const;
-const BADGE_VARIANTS = ['default', 'secondary', 'destructive', 'outline', 'ghost', 'link'] as const;
+const BADGE_VARIANTS = [
+  'default',
+  'secondary',
+  'destructive',
+  'outline',
+  'ghost',
+  'link',
+  'success',
+  'progress',
+  'warning',
+  'danger',
+  'neutral',
+] as const;
 
 /**
  * Fixture data, not copy. Ticker codes are proper nouns that render identically

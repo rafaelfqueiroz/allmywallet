@@ -36,6 +36,7 @@
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -54,6 +55,23 @@
    * they are not interchangeable. See DESIGN.md. */
   --color-positive: var(--positive);
   --color-negative: var(--negative);
+
+  /* SPEC-022 BR-022-33 — the active navigation item's fill and text. */
+  --color-nav-active: var(--nav-active);
+  --color-nav-active-foreground: var(--nav-active-foreground);
+
+  /* SPEC-022 BR-022-31 — status badges: `text-warning` on `bg-warning-surface`.
+   * A status is neither a figure nor an action, so it owns its own five. */
+  --color-success: var(--success);
+  --color-success-surface: var(--success-surface);
+  --color-progress: var(--progress);
+  --color-progress-surface: var(--progress-surface);
+  --color-warning: var(--warning);
+  --color-warning-surface: var(--warning-surface);
+  --color-danger: var(--danger);
+  --color-danger-surface: var(--danger-surface);
+  --color-neutral: var(--neutral);
+  --color-neutral-surface: var(--neutral-surface);
 
   /* SPEC-018 DL-018-06 — the buy/hold/sell state a watch rule evaluates to.
    * Deliberately three tokens of their own, never `--positive`/`--negative`:
@@ -110,40 +128,79 @@
   --spacing-field: 0.625rem;
 }
 
+/*
+ * SPEC-022 Approved tokens (DL-022-13, #203). The values below are the ones
+ * the owner approved with the M10 prototype; DESIGN.md §2–§4 is the living
+ * record from here on, and the wiki table is what was approved.
+ *
+ * A token whose value is `var(--other)` is an alias: it is declared once,
+ * here, and follows its target into every theme without being repeated in the
+ * dark blocks — `--ring` tracking `--primary` (DS-06) cannot drift if it is
+ * not written twice. tests/structural/design-tokens.test.ts holds every
+ * non-alias token to all three blocks.
+ */
 :root {
-  --radius: 0.5rem;
+  --radius: 0.625rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.15 0 0);
+  /* Near-neutral graphite surfaces, a trace of the brand hue in the chroma. */
+  --background: oklch(0.975 0.0012 260);
+  --foreground: oklch(0.22 0.0045 260);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.15 0 0);
+  --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.15 0 0);
+  --popover-foreground: var(--foreground);
 
-  /* SPEC-016 BR-016-15 requires WCAG AA, so these pairs are chosen for their
-   * contrast ratio, not their look. DL-08: the hue is a placeholder — the brand
-   * decision is deferred, and swapping it is these two lines. */
-  --primary: oklch(0.42 0.16 258);
+  /* SPEC-022 BR-022-28 — the brand is a navy (DL-022-05, amended; DL-08
+   * resolved). It marks actions, navigation state and focus, and **never a
+   * figure**: a gain or a loss is `--positive`/`--negative`, always with a sign.
+   * Measured: button text 9.06:1 here, 9.23:1 in dark. */
+  --primary: oklch(0.4 0.12 258);
+  --primary-hover: oklch(0.34 0.1 258);
   --primary-foreground: oklch(0.99 0 0);
 
-  --secondary: oklch(0.96 0 0);
-  --secondary-foreground: oklch(0.15 0 0);
-  --muted: oklch(0.96 0 0);
-  --muted-foreground: oklch(0.45 0 0);
-  --accent: oklch(0.96 0 0);
-  --accent-foreground: oklch(0.15 0 0);
+  /* BR-022-33 — the active navigation item is a tinted fill, the focus ring is
+   * an outline. Two different shapes, so neither can be mistaken for the
+   * other. Active nav text 9.20:1 / 9.51:1. */
+  --nav-active: oklch(0.94 0.022 258);
+  --nav-active-foreground: oklch(0.36 0.1 258);
+
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --muted: oklch(0.955 0.0018 260);
+  --muted-foreground: oklch(0.5 0.0048 260);
+  --accent: oklch(0.95 0.0018 260);
+  --accent-foreground: var(--foreground);
 
   --destructive: oklch(0.53 0.19 25);
   --destructive-foreground: oklch(0.99 0 0);
 
-  --border: oklch(0.9 0 0);
-  --input: oklch(0.9 0 0);
+  --border: oklch(0.91 0.0018 260);
+  /* WCAG 1.4.11 — a field's boundary is a UI component and needs 3:1 against
+   * the card and the page it sits on: measured 3.13–3.47:1 across both themes.
+   * `--border` is a hairline between regions and is exempt. */
+  --input: oklch(0.64 0.0036 260);
   /* The focus ring is the primary hue, not a neutral: it has to be visible
    * against every surface it can land on. Tested per primitive. */
-  --ring: oklch(0.42 0.16 258);
+  --ring: var(--primary);
 
   --positive: oklch(0.5 0.14 150);
   --negative: oklch(0.53 0.19 25);
+
+  /* SPEC-022 BR-022-31 — status colours for badges: the text colour, and the
+   * `-surface` it sits on. A warning is never `--negative` (a figure) nor
+   * `--destructive` (an action), DS-05. `--progress` is violet so an
+   * in-progress badge never shares the brand hue and reads as a button.
+   * Lowest pair: danger on danger-surface, 5.50:1. */
+  --success: oklch(0.46 0.12 150);
+  --success-surface: oklch(0.95 0.04 150);
+  --progress: oklch(0.45 0.15 300);
+  --progress-surface: oklch(0.95 0.025 300);
+  --warning: oklch(0.5 0.11 65);
+  --warning-surface: oklch(0.965 0.04 90);
+  --danger: oklch(0.51 0.18 25);
+  --danger-surface: oklch(0.955 0.02 25);
+  --neutral: oklch(0.46 0.0045 260);
+  --neutral-surface: oklch(0.94 0.0018 260);
 
   /* SPEC-018 DL-018-06 — see the `@theme inline` comment above. Hues match
    * `--chart-3`/`--chart-4`/`--chart-5` (165.5°/90°/244°); lightness/chroma
@@ -167,14 +224,19 @@
   --chart-7: #cc79a7;
   --chart-8: oklch(0.35 0 0);
 
-  --sidebar: oklch(0.98 0 0);
-  --sidebar-foreground: oklch(0.15 0 0);
-  --sidebar-primary: oklch(0.42 0.16 258);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.96 0 0);
-  --sidebar-accent-foreground: oklch(0.15 0 0);
-  --sidebar-border: oklch(0.9 0 0);
-  --sidebar-ring: oklch(0.42 0.16 258);
+  /* shadcn's sidebar vocabulary, aliased onto the brand and navigation tokens
+   * so the sidebar cannot develop a palette of its own. */
+  --sidebar: oklch(0.985 0.0009 260);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--nav-active);
+  --sidebar-accent-foreground: var(--nav-active-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Popovers and menus — the raised layer. */
+  --shadow-raised: 0 1px 2px oklch(0.22 0.0045 260 / 0.06), 0 8px 24px oklch(0.22 0.0045 260 / 0.1);
 }
 
 /* System preference, when the user has expressed no explicit choice. */
@@ -182,37 +244,43 @@
   :root:not(.light) {
     color-scheme: dark;
 
-    --background: oklch(0.16 0.01 260);
-    --foreground: oklch(0.97 0 0);
-    --card: oklch(0.21 0.01 260);
-    --card-foreground: oklch(0.97 0 0);
-    --popover: oklch(0.21 0.01 260);
-    --popover-foreground: oklch(0.97 0 0);
+    --background: oklch(0.17 0.0036 260);
+    --foreground: oklch(0.96 0.0012 260);
+    /* BR-022-29 — page, card and raised layer step up in lightness, so the
+     * dark theme is never one black plane. */
+    --card: oklch(0.215 0.0042 260);
+    --popover: oklch(0.265 0.0048 260);
 
-    --primary: oklch(0.72 0.13 258);
-    --primary-foreground: oklch(0.16 0.01 260);
+    --primary: oklch(0.78 0.08 258);
+    --primary-hover: oklch(0.84 0.065 258);
+    --primary-foreground: oklch(0.19 0.025 258);
+    --nav-active: oklch(0.3 0.04 258);
+    --nav-active-foreground: oklch(0.88 0.05 258);
 
-    --secondary: oklch(0.24 0.01 260);
-    --secondary-foreground: oklch(0.97 0 0);
-    --muted: oklch(0.24 0.01 260);
-    --muted-foreground: oklch(0.7 0 0);
-    --accent: oklch(0.24 0.01 260);
-    --accent-foreground: oklch(0.97 0 0);
+    --muted: oklch(0.245 0.0042 260);
+    --muted-foreground: oklch(0.73 0.0045 260);
+    --accent: oklch(0.275 0.0048 260);
 
     --destructive: oklch(0.7 0.18 25);
-    --destructive-foreground: oklch(0.16 0.01 260);
+    --destructive-foreground: oklch(0.17 0.0036 260);
 
-    --border: oklch(0.3 0.01 260);
-    --input: oklch(0.3 0.01 260);
-    --ring: oklch(0.72 0.13 258);
+    --border: oklch(0.32 0.0042 260);
+    --input: oklch(0.52 0.0045 260);
 
     --positive: oklch(0.72 0.16 150);
     --negative: oklch(0.7 0.18 25);
 
-    /* SPEC-018 DL-018-06 — measured against `--background` in this theme:
-     * buy 8.33:1, hold 9.67:1, sell 7.92:1. Must stay identical to the
-     * `.dark` block below — tests/structural/design-tokens.test.ts fails the
-     * build otherwise. */
+    --success: oklch(0.78 0.14 150);
+    --success-surface: oklch(0.3 0.05 150);
+    --progress: oklch(0.85 0.085 300);
+    --progress-surface: oklch(0.3 0.05 300);
+    --warning: oklch(0.84 0.12 85);
+    --warning-surface: oklch(0.32 0.05 75);
+    --danger: oklch(0.76 0.14 25);
+    --danger-surface: oklch(0.31 0.06 25);
+    --neutral: oklch(0.8 0.0036 260);
+    --neutral-surface: oklch(0.31 0.0036 260);
+
     --opportunity-buy: oklch(0.72 0.14 165.5);
     --opportunity-hold: oklch(0.78 0.13 90);
     --opportunity-sell: oklch(0.72 0.13 244);
@@ -226,14 +294,9 @@
     --chart-7: #cc79a7;
     --chart-8: oklch(0.75 0 0);
 
-    --sidebar: oklch(0.21 0.01 260);
-    --sidebar-foreground: oklch(0.97 0 0);
-    --sidebar-primary: oklch(0.72 0.13 258);
-    --sidebar-primary-foreground: oklch(0.16 0.01 260);
-    --sidebar-accent: oklch(0.24 0.01 260);
-    --sidebar-accent-foreground: oklch(0.97 0 0);
-    --sidebar-border: oklch(0.3 0.01 260);
-    --sidebar-ring: oklch(0.72 0.13 258);
+    --sidebar: oklch(0.195 0.0039 260);
+
+    --shadow-raised: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px oklch(0 0 0 / 0.45);
   }
 }
 
@@ -241,34 +304,43 @@
 .dark {
   color-scheme: dark;
 
-  --background: oklch(0.16 0.01 260);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.21 0.01 260);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.21 0.01 260);
-  --popover-foreground: oklch(0.97 0 0);
+  --background: oklch(0.17 0.0036 260);
+  --foreground: oklch(0.96 0.0012 260);
+  /* BR-022-29 — page, card and raised layer step up in lightness, so the
+   * dark theme is never one black plane. */
+  --card: oklch(0.215 0.0042 260);
+  --popover: oklch(0.265 0.0048 260);
 
-  --primary: oklch(0.72 0.13 258);
-  --primary-foreground: oklch(0.16 0.01 260);
+  --primary: oklch(0.78 0.08 258);
+  --primary-hover: oklch(0.84 0.065 258);
+  --primary-foreground: oklch(0.19 0.025 258);
+  --nav-active: oklch(0.3 0.04 258);
+  --nav-active-foreground: oklch(0.88 0.05 258);
 
-  --secondary: oklch(0.24 0.01 260);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.24 0.01 260);
-  --muted-foreground: oklch(0.7 0 0);
-  --accent: oklch(0.24 0.01 260);
-  --accent-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.245 0.0042 260);
+  --muted-foreground: oklch(0.73 0.0045 260);
+  --accent: oklch(0.275 0.0048 260);
 
   --destructive: oklch(0.7 0.18 25);
-  --destructive-foreground: oklch(0.16 0.01 260);
+  --destructive-foreground: oklch(0.17 0.0036 260);
 
-  --border: oklch(0.3 0.01 260);
-  --input: oklch(0.3 0.01 260);
-  --ring: oklch(0.72 0.13 258);
+  --border: oklch(0.32 0.0042 260);
+  --input: oklch(0.52 0.0045 260);
 
   --positive: oklch(0.72 0.16 150);
   --negative: oklch(0.7 0.18 25);
 
-  /* SPEC-018 DL-018-06 — must stay identical to the media-query block above. */
+  --success: oklch(0.78 0.14 150);
+  --success-surface: oklch(0.3 0.05 150);
+  --progress: oklch(0.85 0.085 300);
+  --progress-surface: oklch(0.3 0.05 300);
+  --warning: oklch(0.84 0.12 85);
+  --warning-surface: oklch(0.32 0.05 75);
+  --danger: oklch(0.76 0.14 25);
+  --danger-surface: oklch(0.31 0.06 25);
+  --neutral: oklch(0.8 0.0036 260);
+  --neutral-surface: oklch(0.31 0.0036 260);
+
   --opportunity-buy: oklch(0.72 0.14 165.5);
   --opportunity-hold: oklch(0.78 0.13 90);
   --opportunity-sell: oklch(0.72 0.13 244);
@@ -282,14 +354,9 @@
   --chart-7: #cc79a7;
   --chart-8: oklch(0.75 0 0);
 
-  --sidebar: oklch(0.21 0.01 260);
-  --sidebar-foreground: oklch(0.97 0 0);
-  --sidebar-primary: oklch(0.72 0.13 258);
-  --sidebar-primary-foreground: oklch(0.16 0.01 260);
-  --sidebar-accent: oklch(0.24 0.01 260);
-  --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(0.3 0.01 260);
-  --sidebar-ring: oklch(0.72 0.13 258);
+  --sidebar: oklch(0.195 0.0039 260);
+
+  --shadow-raised: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px oklch(0 0 0 / 0.45);
 }
 
 @layer base {
