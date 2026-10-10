@@ -190,6 +190,78 @@ describe('AccountMenu', () => {
     expect(within(menu).getByRole('menuitemradio', { name: 'Claro' })).toBeChecked();
   });
 
+  /**
+   * Review of #221 — overlapping saves. With Sistema stored, Escuro then Claro
+   * are chosen before either save answers. A rollback must land on what the
+   * account holds, never on the earlier optimistic selection.
+   */
+  describe('overlapping saves', () => {
+    function deferredSaves() {
+      const pending: ((result: { status: 'saved' | 'error' }) => void)[] = [];
+      const saveTheme = vi.fn(
+        () =>
+          new Promise<{ status: 'saved' | 'error' }>((resolve) => {
+            pending.push(resolve);
+          }),
+      );
+      return { saveTheme, pending };
+    }
+
+    async function chooseTwice(saveTheme: AccountMenuProps['saveTheme']) {
+      const user = userEvent.setup();
+      render(<AccountMenu {...props({ theme: 'system', saveTheme })} />);
+      const menu = await open(user);
+      await user.click(within(menu).getByRole('menuitemradio', { name: 'Escuro' }));
+      await user.click(within(menu).getByRole('menuitemradio', { name: 'Claro' }));
+      return menu;
+    }
+
+    it('restores the stored theme when both saves fail in order', async () => {
+      const { saveTheme, pending } = deferredSaves();
+      const menu = await chooseTwice(saveTheme);
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      pending[0]?.({ status: 'error' });
+      pending[1]?.({ status: 'error' });
+
+      await waitFor(() =>
+        expect(within(menu).getByRole('menuitemradio', { name: 'Sistema' })).toBeChecked(),
+      );
+      expect(document.documentElement).not.toHaveClass('dark');
+      expect(document.documentElement).not.toHaveClass('light');
+      expect(window.localStorage.getItem('amw-theme')).toBe('system');
+    });
+
+    it('restores the theme the first save confirmed when only the second fails', async () => {
+      const { saveTheme, pending } = deferredSaves();
+      const menu = await chooseTwice(saveTheme);
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      pending[0]?.({ status: 'saved' });
+      pending[1]?.({ status: 'error' });
+
+      await waitFor(() =>
+        expect(within(menu).getByRole('menuitemradio', { name: 'Escuro' })).toBeChecked(),
+      );
+      expect(document.documentElement).toHaveClass('dark');
+      expect(window.localStorage.getItem('amw-theme')).toBe('dark');
+    });
+
+    it('keeps the newest choice when an older save fails after it', async () => {
+      const { saveTheme, pending } = deferredSaves();
+      const menu = await chooseTwice(saveTheme);
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      pending[1]?.({ status: 'saved' });
+      pending[0]?.({ status: 'error' });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(within(menu).getByRole('menuitemradio', { name: 'Claro' })).toBeChecked();
+      expect(document.documentElement).toHaveClass('light');
+      expect(window.localStorage.getItem('amw-theme')).toBe('light');
+    });
+  });
+
   // A save that throws (session ended elsewhere, database down) must not
   // reach an error boundary and replace the page.
   it('puts the previous theme back when the save throws', async () => {

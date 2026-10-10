@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import { Monitor, Moon, Sun, type LucideIcon } from 'lucide-react';
 import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/components/ui/dropdown-menu';
@@ -72,8 +72,15 @@ export function ThemeSync({ theme }: { theme: ThemePreference }) {
  * The class changes on the click, before the server has answered, so the
  * switch applies **without a reload**; `save` then persists `ui.theme` to the
  * account (DS-29), which is what makes the choice survive a new session. A
- * refused save puts the previous theme back rather than leaving the screen
- * showing a choice the account does not hold.
+ * refused save puts back **the theme the account holds** rather than leaving
+ * the screen showing a choice it does not.
+ *
+ * "The theme the account holds" is the last *confirmed* one, never the
+ * previous selection: with Sistema stored, choosing Escuro and then Claro
+ * before either save answers makes Escuro the previous selection, and a
+ * rollback to it would show a theme that was never saved. Only the newest
+ * choice may change the screen when its save answers; an older save that
+ * succeeds updates what the account holds and nothing else.
  *
  * The state lives in the caller (the account menu), not in the menu content:
  * Radix unmounts the content when the menu closes, and reopening it before the
@@ -85,13 +92,20 @@ export function useThemeChoice(
 ): readonly [ThemePreference, (next: ThemePreference) => void] {
   const [current, setCurrent] = useState(stored);
   const [, startTransition] = useTransition();
+  /** What the account holds: the server's value, or the newest save it accepted. */
+  const confirmed = useRef(stored);
+  const confirmedChoice = useRef(0);
+  const latestChoice = useRef(0);
 
   // A newer server value (another tab, Preferências) wins over a stale local one.
-  useEffect(() => setCurrent(stored), [stored]);
+  useEffect(() => {
+    confirmed.current = stored;
+    setCurrent(stored);
+  }, [stored]);
 
   function choose(next: ThemePreference) {
-    const previous = current;
-    if (next === previous) return;
+    if (next === current) return;
+    const choice = ++latestChoice.current;
     setCurrent(next);
     rememberTheme(next);
     startTransition(async () => {
@@ -104,9 +118,17 @@ export function useThemeChoice(
       } catch {
         saved = false;
       }
+      // Server actions answer in the order they were sent, so the newest
+      // accepted save is what the account holds.
+      if (saved && choice > confirmedChoice.current) {
+        confirmed.current = next;
+        confirmedChoice.current = choice;
+      }
+      // A newer choice owns the screen; this answer is only bookkeeping.
+      if (choice !== latestChoice.current) return;
       if (!saved) {
-        setCurrent(previous);
-        rememberTheme(previous);
+        setCurrent(confirmed.current);
+        rememberTheme(confirmed.current);
       }
     });
   }
