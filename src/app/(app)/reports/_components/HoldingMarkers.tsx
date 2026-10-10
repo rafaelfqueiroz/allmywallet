@@ -35,6 +35,7 @@ import { Cluster } from '@/components/layout/cluster';
  */
 export async function HoldingMarkers({ holding }: { readonly holding: ReportHolding }) {
   const t = await getTranslations('reports.markers');
+  const tCommon = await getTranslations('common');
 
   const markers: React.ReactNode[] = [];
 
@@ -62,7 +63,7 @@ export async function HoldingMarkers({ holding }: { readonly holding: ReportHold
           through: holding.basis.throughDate,
         })}
       >
-        {t('estimated.badge')}
+        {tCommon('estimated')}
       </Badge>,
     );
   }

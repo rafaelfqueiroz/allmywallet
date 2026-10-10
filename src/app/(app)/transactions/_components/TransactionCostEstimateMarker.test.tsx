@@ -16,7 +16,7 @@ describe('TransactionCostEstimateMarker', () => {
       <TransactionCostEstimateMarker
         costIsEstimate={false}
         estimateCloseDate={null}
-        label="Preço estimado"
+        label="Estimado"
         closeExplanation={closeExplanation}
         carriedExplanation={carriedExplanation}
       />,
@@ -29,12 +29,12 @@ describe('TransactionCostEstimateMarker', () => {
       <TransactionCostEstimateMarker
         costIsEstimate
         estimateCloseDate={BusinessDate.of('2024-02-22')}
-        label="Preço estimado"
+        label="Estimado"
         closeExplanation={closeExplanation}
         carriedExplanation={carriedExplanation}
       />,
     );
-    const badge = screen.getByText('Preço estimado');
+    const badge = screen.getByText('Estimado');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveAttribute('title', 'Preço estimado pelo fechamento de 2024-02-22');
   });
@@ -44,12 +44,12 @@ describe('TransactionCostEstimateMarker', () => {
       <TransactionCostEstimateMarker
         costIsEstimate
         estimateCloseDate={null}
-        label="Preço estimado"
+        label="Estimado"
         closeExplanation={closeExplanation}
         carriedExplanation={carriedExplanation}
       />,
     );
-    const badge = screen.getByText('Preço estimado');
+    const badge = screen.getByText('Estimado');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveAttribute('title', carriedExplanation);
   });

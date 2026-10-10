@@ -9,24 +9,22 @@ import { audit, render, screen } from '@/components/test-utils';
  */
 describe('CostEstimateMarker', () => {
   it('shown: renders the visible label and an accessible explanation', () => {
-    render(
-      <CostEstimateMarker shown label="Preço estimado" title="O custo desta posição é estimado." />,
-    );
-    const badge = screen.getByText('Preço estimado');
+    render(<CostEstimateMarker shown label="Estimado" title="O custo desta posição é estimado." />);
+    const badge = screen.getByText('Estimado');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveAttribute('title', 'O custo desta posição é estimado.');
   });
 
   it('hidden: renders nothing for a position with no estimated cost', () => {
     const { container } = render(
-      <CostEstimateMarker shown={false} label="Preço estimado" title="irrelevant" />,
+      <CostEstimateMarker shown={false} label="Estimado" title="irrelevant" />,
     );
     expect(container).toBeEmptyDOMElement();
   });
 
   it('has no axe violations when shown', async () => {
     const { container } = render(
-      <CostEstimateMarker shown label="Preço estimado" title="O custo desta posição é estimado." />,
+      <CostEstimateMarker shown label="Estimado" title="O custo desta posição é estimado." />,
     );
     expect(await audit(container)).toHaveNoViolations();
   });

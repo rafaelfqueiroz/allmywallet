@@ -68,6 +68,7 @@ export default async function ImportBatchDetailPage({
 }) {
   const { batchId: rawBatchId } = await params;
   const t = await getTranslations('import');
+  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -206,7 +207,7 @@ export default async function ImportBatchDetailPage({
             closeValue: formatCurrency(offer.close.close),
           }),
     closeMissingReason: offer.close === null ? t('subscriptionOffer.closeMissing') : null,
-    estimateBadge: t('subscriptionOffer.estimateBadge'),
+    estimateBadge: tCommon('estimated'),
     resolve: t('subscriptionOffer.resolve'),
     keep: t('subscriptionOffer.keep'),
   });

@@ -33,6 +33,7 @@ interface PageProps {
 
 export default async function EditTransactionPage({ params }: PageProps) {
   const t = await getTranslations('transactions');
+  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -90,7 +91,7 @@ export default async function EditTransactionPage({ params }: PageProps) {
       <TransactionCostEstimateMarker
         costIsEstimate={tx.costIsEstimate}
         estimateCloseDate={tx.estimateCloseDate}
-        label={t('markers.costEstimated.badge')}
+        label={tCommon('estimated')}
         closeExplanation={(date) => t('markers.costEstimated.closeExplanation', { date })}
         carriedExplanation={t('markers.costEstimated.carriedExplanation')}
       />

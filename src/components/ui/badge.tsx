@@ -33,21 +33,52 @@ const badgeVariants = cva(
   },
 );
 
+/**
+ * `dot` adds the small leading dot the SPEC-022 component sheet draws on every
+ * status badge ("● Concluída"). It is decoration only — `aria-hidden`, in the
+ * badge's own text colour (`bg-current`) — because the label already says what
+ * the state is: the dot reinforces the colour, it never replaces the words
+ * (BR-016-16). Ignored with `asChild`, where there is no element of ours to
+ * put it in.
+ */
 function Badge({
   className,
   variant = 'default',
   asChild = false,
+  dot = false,
+  children,
   ...props
-}: React.ComponentProps<'span'> & VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
-  const Comp = asChild ? Slot.Root : 'span';
+}: React.ComponentProps<'span'> &
+  VariantProps<typeof badgeVariants> & { asChild?: boolean; dot?: boolean }) {
+  if (asChild) {
+    return (
+      <Slot.Root
+        data-slot="badge"
+        data-variant={variant}
+        className={cn(badgeVariants({ variant }), className)}
+        {...props}
+      >
+        {children}
+      </Slot.Root>
+    );
+  }
 
   return (
-    <Comp
+    <span
       data-slot="badge"
       data-variant={variant}
       className={cn(badgeVariants({ variant }), className)}
       {...props}
-    />
+    >
+      {dot && (
+        <span
+          aria-hidden
+          data-slot="badge-dot"
+          className="size-1.5 shrink-0 rounded-full bg-current"
+        />
+      )}
+      {children}
+    </span>
   );
 }
 

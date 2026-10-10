@@ -225,6 +225,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
  */
 async function TransactionRow({ item }: { readonly item: TransactionListItem }) {
   const t = await getTranslations('transactions');
+  const tCommon = await getTranslations('common');
   const tType = await getTranslations('import.transactionType');
   const tx = item.transaction;
 
@@ -257,7 +258,7 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
           <TransactionCostEstimateMarker
             costIsEstimate={tx.costIsEstimate}
             estimateCloseDate={tx.estimateCloseDate}
-            label={t('markers.costEstimated.badge')}
+            label={tCommon('estimated')}
             closeExplanation={(date) => t('markers.costEstimated.closeExplanation', { date })}
             carriedExplanation={t('markers.costEstimated.carriedExplanation')}
           />

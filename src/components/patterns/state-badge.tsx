@@ -24,6 +24,11 @@ import { cn } from '@/lib/utils';
  * rather than a fifth colour: "no usable price" is not a fourth opinion to
  * sit alongside buy/hold/sell, so it borrows the same neutral treatment
  * `Badge`'s `secondary` variant already uses elsewhere.
+ *
+ * **Shape follows the component sheet** (SPEC-022 BR-022-31): a pill with the
+ * same leading dot as the status badges, as in the sheet's "Oportunidade" row.
+ * The dot is `Badge`'s `dot` — decoration beside the label — and the tokens
+ * above are unchanged.
  */
 export type WatchState = 'buy' | 'hold' | 'sell' | 'unknown';
 
@@ -46,6 +51,7 @@ export interface StateBadgeProps {
 export function StateBadge({ state, label, title, className }: StateBadgeProps): React.JSX.Element {
   return (
     <Badge
+      dot
       data-slot="state-badge"
       data-state={state}
       title={title}

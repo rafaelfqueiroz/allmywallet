@@ -56,6 +56,16 @@ describe('StateBadge', () => {
     }
   });
 
+  // SPEC-022 BR-022-31 — the "Oportunidade" row of the component sheet carries
+  // a leading dot on each pill; it is decoration beside the text, not instead of it.
+  it('draws the prototype’s leading dot, hidden from assistive technology', () => {
+    const { container } = render(<StateBadge state="buy" label="compra" />);
+    expect(container.querySelector('[data-slot="badge-dot"]')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
+  });
+
   it('has no axe violations for every state', async () => {
     for (const { state, label } of cases) {
       const { container, unmount } = render(<StateBadge state={state} label={label} />);

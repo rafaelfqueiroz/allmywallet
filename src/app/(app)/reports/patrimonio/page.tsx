@@ -60,6 +60,7 @@ interface PageProps {
 export default async function PatrimonioPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
   const tp = await getTranslations('patrimonio');
+  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -331,7 +332,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     value: tp('table.value'),
                     basis: tp('table.basis'),
                     observed: tp('table.observed'),
-                    estimated: tp('table.estimated'),
+                    estimated: tCommon('estimated'),
                     gap: tp('table.gap'),
                   }}
                 />

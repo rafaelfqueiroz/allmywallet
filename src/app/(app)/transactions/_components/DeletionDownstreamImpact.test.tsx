@@ -44,7 +44,7 @@ describe('DeletionDownstreamImpact', () => {
     expect(within(average as HTMLElement).getByText(/27,48/)).toBeInTheDocument();
     expect(within(average as HTMLElement).getByText(/10,00/)).toBeInTheDocument();
     // SPEC-007 BR-007-06: marked today, exact after — one marker, not two.
-    expect(within(average as HTMLElement).getAllByText('Preço estimado')).toHaveLength(1);
+    expect(within(average as HTMLElement).getAllByText('Estimado')).toHaveLength(1);
     expect(within(total as HTMLElement).getByText(/2\.748,33/)).toBeInTheDocument();
     expect(within(total as HTMLElement).getByText(/1\.000,00/)).toBeInTheDocument();
   });
