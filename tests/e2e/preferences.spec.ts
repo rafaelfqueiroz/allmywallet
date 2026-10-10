@@ -45,7 +45,7 @@ test('a signed-in user sees their stored preferences and a saved change survives
   await page.goto('/preferences');
 
   await expect(page.getByText(SIGNED_OUT)).toHaveCount(0);
-  const field = page.getByLabel(CONCENTRATION);
+  const field = page.getByLabel(CONCENTRATION, { exact: true });
   await expect(field).toHaveValue('37');
 
   await field.fill('42');
@@ -60,5 +60,5 @@ test('a signed-in user sees their stored preferences and a saved change survives
   ]);
 
   await page.reload();
-  await expect(page.getByLabel(CONCENTRATION)).toHaveValue('42');
+  await expect(page.getByLabel(CONCENTRATION, { exact: true })).toHaveValue('42');
 });
