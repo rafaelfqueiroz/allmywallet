@@ -18,8 +18,11 @@ import { describe, expect, it } from 'vitest';
  *    already masked;
  * 2. no page formats currency itself — `currencyText(masked)` is the string
  *    path, and `formatCurrency` is what it wraps;
- * 3. every chart with a value axis spreads the masking props on that axis and
- *    on its tooltip.
+ * 3. every chart with a value axis spreads the masking props on **every**
+ *    value axis and tooltip, and lets nothing override them afterwards;
+ * 4. every page that renders such a chart hands it coordinates through
+ *    `concealSeries` — masking the ticks does nothing about the amounts the
+ *    series carries in the RSC payload.
  *
  * The dev-only `/primitives` gallery is outside the frame and shows the
  * pattern itself, so it is exempt.
@@ -36,9 +39,16 @@ function* files(dir: string): Generator<string> {
   }
 }
 
-const sources = [...files(APP)]
-  .map((path) => ({ path: relative(ROOT, path), text: readFileSync(path, 'utf8') }))
-  .filter(({ path }) => !path.startsWith('src/app/(dev)/'));
+const read = (dir: string) =>
+  [...files(dir)].map((path) => ({ path: relative(ROOT, path), text: readFileSync(path, 'utf8') }));
+
+const sources = read(APP).filter(({ path }) => !path.startsWith('src/app/(dev)/'));
+const components = read(join(ROOT, 'src', 'components'));
+
+/** Source without its comments, so prose that names a function is not a use of it. */
+const code = (text: string) => text.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '');
+
+const count = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].length;
 
 /**
  * A chart whose value axis is not money. `BenchmarkChart` plots growth
@@ -66,16 +76,21 @@ describe('every amount goes through the masking (BR-022-24)', () => {
           .split(',')
           .map((name) => name.trim())
           .filter(Boolean);
-        return names.some((name) => name !== 'MoneyMask' && !name.startsWith('type '));
+        return names.some((name) => !name.startsWith('type '));
       })
       .map(({ path }) => path);
 
     expect(offenders).toEqual([]);
   });
 
-  it('never formats currency outside the masking helper', () => {
-    const offenders = sources
-      .filter(({ text }) => /\bformatCurrency\b/.test(text.replace(/^\s*(\*|\/\/).*$/gm, '')))
+  it('never formats currency outside Money and the masking helper', () => {
+    const allowed = ['src/components/patterns/money.tsx'];
+    const offenders = [...sources, ...components]
+      .filter(({ path }) => !allowed.includes(path))
+      .filter(({ text }) => {
+        const body = code(text);
+        return /\bformatCurrency\b/.test(body) || /style:\s*['"]currency['"]/.test(body);
+      })
       .map(({ path }) => path);
 
     expect(offenders).toEqual([]);
@@ -87,11 +102,34 @@ describe('every amount goes through the masking (BR-022-24)', () => {
 
     const offenders = charts
       .filter(({ path }) => !NOT_A_MONEY_AXIS.includes(path))
-      .filter(
-        ({ text }) =>
-          !/<YAxis[^>]*\{\.\.\.valueAxis\}/.test(text) ||
-          !/<Tooltip[^>]*\{\.\.\.valueTooltip\}/.test(text),
-      )
+      .filter(({ text }) => {
+        const body = code(text);
+        const axes = count(body, /<YAxis\b/g);
+        const tooltips = count(body, /<Tooltip\b/g);
+        return (
+          count(body, /<YAxis\b[^>]*\{\.\.\.valueAxis\}/g) !== axes ||
+          count(body, /<Tooltip\b[^>]*\{\.\.\.valueTooltip\}/g) !== tooltips ||
+          // An explicit prop after the spread would replace the mask.
+          /\{\.\.\.valueAxis\}[^>]*\btickFormatter=/.test(body) ||
+          /\{\.\.\.valueTooltip\}[^>]*\bformatter=/.test(body)
+        );
+      })
+      .map(({ path }) => path);
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('hands every money chart coordinates through concealSeries', () => {
+    const moneyCharts = sources
+      .filter(({ text }) => text.includes('useValueChartProps()'))
+      .flatMap(({ text }) => [...text.matchAll(/export function (\w+)\(/g)].map((m) => m[1]!));
+    // The composition ring has no value axis, but its slices are amounts too.
+    moneyCharts.push('ShareChart');
+    expect(moneyCharts.length).toBeGreaterThan(5);
+
+    const offenders = sources
+      .filter(({ text }) => moneyCharts.some((name) => new RegExp(`<${name}\\b`).test(code(text))))
+      .filter(({ text }) => !/\bconcealSeries\(/.test(code(text)))
       .map(({ path }) => path);
 
     expect(offenders).toEqual([]);

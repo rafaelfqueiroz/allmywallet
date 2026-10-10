@@ -1,13 +1,7 @@
 import type * as React from 'react';
-import { useTranslations } from 'next-intl';
 import type { Money as MoneyValue, Quantity } from '@/core/shared/money';
-import {
-  MASKED_CURRENCY,
-  formatCurrency,
-  formatPercent,
-  formatPercentPoints,
-  formatQuantity,
-} from '@/i18n/format';
+import { formatCurrency, formatPercent, formatPercentPoints, formatQuantity } from '@/i18n/format';
+import { MoneyMask } from '@/components/patterns/money-mask';
 import { cn } from '@/lib/utils';
 
 /**
@@ -59,22 +53,6 @@ function format(value: MoneyValue | Quantity, kind: NonNullable<MoneyProps['kind
   return formatCurrency(value as MoneyValue);
 }
 
-/**
- * SPEC-022 BR-022-26 — a hidden amount. The placeholder is the same text for
- * every value, so its width cannot leak the number of digits; it is
- * `aria-hidden` because a screen reader would announce six bullets, and the
- * accessible name says what is actually there.
- */
-export function MoneyMask() {
-  const t = useTranslations('common');
-  return (
-    <>
-      <span aria-hidden="true">{MASKED_CURRENCY}</span>
-      <span className="sr-only">{t('hiddenValue')}</span>
-    </>
-  );
-}
-
 export function Money({
   value,
   kind = 'currency',
@@ -85,27 +63,29 @@ export function Money({
 }: MoneyProps) {
   const negative = value.isNegative();
   const zero = value.isZero();
-  // The sign and its colour survive masking: they say which way a figure
-  // moved, not how much money it is — the same reason percentages stay
-  // visible (DL-022-07).
+  // A masked figure drops its sign and its colour too. Both would say whether
+  // the amount is exactly zero, and the sign would make a zero narrower than
+  // every other value — BR-022-26 is one width for every value. Direction is
+  // still on screen wherever a percentage sits beside the amount (DL-022-07).
   const hidden = masked && kind === 'currency';
+  const showSign = signed && !hidden;
 
   // The sign is rendered as text, so the formatter never has to produce one and
   // "-R$ 10,00" versus "R$ -10,00" stops being a per-call-site decision.
   // `negated()` rather than `abs()`: Quantity has no `abs`, and negating a
   // known-negative value is the same thing without widening the union.
   const magnitude = hidden ? undefined : format(signed && negative ? value.negated() : value, kind);
-  const prefix = !signed || zero ? '' : negative ? '−' : '+';
+  const prefix = !showSign || zero ? '' : negative ? '−' : '+';
 
   return (
     <span
       data-slot="money"
-      data-sign={signed ? (zero ? 'zero' : negative ? 'negative' : 'positive') : undefined}
+      data-sign={showSign ? (zero ? 'zero' : negative ? 'negative' : 'positive') : undefined}
       data-masked={hidden ? '' : undefined}
       className={cn(
         'tabular-nums',
         hidden && 'whitespace-nowrap',
-        signed && !zero && (negative ? 'text-negative' : 'text-positive'),
+        showSign && !zero && (negative ? 'text-negative' : 'text-positive'),
         className,
       )}
       {...props}

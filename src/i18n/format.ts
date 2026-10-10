@@ -1,6 +1,7 @@
 import type { Money, Quantity } from '@/core/shared/money';
 import type { BusinessDate } from '@/core/shared/clock';
 import { DEFAULT_LOCALE } from '@/i18n/request';
+import { MASKED_CURRENCY } from '@/i18n/masked';
 
 /**
  * AR-09/AR-47: this is the only place rounding is permitted, and the only place
@@ -35,15 +36,6 @@ const quantityFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
 export function formatCurrency(value: Money): string {
   return currencyFormatter.format(Number(value.toString()));
 }
-
-/**
- * SPEC-022 BR-022-26 — what a hidden amount renders as, whatever its magnitude,
- * so the number of digits does not leak. Decided here with the real format, so
- * the two cannot drift into different currency symbols. The space is the same
- * no-break space `Intl` puts after `R$`, so the placeholder never wraps where a
- * real figure would not.
- */
-export const MASKED_CURRENCY = 'R$\u00a0••••••';
 
 /**
  * For the few amounts a page has to produce as a **string** rather than as a

@@ -17,6 +17,9 @@ import { ConversionGroupForm } from '@/app/(app)/transactions/_components/Conver
 import { TransactionCostEstimateMarker } from '@/app/(app)/transactions/_components/TransactionCostEstimateMarker';
 import { PageShell } from '@/components/patterns/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { RevealValuesForm } from '@/components/patterns/reveal-values-form';
+import { loadHideValues } from '@/app/hide-values';
+import { saveHideValuesAction } from '@/app/(settings)/account/actions';
 
 /**
  * SPEC-006 BR-006-12 / DL-006-02 — **any** transaction is editable, imported
@@ -64,6 +67,17 @@ export default async function EditTransactionPage({ params }: PageProps) {
 
   if (loaded.transaction === null) notFound();
   const tx = loaded.transaction;
+
+  // SPEC-022 BR-022-24: both forms round-trip stored amounts — unit price,
+  // fees, a conversion's cost basis — through their inputs, so neither is
+  // rendered while amounts are hidden.
+  if (await loadHideValues()) {
+    return (
+      <PageShell title={t('form.editTitle')} description={t('form.editDescription')}>
+        <RevealValuesForm action={saveHideValuesAction} />
+      </PageShell>
+    );
+  }
 
   if (tx.conversionGroupId !== null) {
     return (

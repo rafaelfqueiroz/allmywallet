@@ -5,7 +5,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './support/authenticated';
 import { attachSession, seedSessionFor } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
-import { seedPreviewedImportBatch } from './support/onboarding';
+import { dismissOnboarding, seedPreviewedImportBatch } from './support/onboarding';
 import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
 
 /**
@@ -32,44 +32,49 @@ const MIGRATION_URL =
   process.env.DATABASE_MIGRATION_URL ??
   'postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet';
 
-/** `R$`, any spacing `Intl` or the HTML encoder may produce, then a figure. */
-const AMOUNT = /R\$(?:\s|&nbsp;|&#160;|&#xa0;|\\u00a0)*(\d[\d.,]*)/gi;
+/**
+ * `R$`, any spacing `Intl` or the HTML encoder may produce, a figure, and the
+ * first word after it — skipping punctuation, escaped quotes and entities.
+ */
+const AMOUNT =
+  /R\$(?:\s|&nbsp;|&#160;|&#xa0;|\\u00a0)*(\d[\d.,]*\d|\d)(?:&#?\w+;|[^A-Za-zÀ-ÿ&<])*([A-Za-zÀ-ÿ]*)/gi;
 
 /**
  * The catalogue's own prose quotes two figures — "Não mostramos R$ 0,00 antes
- * disso", "abaixo de R$ 30" — and every page ships the catalogue to the client.
- * Those are copy, not anybody's money, so they are the only figures allowed
- * after `R$`. Read from the catalogue itself, so a new example in the copy
- * does not need this list edited — and none of the seeded figures below is
- * among them, which the test asserts.
+ * disso", "abaixo de R$ 30\" pode…" — and every page ships the catalogue to the
+ * client. Those are copy, not anybody's money. They are excused **with the word
+ * that follows them in the copy**, so a real `R$ 0,00` elsewhere still counts.
+ * Read from the catalogue itself, so a new example in the copy does not need
+ * this list edited.
  */
-const CATALOGUE_FIGURES = new Set(
+const CATALOGUE_PHRASES = new Set(
   [
     ...readFileSync(
       new URL('../../src/i18n/messages/pt-BR.json', import.meta.url),
       'utf8',
-    ).matchAll(/R\$\s*(\d[\d.,]*\d|\d)/g),
-  ].map((match) => match[1]),
+    ).matchAll(AMOUNT),
+  ].map(([, figure, word]) => `${figure} ${word}`),
 );
 
 /** Every figure after `R$` in a page that is not the catalogue's own copy. */
 function amountsIn(document: string): string[] {
   return [...document.matchAll(AMOUNT)]
-    .map((match) => (match[1] ?? '').replace(/[.,]$/, ''))
-    .filter((figure) => !CATALOGUE_FIGURES.has(figure));
+    .filter(([, figure, word]) => !CATALOGUE_PHRASES.has(`${figure} ${word}`))
+    .map(([, figure]) => figure ?? '');
 }
 
-/** What the seed below puts on the screen, formatted as `Intl` would. */
-const SEEDED_FIGURES = [
-  '4.000,00',
-  '3.000,00',
-  '1.000,00',
-  '40,00',
-  '30,00',
-  '150,00',
-  '9.000,00',
-  '1.200,00',
-];
+/** Pages that, unmasked, must show a seeded amount — so masked, the check means something. */
+const PAGES_WITH_AMOUNTS = [
+  '/dashboard',
+  '/wallets',
+  '/reports',
+  '/reports/performance',
+  '/reports/composition',
+  '/reports/earnings',
+  '/reports/patrimonio',
+  '/transactions',
+  '/watch',
+] as const;
 
 interface Seeded {
   readonly walletId: string;
@@ -131,7 +136,31 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
       );
     }
 
+    // SPEC-013 — two daily snapshots, so Patrimônio draws its value line and
+    // the masking of a real chart's coordinates is exercised end to end.
+    for (const [offset, total] of [
+      [2, 4000],
+      [1, 4100],
+    ] as const) {
+      await pool.query(
+        `INSERT INTO daily_valuation_snapshots
+           (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+         VALUES ($1, CURRENT_DATE - $2::int, $3, 3000, 150, $4)`,
+        [userId, offset, total, JSON.stringify({ stock: String(total) })],
+      );
+    }
+
+    // SPEC-018 — a rule with a threshold, so the watch row's bound and the
+    // edit form's input both carry an amount.
+    await pool.query(
+      `INSERT INTO opportunity_rules (id, user_id, asset_id, lower_bound, lower_state, default_state)
+       VALUES ($1, $2, $3, 35, 'buy', 'hold')`,
+      [randomUUID(), userId, assetId],
+    );
+
     const batchId = await seedPreviewedImportBatch(userId);
+    // Past the first run, so Painel shows the portfolio rather than the guide.
+    await dismissOnboarding(userId);
     const fixedIncome = await seedHeldFixedIncomeWithMissingRate(userId, 'CDBMASK');
 
     return { walletId, transactionId, batchId, fixedIncomeId: fixedIncome.assetId };
@@ -142,6 +171,16 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
 
 /** The composition ring's coordinate for the seeded position, in the RSC payload. */
 const RING_COORDINATE = /value\\?":4000\b/;
+
+/** Patrimônio's value line, at the seeded snapshot of 4100. */
+const LINE_COORDINATE = /value\\?":4100\b/;
+
+/** The edit forms' inputs, carrying the seeded stored amounts. */
+const GOAL_INPUT =
+  /<input[^>]*name="amount"[^>]*value="9000"|<input[^>]*value="9000"[^>]*name="amount"/;
+const RULE_INPUT =
+  /<input[^>]*name="lowerPrice"[^>]*value="35"|<input[^>]*value="35"[^>]*name="lowerPrice"/;
+const PRICE_INPUT = /<input[^>]*name="(unitPrice|fees)"/;
 
 /** Every signed-in page, with the seeded ids filled in. */
 function pages(seeded: Seeded): readonly string[] {
@@ -161,6 +200,7 @@ function pages(seeded: Seeded): readonly string[] {
     '/transactions/new',
     '/transactions/conversions/new',
     `/transactions/${seeded.transactionId}/delete`,
+    `/transactions/${seeded.transactionId}/edit`,
     '/import',
     `/import/${seeded.batchId}`,
     `/fixed-income/${seeded.fixedIncomeId}`,
@@ -195,13 +235,22 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const { page, userId } = signedIn;
   const seeded = await seedPortfolio(userId);
 
-  // Not vacuous: no seeded figure is excused as catalogue copy, and unmasked
-  // the seeded amounts are in the HTML.
-  expect(SEEDED_FIGURES.filter((figure) => CATALOGUE_FIGURES.has(figure))).toEqual([]);
+  // Not vacuous: unmasked, the seeded amounts are in the HTML — on the pages
+  // that list them, in the edit forms' inputs, and in the ring's coordinates.
+  const shown: string[] = [];
+  for (const path of pages(seeded)) {
+    if (amountsIn(await html(page, path)).length > 0) shown.push(path);
+  }
+  expect(shown).toEqual(expect.arrayContaining([...PAGES_WITH_AMOUNTS]));
   const unmasked = await html(page, '/reports/composition');
   expect(amountsIn(unmasked)).toContain('4.000,00');
   expect(unmasked).toMatch(RING_COORDINATE);
-  expect(amountsIn(await html(page, `/wallets/${seeded.walletId}/goals`))).toContain('9.000,00');
+  expect(await html(page, '/reports/patrimonio')).toMatch(LINE_COORDINATE);
+  const goals = await html(page, `/wallets/${seeded.walletId}/goals`);
+  expect(amountsIn(goals)).toContain('9.000,00');
+  expect(goals).toMatch(GOAL_INPUT);
+  expect(await html(page, '/watch')).toMatch(RULE_INPUT);
+  expect(await html(page, `/transactions/${seeded.transactionId}/edit`)).toMatch(PRICE_INPUT);
 
   await turnMaskingOn(page);
 
@@ -209,6 +258,16 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   // The ring's coordinates rode to the browser rescaled, not as the 4000 they
   // were: the RSC payload is HTML too.
   expect(await html(page, '/reports/composition')).not.toMatch(RING_COORDINATE);
+  expect(await html(page, '/reports/patrimonio')).not.toMatch(LINE_COORDINATE);
+  // Edit forms round-trip stored amounts through their inputs, so they are
+  // replaced by "show values to edit" rather than rendered (BR-022-24).
+  const maskedGoals = await html(page, `/wallets/${seeded.walletId}/goals`);
+  expect(maskedGoals).not.toMatch(GOAL_INPUT);
+  expect(maskedGoals).toContain('Mostrar valores');
+  expect(await html(page, '/watch')).not.toMatch(RULE_INPUT);
+  const maskedEdit = await html(page, `/transactions/${seeded.transactionId}/edit`);
+  expect(maskedEdit).not.toMatch(PRICE_INPUT);
+  expect(maskedEdit).toContain('Mostrar valores');
 
   const leaking: Record<string, string[]> = {};
   for (const path of pages(seeded)) {

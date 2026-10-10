@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { StateBadge, type WatchState } from '@/components/patterns/state-badge';
 import { Text } from '@/components/ui/text';
 import { Cluster } from '@/components/layout/cluster';
-import { MoneyMask } from '@/components/patterns/money';
+import { MoneyMask } from '@/components/patterns/money-mask';
 
 /**
  * SPEC-015 BR-015-02 / AC-4 — "the table sorts by every column, ascending and
@@ -174,11 +174,12 @@ export function HoldingsTable({
             className="tabular-nums"
             // DS-09: colour never carries meaning alone — the server's
             // formatter has already put an explicit sign on the figure.
-            {...(options?.signed === true
+            // SPEC-022 BR-022-26: a masked cell carries no colour either.
+            {...(options?.signed === true && !cell.masked
               ? { tone: cell.negative ? ('negative' as const) : ('positive' as const) }
               : {})}
           >
-            <CellText cell={cell} signed={options?.signed === true} />
+            <CellText cell={cell} />
           </Text>
         );
       },
@@ -306,15 +307,9 @@ export function HoldingsTable({
 }
 
 /**
- * A cell's figure. A masked one keeps its sign as text — the colour alone
- * would otherwise carry it, which DS-09 forbids — and says it is hidden.
+ * A cell's figure, or — masked — the placeholder with its accessible name.
+ * Like `Money`, a masked gain shows no sign and no colour (BR-022-26).
  */
-function CellText({ cell, signed = false }: { readonly cell: Cell; readonly signed?: boolean }) {
-  if (!cell.masked) return cell.text;
-  return (
-    <>
-      {signed ? (cell.negative ? '−' : '+') : ''}
-      <MoneyMask />
-    </>
-  );
+function CellText({ cell }: { readonly cell: Cell }) {
+  return cell.masked ? <MoneyMask /> : cell.text;
 }

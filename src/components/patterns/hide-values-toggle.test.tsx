@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HideValuesToggle } from '@/components/patterns/hide-values-toggle';
+import { RevealValuesForm } from '@/components/patterns/reveal-values-form';
 import { audit, render, screen } from '@/components/test-utils';
 
 const action = vi.fn(async (_formData: FormData) => {});
@@ -38,5 +39,16 @@ describe('HideValuesToggle (SPEC-022 BR-022-24)', () => {
 
     const on = render(<HideValuesToggle masked action={action} />);
     expect(await audit(on.container)).toHaveNoViolations();
+  });
+});
+
+describe('RevealValuesForm (SPEC-022 BR-022-24)', () => {
+  it('says why the form is gone and asks to show values, not to toggle them', async () => {
+    const { container } = render(<RevealValuesForm action={action} />);
+
+    expect(screen.getByText(/os valores estão ocultos/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mostrar valores' })).toBeInTheDocument();
+    expect(container.querySelector<HTMLInputElement>('input[name="hidden"]')?.value).toBe('false');
+    expect(await audit(container)).toHaveNoViolations();
   });
 });

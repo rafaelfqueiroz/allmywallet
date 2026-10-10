@@ -19,6 +19,8 @@ import { ActionForm } from '@/components/patterns/action-form';
 import { StateBadge } from '@/components/patterns/state-badge';
 import { Money } from '@/app/money';
 import { useHideValues } from '@/app/hide-values';
+import { saveHideValuesAction } from '@/app/(settings)/account/actions';
+import { RevealValuesForm } from '@/components/patterns/reveal-values-form';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { List, ListItem } from '@/components/layout/list';
@@ -300,19 +302,24 @@ function WatchedRow({
               </Text>
             </summary>
             <Stack gap="sm">
-              <RuleForm
-                action={updateRuleAction}
-                assetId={row.assetId}
-                idPrefix={`edit-${row.assetId}`}
-                labels={editLabels}
-                initial={{
-                  lowerPrice: row.lower?.price.toString(),
-                  lowerState: row.lower?.state,
-                  upperPrice: row.upper?.price.toString(),
-                  upperState: row.upper?.state,
-                  defaultState: row.defaultState,
-                }}
-              />
+              {masked ? (
+                // SPEC-022 BR-022-24: the thresholds would sit in the inputs.
+                <RevealValuesForm action={saveHideValuesAction} />
+              ) : (
+                <RuleForm
+                  action={updateRuleAction}
+                  assetId={row.assetId}
+                  idPrefix={`edit-${row.assetId}`}
+                  labels={editLabels}
+                  initial={{
+                    lowerPrice: row.lower?.price.toString(),
+                    lowerState: row.lower?.state,
+                    upperPrice: row.upper?.price.toString(),
+                    upperState: row.upper?.state,
+                    defaultState: row.defaultState,
+                  }}
+                />
+              )}
             </Stack>
           </details>
 

@@ -84,7 +84,7 @@ export async function saveHideValuesAction(formData: FormData): Promise<void> {
 
   const userId = await requireUserId();
   // AR-11, as for the theme above.
-  await withTenant(
+  const result = await withTenant(
     userId,
     (tx) =>
       setConfigValue(tx, {
@@ -96,6 +96,9 @@ export async function saveHideValuesAction(formData: FormData): Promise<void> {
       }),
     db,
   );
+  // A refused write changes nothing, so there is nothing to re-render: the
+  // toggle keeps showing the state the account actually has.
+  if (isErr(result)) return;
 
   // Every amount on every signed-in screen is rendered from this key.
   revalidatePath('/', 'layout');

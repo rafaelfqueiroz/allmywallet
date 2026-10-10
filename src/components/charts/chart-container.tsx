@@ -9,7 +9,7 @@ import {
   type YAxisProps,
 } from 'recharts';
 import { useMasked } from '@/components/patterns/masking';
-import { MASKED_CURRENCY } from '@/i18n/format';
+import { MASKED_CURRENCY } from '@/i18n/masked';
 import { cn } from '@/lib/utils';
 
 /**

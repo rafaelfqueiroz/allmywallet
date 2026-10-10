@@ -95,7 +95,9 @@
     "help": "Guia de primeiros passos"
   },
   "hideValues": {
-    "toggle": "Ocultar valores"
+    "toggle": "Ocultar valores",
+    "formHidden": "Os valores estão ocultos. Para editar, mostre os valores.",
+    "reveal": "Mostrar valores"
   },
   "accountMenu": {
     "trigger": "Menu da conta",

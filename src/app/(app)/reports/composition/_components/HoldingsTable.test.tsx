@@ -362,9 +362,9 @@ describe('HoldingsTable — sorting without column headers', () => {
   /**
    * SPEC-022 BR-022-24/26 — the page masks on the server and sends the
    * placeholder as `text`; the table renders it with an accessible name, and
-   * keeps a masked gain's sign as text so colour never carries it alone.
+   * a masked gain carries neither sign nor colour, so a zero cannot stand out.
    */
-  it('renders a masked amount as the placeholder, with its sign and an accessible name', () => {
+  it('renders a masked amount as the placeholder, with an accessible name and no sign or colour', () => {
     const masked = (negative = false): Cell => ({
       text: 'R$\u00a0••••••',
       rank: 0,
@@ -395,7 +395,8 @@ describe('HoldingsTable — sorting without column headers', () => {
         (node) => node.textContent === 'R$\u00a0••••••',
       ),
     ).toHaveLength(8);
-    expect(container.textContent).toContain('−R$\u00a0••••••');
+    expect(container.textContent).not.toContain('−R$');
+    expect(container.querySelector('.text-negative, .text-positive')).toBeNull();
     // DL-022-07: the quantity and the share stay.
     expect(screen.getAllByText('50,00%').length).toBeGreaterThan(0);
   });

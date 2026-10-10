@@ -120,14 +120,16 @@ describe('Money', () => {
       expect(screen.getByText('Valor oculto')).toHaveClass('sr-only');
     });
 
-    it('keeps the sign and its colour, which say direction and not amount', () => {
-      const { container } = render(
-        <Money value={MoneyValue.fromString('-1234.56')} signed masked />,
-      );
-      const el = container.querySelector('[data-slot="money"]');
+    it('drops a signed figure’s sign and colour, so a zero looks like every other value', () => {
+      const texts = ['-1234.56', '0', '1234.56'].map((value) => {
+        const { container } = render(<Money value={MoneyValue.fromString(value)} signed masked />);
+        const el = container.querySelector('[data-slot="money"]');
+        expect(el?.className).not.toMatch(/text-(negative|positive)/);
+        expect(el).not.toHaveAttribute('data-sign');
+        return el?.textContent;
+      });
 
-      expect(el?.className).toContain('text-negative');
-      expect(el?.textContent?.startsWith('−R$')).toBe(true);
+      expect(new Set(texts).size).toBe(1);
     });
 
     it('leaves quantities and percentages visible (DL-022-07)', () => {
