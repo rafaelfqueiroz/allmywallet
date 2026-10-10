@@ -125,7 +125,6 @@ export default async function PrimitivesPage() {
     // The page's own header is the `PageHeader` demo (BR-022-14): scope
     // selector and primary action on the right. One `<h1>` per document.
     <PageShell
-      width="wide"
       title={vocabulary('patrimonio')}
       description={t('loading')}
       scope={<ScopeSelector wallets={SAMPLE_WALLETS} />}

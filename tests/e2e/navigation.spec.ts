@@ -47,21 +47,16 @@ test.describe('application navigation', () => {
   });
 
   /**
-   * SPEC-020 BR-020-13 — the help entry point reopens the guide for a signed-in
-   * account. This suite runs signed out (no `signedIn` fixture — every route in
-   * `(app)/` renders regardless of session, per `screens.spec.ts`'s own
-   * header), so its absence here is the other half of that rule: nothing on
-   * this shell should offer to reopen a guide for a visitor who has not signed
-   * in to have one, and `reopenOnboardingAction`'s `requireUserId()` would
-   * simply throw if it did (`authenticated-frame.tsx`'s own comment).
+   * SPEC-022 BR-022-09 — the account menu, and with it the guide's help entry
+   * (SPEC-020 BR-020-13) and Sair, belongs to a signed-in account. This suite
+   * runs signed out (every route in `(app)/` renders regardless of session,
+   * per `screens.spec.ts`'s header), and each of the menu's actions calls
+   * `requireUserId()`, which would throw for a visitor.
    */
-  test('offers no help entry to a visitor with no session', async ({ page, viewport }) => {
+  test('offers no account menu to a visitor with no session', async ({ page }) => {
     await page.goto('/wallets');
 
-    if (viewport && isMobile(viewport.width)) {
-      await page.getByRole('button', { name: 'Abrir menu' }).click();
-    }
-
-    await expect(page.getByRole('button', { name: 'Guia de primeiros passos' })).not.toBeVisible();
+    await expect(page.getByRole('banner')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Menu da conta/ })).toHaveCount(0);
   });
 });

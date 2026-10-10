@@ -52,17 +52,47 @@ export interface SeededSession {
   readonly sessionToken: string;
 }
 
-export async function seedSession(email?: string): Promise<SeededSession> {
+/** The Google-supplied fields a journey may need to assert (BR-001-05). */
+export interface SeededProfile {
+  readonly name?: string;
+  readonly imageUrl?: string;
+}
+
+export async function seedSession(
+  email?: string,
+  profile: SeededProfile = {},
+): Promise<SeededSession> {
   const userId = randomUUID();
-  const sessionToken = randomUUID();
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
 
   try {
     await pool.query(
-      `INSERT INTO users (id, google_subject_id, email, name)
-       VALUES ($1, $2, $3, $4)`,
-      [userId, `google-subject-${userId}`, email ?? `${userId}@example.test`, 'E2E'],
+      `INSERT INTO users (id, google_subject_id, email, name, image_url)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        userId,
+        `google-subject-${userId}`,
+        email ?? `${userId}@example.test`,
+        profile.name ?? 'E2E',
+        profile.imageUrl ?? null,
+      ],
     );
+  } finally {
+    await pool.end();
+  }
+
+  return { userId, sessionToken: await seedSessionFor(userId) };
+}
+
+/**
+ * A further session for an account that already exists — a second device, or
+ * the next sign-in after Sair. Journeys use it to prove that something the
+ * account chose survives into a *new* session, not just a reload.
+ */
+export async function seedSessionFor(userId: string): Promise<string> {
+  const sessionToken = randomUUID();
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
     await pool.query(
       `INSERT INTO sessions (session_token, user_id, expires)
        VALUES ($1, $2, $3)`,
@@ -71,8 +101,20 @@ export async function seedSession(email?: string): Promise<SeededSession> {
   } finally {
     await pool.end();
   }
+  return sessionToken;
+}
 
-  return { userId, sessionToken };
+/** Whether the `sessions` row behind a cookie still exists (BR-001-07). */
+export async function sessionExists(sessionToken: string): Promise<boolean> {
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    const { rowCount } = await pool.query(`SELECT 1 FROM sessions WHERE session_token = $1`, [
+      sessionToken,
+    ]);
+    return rowCount === 1;
+  } finally {
+    await pool.end();
+  }
 }
 
 /**
@@ -98,7 +140,7 @@ export async function dropSeededUser(userId: string): Promise<void> {
  * produces `url: ''` and a rejected cookie — a failure that presents as "the
  * page is signed out" three assertions later.
  */
-async function attachSession(
+export async function attachSession(
   context: BrowserContext,
   sessionToken: string,
   baseURL: string,

@@ -58,7 +58,7 @@ export default async function WalletGoalsPage({
 
   if (userId === undefined) {
     return (
-      <PageShell width="narrow" title={t('title')}>
+      <PageShell title={t('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );

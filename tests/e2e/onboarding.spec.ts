@@ -17,8 +17,6 @@ import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
  * way `navigation.spec.ts` does.
  */
 
-const isMobile = (viewportWidth: number) => viewportWidth < 768;
-
 test.describe('the guided onboarding flow', () => {
   /** AC-1 / BR-020-02 — "first sign-in lands on onboarding, not on an empty dashboard." */
   test('a fresh signed-in user visiting the root lands on the guide', async ({ signedIn }) => {
@@ -71,18 +69,14 @@ test.describe('the guided onboarding flow', () => {
    * `Link` (BR-020-12's "never a GET"), asserted here by its actual effect —
    * routing back to `/onboarding` — rather than by inspecting the markup.
    */
-  test('the help entry point reopens the guide after it was dismissed', async ({
-    signedIn,
-    viewport,
-  }) => {
+  test('the help entry point reopens the guide after it was dismissed', async ({ signedIn }) => {
     await signedIn.page.goto('/onboarding');
     await signedIn.page.getByRole('button', { name: 'Dispensar o guia' }).click();
     await expect(signedIn.page).toHaveURL(/\/dashboard$/);
 
-    if (viewport && isMobile(viewport.width)) {
-      await signedIn.page.getByRole('button', { name: 'Abrir menu' }).click();
-    }
-    await signedIn.page.getByRole('button', { name: 'Guia de primeiros passos' }).click();
+    // SPEC-022 BR-022-10: the entry lives in the account menu, at every width.
+    await signedIn.page.getByRole('button', { name: /Menu da conta/ }).click();
+    await signedIn.page.getByRole('menuitem', { name: 'Guia de primeiros passos' }).click();
 
     await expect(signedIn.page).toHaveURL(/\/onboarding$/);
   });

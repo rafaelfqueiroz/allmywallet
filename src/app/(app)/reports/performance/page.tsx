@@ -86,7 +86,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell width="wide" title={tr('title')}>
+      <PageShell title={tr('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -113,7 +113,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   const { wallets, report } = await loadPerformance(userId, { ...state, treatment });
 
   return (
-    <PageShell width="wide" title={tr('title')} description={tr('description')}>
+    <PageShell title={tr('title')} description={tr('description')}>
       <ReportNav />
 
       <Controls

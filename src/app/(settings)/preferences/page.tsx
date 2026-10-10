@@ -45,7 +45,7 @@ export default async function PreferencesPage() {
   const preferences = await loadUserSettablePreferences();
 
   return (
-    <PageShell width="narrow" title={t('title')} description={t('description')}>
+    <PageShell title={t('title')} description={t('description')}>
       {!userId ? (
         <EmptyState title={t('signedOut')} />
       ) : (

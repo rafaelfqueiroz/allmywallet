@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { LifeBuoy, Menu, PanelLeft, PanelLeftClose } from 'lucide-react';
+import { Menu, PanelLeft, PanelLeftClose, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -21,26 +21,32 @@ import { isPathActive, navItemClassName } from '@/components/patterns/nav-link';
  * Bottom tabs were considered and rejected (DL-11): they are the better phone
  * pattern but a second component to build, test and keep in sync with this one.
  *
- * **`helpAction` (SPEC-020 BR-020-13)** — the guide's help entry point,
- * reachable from either rendering of the shell on every authenticated screen.
- * Taken as a prop rather than imported here: `AppShell` is a design-system
- * pattern (DS-02, "a primitive knows nothing about the domain") and stays
- * testable/reusable without pulling in `(app)/onboarding/actions.ts`.
- * `src/app/authenticated-frame.tsx` is the one place that wires the real
- * action in. A `<form>`, not a `Link` — BR-020-12/13 make reopening a real
- * state change (clearing `users.onboarding_dismissed_at`), which a GET
- * request (prefetch, crawler) must never trigger.
+ * **The top bar (SPEC-022 BR-022-09)** sits above the content at every width.
+ * Its right-hand side holds `topBarActions` — the slot the masking toggle
+ * (BR-022-24, #206) fills — and `account`, the account menu. Below `md` it
+ * also carries the drawer button and the product name.
+ *
+ * Both are slots rather than imports: `AppShell` is a design-system pattern
+ * (DS-02, "a primitive knows nothing about the domain") and stays testable
+ * without Auth.js or the registry. `src/app/authenticated-frame.tsx` is the one
+ * place the real account menu is wired in, and it passes none to a visitor
+ * with no session. The guide's help entry (SPEC-020 BR-020-13) moved from the
+ * foot of the sidebar into that menu (BR-022-10).
  */
 export function AppShell({
   children,
-  helpAction,
+  account,
+  topBarActions,
 }: {
   children: ReactNode;
   // `| undefined` explicit (DV-01/`exactOptionalPropertyTypes`): the caller
-  // computes this conditionally (signed in or not) and passes the result
+  // computes these conditionally (signed in or not) and passes the result
   // straight through, rather than being forced into a conditional spread for
   // every render site.
-  helpAction?: ((formData: FormData) => Promise<void>) | undefined;
+  /** The account menu (BR-022-09). Absent for a visitor with no session. */
+  account?: ReactNode | undefined;
+  /** Controls beside the account menu — the masking toggle (BR-022-24). */
+  topBarActions?: ReactNode | undefined;
 }) {
   const t = useTranslations('nav');
   const tCommon = useTranslations('common');
@@ -68,8 +74,13 @@ export function AppShell({
           collapsed ? 'md:w-16' : 'md:w-60',
         )}
       >
-        <div className="flex h-14 items-center justify-between px-3">
-          {!collapsed && <span className="font-heading font-semibold">{t('appName')}</span>}
+        <div
+          className={cn(
+            'flex h-14 items-center gap-2 px-3',
+            collapsed ? 'justify-center' : 'justify-between',
+          )}
+        >
+          {!collapsed && <Brand />}
           <Button
             variant="ghost"
             size="icon-sm"
@@ -80,27 +91,32 @@ export function AppShell({
             {collapsed ? <PanelLeft /> : <PanelLeftClose />}
           </Button>
         </div>
-        <div className="flex min-h-0 flex-1 flex-col justify-between">
-          <NavList collapsed={collapsed} />
-          {helpAction && <HelpEntry action={helpAction} collapsed={collapsed} />}
-        </div>
+        <NavList collapsed={collapsed} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center gap-2 border-b px-4 md:hidden">
-          <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label={t('openMenu')}>
-                <Menu />
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="inset-y-0 top-0 left-0 flex h-dvh max-w-72 translate-x-0 translate-y-0 flex-col justify-between rounded-none rounded-r-xl">
-              <DialogTitle className="sr-only">{t('menu')}</DialogTitle>
-              <NavList collapsed={false} onNavigate={() => setDrawerOpen(false)} />
-              {helpAction && <HelpEntry action={helpAction} collapsed={false} />}
-            </DialogContent>
-          </Dialog>
-          <span className="font-heading font-semibold">{t('appName')}</span>
+        <header
+          data-slot="top-bar"
+          className="flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4 sm:px-8"
+        >
+          <div className="flex items-center gap-2 md:hidden">
+            <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label={t('openMenu')}>
+                  <Menu />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="inset-y-0 top-0 left-0 flex h-dvh max-w-72 translate-x-0 translate-y-0 flex-col rounded-none rounded-r-xl">
+                <DialogTitle className="sr-only">{t('menu')}</DialogTitle>
+                <NavList collapsed={false} onNavigate={() => setDrawerOpen(false)} />
+              </DialogContent>
+            </Dialog>
+            <Brand />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {topBarActions}
+            {account}
+          </div>
         </header>
 
         <div id="conteudo" className="min-w-0 flex-1">
@@ -133,39 +149,20 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
   );
 }
 
-/**
- * SPEC-020 BR-020-13 — "the guide can be reopened at any time from a help
- * entry point." Styled like `NavLink` (same padding, same icon treatment,
- * same collapsed-to-icon behaviour) so it reads as part of the navigation
- * rather than as an unrelated button bolted onto the bottom of it — but it is
- * a `<form>` around a submit button, never an `<a>`/`Link`, for the GET/POST
- * reason on `AppShell`'s own doc comment.
- */
-function HelpEntry({
-  action,
-  collapsed,
-}: {
-  action: (formData: FormData) => Promise<void>;
-  collapsed: boolean;
-}) {
+/** The product mark: the approved prototype's navy tile and the name. */
+function Brand() {
   const t = useTranslations('nav');
 
   return (
-    <form action={action} className="p-2">
-      <button
-        type="submit"
-        title={collapsed ? t('help') : undefined}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-field text-sm outline-none',
-          'hover:bg-sidebar-accent/60',
-          'focus-visible:ring-3 focus-visible:ring-ring/50',
-          collapsed && 'justify-center',
-        )}
+    <span className="flex items-center gap-2 font-heading font-semibold">
+      <span
+        aria-hidden="true"
+        className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground"
       >
-        <LifeBuoy className="size-4 shrink-0" aria-hidden="true" />
-        {collapsed ? <span className="sr-only">{t('help')}</span> : t('help')}
-      </button>
-    </form>
+        <Wallet className="size-4" />
+      </span>
+      {t('appName')}
+    </span>
   );
 }
 

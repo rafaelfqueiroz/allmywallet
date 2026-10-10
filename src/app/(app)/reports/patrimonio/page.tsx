@@ -65,7 +65,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell width="wide" title={tp('title')}>
+      <PageShell title={tp('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -117,7 +117,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
       : null;
 
   return (
-    <PageShell width="wide" title={tp('title')} description={tp('description')}>
+    <PageShell title={tp('title')} description={tp('description')}>
       <ReportNav />
 
       <Controls

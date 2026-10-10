@@ -74,7 +74,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell width="wide" title={t('title')}>
+      <PageShell title={t('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -118,7 +118,6 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
 
   return (
     <PageShell
-      width="wide"
       title={t('title')}
       description={t('description')}
       actions={

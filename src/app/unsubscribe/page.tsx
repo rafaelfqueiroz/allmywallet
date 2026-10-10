@@ -42,7 +42,7 @@ export default async function UnsubscribePage({ searchParams }: PageProps) {
 
   if (params.done === '1') {
     return (
-      <PageShell width="narrow" title={t('title')}>
+      <PageShell title={t('title')}>
         <Text>{t('done')}</Text>
       </PageShell>
     );
@@ -59,14 +59,14 @@ export default async function UnsubscribePage({ searchParams }: PageProps) {
   // plain `string` with no cast and no `!` (DV-03).
   if (userId === null || token === null) {
     return (
-      <PageShell width="narrow" title={t('title')}>
+      <PageShell title={t('title')}>
         <Text tone="muted">{t('invalid')}</Text>
       </PageShell>
     );
   }
 
   return (
-    <PageShell width="narrow" title={t('title')}>
+    <PageShell title={t('title')}>
       <Section title={t('confirmTitle')}>
         <Stack gap="md">
           <Text tone="muted">{t('confirmBody')}</Text>

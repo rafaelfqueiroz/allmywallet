@@ -67,7 +67,7 @@ export default async function EditTransactionPage({ params }: PageProps) {
 
   if (tx.conversionGroupId !== null) {
     return (
-      <PageShell width="wide" title={t('form.editTitle')} description={t('form.editDescription')}>
+      <PageShell title={t('form.editTitle')} description={t('form.editDescription')}>
         <ConversionGroupForm
           action={editAssetConversionGroupAction}
           conversionGroupId={tx.conversionGroupId}
@@ -85,7 +85,7 @@ export default async function EditTransactionPage({ params }: PageProps) {
   }
 
   return (
-    <PageShell width="wide" title={t('form.editTitle')} description={t('form.editDescription')}>
+    <PageShell title={t('form.editTitle')} description={t('form.editDescription')}>
       {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden: the transaction being
           edited is exactly the one whose own price the marker is about. */}
       <TransactionCostEstimateMarker
