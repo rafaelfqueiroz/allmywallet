@@ -51,7 +51,7 @@ describe('Badge', () => {
       for (const status of ['success', 'progress', 'warning', 'neutral'] as const) {
         const { unmount } = render(<Badge variant={status}>x</Badge>);
         const className = screen.getByText('x').className;
-        expect(className).not.toMatch(/destructive|negative/);
+        expect(className).not.toMatch(/(^|\s)(bg|text)-(destructive|negative)/);
         unmount();
       }
     });

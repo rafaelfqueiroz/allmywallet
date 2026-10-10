@@ -50,16 +50,27 @@ function Badge({
   ...props
 }: React.ComponentProps<'span'> &
   VariantProps<typeof badgeVariants> & { asChild?: boolean; dot?: boolean }) {
-  const Comp = asChild ? Slot.Root : 'span';
+  if (asChild) {
+    return (
+      <Slot.Root
+        data-slot="badge"
+        data-variant={variant}
+        className={cn(badgeVariants({ variant }), className)}
+        {...props}
+      >
+        {children}
+      </Slot.Root>
+    );
+  }
 
   return (
-    <Comp
+    <span
       data-slot="badge"
       data-variant={variant}
       className={cn(badgeVariants({ variant }), className)}
       {...props}
     >
-      {dot && !asChild && (
+      {dot && (
         <span
           aria-hidden
           data-slot="badge-dot"
@@ -67,7 +78,7 @@ function Badge({
         />
       )}
       {children}
-    </Comp>
+    </span>
   );
 }
 
