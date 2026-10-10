@@ -32,11 +32,10 @@ export async function loadParameters(
    * authenticated session to render with until `tests/e2e/support/authenticated.ts`,
    * and `tests/e2e/preferences.spec.ts` is the journey that now holds it.
    */
-  const effective =
-    userId === undefined
-      ? await getEffectiveConfig(db, {})
-      : await withTenant(userId, (tx) => getEffectiveConfig(tx, { userId }), db);
-
+  // Only this surface's keys are resolved: each one is its own reads, and a
+  // Configurações section renders one parameter, not the registry.
   const keys = keysOnSurface(surface);
-  return effective.filter((entry) => keys.includes(entry.key));
+  return userId === undefined
+    ? getEffectiveConfig(db, { keys })
+    : withTenant(userId, (tx) => getEffectiveConfig(tx, { userId, keys }), db);
 }
