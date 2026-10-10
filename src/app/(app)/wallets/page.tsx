@@ -10,6 +10,7 @@ import {
 import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
+import { ParameterSection } from '@/app/parameter-form';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -339,6 +340,8 @@ export default async function WalletsPage() {
           </List>
         )}
       </Section>
+
+      <ParameterSection surface="settings.wallets" />
     </PageShell>
   );
 }

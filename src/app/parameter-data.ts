@@ -1,19 +1,22 @@
 import { db } from '@/db/client';
 import { withTenant } from '@/db/tenant';
 import { getEffectiveConfig, type EffectiveConfigEntry } from '@/config/effective';
-import { USER_SETTABLE_KEYS, type ConfigKey } from '@/config/registry';
+import { keysOnSurface, type ConfigKey, type ParameterSurface } from '@/config/registry';
 import { tryUserId } from '@/lib/session';
 
 /**
  * AR-31: Server Components call a use case in `core/` (or, for this
  * cross-cutting spec, `src/config/`) directly — never the database. That is
  * enforced by lint for `.tsx` files (AR-35's block in eslint.config.mjs), so
- * the `@/db/*` import lives in this plain `.ts` module and `page.tsx` only
- * ever imports the function below.
+ * the `@/db/*` import lives in this plain `.ts` module and `ParameterForm`
+ * only ever imports the function below.
+ *
+ * SPEC-022 BR-022-13: one surface's keys — Preferências, or one Configurações
+ * section — in registry order.
  */
-export async function loadUserSettablePreferences(): Promise<
-  readonly EffectiveConfigEntry<ConfigKey>[]
-> {
+export async function loadParameters(
+  surface: ParameterSurface,
+): Promise<readonly EffectiveConfigEntry<ConfigKey>[]> {
   const userId = await tryUserId();
 
   /**
@@ -29,10 +32,10 @@ export async function loadUserSettablePreferences(): Promise<
    * authenticated session to render with until `tests/e2e/support/authenticated.ts`,
    * and `tests/e2e/preferences.spec.ts` is the journey that now holds it.
    */
-  const effective =
-    userId === undefined
-      ? await getEffectiveConfig(db, {})
-      : await withTenant(userId, (tx) => getEffectiveConfig(tx, { userId }), db);
-
-  return effective.filter((entry) => USER_SETTABLE_KEYS.includes(entry.key));
+  // Only this surface's keys are resolved: each one is its own reads, and a
+  // Configurações section renders one parameter, not the registry.
+  const keys = keysOnSurface(surface);
+  return userId === undefined
+    ? getEffectiveConfig(db, { keys })
+    : withTenant(userId, (tx) => getEffectiveConfig(tx, { userId, keys }), db);
 }

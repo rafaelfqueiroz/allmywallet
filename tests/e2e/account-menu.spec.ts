@@ -118,7 +118,10 @@ test('shows the Google profile and operates by keyboard', async ({ page, context
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/account$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Conta' })).toBeVisible();
-    await expect(page.getByRole('main').getByText('ana.ribeiro@exemplo.test')).toBeVisible();
+    const main = page.getByRole('main');
+    await expect(main.getByText('Ana Ribeiro')).toBeVisible();
+    await expect(main.getByText('ana.ribeiro@exemplo.test')).toBeVisible();
+    await expect(main.locator('img')).toHaveAttribute('src', picture);
     await expect(page.getByRole('link', { name: 'Ir para Privacidade' })).toHaveAttribute(
       'href',
       '/privacy',

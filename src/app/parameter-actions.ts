@@ -14,6 +14,10 @@ import { requireUserId } from '@/lib/session';
  * Scope explicitly excludes a deployment-config admin UI; only per-user
  * preferences get one). Every key here is user-settable by construction —
  * `USER_SETTABLE_KEYS` is derived from the registry, never hand-maintained.
+ *
+ * Shared by every screen `ParameterForm` renders on (SPEC-022 BR-022-13):
+ * Preferências and each Configurações section save through the same write,
+ * whatever surface the key is on.
  */
 
 const UserSettableKey = z.custom<ConfigKey>(
@@ -41,7 +45,7 @@ function coerceFormValue(key: ConfigKey, formData: FormData): unknown {
   return Number.isNaN(asNumber) ? raw : asNumber;
 }
 
-export interface SavePreferenceState {
+export interface SaveParameterState {
   readonly status: 'idle' | 'saved' | 'error';
   readonly errorCode?: string;
 }
@@ -52,10 +56,7 @@ export interface SavePreferenceState {
  * the coerced value against the key's own schema (BR-002-04) and authorizes
  * the write (BR-002-03) before anything reaches the database.
  */
-export async function saveUserPreference(
-  key: unknown,
-  formData: FormData,
-): Promise<SavePreferenceState> {
+export async function saveParameter(key: unknown, formData: FormData): Promise<SaveParameterState> {
   const parsedKey = UserSettableKey.safeParse(key);
   if (!parsedKey.success) return { status: 'error', errorCode: 'VALIDATION_FAILED' };
 
@@ -96,12 +97,14 @@ export async function saveUserPreference(
 }
 
 /**
- * A `<form action={...}>` bound directly from a Server Component (page.tsx)
- * must itself be a Server Action returning `void` — React's form-action type
- * has no room for `saveUserPreference`'s result. This is the thin adapter
- * that boundary requires; `saveUserPreference` stays the testable unit with
- * a real return value.
+ * The shape `useActionState` calls: `ParameterField` binds the key, React
+ * supplies the previous state. `saveParameter` stays the testable unit; this
+ * only adapts its argument order.
  */
-export async function submitPreferenceForm(key: unknown, formData: FormData): Promise<void> {
-  await saveUserPreference(key, formData);
+export async function saveParameterAction(
+  key: unknown,
+  _previous: SaveParameterState,
+  formData: FormData,
+): Promise<SaveParameterState> {
+  return saveParameter(key, formData);
 }

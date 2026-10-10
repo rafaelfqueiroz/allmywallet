@@ -42,4 +42,26 @@ describe('getEffectiveConfig — against a fake Tx with nothing set', () => {
     expect(effective).toHaveLength(CONFIG_KEYS.length);
     expect(effective.every((entry) => entry.source === 'default')).toBe(true);
   });
+
+  it('resolves only the keys asked for, in that order, with no reads for the rest', async () => {
+    invalidateDeploymentCache();
+    const base = fakeTx({ selectRows: [] });
+    let selects = 0;
+    const tx = {
+      ...base,
+      select: (...args: unknown[]) => (selects++, base.select(...(args as []))),
+    };
+    const keys = ['wallets.drift_tolerance_pp', 'import.staleness_days'] as const;
+
+    const effective = await getEffectiveConfig(tx as typeof base, {
+      userId: UserId.generate(),
+      keys,
+    });
+
+    expect(effective.map((entry) => entry.key)).toEqual(keys);
+    // One read to prime the deployment cache, then at most `runtime_state`
+    // and `config_overrides` per key asked for — not per registry key.
+    expect(selects).toBeGreaterThan(0);
+    expect(selects).toBeLessThanOrEqual(1 + 2 * keys.length);
+  });
 });

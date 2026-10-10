@@ -8,6 +8,7 @@ import { tryUserId } from '@/lib/session';
 import { ExportGuide } from '@/app/(app)/import/_components/ExportGuide';
 import { StalenessPrompt } from '@/app/(app)/import/_components/StalenessPrompt';
 import { PageShell } from '@/app/page-shell';
+import { ParameterSection } from '@/app/parameter-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Cluster } from '@/components/layout/cluster';
@@ -98,6 +99,8 @@ export default async function ImportPage() {
           <ExportGuide firstRun={false} />
         </div>
       )}
+
+      <ParameterSection surface="settings.import" />
     </PageShell>
   );
 }

@@ -30,14 +30,19 @@ export interface EffectiveConfigEntry<K extends ConfigKey = ConfigKey> {
  * A `userId`-scoped call must be given the transaction `withTenant` produces
  * for that user (AR-11, `tx.ts`'s doc comment) — this function does not
  * itself set tenant context.
+ *
+ * `keys` narrows the view to those keys, in the order given. Each key costs
+ * its own reads (`runtime_state`, then `config_overrides` for a user), so a
+ * screen that renders one parameter resolves one key, not the whole registry
+ * (#223 review).
  */
 export async function getEffectiveConfig(
   db: Tx,
-  options: { readonly userId?: UserId } = {},
+  options: { readonly userId?: UserId; readonly keys?: readonly ConfigKey[] } = {},
 ): Promise<readonly EffectiveConfigEntry[]> {
   const entries: EffectiveConfigEntry[] = [];
 
-  for (const key of CONFIG_KEYS) {
+  for (const key of options.keys ?? CONFIG_KEYS) {
     const entry = registryEntry(key);
     const resolved = await resolveConfig(key, {
       db,
