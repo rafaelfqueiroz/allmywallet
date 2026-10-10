@@ -476,6 +476,12 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
 
     // 22:05 São Paulo (2026-03-18T01:05Z) — the close job runs as scheduled
     // and is not blocked by catch-up having already run.
+    //
+    // The rebuild is captured, never left to the default: the real enqueue
+    // writes a `valuation.snapshot` with no tenant to the shared database's
+    // pg-boss queue, where the next worker to start — the E2E suite's —
+    // rebuilt every tenant mid-run and replaced a journey's seeded snapshots.
+    const rebuilds: BusinessDate[] = [];
     await withFreshDb((database) =>
       handleQuotesCloseCapture({
         database,
@@ -483,8 +489,13 @@ describe('SPEC-021 worker-start catch-up (integration)', () => {
         calendar,
         closeSource,
         heldAssets: new FakeHeldAssetsPort([petr, vale]),
+        enqueueSnapshotRebuild: async (from) => {
+          rebuilds.push(from);
+        },
       }),
     );
+    // SPEC-009 BR-009-18: the closes it wrote invalidate snapshots from that day.
+    expect(rebuilds).toEqual(['2026-03-17']);
 
     const { rows: closes } = await migratorPool.query<{ code: string; close: string }>(
       `SELECT a.code, q.close::text AS close FROM price_quotes q JOIN assets a ON a.id = q.asset_id
