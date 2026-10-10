@@ -17,7 +17,7 @@ Five layers. The design system owns the first four. The fifth belongs to the spe
 | Tokens | `src/app/globals.css` | Named values — colour, radius, density. No opinion about usage |
 | Primitives | `src/components/ui/` | Button, Input, Select, NativeSelect, Label, Table, Card, Badge, Dialog, Popover, DropdownMenu, Tabs, Skeleton |
 | Layout | `src/components/layout/` | Stack, Grid, Cluster — the only sanctioned way a page expresses spacing |
-| Patterns | `src/components/patterns/` | PageShell, PageHeader, AppShell, RouteTabs, SubNav, ScopeSelector, EmptyState, ErrorState, DataTable, StatCard, Money, Field, InfoTip, FileUpload, theme |
+| Patterns | `src/components/patterns/` | PageShell, PageHeader, AppShell, AccountMenu, RouteTabs, SubNav, ScopeSelector, EmptyState, ErrorState, DataTable, StatCard, Money, Field, InfoTip, FileUpload, theme |
 | Charts | `src/components/charts/` | The palette binding, ChartContainer, ChartLegend and the shared axis/tooltip props |
 | **Pages** | `src/app/` | Screen composition. **Not part of the design system** |
 
@@ -160,12 +160,13 @@ Two caveats carried forward:
 
 | Pattern | Contract |
 |---|---|
-| `PageShell` | The page's `<main>`, its header, and one of exactly three widths — `narrow`, `default`, `wide`. Replaced the five different max-widths that had accumulated across five peer screens. |
+| `PageShell` | The page's `<main>`, its header, and **one width** for every destination — DS-57. No width prop and no `className`. |
 | `PageHeader` | The `<h1>`, a description, the scope slot and the primary actions on the right (BR-022-14). `PageShell` renders its header through it, so there is one header. |
 | `RouteTabs` | A destination's tasks as links, one URL per tab, the active one `aria-current="page"` — DS-52. |
 | `SubNav` | Configurações' vertical section navigation; the same active/hover/focus treatment as the sidebar (DS-48). |
 | `ScopeSelector` | All wallets or one, as the `wallet` URL parameter — DS-53. |
-| `AppShell` | The application frame. One nav definition (`nav-items.ts`), rendered as a collapsible sidebar from `md` and a Dialog-based drawer below it. Owns the skip link. |
+| `AppShell` | The application frame. One nav definition (`nav-items.ts`), rendered as a collapsible sidebar from `md` and a Dialog-based drawer below it, and a **top bar** at every width whose right side holds two slots: `topBarActions` (the masking toggle) and `account` (the account menu) — DS-58. Owns the skip link. |
+| `AccountMenu` | The Google name, e-mail and picture; Conta, Preferências, Privacidade, the guide, the theme switch and Sair — DS-58. Every action is a prop. |
 | `EmptyState` | `role="status"`. Explains an absence. |
 | `ErrorState` | `role="alert"`. Explains a failure. |
 | `StatCard` | One headline figure as `dt`/`dd`. Owns framing, never formatting — pass a `<Money>`. |
@@ -174,9 +175,13 @@ Two caveats carried forward:
 
 **DS-25 — An absence and a failure are different components.** `EmptyState` is `role="status"`; `ErrorState` is `role="alert"`. Only one of them is worth retrying, and rendering them the same way tells the user nothing about which they are looking at. This is why SPEC-011 forbids a misleading zero: "R$ 0,00" and "we have no data for this period" look identical and mean opposite things.
 
-**DS-26 — Every destination lives in `nav-items.ts`.** The sidebar and the drawer render the same array, so they cannot disagree about what exists. Only routes that exist are listed: `nav.dashboard` and `nav.transactions` have catalogue entries but no pages, and a menu whose items 404 is worse than a shorter menu.
+**DS-26 — Every destination lives in `nav-items.ts`.** The sidebar and the drawer render the same array, so they cannot disagree about what exists. Only routes that exist are listed, because a menu whose items 404 is worse than a shorter menu. SPEC-022 BR-022-01's five destinations therefore arrive with the issue that makes each route real, and the items a destination absorbs leave in the same change. What belongs to the person rather than to a feature — Conta, Preferências, Privacidade — is not a destination and lives in the account menu (BR-022-10).
 
-**DS-27 — Active navigation state is `aria-current="page"`, not just a background colour.** Styling the active item without it makes the state sighted-only. Matching is on a path boundary, so `/wallets/abc` lights up `/wallets` and `/importar-outro` does not light up `/import`.
+**DS-27 — Active navigation state is `aria-current="page"`, not just a background colour.** Styling the active item without it makes the state sighted-only. Matching is on a path boundary, so `/wallets/abc` lights up `/wallets` and `/importar-outro` does not light up `/import`. The look is `navItemClassName` (DS-48), shared by the sidebar, `SubNav` and `RouteTabs`; `tests/e2e/frame.spec.ts` compares the active item's computed style across every destination, arrived at by URL and by click, and checks keyboard focus adds the ring and changes nothing else (BR-022-33).
+
+**DS-57 — One page width, and a page never chooses its own** (SPEC-022 BR-022-14). `PageShell` is `max-w-7xl`, centred, with one padding pair, on every destination. #33's three named widths stopped the drift but kept the choice, and the choice is what the 2026-10-09 walkthrough measured: Relatórios began about 426px from the edge and Painel about 574px. A paragraph or a form that wants a shorter measure constrains itself (`max-w-prose` inside `EmptyState`, a `Field`'s own width) and leaves the page's edge alone. `tests/structural/one-page-width.test.ts` bars `max-w-*`, `mx-auto` and `w-screen` from every file in `(app)` and `(settings)`, and `tests/e2e/frame.spec.ts` measures the rendered edge on every destination at 1920px. Pages outside the frame keep their own shells (DS-39).
+
+**DS-58 — The account menu holds what belongs to the person, and its state changes are forms** (BR-022-09/10/11). It shows what Google supplied (SPEC-001 BR-001-05) and nothing else. Sair and the guide's help entry change server state — the `sessions` row, `onboarding_dismissed_at` — so each is a `<form>` submission that no GET, prefetch or crawler can trigger. The forms sit *outside* the menu content and the items submit them through the `form` attribute, because Radix unmounts the content the moment an item is chosen. The theme switch is three `menuitemradio` items: the class changes on the click and `ui.theme` is saved behind it (DS-29); a refused save puts the previous theme back. Every action is a prop wired in `src/app/authenticated-frame.tsx` (DS-02), and a visitor with no session gets no menu.
 
 **DS-28 — The card list is a second rendering, not responsive classes.** Both renderings are always in the DOM and CSS picks one. That costs markup and buys correctness on resize and in print, without a viewport-width hook — which would be wrong on the server and would force every consumer to be client-rendered on a guess.
 
@@ -188,7 +193,7 @@ Two caveats carried forward:
 
 ### Theme
 
-**DS-29 — The theme is decided in two places, deliberately.** `ThemeScript` runs synchronously in `<head>` from `localStorage` so nobody watches a white page repaint to dark; `ThemeSync` reconciles that guess with the account's stored `ui.theme` after hydration, which is what makes the setting follow a user to a new device. `'system'` stamps no class at all, so the OS keeps control — including when it changes mid-session.
+**DS-29 — The theme is decided in two places, deliberately.** `ThemeScript` runs synchronously in `<head>` from `localStorage` so nobody watches a white page repaint to dark; `ThemeSync` reconciles that guess with the account's stored `ui.theme` after hydration, which is what makes the setting follow a user to a new device. `'system'` stamps no class at all, so the OS keeps control — including when it changes mid-session. The switch lives in the account menu (BR-022-30, DS-58) and writes the same key Preferências renders, through the same validated `setConfigValue`, so the two cannot disagree.
 
 **DS-30 — A new user preference is a registry key, not a component.** `ui.theme` is a `ZodEnum` at `levels: ['user']`, and the SPEC-002 preferences screen renders it with no other change. Adding a bespoke settings control would fork a surface that is currently generated.
 
