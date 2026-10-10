@@ -10,7 +10,9 @@ import { EditDeleteForms } from '@/app/(app)/wallets/[walletId]/goals/_component
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
+import { useHideValues } from '@/app/hide-values';
+import { concealSeries } from '@/app/chart-series';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
 import { Text } from '@/components/ui/text';
@@ -74,13 +76,21 @@ function EarningsBody({
 }) {
   const goalAmountNumber = Number(earnings.goalAmount.toString());
 
-  const points: EarningsChartPoint[] = earnings.months.map((month) => ({
-    month: month.month,
-    amount: month.kind === 'elapsed' ? Number(month.amount.toString()) : null,
-    cumulative: month.kind === 'elapsed' ? Number(month.cumulative.toString()) : null,
-    yearToDateAverage: month.kind === 'elapsed' ? Number(month.yearToDateAverage.toString()) : null,
-    goal: goalAmountNumber,
-  }));
+  // SPEC-022 BR-022-24: rescaled when masked — every mark and the goal line
+  // keep their relation, and no amount reaches the browser.
+  const masked = useHideValues();
+  const points: EarningsChartPoint[] = concealSeries(
+    earnings.months.map((month) => ({
+      month: month.month,
+      amount: month.kind === 'elapsed' ? Number(month.amount.toString()) : null,
+      cumulative: month.kind === 'elapsed' ? Number(month.cumulative.toString()) : null,
+      yearToDateAverage:
+        month.kind === 'elapsed' ? Number(month.yearToDateAverage.toString()) : null,
+      goal: goalAmountNumber,
+    })),
+    ['amount', 'cumulative', 'yearToDateAverage', 'goal'],
+    masked,
+  );
 
   return (
     <>
@@ -98,6 +108,7 @@ function EarningsBody({
       </Grid>
 
       <EarningsGoalChart
+        masked={masked}
         points={points}
         period={goal.period === 'yearly' ? 'yearly' : 'monthly'}
         title={t('earnings.chartTitle', { name: goal.name, year: earnings.year })}

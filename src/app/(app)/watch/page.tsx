@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import type { Money as MoneyValue } from '@/core/shared/money';
 import type { OpportunityState } from '@/core/opportunity/ports';
-import { formatCurrency, formatDateTime } from '@/i18n/format';
+import { currencyText, formatDateTime } from '@/i18n/format';
 import { tryUserId } from '@/lib/session';
 import { loadWatchView, type WatchRuleRow } from '@/app/(app)/watch/data';
 import {
@@ -11,13 +11,16 @@ import {
   updateRuleAction,
 } from '@/app/(app)/watch/actions';
 import { RuleForm, type RuleFormLabels } from '@/app/(app)/watch/_components/RuleForm';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Note } from '@/components/patterns/note';
 import { ActionForm } from '@/components/patterns/action-form';
 import { StateBadge } from '@/components/patterns/state-badge';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
+import { useHideValues } from '@/app/hide-values';
+import { saveHideValuesAction } from '@/app/(settings)/account/actions';
+import { RevealValuesForm } from '@/components/patterns/reveal-values-form';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { List, ListItem } from '@/components/layout/list';
@@ -196,19 +199,29 @@ export default async function WatchPage() {
  * contract), so branching on it is what lets this read as prose rather than a
  * templated fill-in-the-blank for a case that does not apply.
  */
-function stateTitle(row: WatchRuleRow, t: Awaited<ReturnType<typeof getTranslations>>): string {
+function stateTitle(
+  row: WatchRuleRow,
+  t: Awaited<ReturnType<typeof getTranslations>>,
+  masked: boolean,
+): string {
   if (row.evaluatedState === 'unknown') return t('stateTitleUnknown');
   const stateLabel = t(`stateLabel.${row.evaluatedState}`);
   if (row.threshold === null) return t('stateTitleDefault', { stateLabel });
-  return t('stateTitleBound', { stateLabel, threshold: formatCurrency(row.threshold) });
+  // SPEC-022 BR-022-24: a `title` is a string, so the placeholder is too.
+  return t('stateTitleBound', { stateLabel, threshold: currencyText(masked)(row.threshold) });
 }
 
 function boundText(
   bound: { readonly price: MoneyValue; readonly state: OpportunityState } | null,
   t: Awaited<ReturnType<typeof getTranslations>>,
-): string {
+): React.ReactNode {
   if (bound === null) return t('noBound');
-  return `${formatCurrency(bound.price)} → ${t(`stateLabel.${bound.state}`)}`;
+  // `Money`, so the threshold masks with every other amount (BR-022-24).
+  return (
+    <>
+      <Money value={bound.price} /> → {t(`stateLabel.${bound.state}`)}
+    </>
+  );
 }
 
 function WatchedRow({
@@ -220,6 +233,7 @@ function WatchedRow({
   readonly t: Awaited<ReturnType<typeof getTranslations>>;
   readonly editLabels: RuleFormLabels;
 }) {
+  const masked = useHideValues();
   return (
     <ListItem separated>
       <Stack gap="sm">
@@ -231,7 +245,7 @@ function WatchedRow({
             <StateBadge
               state={row.evaluatedState}
               label={t(`stateLabel.${row.evaluatedState}`)}
-              title={stateTitle(row, t)}
+              title={stateTitle(row, t, masked)}
             />
             {row.muted && <Badge variant="outline">{t('mutedBadge')}</Badge>}
           </Cluster>
@@ -288,19 +302,24 @@ function WatchedRow({
               </Text>
             </summary>
             <Stack gap="sm">
-              <RuleForm
-                action={updateRuleAction}
-                assetId={row.assetId}
-                idPrefix={`edit-${row.assetId}`}
-                labels={editLabels}
-                initial={{
-                  lowerPrice: row.lower?.price.toString(),
-                  lowerState: row.lower?.state,
-                  upperPrice: row.upper?.price.toString(),
-                  upperState: row.upper?.state,
-                  defaultState: row.defaultState,
-                }}
-              />
+              {masked ? (
+                // SPEC-022 BR-022-24: the thresholds would sit in the inputs.
+                <RevealValuesForm action={saveHideValuesAction} />
+              ) : (
+                <RuleForm
+                  action={updateRuleAction}
+                  assetId={row.assetId}
+                  idPrefix={`edit-${row.assetId}`}
+                  labels={editLabels}
+                  initial={{
+                    lowerPrice: row.lower?.price.toString(),
+                    lowerState: row.lower?.state,
+                    upperPrice: row.upper?.price.toString(),
+                    upperState: row.upper?.state,
+                    defaultState: row.defaultState,
+                  }}
+                />
+              )}
             </Stack>
           </details>
 

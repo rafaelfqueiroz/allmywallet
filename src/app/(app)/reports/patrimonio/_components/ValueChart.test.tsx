@@ -39,6 +39,7 @@ describe('ValueChart geometry (SPEC-021 BR-021-31)', () => {
   it('draws a continuous line when no day is a gap', () => {
     const { container } = render(
       <ValueChart
+        masked={false}
         title="Patrimônio"
         summary="—"
         points={[
@@ -55,6 +56,7 @@ describe('ValueChart geometry (SPEC-021 BR-021-31)', () => {
   it('breaks the line at a gap day instead of joining its neighbours', () => {
     const { container } = render(
       <ValueChart
+        masked={false}
         title="Patrimônio"
         summary="—"
         points={[

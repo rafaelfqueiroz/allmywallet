@@ -2,7 +2,13 @@
 
 import type { ReactElement, ReactNode } from 'react';
 import { useId } from 'react';
-import { ResponsiveContainer } from 'recharts';
+import {
+  ResponsiveContainer,
+  type TooltipProps,
+  type TooltipValueType,
+  type YAxisProps,
+} from 'recharts';
+import { MASKED_CURRENCY } from '@/i18n/masked';
 import { cn } from '@/lib/utils';
 
 /**
@@ -98,6 +104,37 @@ export const chartTooltipProps = {
   },
   cursor: { fill: 'var(--color-muted)' },
 } as const;
+
+/**
+ * SPEC-022 BR-022-24 — the masking half of DS-33, for a chart whose value axis
+ * is money. Spread `valueAxis` on the `YAxis` and `valueTooltip` on the
+ * `Tooltip`, after the shared props:
+ *
+ * - every tick reads as the same placeholder `Money` renders, so the axis says
+ *   "there is a scale here, hidden" rather than looking empty or broken;
+ * - the tooltip keeps each series' name and drops its value.
+ *
+ * `masked` is a **prop of the chart**, passed by the Server Component that
+ * also rescaled the chart's coordinates with `concealSeries` — never read from
+ * the frame. The frame is a layout, and a client-side navigation does not
+ * re-render it, so its idea of the masking can be older than the page's; the
+ * labels and the coordinates must come from one render or the axis would print
+ * the 0–100 scale as though it were money.
+ *
+ * The plotted shape stays, as BR-022-24 requires. A chart whose axis is not
+ * money — the rebased benchmark lines, the composition ring's shares — does not
+ * use this.
+ */
+export function valueChartProps(masked: boolean): {
+  readonly valueAxis: Pick<YAxisProps, 'tickFormatter'>;
+  readonly valueTooltip: Pick<TooltipProps<TooltipValueType, string | number>, 'formatter'>;
+} {
+  if (!masked) return { valueAxis: {}, valueTooltip: {} };
+  return {
+    valueAxis: { tickFormatter: () => MASKED_CURRENCY },
+    valueTooltip: { formatter: (_value, name) => [MASKED_CURRENCY, name ?? ''] },
+  };
+}
 
 /**
  * DS-10's caveat, applied. `--chart-4` is Okabe–Ito's yellow, which is

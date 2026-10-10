@@ -1,6 +1,9 @@
 import type { getTranslations } from 'next-intl/server';
 import type { Money } from '@/core/shared/money';
 import { updateGoalAction, deleteGoalAction } from '@/app/(app)/wallets/goal-actions';
+import { saveHideValuesAction } from '@/app/(settings)/account/actions';
+import { useHideValues } from '@/app/hide-values';
+import { RevealValuesForm } from '@/components/patterns/reveal-values-form';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Field } from '@/components/patterns/field';
 import { Stack } from '@/components/layout/stack';
@@ -30,17 +33,22 @@ export function EditDeleteForms({
   readonly amount: Money;
   readonly t: Awaited<ReturnType<typeof getTranslations>>;
 }) {
+  // SPEC-022 BR-022-24: the amount field would put the goal in the HTML.
+  const masked = useHideValues();
   return (
     <Stack gap="sm" align="start">
-      <ActionForm action={updateGoalAction}>
-        <input type="hidden" name="goalId" value={goalId} />
-        <input type="hidden" name="walletId" value={walletId} />
-        <Cluster gap="md" align="end">
-          <Field id={`goal-name-${goalId}`} label={t('nameLabel')} width="lg">
-            <Input name="name" defaultValue={name} required />
-          </Field>
-          <Field id={`goal-amount-${goalId}`} label={t('amountLabel')} width="md">
-            {/*
+      {masked ? (
+        <RevealValuesForm action={saveHideValuesAction} />
+      ) : (
+        <ActionForm action={updateGoalAction}>
+          <input type="hidden" name="goalId" value={goalId} />
+          <input type="hidden" name="walletId" value={walletId} />
+          <Cluster gap="md" align="end">
+            <Field id={`goal-name-${goalId}`} label={t('nameLabel')} width="lg">
+              <Input name="name" defaultValue={name} required />
+            </Field>
+            <Field id={`goal-amount-${goalId}`} label={t('amountLabel')} width="md">
+              {/*
               AR-09 — the stored amount, in full, never `toFixed(2)`.
               This form always submits this field, so any shortening here is a
               rounding decision that writes itself back into `NUMERIC(20,8)`:
@@ -48,11 +56,12 @@ export function EditDeleteForms({
               next time somebody renamed it. Display rounds; a form that
               round-trips a stored value does not.
             */}
-            <Input name="amount" inputMode="decimal" defaultValue={amount.toString()} required />
-          </Field>
-          <Button type="submit">{t('save')}</Button>
-        </Cluster>
-      </ActionForm>
+              <Input name="amount" inputMode="decimal" defaultValue={amount.toString()} required />
+            </Field>
+            <Button type="submit">{t('save')}</Button>
+          </Cluster>
+        </ActionForm>
+      )}
       <ActionForm action={deleteGoalAction}>
         <input type="hidden" name="goalId" value={goalId} />
         <input type="hidden" name="walletId" value={walletId} />

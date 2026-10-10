@@ -6,6 +6,7 @@ import {
   chartAxisProps,
   chartGridProps,
   chartTooltipProps,
+  valueChartProps,
 } from '@/components/charts/chart-container';
 
 /**
@@ -41,6 +42,7 @@ export interface GrowthChartPoint {
 }
 
 export function GrowthChart({
+  masked,
   points,
   title,
   summary,
@@ -48,16 +50,21 @@ export function GrowthChart({
 }: {
   readonly points: readonly GrowthChartPoint[];
   readonly title: string;
+  /** SPEC-022 BR-022-24 — from the Server Component that rendered this chart's data. */
+  readonly masked: boolean;
   readonly summary: React.ReactNode;
   readonly labels: { readonly value: string; readonly goal: string };
 }) {
+  // SPEC-022 BR-022-24: a money axis and tooltip honour the eye toggle —
+  // from this page's own render, the one that rescaled `points`.
+  const { valueAxis, valueTooltip } = valueChartProps(masked);
   return (
     <ChartContainer title={title} summary={summary} height={280}>
       <LineChart data={[...points]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
         <CartesianGrid {...chartGridProps} />
         <XAxis dataKey="date" {...chartAxisProps} minTickGap={32} />
-        <YAxis {...chartAxisProps} width={72} />
-        <Tooltip {...chartTooltipProps} />
+        <YAxis {...chartAxisProps} {...valueAxis} width={72} />
+        <Tooltip {...chartTooltipProps} {...valueTooltip} />
         <Line
           type="monotone"
           dataKey="value"

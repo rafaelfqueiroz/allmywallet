@@ -19,12 +19,14 @@ import { basisOf, plot, toValueChartPoints } from '@/app/(app)/reports/patrimoni
 import { ValueChart } from '@/app/(app)/reports/patrimonio/_components/ValueChart';
 import { ContributionChart } from '@/app/(app)/reports/patrimonio/_components/ContributionChart';
 import { StackedChart } from '@/app/(app)/reports/patrimonio/_components/StackedChart';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
+import { loadHideValues, useHideValues } from '@/app/hide-values';
+import { concealSeries } from '@/app/chart-series';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
@@ -71,6 +73,8 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
     );
   }
 
+  // SPEC-022 BR-022-24: the charts' coordinates are rescaled when masked.
+  const masked = await loadHideValues();
   const raw = await searchParams;
   const params = {
     get: (name: string) => {
@@ -229,11 +233,16 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
               >
                 <Stack gap="md">
                   <ValueChart
+                    masked={masked}
                     title={tp('chart.title')}
                     summary={<SeriesSummary points={history.series} label={tp('chart.summary')} />}
                     // SPEC-021 BR-021-31: a gap day is plotted as a break; the
                     // table below states its figure under its own basis.
-                    points={toValueChartPoints(history.series, closeGapDates)}
+                    points={concealSeries(
+                      toValueChartPoints(history.series, closeGapDates),
+                      ['value'],
+                      masked,
+                    )}
                   />
                   {history.series.some((point) => point.estimated) && (
                     // BR-013-07 / DL-013-04: the marker sits with the chart, not in
@@ -272,6 +281,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                 description={tp('contributions.description')}
               >
                 <ContributionChart
+                  masked={masked}
                   title={tp('contributions.title')}
                   summary={
                     <ContributionSummary
@@ -279,10 +289,14 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                       label={tp('contributions.summary')}
                     />
                   }
-                  bars={history.contributions.map((bar) => ({
-                    month: bar.month,
-                    amount: plot(bar.amount),
-                  }))}
+                  bars={concealSeries(
+                    history.contributions.map((bar) => ({
+                      month: bar.month,
+                      amount: plot(bar.amount),
+                    })),
+                    ['amount'],
+                    masked,
+                  )}
                 />
               </Section>
 
@@ -531,14 +545,20 @@ function StackedComposition({
     bands.map((band) => [band.key, new Map(band.points.map((point) => [point.date, point.value]))]),
   );
 
-  const rows = dates.map((date) => {
-    const row: Record<string, string | number> = { date };
-    for (const band of bands) {
-      const value = valueAt.get(band.key)?.get(date);
-      row[band.key] = value === undefined ? 0 : plot(value);
-    }
-    return row;
-  });
+  // SPEC-022 BR-022-24 — a synchronous component, so the request-cached read.
+  const masked = useHideValues();
+  const rows = concealSeries(
+    dates.map((date) => {
+      const row: Record<string, string | number> = { date };
+      for (const band of bands) {
+        const value = valueAt.get(band.key)?.get(date);
+        row[band.key] = value === undefined ? 0 : plot(value);
+      }
+      return row;
+    }),
+    bands.map((band) => band.key),
+    masked,
+  );
 
   const legend = bands.map((band, index) => ({
     key: band.key,
@@ -548,7 +568,13 @@ function StackedComposition({
 
   return (
     <Stack gap="md">
-      <StackedChart rows={rows} bands={legend} title={labels.title} summary={labels.summary} />
+      <StackedChart
+        masked={masked}
+        rows={rows}
+        bands={legend}
+        title={labels.title}
+        summary={labels.summary}
+      />
       <Table>
         <TableCaption className="sr-only">{labels.caption}</TableCaption>
         <TableHeader>

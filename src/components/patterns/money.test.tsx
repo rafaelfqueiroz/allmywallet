@@ -93,4 +93,59 @@ describe('Money', () => {
     const { container } = render(<Money value={MoneyValue.fromString('1')} signed />);
     expect(await audit(container)).toHaveNoViolations();
   });
+
+  describe('masked (SPEC-022 BR-022-24/26)', () => {
+    it('renders the same placeholder for 1 and for 1.000.000, so the width cannot leak digits', () => {
+      const { container: small } = render(<Money value={MoneyValue.fromString('1')} masked />);
+      const { container: large } = render(
+        <Money value={MoneyValue.fromString('1000000')} masked />,
+      );
+      const visible = (root: HTMLElement) =>
+        root.querySelector('[data-slot="money"] [aria-hidden="true"]')?.textContent;
+
+      expect(visible(small)).toBe('R$\u00a0••••••');
+      expect(visible(large)).toBe(visible(small));
+      expect(small.querySelector('[data-slot="money"]')?.textContent).toBe(
+        large.querySelector('[data-slot="money"]')?.textContent,
+      );
+    });
+
+    it('puts no digit of the amount in the markup — BR-022-25 is about the HTML, not the CSS', () => {
+      const { container } = render(<Money value={MoneyValue.fromString('98765.43')} masked />);
+      expect(container.innerHTML).not.toMatch(/\d/);
+    });
+
+    it('has an accessible name saying the value is hidden', () => {
+      render(<Money value={MoneyValue.fromString('1234.56')} masked />);
+      expect(screen.getByText('Valor oculto')).toHaveClass('sr-only');
+    });
+
+    it('drops a signed figure’s sign and colour, so a zero looks like every other value', () => {
+      const texts = ['-1234.56', '0', '1234.56'].map((value) => {
+        const { container } = render(<Money value={MoneyValue.fromString(value)} signed masked />);
+        const el = container.querySelector('[data-slot="money"]');
+        expect(el?.className).not.toMatch(/text-(negative|positive)/);
+        expect(el).not.toHaveAttribute('data-sign');
+        return el?.textContent;
+      });
+
+      expect(new Set(texts).size).toBe(1);
+    });
+
+    it('leaves quantities and percentages visible (DL-022-07)', () => {
+      render(
+        <>
+          <Money value={Quantity.fromString('150')} kind="quantity" masked />
+          <Money value={MoneyValue.fromString('0.1234')} kind="percent" masked />
+        </>,
+      );
+      expect(screen.getByText('150')).toBeInTheDocument();
+      expect(screen.getByText(/12,34/)).toBeInTheDocument();
+    });
+
+    it('passes axe', async () => {
+      const { container } = render(<Money value={MoneyValue.fromString('10')} masked />);
+      expect(await audit(container)).toHaveNoViolations();
+    });
+  });
 });

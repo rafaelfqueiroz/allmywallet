@@ -160,7 +160,7 @@ Two caveats carried forward:
 
 | Pattern | Contract |
 |---|---|
-| `PageShell` | The page's `<main>`, its header, and **one width** for every destination — DS-57. No width prop and no `className`. |
+| `PageShell` | The page's `<main>`, its header, and **one width** for every destination — DS-57. No width prop and no `className`. Signed-in pages import it from `@/app/page-shell`, which reports the page's masking to the frame (DS-59). |
 | `PageHeader` | The `<h1>`, a description, the scope slot and the primary actions on the right (BR-022-14). `PageShell` renders its header through it, so there is one header. |
 | `RouteTabs` | A destination's tasks as links, one URL per tab, the active one `aria-current="page"` — DS-52. |
 | `SubNav` | Configurações' vertical section navigation; the same active/hover/focus treatment as the sidebar (DS-48). |
@@ -171,7 +171,7 @@ Two caveats carried forward:
 | `ErrorState` | `role="alert"`. Explains a failure. |
 | `StatCard` | One headline figure as `dt`/`dd`. Owns framing, never formatting — pass a `<Money>`. |
 | `DataTable` | A real table from `md`, a labelled card list below it. `caption` is required. Sorts, paginates and filters, with its state in the URL — DS-54. |
-| `Money` | The only place a figure becomes text. |
+| `Money` | The only place a figure becomes text. Pages import it from `@/app/money`, which applies the account's masking (DS-59). |
 
 **DS-25 — An absence and a failure are different components.** `EmptyState` is `role="status"`; `ErrorState` is `role="alert"`. Only one of them is worth retrying, and rendering them the same way tells the user nothing about which they are looking at. This is why SPEC-011 forbids a misleading zero: "R$ 0,00" and "we have no data for this period" look identical and mean opposite things.
 
@@ -195,6 +195,17 @@ Two caveats carried forward:
 
 **DS-29 — The theme is decided in two places, deliberately.** `ThemeScript` runs synchronously in `<head>` from `localStorage` so nobody watches a white page repaint to dark; `ThemeSync` reconciles that guess with the account's stored `ui.theme` after hydration, which is what makes the setting follow a user to a new device. `'system'` stamps no class at all, so the OS keeps control — including when it changes mid-session. The switch lives in the account menu (BR-022-30, DS-58) and writes the same key Preferências renders, through the same validated `setConfigValue`, so the two cannot disagree.
 
+**DS-59 — Masking is decided by the server, and every amount passes through one of its doors** (SPEC-022 BR-022-24..27, DL-022-06/07). `ui.hide_values` is a user-level registry key; the eye toggle in the top bar is a `<form>` whose action writes it and revalidates the layout, so the next render arrives already masked. Nothing is hidden in the browser — an amount hidden by CSS or swapped after hydration was in the HTML, which BR-022-25 forbids.
+
+- **`Money` from `@/app/money`** reads the preference with `useHideValues()` — `use()` on a `React.cache`d read, once per request — and renders a `currency` figure as `MoneyMask`: `R$ ••••••` (`MASKED_CURRENCY`, in the import-free `src/i18n/masked.ts`), the same text for every value, with an `sr-only` "Valor oculto". The frame cannot hand the value down: layouts and pages render in parallel, and a client navigation renders a page without its layout. Quantities and percentages stay. A signed figure loses its sign and colour while masked — both would single out an exact zero, and the sign would make it narrower. The pattern in `src/components/patterns/money.tsx` takes `masked` as a prop and stays free of the session (DS-02).
+- **Charts** take `masked` as a prop from the Server Component that renders them, and spread `valueChartProps(masked)` (DS-33). The same render rescales their coordinates to 0–100 with `concealSeries`, so the RSC payload carries the shape and no amount, and the labels can never disagree with the coordinates. Never read the frame for this: it is a layout, and a client-side navigation does not re-render it.
+- **The eye toggle** shows `useMasked()` from the frame's `MaskingProvider`, which every signed-in page updates through `PageShell` from `@/app/page-shell` (`MaskingSync`), so a value changed in another tab or on another device is reflected on this tab's next navigation.
+- **A string** — a `title`, a cell for a Client Component, a phrase in a translation — comes from `currencyText(masked)`. Prefer an element: a string has no accessible name.
+
+- **An edit form that round-trips a stored amount** — a goal's amount, a watch rule's thresholds, a transaction's price and fees — is replaced by `RevealValuesForm` while masked: one sentence and a "Mostrar valores" button that writes the same key. Rendering the input empty is not an option: the form would submit the blank as the new amount.
+
+Exports never read the key (BR-022-27). Preferências revalidates the layout on save, so the frame's toggle and the charts' context follow a change made there. `tests/structural/amounts-are-masked.test.ts` holds pages to these doors; `tests/e2e/hide-values.spec.ts` fetches every signed-in page's HTML, unmasked and then masked, and finds no figure after `R$` but the catalogue's own copy, no chart coordinate and no edit input carrying an amount.
+
 **DS-30 — A new user preference is a registry key, not a component.** `ui.theme` is a `ZodEnum` at `levels: ['user']`, and the SPEC-002 preferences screen renders it with no other change. Adding a bespoke settings control would fork a surface that is currently generated.
 
 ## 9. Charts
@@ -203,7 +214,7 @@ Two caveats carried forward:
 
 **DS-32 — Import the palette; never pass a literal colour to a chart.** `assetClassColor()` and `chartColorAt()` are the only sources. Series that are not asset classes — benchmarks, wallets — take slots in order from `CHART_SERIES_COLORS`.
 
-**DS-33 — Spread the shared props.** `chartAxisProps`, `chartGridProps`, `chartTooltipProps` and `chartMarkProps` exist so two reports cannot arrive at different tick formatting and different tooltip chrome. `chartMarkProps` carries the background-coloured stroke that keeps `--chart-4` (Okabe–Ito's yellow) legible on a light background.
+**DS-33 — Spread the shared props.** `chartAxisProps`, `chartGridProps`, `chartTooltipProps` and `chartMarkProps` exist so two reports cannot arrive at different tick formatting and different tooltip chrome. `chartMarkProps` carries the background-coloured stroke that keeps `--chart-4` (Okabe–Ito's yellow) legible on a light background. A chart whose value axis is money also takes a `masked` prop and spreads `valueChartProps(masked)`'s `valueAxis` on its `YAxis` and `valueTooltip` on its `Tooltip`, after the shared props, and the page hands it coordinates through `concealSeries` (DS-59). `tests/structural/amounts-are-masked.test.ts` fails a money chart that does not.
 
 **DS-34 — Legends render as text below the plot on small screens.** An in-chart legend on a 375px viewport consumes the plot area it exists to explain. `ChartLegend` pairs each swatch with a label and marks the swatch `aria-hidden` — it carries nothing the label does not.
 

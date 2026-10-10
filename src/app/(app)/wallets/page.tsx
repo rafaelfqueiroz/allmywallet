@@ -9,11 +9,11 @@ import {
 } from '@/app/(app)/wallets/actions';
 import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { tryUserId } from '@/lib/session';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Field } from '@/components/patterns/field';
 import { Stack } from '@/components/layout/stack';

@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach, expect } from 'vitest';
+import { afterEach, expect, vi } from 'vitest';
 import * as axeMatchers from 'vitest-axe/matchers';
 
 // vitest-axe's own `extend-expect` entry targets Vitest 0.x and silently fails
@@ -68,3 +68,17 @@ if (!Element.prototype.hasPointerCapture) {
   Element.prototype.setPointerCapture = function setPointerCapture() {};
   Element.prototype.releasePointerCapture = function releasePointerCapture() {};
 }
+
+/*
+ * SPEC-022 BR-022-25 — `@/app/money` reads the account's masking preference
+ * on the server, through `React.cache` and the session. Neither exists in
+ * jsdom: the client build's `cache` does not memoise, so `use()` would suspend
+ * on a fresh promise every render and the component would never appear.
+ * Components are tested unmasked unless a test says otherwise —
+ * `vi.mocked(useHideValues).mockReturnValue(true)` — and the server read itself
+ * is covered where there is a server: `tests/e2e/hide-values.spec.ts`.
+ */
+vi.mock('@/app/hide-values', () => ({
+  loadHideValues: vi.fn(async () => false),
+  useHideValues: vi.fn(() => false),
+}));

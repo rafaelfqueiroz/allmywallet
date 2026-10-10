@@ -8,7 +8,7 @@ import { createGoalAction } from '@/app/(app)/wallets/goal-actions';
 import { tryUserId } from '@/lib/session';
 import { GrowthGoalCard } from '@/app/(app)/wallets/[walletId]/goals/_components/GrowthGoalCard';
 import { EarningsGoalCard } from '@/app/(app)/wallets/[walletId]/goals/_components/EarningsGoalCard';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';

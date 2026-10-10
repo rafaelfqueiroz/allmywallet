@@ -94,6 +94,11 @@
     "expandSidebar": "Expandir menu lateral",
     "help": "Guia de primeiros passos"
   },
+  "hideValues": {
+    "toggle": "Ocultar valores",
+    "formHidden": "Os valores estão ocultos. Para editar, mostre os valores.",
+    "reveal": "Mostrar valores"
+  },
   "accountMenu": {
     "trigger": "Menu da conta",
     "account": "Conta",
@@ -221,7 +226,8 @@
     "empty": "Nada por aqui ainda",
     "skipToContent": "Pular para o conteúdo",
     "retry": "Tentar novamente",
-    "estimated": "Estimado"
+    "estimated": "Estimado",
+    "hiddenValue": "Valor oculto"
   },
   "field": {
     "instructions": "Instruções sobre {label}"
@@ -361,6 +367,10 @@
         "theme": {
           "label": "Tema",
           "description": "Seguir o sistema, ou fixar em claro ou escuro."
+        },
+        "hide_values": {
+          "label": "Ocultar valores",
+          "description": "Esconde os valores em reais e os rótulos dos gráficos de valor em todas as telas. As exportações sempre trazem os valores."
         }
       },
       "wallets": {
@@ -512,7 +522,7 @@
     "classifySubmit": "Classificar",
     "subscriptionOffer": {
       "pairing": "Esta linha é o exercício de uma subscrição cujo crédito — {quantity} {assetCode} em {date} — você classificou como {type}, a custo zero.",
-      "priceHint": "Resolver como subscrição vai precificá-lo pelo fechamento de {closeDate} ({closeValue}), marcado como estimativa.",
+      "priceHint": "Resolver como subscrição vai precificá-lo pelo fechamento de {closeDate} (<price>{closeValue}</price>), marcado como estimativa.",
       "closeMissing": "Ainda não há um preço de fechamento guardado para essa data. Importe a Movimentação de novo para buscá-lo.",
       "resolve": "Resolver como subscrição",
       "keep": "Manter minha classificação"

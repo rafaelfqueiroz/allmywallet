@@ -12,12 +12,14 @@ import { tryUserId } from '@/lib/session';
 import { loadEarnings } from '@/app/(app)/reports/earnings/data';
 import { IncomeChart } from '@/app/(app)/reports/earnings/_components/IncomeChart';
 import { ByTypeBreakdown } from '@/app/(app)/reports/earnings/_components/ByTypeBreakdown';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
+import { loadHideValues } from '@/app/hide-values';
+import { concealSeries } from '@/app/chart-series';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
@@ -64,6 +66,8 @@ export default async function EarningsPage({ searchParams }: PageProps) {
     );
   }
 
+  // SPEC-022 BR-022-24: the income chart's coordinates are rescaled when masked.
+  const masked = await loadHideValues();
   const raw = await searchParams;
   const params = {
     get: (name: string) => {
@@ -130,15 +134,20 @@ export default async function EarningsPage({ searchParams }: PageProps) {
           <Section title={tp('monthly.title')} description={tp('monthly.description')}>
             <Stack gap="md">
               <IncomeChart
+                masked={masked}
                 title={tp('monthly.chartLabel')}
                 summary={<MonthlyTable months={report.monthly} labels={monthlyLabels(tp)} />}
                 labels={{ bars: tp('monthly.bars'), average: tp('monthly.average') }}
-                points={report.monthly.map((month) => ({
-                  month: month.month,
-                  amount: Number(month.amount.toString()),
-                  average:
-                    month.movingAverage === null ? null : Number(month.movingAverage.toString()),
-                }))}
+                points={concealSeries(
+                  report.monthly.map((month) => ({
+                    month: month.month,
+                    amount: Number(month.amount.toString()),
+                    average:
+                      month.movingAverage === null ? null : Number(month.movingAverage.toString()),
+                  })),
+                  ['amount', 'average'],
+                  masked,
+                )}
               />
             </Stack>
           </Section>

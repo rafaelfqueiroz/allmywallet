@@ -88,7 +88,10 @@ export async function saveUserPreference(
 
   if (isErr(result)) return { status: 'error', errorCode: result.error.code };
 
-  revalidatePath('/preferences');
+  // The layout, not just this page: `ui.theme` and `ui.hide_values` are read
+  // by the signed-in frame (its theme sync, the eye toggle and the charts'
+  // masking context), which a page-scoped revalidation leaves stale.
+  revalidatePath('/', 'layout');
   return { status: 'saved' };
 }
 

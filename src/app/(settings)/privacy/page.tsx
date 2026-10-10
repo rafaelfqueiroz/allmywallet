@@ -4,7 +4,7 @@ import { tryUserId } from '@/lib/session';
 import { CONSENT_PURPOSES, type ConsentPurpose } from '@/core/privacy/ports';
 import { loadConsentStates, loadDeletionStatus } from '@/app/(settings)/privacy/data';
 import { requestAccountDeletionAction, setConsentAction } from '@/app/(settings)/privacy/actions';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Stack } from '@/components/layout/stack';

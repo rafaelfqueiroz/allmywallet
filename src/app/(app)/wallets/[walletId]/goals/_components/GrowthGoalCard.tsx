@@ -12,7 +12,9 @@ import { EditDeleteForms } from '@/app/(app)/wallets/[walletId]/goals/_component
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
+import { loadHideValues } from '@/app/hide-values';
+import { concealSeries } from '@/app/chart-series';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
@@ -45,11 +47,18 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
   const t = await getTranslations('objetivos');
   const tCommon = await getTranslations('common');
 
-  const points: GrowthChartPoint[] = growth.series.map((point) => ({
-    date: point.date,
-    value: point.kind === 'available' ? Number(point.value.toString()) : null,
-    goal: Number(growth.goalAmount.toString()),
-  }));
+  // SPEC-022 BR-022-24: rescaled when masked — the line and the goal keep
+  // their relation, and no amount reaches the browser.
+  const masked = await loadHideValues();
+  const points: GrowthChartPoint[] = concealSeries(
+    growth.series.map((point) => ({
+      date: point.date,
+      value: point.kind === 'available' ? Number(point.value.toString()) : null,
+      goal: Number(growth.goalAmount.toString()),
+    })),
+    ['value', 'goal'],
+    masked,
+  );
 
   // BR-019-12 / CR-1 — marked beside the chart, not in a footnote read once
   // and never again (patrimonio's `ValueChart` does the same for the same
@@ -101,6 +110,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
 
             <Stack gap="sm">
               <GrowthChart
+                masked={masked}
                 points={points}
                 title={t('growth.chartTitle', { name: goal.name })}
                 summary={

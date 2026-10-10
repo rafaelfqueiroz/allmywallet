@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PieChart } from 'recharts';
-import { ChartContainer } from '@/components/charts/chart-container';
+import { ChartContainer, valueChartProps } from '@/components/charts/chart-container';
 import { ChartLegend } from '@/components/charts/chart-legend';
 import { assetClassColor } from '@/components/charts/palette';
 import { audit, render, screen } from '@/components/test-utils';
@@ -78,5 +78,21 @@ describe('ChartLegend', () => {
       <ChartLegend entries={[{ label: 'Ações', color: assetClassColor('stock') }]} />,
     );
     expect(await audit(container)).toHaveNoViolations();
+  });
+});
+
+describe('valueChartProps (SPEC-022 BR-022-24)', () => {
+  it('adds nothing when masking is off, so the shared props decide', () => {
+    expect(valueChartProps(false)).toEqual({ valueAxis: {}, valueTooltip: {} });
+  });
+
+  it('labels every tick with the placeholder and keeps only the series name in the tooltip', () => {
+    const { valueAxis, valueTooltip } = valueChartProps(true);
+
+    expect(valueAxis.tickFormatter?.(123_456.78, 0)).toBe('R$\u00a0••••••');
+    expect(valueTooltip.formatter?.(123_456.78, 'Patrimônio', {} as never, 0, [])).toEqual([
+      'R$\u00a0••••••',
+      'Patrimônio',
+    ]);
   });
 });

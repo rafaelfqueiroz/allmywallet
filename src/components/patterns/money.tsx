@@ -1,6 +1,7 @@
 import type * as React from 'react';
 import type { Money as MoneyValue, Quantity } from '@/core/shared/money';
 import { formatCurrency, formatPercent, formatPercentPoints, formatQuantity } from '@/i18n/format';
+import { MoneyMask } from '@/components/patterns/money-mask';
 import { cn } from '@/lib/utils';
 
 /**
@@ -34,6 +35,15 @@ export type MoneyProps = Omit<React.ComponentProps<'span'>, 'children'> & {
   kind?: 'currency' | 'quantity' | 'percent' | 'percentPoints';
   /** Colour by sign and prefix an explicit +/−. For deltas, never for balances. */
   signed?: boolean;
+  /**
+   * SPEC-022 BR-022-24/26 — render a `currency` figure as the fixed
+   * placeholder instead. Quantities and percentages ignore it (DL-022-07).
+   *
+   * Pages never pass this: they import `Money` from `@/app/money`, which reads
+   * the account's `ui.hide_values` on the server. Only a Client Component sets
+   * it, from `useMasked()`.
+   */
+  masked?: boolean;
 };
 
 function format(value: MoneyValue | Quantity, kind: NonNullable<MoneyProps['kind']>): string {
@@ -47,32 +57,41 @@ export function Money({
   value,
   kind = 'currency',
   signed = false,
+  masked = false,
   className,
   ...props
 }: MoneyProps) {
   const negative = value.isNegative();
   const zero = value.isZero();
+  // A masked figure drops its sign and its colour too. Both would say whether
+  // the amount is exactly zero, and the sign would make a zero narrower than
+  // every other value — BR-022-26 is one width for every value. Direction is
+  // still on screen wherever a percentage sits beside the amount (DL-022-07).
+  const hidden = masked && kind === 'currency';
+  const showSign = signed && !hidden;
 
   // The sign is rendered as text, so the formatter never has to produce one and
   // "-R$ 10,00" versus "R$ -10,00" stops being a per-call-site decision.
   // `negated()` rather than `abs()`: Quantity has no `abs`, and negating a
   // known-negative value is the same thing without widening the union.
-  const magnitude = format(signed && negative ? value.negated() : value, kind);
-  const prefix = !signed || zero ? '' : negative ? '−' : '+';
+  const magnitude = hidden ? undefined : format(signed && negative ? value.negated() : value, kind);
+  const prefix = !showSign || zero ? '' : negative ? '−' : '+';
 
   return (
     <span
       data-slot="money"
-      data-sign={signed ? (zero ? 'zero' : negative ? 'negative' : 'positive') : undefined}
+      data-sign={showSign ? (zero ? 'zero' : negative ? 'negative' : 'positive') : undefined}
+      data-masked={hidden ? '' : undefined}
       className={cn(
         'tabular-nums',
-        signed && !zero && (negative ? 'text-negative' : 'text-positive'),
+        hidden && 'whitespace-nowrap',
+        showSign && !zero && (negative ? 'text-negative' : 'text-positive'),
         className,
       )}
       {...props}
     >
       {prefix}
-      {magnitude}
+      {hidden ? <MoneyMask /> : magnitude}
     </span>
   );
 }

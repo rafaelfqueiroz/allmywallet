@@ -51,7 +51,9 @@ describe('registry', () => {
     // `quotes.close_capture_time`, `quotes.cotahist_annual_min_days` and
     // `quotes.cotahist_timeout_ms` (SPEC-008 BR-008-09/30, when the official
     // close is read from B3's COTAHIST and how).
-    expect(CONFIG_KEYS).toHaveLength(41);
+    // Plus #206's `ui.hide_values` (SPEC-022 BR-022-25, value masking as an
+    // account preference the server applies).
+    expect(CONFIG_KEYS).toHaveLength(42);
   });
 
   it('every entry’s own key field matches the object key it is stored under (guards against copy/paste typos)', () => {
@@ -125,6 +127,8 @@ describe('registry', () => {
       // a bespoke settings control, so the generated preferences screen picks
       // it up with no change of its own.
       'ui.theme',
+      // SPEC-022 BR-022-25: masking follows the account to another device.
+      'ui.hide_values',
       // SPEC-018 BR-018-22: how often the product may write to an inbox is
       // the inbox owner's judgement, not the operator's — and BR-018-23's
       // accepted cost (a genuine second crossing suppressed) is one only the

@@ -4,7 +4,7 @@ import type { AttentionItem } from '@/core/dashboard/summary';
 import { describeGate, type GateResolution } from '@/core/onboarding/gates';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 import { List, ListItem } from '@/components/layout/list';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';

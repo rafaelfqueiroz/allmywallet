@@ -1,6 +1,7 @@
 import type { Money, Quantity } from '@/core/shared/money';
 import type { BusinessDate } from '@/core/shared/clock';
 import { DEFAULT_LOCALE } from '@/i18n/request';
+import { MASKED_CURRENCY } from '@/i18n/masked';
 
 /**
  * AR-09/AR-47: this is the only place rounding is permitted, and the only place
@@ -34,6 +35,17 @@ const quantityFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
  */
 export function formatCurrency(value: Money): string {
   return currencyFormatter.format(Number(value.toString()));
+}
+
+/**
+ * For the few amounts a page has to produce as a **string** rather than as a
+ * `<Money>` element — a `title` attribute, a cell handed to a Client
+ * Component, a phrase interpolated into a translation (BR-022-24). Prefer
+ * `<Money>` wherever an element can go: its placeholder carries an accessible
+ * name, and a string cannot.
+ */
+export function currencyText(masked: boolean): (value: Money) => string {
+  return masked ? () => MASKED_CURRENCY : formatCurrency;
 }
 
 export function formatQuantity(value: Quantity): string {

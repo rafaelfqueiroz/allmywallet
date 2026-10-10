@@ -7,6 +7,7 @@ import {
   chartGridProps,
   chartMarkProps,
   chartTooltipProps,
+  valueChartProps,
 } from '@/components/charts/chart-container';
 
 /**
@@ -31,6 +32,7 @@ export interface IncomePoint {
 }
 
 export function IncomeChart({
+  masked,
   points,
   title,
   summary,
@@ -38,16 +40,21 @@ export function IncomeChart({
 }: {
   readonly points: readonly IncomePoint[];
   readonly title: string;
+  /** SPEC-022 BR-022-24 — from the Server Component that rendered this chart's data. */
+  readonly masked: boolean;
   readonly summary: React.ReactNode;
   readonly labels: { readonly bars: string; readonly average: string };
 }) {
+  // SPEC-022 BR-022-24: a money axis and tooltip honour the eye toggle —
+  // from this page's own render, the one that rescaled `points`.
+  const { valueAxis, valueTooltip } = valueChartProps(masked);
   return (
     <ChartContainer title={title} summary={summary} height={260}>
       <ComposedChart data={[...points]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
         <CartesianGrid {...chartGridProps} />
         <XAxis dataKey="month" {...chartAxisProps} minTickGap={24} />
-        <YAxis {...chartAxisProps} width={72} />
-        <Tooltip {...chartTooltipProps} />
+        <YAxis {...chartAxisProps} {...valueAxis} width={72} />
+        <Tooltip {...chartTooltipProps} {...valueTooltip} />
         <Bar
           dataKey="amount"
           name={labels.bars}
