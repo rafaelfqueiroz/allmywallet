@@ -20,11 +20,17 @@ export interface InfoTipProps {
   /** Unique on the page; the icon's own id, referenced by its `aria-labelledby`. */
   readonly id: string;
   /**
-   * Id of the element naming what the instructions are about (the field's
-   * label). The icon's accessible name is "Instruções sobre <that label>",
-   * built with `aria-labelledby` because the label is a node here, not a
-   * string a `t()` call could interpolate.
+   * What the instructions are about — the field's label. The icon's accessible
+   * name is "Instruções sobre <label>". A string is interpolated into the
+   * name directly; a node cannot be, so it falls back to `labelledBy`.
+   *
+   * Preferring the string is deliberate: an `aria-labelledby` that points at
+   * the label makes the icon match any query for the *field's* label too
+   * (`getByLabelText('Nome')` finds two elements), which is both what a test
+   * and what a voice-control user saying "Nome" would trip over.
    */
+  readonly label: ReactNode;
+  /** Id of the element holding `label`; used only when `label` is not a string. */
   readonly labelledBy: string;
   readonly className?: string;
 }
@@ -54,7 +60,7 @@ export interface InfoTipProps {
  * and the icon is not what carries the information to a screen reader
  * (BR-016-16 spirit).
  */
-export function InfoTip({ children, id, labelledBy, className }: InfoTipProps) {
+export function InfoTip({ children, id, label, labelledBy, className }: InfoTipProps) {
   const t = useTranslations('field');
   const [open, setOpen] = useState(false);
   const pinned = useRef(false);
@@ -98,8 +104,12 @@ export function InfoTip({ children, id, labelledBy, className }: InfoTipProps) {
         <button
           type="button"
           id={id}
-          aria-label={t('instructions')}
-          aria-labelledby={`${id} ${labelledBy}`}
+          {...(typeof label === 'string'
+            ? { 'aria-label': t('instructions', { label }) }
+            : {
+                'aria-label': t('instructions', { label: '' }).trim(),
+                'aria-labelledby': `${id} ${labelledBy}`,
+              })}
           data-slot="info-tip"
           onPointerEnter={(event: PointerEvent) => {
             if (event.pointerType === 'touch') return;

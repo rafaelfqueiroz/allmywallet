@@ -84,7 +84,7 @@ export function Field({ id, label, hint, error, width, className, children }: Fi
           {label}
         </Label>
         {hint && (
-          <InfoTip id={`${id}-info`} labelledBy={labelId}>
+          <InfoTip id={`${id}-info`} label={label} labelledBy={labelId}>
             {hint}
           </InfoTip>
         )}

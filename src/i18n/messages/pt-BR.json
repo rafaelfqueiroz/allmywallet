@@ -198,7 +198,7 @@
     "estimated": "Estimado"
   },
   "field": {
-    "instructions": "Instruções sobre"
+    "instructions": "Instruções sobre {label}"
   },
   "fileUpload": {
     "title": "Arraste o arquivo aqui",
