@@ -246,13 +246,14 @@ function UrlDataTable<TData>({
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
-    if (written.current.has(urlKey)) return;
+    // Consumed on arrival: one write explains one arrival, so a later outside
+    // navigation to the same URL is still followed.
+    if (written.current.delete(urlKey)) return;
     // Someone else moved the URL (a Link, the Back button): follow it.
     written.current.clear();
     setState(parseTableUrlState(new URLSearchParams(urlKey), options));
     // `options` is rebuilt every render and only its content matters; the URL
     // is the one input whose change should re-read.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlKey]);
 
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -263,7 +264,9 @@ function UrlDataTable<TData>({
 
     const write = () => {
       const query = writeTableUrlState(urlKey, next, options);
-      written.current.add(query);
+      // An unchanged URL produces no arrival to explain, and a stale entry
+      // would swallow the next outside navigation to it.
+      if (query !== urlKey) written.current.add(query);
       router.replace(query === '' ? pathname : `${pathname}?${query}`, { scroll: false });
     };
     if (change?.debounce) timer.current = setTimeout(write, QUERY_WRITE_DELAY_MS);

@@ -449,6 +449,24 @@ describe('DataTable — pagination, filter and URL state', () => {
     expect(bodyNames()[0]).toBe('arquivo-06.xlsx');
   });
 
+  it('does not mistake the arrival of its own write for an outside change', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Imports />);
+
+    await user.click(screen.getByRole('button', { name: 'Próxima página' }));
+    expect(bodyNames()[0]).toBe('arquivo-06.xlsx');
+
+    // The URL catches up with what the table already shows.
+    nav.search = 'page=2';
+    rerender(<Imports />);
+    expect(bodyNames()[0]).toBe('arquivo-06.xlsx');
+
+    // A later outside navigation to the page-1 URL is still followed.
+    nav.search = '';
+    rerender(<Imports />);
+    expect(bodyNames()[0]).toBe('arquivo-01.xlsx');
+  });
+
   it('has no axe violations with the toolbar and pagination', async () => {
     const { container } = render(<Imports toolbar={<span>extra</span>} />);
     expect(await audit(container)).toHaveNoViolations();
