@@ -113,7 +113,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
 
   return (
     <PageShell width="wide" title={tr('title')} description={tr('description')}>
-      <ReportNav current="/reports/performance" />
+      <ReportNav />
 
       <Controls
         action="/reports/performance"

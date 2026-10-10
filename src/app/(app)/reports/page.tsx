@@ -104,7 +104,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   return (
     <PageShell width="wide" title={t('title')} description={t('description')}>
-      <ReportNav current="/reports" />
+      <ReportNav />
 
       <Controls
         action="/reports"

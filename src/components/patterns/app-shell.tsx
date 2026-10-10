@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { NAV_ITEMS, type NavItem } from '@/components/patterns/nav-items';
+import { isPathActive, navItemClassName } from '@/components/patterns/nav-link';
 
 /**
  * DL-10/DL-11 — the application frame. One navigation definition, rendered two
@@ -123,7 +124,7 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
           label={t(item.labelKey)}
           // `/wallets/abc` should light up `/wallets`, but `/import` must not
           // light up because `/importar` shares a prefix — hence the boundary.
-          active={pathname === item.href || pathname.startsWith(`${item.href}/`)}
+          active={isPathActive(pathname, item.href)}
           collapsed={collapsed}
           onNavigate={onNavigate}
         />
@@ -194,15 +195,9 @@ function NavLink({
       // page". Styling the active item without it makes the state sighted-only.
       {...(active ? { 'aria-current': 'page' as const } : {})}
       {...(collapsed ? { title: label } : {})}
-      className={cn(
-        'flex items-center gap-2 rounded-md px-2 py-field text-sm outline-none',
-        'focus-visible:ring-3 focus-visible:ring-ring/50',
-        // SPEC-022 BR-022-33 — the active item is a navy-tinted fill, the focus
-        // ring an outline: never the same token, so the two cannot be confused.
-        // Hover is the neutral `accent`, so it cannot pass for "active" either.
-        active ? 'bg-nav-active font-medium text-nav-active-foreground' : 'hover:bg-accent',
-        collapsed && 'justify-center',
-      )}
+      // SPEC-022 BR-022-33 — the same treatment as the sub-navigation and the
+      // route tabs: one class list, so "current" cannot look different here.
+      className={cn(navItemClassName(active), collapsed && 'justify-center')}
     >
       <Icon className="size-4 shrink-0" aria-hidden="true" />
       {collapsed ? <span className="sr-only">{label}</span> : label}

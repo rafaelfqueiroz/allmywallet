@@ -117,7 +117,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
 
   return (
     <PageShell width="wide" title={tp('title')} description={tp('description')}>
-      <ReportNav current="/reports/patrimonio" />
+      <ReportNav />
 
       <Controls
         action="/reports/patrimonio"
