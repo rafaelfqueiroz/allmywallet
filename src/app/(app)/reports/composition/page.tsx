@@ -77,6 +77,7 @@ interface PageProps {
 
 export default async function CompositionPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
+  const tCommon = await getTranslations('common');
   const tc = await getTranslations('composicao');
   // SPEC-018 BR-018-19: the badge reuses `/watch`'s own state labels rather
   // than a second set here, so one state never has two names (AR-44).
@@ -197,9 +198,9 @@ export default async function CompositionPage({ searchParams }: PageProps) {
                 concentratedTitle: tc('concentration.explanation', {
                   threshold: report.concentration.thresholdPct,
                 }),
-                estimated: t('estimate.badge'),
+                estimated: tCommon('estimated'),
                 estimatedTitle: t('estimate.explanation'),
-                costEstimated: t('markers.costEstimated.badge'),
+                costEstimated: tCommon('estimated'),
                 costEstimatedTitle: t('markers.costEstimated.explanation'),
                 sortBy: tc('holdings.sortBy', { column: '{column}' }),
                 sortField: tc('holdings.sortField'),

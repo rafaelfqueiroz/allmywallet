@@ -36,6 +36,7 @@ export default async function WalletDetailPage({
 }) {
   const { walletId: rawWalletId } = await params;
   const t = await getTranslations('wallets');
+  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -130,7 +131,7 @@ export default async function WalletDetailPage({
                           {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
                           <CostEstimateMarker
                             shown={detail.costEstimated.get(allocation.assetId) ?? false}
-                            label={t('markers.costEstimated.badge')}
+                            label={tCommon('estimated')}
                             title={t('markers.costEstimated.explanation')}
                           />
                         </Cluster>
