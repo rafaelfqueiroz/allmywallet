@@ -14,7 +14,7 @@ import { PageShell } from '@/components/patterns/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 import { formatPercentPoints } from '@/i18n/format';
 import { Note } from '@/components/patterns/note';
 import { Field } from '@/components/patterns/field';

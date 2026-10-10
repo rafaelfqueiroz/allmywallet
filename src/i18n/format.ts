@@ -36,6 +36,26 @@ export function formatCurrency(value: Money): string {
   return currencyFormatter.format(Number(value.toString()));
 }
 
+/**
+ * SPEC-022 BR-022-26 — what a hidden amount renders as, whatever its magnitude,
+ * so the number of digits does not leak. Decided here with the real format, so
+ * the two cannot drift into different currency symbols. The space is the same
+ * no-break space `Intl` puts after `R$`, so the placeholder never wraps where a
+ * real figure would not.
+ */
+export const MASKED_CURRENCY = 'R$\u00a0••••••';
+
+/**
+ * For the few amounts a page has to produce as a **string** rather than as a
+ * `<Money>` element — a `title` attribute, a cell handed to a Client
+ * Component, a phrase interpolated into a translation (BR-022-24). Prefer
+ * `<Money>` wherever an element can go: its placeholder carries an accessible
+ * name, and a string cannot.
+ */
+export function currencyText(masked: boolean): (value: Money) => string {
+  return masked ? () => MASKED_CURRENCY : formatCurrency;
+}
+
 export function formatQuantity(value: Quantity): string {
   return quantityFormatter.format(Number(value.toString()));
 }

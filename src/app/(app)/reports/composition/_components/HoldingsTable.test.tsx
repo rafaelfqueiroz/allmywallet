@@ -358,4 +358,45 @@ describe('HoldingsTable — sorting without column headers', () => {
     // watch at all.
     expect(column('Estado')).toEqual(['compra', 'sem cotação válida', '']);
   });
+
+  /**
+   * SPEC-022 BR-022-24/26 — the page masks on the server and sends the
+   * placeholder as `text`; the table renders it with an accessible name, and
+   * keeps a masked gain's sign as text so colour never carries it alone.
+   */
+  it('renders a masked amount as the placeholder, with its sign and an accessible name', () => {
+    const masked = (negative = false): Cell => ({
+      text: 'R$\u00a0••••••',
+      rank: 0,
+      negative,
+      masked: true,
+    });
+    const [first] = rows;
+    const { container } = render(
+      <HoldingsTable
+        rows={[
+          {
+            ...first!,
+            averagePrice: masked(),
+            currentPrice: masked(),
+            value: masked(),
+            unrealizedGain: masked(true),
+          },
+        ]}
+        labels={labels}
+      />,
+    );
+
+    expect(container.innerHTML).not.toMatch(/R\$\s*\d/);
+    // Four amounts, rendered twice each: the table and the card list (DS-28).
+    expect(screen.getAllByText('Valor oculto')).toHaveLength(8);
+    expect(
+      [...container.querySelectorAll('[aria-hidden="true"]')].filter(
+        (node) => node.textContent === 'R$\u00a0••••••',
+      ),
+    ).toHaveLength(8);
+    expect(container.textContent).toContain('−R$\u00a0••••••');
+    // DL-022-07: the quantity and the share stay.
+    expect(screen.getAllByText('50,00%').length).toBeGreaterThan(0);
+  });
 });

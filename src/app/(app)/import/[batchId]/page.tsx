@@ -3,7 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { ImportBatchId } from '@/core/shared/ids';
 import { positionKeyString } from '@/core/positions/replay';
 import { SystemClock } from '@/core/shared/clock';
-import { formatBusinessDate, formatCurrency, formatDateTime, formatQuantity } from '@/i18n/format';
+import { currencyText, formatBusinessDate, formatDateTime, formatQuantity } from '@/i18n/format';
 import type { RowRefusal } from '@/core/ingestion/refusal';
 import type { CorporateEventOutcome } from '@/core/ingestion/corporate-event-resolution';
 import { ratioPrefillFor } from '@/core/ingestion/corporate-event-evidence';
@@ -39,7 +39,8 @@ import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
+import { loadHideValues } from '@/app/hide-values';
 import { Badge } from '@/components/ui/badge';
 import { NativeSelect } from '@/components/ui/native-select';
 import { List, ListItem } from '@/components/layout/list';
@@ -188,6 +189,9 @@ export default async function ImportBatchDetailPage({
       </Stack>
     );
   };
+  // SPEC-022 BR-022-24: the close price is interpolated into a sentence handed
+  // to a Client Component, so it is masked here, as a string.
+  const formatClose = currencyText(await loadHideValues());
   // SPEC-005 BR-005-20d (#157, DL-005-25): the pairing sentence and the
   // stored-close price hint (or the reason it is missing), all pre-translated
   // (AR-44) so `SubscriptionOfferPanel` stays a plain component with no
@@ -204,7 +208,7 @@ export default async function ImportBatchDetailPage({
         ? null
         : t('subscriptionOffer.priceHint', {
             closeDate: formatBusinessDate(offer.close.date),
-            closeValue: formatCurrency(offer.close.close),
+            closeValue: formatClose(offer.close.close),
           }),
     closeMissingReason: offer.close === null ? t('subscriptionOffer.closeMissing') : null,
     estimateBadge: tCommon('estimated'),

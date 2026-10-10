@@ -11,7 +11,7 @@ import { ValuationMarkers } from '@/app/(app)/dashboard/_components/ValuationMar
 import { PageShell } from '@/components/patterns/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';

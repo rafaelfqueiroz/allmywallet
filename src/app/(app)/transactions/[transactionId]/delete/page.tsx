@@ -18,7 +18,7 @@ import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Note } from '@/components/patterns/note';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';

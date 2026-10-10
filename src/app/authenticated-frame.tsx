@@ -2,10 +2,17 @@ import type { ReactNode } from 'react';
 import { AppShell } from '@/components/patterns/app-shell';
 import { AccountMenu } from '@/components/patterns/account-menu';
 import { ThemeSync } from '@/components/patterns/theme';
+import { HideValuesToggle } from '@/components/patterns/hide-values-toggle';
+import { MaskingProvider } from '@/components/patterns/masking';
 import { loadThemePreference } from '@/app/theme-data';
+import { loadHideValues } from '@/app/hide-values';
 import { loadAccountProfile } from '@/app/account-profile';
 import { reopenOnboardingAction } from '@/app/(app)/onboarding/actions';
-import { saveThemeAction, signOutAction } from '@/app/(settings)/account/actions';
+import {
+  saveHideValuesAction,
+  saveThemeAction,
+  signOutAction,
+} from '@/app/(settings)/account/actions';
 import { loadFailedBackup } from '@/app/backup-status';
 import { BackupNotice } from '@/app/backup-notice';
 
@@ -33,18 +40,28 @@ import { BackupNotice } from '@/app/backup-notice';
  * no protected surface *relies* on the middleware's cookie-presence check) —
  * and each of the menu's actions calls `requireUserId()`, which throws rather
  * than returning nothing.
+ *
+ * SPEC-022 BR-022-24/25 — the masking preference is read here for the two
+ * things that cannot ask the server themselves: the eye toggle, which has to
+ * show its state, and the charts, which label their axes in the browser.
+ * `Money` does not depend on this: it reads the same request-cached value
+ * itself, because a client-side navigation renders a page without its layout.
  */
 export async function AuthenticatedFrame({ children }: { children: ReactNode }) {
-  const [theme, profile, failedBackup] = await Promise.all([
+  const [theme, profile, failedBackup, masked] = await Promise.all([
     loadThemePreference(),
     loadAccountProfile(),
     loadFailedBackup(),
+    loadHideValues(),
   ]);
 
   return (
-    <>
+    <MaskingProvider masked={masked}>
       {theme && <ThemeSync theme={theme} />}
       <AppShell
+        topBarActions={
+          profile ? <HideValuesToggle masked={masked} action={saveHideValuesAction} /> : undefined
+        }
         account={
           profile ? (
             <AccountMenu
@@ -61,6 +78,6 @@ export async function AuthenticatedFrame({ children }: { children: ReactNode }) 
         {failedBackup && <BackupNotice failure={failedBackup} />}
         {children}
       </AppShell>
-    </>
+    </MaskingProvider>
   );
 }

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { StateBadge, type WatchState } from '@/components/patterns/state-badge';
 import { Text } from '@/components/ui/text';
 import { Cluster } from '@/components/layout/cluster';
+import { MoneyMask } from '@/components/patterns/money';
 
 /**
  * SPEC-015 BR-015-02 / AC-4 — "the table sorts by every column, ascending and
@@ -56,6 +57,12 @@ export interface Cell {
   readonly rank: number | undefined;
   /** BR-015-08's sign, decided by `Money.isNegative()` on the server. */
   readonly negative: boolean;
+  /**
+   * SPEC-022 BR-022-24 — the amount is hidden, and `text` is already the
+   * placeholder: the figure never left the server. Rendered as `MoneyMask` so
+   * the cell's accessible name says so (BR-022-26).
+   */
+  readonly masked?: boolean;
 }
 
 export interface HoldingRow {
@@ -171,7 +178,7 @@ export function HoldingsTable({
               ? { tone: cell.negative ? ('negative' as const) : ('positive' as const) }
               : {})}
           >
-            {cell.text}
+            <CellText cell={cell} signed={options?.signed === true} />
           </Text>
         );
       },
@@ -240,7 +247,7 @@ export function HoldingsTable({
         cell: ({ row }) => (
           <Cluster gap="sm" justify="end" align="baseline">
             <Text as="span" className="tabular-nums">
-              {row.original.averagePrice.text}
+              <CellText cell={row.original.averagePrice} />
             </Text>
             {row.original.costEstimated && (
               <Badge variant="outline" title={labels.costEstimatedTitle}>
@@ -263,7 +270,7 @@ export function HoldingsTable({
         cell: ({ row }) => (
           <Cluster gap="sm" justify="end" align="baseline">
             <Text as="span" className="tabular-nums">
-              {row.original.value.text}
+              <CellText cell={row.original.value} />
             </Text>
             {row.original.estimated && (
               <Badge variant="outline" title={labels.estimatedTitle}>
@@ -295,5 +302,19 @@ export function HoldingsTable({
       }}
       filter={{ placeholder: labels.filterPlaceholder }}
     />
+  );
+}
+
+/**
+ * A cell's figure. A masked one keeps its sign as text — the colour alone
+ * would otherwise carry it, which DS-09 forbids — and says it is hidden.
+ */
+function CellText({ cell, signed = false }: { readonly cell: Cell; readonly signed?: boolean }) {
+  if (!cell.masked) return cell.text;
+  return (
+    <>
+      {signed ? (cell.negative ? '−' : '+') : ''}
+      <MoneyMask />
+    </>
   );
 }

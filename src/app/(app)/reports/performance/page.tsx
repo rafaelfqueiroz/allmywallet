@@ -24,7 +24,7 @@ import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Note } from '@/components/patterns/note';

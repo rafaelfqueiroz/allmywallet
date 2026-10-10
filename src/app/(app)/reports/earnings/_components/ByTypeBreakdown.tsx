@@ -2,7 +2,7 @@ import type { EarningType } from '@/core/reporting/ports';
 import type { Money as MoneyValue } from '@/core/shared/money';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Grid } from '@/components/layout/grid';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 
 /**
  * SPEC-014 BR-014-01 — the period's proventos, broken out by type: dividend,

@@ -67,3 +67,36 @@ export async function saveThemeAction(theme: unknown): Promise<SaveThemeState> {
   revalidatePath('/', 'layout');
   return { status: 'saved' };
 }
+
+/**
+ * SPEC-022 BR-022-24/25 — the top bar's eye toggle. Writes `ui.hide_values`
+ * through the same validated `setConfigValue` as Preferências, so the toggle
+ * and the settings screen cannot disagree.
+ *
+ * A form action rather than a typed call: the toggle is a `<form>` that works
+ * before hydration, and masking is applied by the server's next render, which
+ * `revalidatePath` asks for. A value that is neither `'true'` nor `'false'`
+ * changes nothing — the form only ever sends one of the two.
+ */
+export async function saveHideValuesAction(formData: FormData): Promise<void> {
+  const raw = formData.get('hidden');
+  if (raw !== 'true' && raw !== 'false') return;
+
+  const userId = await requireUserId();
+  // AR-11, as for the theme above.
+  await withTenant(
+    userId,
+    (tx) =>
+      setConfigValue(tx, {
+        key: 'ui.hide_values',
+        level: 'user',
+        value: raw === 'true',
+        actor: { kind: 'user', userId },
+        userId,
+      }),
+    db,
+  );
+
+  // Every amount on every signed-in screen is rendered from this key.
+  revalidatePath('/', 'layout');
+}

@@ -450,6 +450,17 @@ export const REGISTRY = {
     description: 'Interface theme — follow the operating system, or force light or dark (DL-03).',
     range: "one of: 'system', 'light', 'dark'",
   },
+  'ui.hide_values': {
+    key: 'ui.hide_values',
+    schema: z.boolean(),
+    default: false,
+    levels: ['user'],
+    // SPEC-022 BR-022-25 / DL-022-06: on the account, not in browser storage,
+    // because the server has to know it before the first paint.
+    description:
+      'Hide money amounts and value-chart labels on every screen; exports are never masked (SPEC-022 BR-022-24/27).',
+    range: 'boolean',
+  },
   'auth.session_idle_days': {
     key: 'auth.session_idle_days',
     schema: z.number().int().min(1).max(365),

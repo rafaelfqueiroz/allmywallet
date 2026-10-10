@@ -1,7 +1,7 @@
 import { useTranslations } from 'next-intl';
 import type { PositionState } from '@/core/positions/position-state';
 import { Section } from '@/components/patterns/section';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
 import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';

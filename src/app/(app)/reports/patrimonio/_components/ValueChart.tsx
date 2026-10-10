@@ -6,6 +6,7 @@ import {
   chartAxisProps,
   chartGridProps,
   chartTooltipProps,
+  useValueChartProps,
 } from '@/components/charts/chart-container';
 
 /**
@@ -45,6 +46,8 @@ export function ValueChart({
   readonly title: string;
   readonly summary: React.ReactNode;
 }) {
+  // SPEC-022 BR-022-24: a money axis and tooltip honour the eye toggle.
+  const { valueAxis, valueTooltip } = useValueChartProps();
   return (
     <ChartContainer title={title} summary={summary} height={320}>
       <AreaChart data={[...points]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
@@ -56,8 +59,8 @@ export function ValueChart({
         </defs>
         <CartesianGrid {...chartGridProps} />
         <XAxis dataKey="date" {...chartAxisProps} minTickGap={32} />
-        <YAxis {...chartAxisProps} width={72} />
-        <Tooltip {...chartTooltipProps} />
+        <YAxis {...chartAxisProps} {...valueAxis} width={72} />
+        <Tooltip {...chartTooltipProps} {...valueTooltip} />
         <Area
           type="monotone"
           dataKey="value"

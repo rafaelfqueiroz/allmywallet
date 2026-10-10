@@ -6,7 +6,7 @@ import type { AllocationShift, CompositionReport } from '@/core/reporting/compos
 import type { EvaluatedState } from '@/core/opportunity/ports';
 import type { AssetId } from '@/core/shared/ids';
 import { assetClassColor, chartColorAt } from '@/components/charts/palette';
-import { formatCurrency, formatDateTime, formatPercent, formatQuantity } from '@/i18n/format';
+import { currencyText, formatDateTime, formatPercent, formatQuantity } from '@/i18n/format';
 import { fromSearchParams } from '@/lib/report-url-state';
 import { hasFixedIncome } from '@/lib/fixed-income';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
@@ -29,7 +29,9 @@ import { PageShell } from '@/components/patterns/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
-import { Money } from '@/components/patterns/money';
+import { Money } from '@/app/money';
+import { loadHideValues } from '@/app/hide-values';
+import { concealSeries } from '@/app/chart-series';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
@@ -92,6 +94,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
     );
   }
 
+  const masked = await loadHideValues();
   const raw = await searchParams;
   const params = {
     get: (name: string) => {
@@ -179,7 +182,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
 
           <Section title={tc('holdings.title')} description={tc('holdings.description')}>
             <HoldingsTable
-              rows={holdingRows(report.rows, watchStates, t, tc, tw)}
+              rows={holdingRows(report.rows, watchStates, t, tc, tw, masked)}
               labels={{
                 code: tc('holdings.code'),
                 state: tc('holdings.state'),
@@ -276,6 +279,7 @@ async function ChartOfShares({
   readonly labelOf: (key: GroupKey, names: GroupNames) => string;
 }) {
   const tc = await getTranslations('composicao');
+  const masked = await loadHideValues();
 
   const labelled = report.breakdown.map((slice, index) => ({
     slice,
@@ -314,7 +318,9 @@ async function ChartOfShares({
     <>
       <ShareChart
         title={tc('chart.title')}
-        slices={wedges}
+        // SPEC-022 BR-022-24: the ring's arcs are proportions, so they survive
+        // the rescale unchanged; only the amounts behind them are removed.
+        slices={concealSeries(wedges, ['value'], masked)}
         summary={
           <>
             <p>{tc('chart.summary')}</p>
@@ -489,6 +495,7 @@ function holdingRows(
   t: (key: string) => string,
   tc: (key: string) => string,
   tw: (key: string) => string,
+  masked: boolean,
 ): HoldingRow[] {
   const quantity = rankOf(rows, (row) => row.quantity);
   const averagePrice = rankOf(rows, (row) => row.averagePrice);
@@ -496,6 +503,7 @@ function holdingRows(
   const value = rankOf(rows, (row) => row.value);
   const share = rankOf(rows, (row) => row.share);
   const unrealizedGain = rankOf(rows, (row) => row.unrealizedGain);
+  const currency = currencyText(masked);
 
   return rows.map((row, index) => ({
     id: row.assetId,
@@ -505,11 +513,14 @@ function holdingRows(
     // BR-015-03 / DL-015-04: never dropped, and never blank either.
     sector: row.sector ?? t('group.notClassified'),
     quantity: cell(row.quantity, formatQuantity, quantity[index]),
-    averagePrice: cell(row.averagePrice, formatCurrency, averagePrice[index]),
-    currentPrice: cell(row.currentPrice, formatCurrency, currentPrice[index]),
-    value: cell(row.value, formatCurrency, value[index]),
+    // SPEC-022 BR-022-24: amounts are masked here, on the server; the
+    // quantity and the share stay (DL-022-07). Ranks survive, so a masked
+    // column still sorts — an order is not an amount.
+    averagePrice: cell(row.averagePrice, currency, averagePrice[index], masked),
+    currentPrice: cell(row.currentPrice, currency, currentPrice[index], masked),
+    value: cell(row.value, currency, value[index], masked),
     share: cell(row.share, formatPercent, share[index]),
-    unrealizedGain: cell(row.unrealizedGain, formatCurrency, unrealizedGain[index]),
+    unrealizedGain: cell(row.unrealizedGain, currency, unrealizedGain[index], masked),
     concentrated: row.concentrated,
     estimated: row.estimated,
     costEstimated: row.costEstimated,
@@ -551,12 +562,13 @@ function cell<T extends MoneyValue | Quantity>(
   figure: T | null,
   format: (value: T) => string,
   rank: number | undefined,
+  masked = false,
 ): Cell {
   return figure === null
     ? // An em dash and no rank — see `Cell.rank`, which sorts it last in both
       // directions rather than letting it pass for zero.
       { text: '—', rank: undefined, negative: false }
-    : { text: format(figure), rank, negative: figure.isNegative() };
+    : { text: format(figure), rank, negative: figure.isNegative(), masked };
 }
 
 /**
