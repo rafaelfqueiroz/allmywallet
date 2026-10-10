@@ -116,47 +116,48 @@ describe('AppShell', () => {
   });
 
   /**
-   * SPEC-020 BR-020-13 — the help entry point. `helpAction` is optional so a
-   * shell rendered with none (a test, a future route group) does not gain a
-   * dead button; every real render (`authenticated-frame.tsx`) always passes
-   * one.
+   * SPEC-022 BR-022-09 — the top bar. Its contents are slots, so the shell is
+   * tested with stand-ins; the account menu has its own tests.
    */
-  describe('the help entry point (SPEC-020 BR-020-13)', () => {
-    it('renders no help entry when no action is supplied', () => {
+  describe('the top bar (SPEC-022 BR-022-09)', () => {
+    it('renders the account menu and the top-bar actions on every screen', () => {
+      pathname.current = '/reports';
+      render(
+        <AppShell
+          account={<button type="button">Conta</button>}
+          topBarActions={<button type="button">Ocultar valores</button>}
+        >
+          conteúdo
+        </AppShell>,
+      );
+
+      const bar = screen.getByRole('banner');
+      expect(within(bar).getByRole('button', { name: 'Conta' })).toBeInTheDocument();
+      expect(within(bar).getByRole('button', { name: 'Ocultar valores' })).toBeInTheDocument();
+    });
+
+    it('renders an empty top bar for a visitor with no session', () => {
       pathname.current = '/wallets';
       render(<AppShell>conteúdo</AppShell>);
+
+      expect(screen.getByRole('banner')).toBeInTheDocument();
       expect(
-        screen.queryByRole('button', { name: 'Guia de primeiros passos' }),
-      ).not.toBeInTheDocument();
+        within(screen.getByRole('banner')).queryByRole('button', { name: 'Conta' }),
+      ).toBeNull();
     });
 
-    it('submits the action rather than navigating, so reopening is never a GET', async () => {
+    // BR-022-10: the help entry belongs to the person, so it left the sidebar.
+    it('offers no help entry in the navigation itself', () => {
       pathname.current = '/wallets';
-      const user = userEvent.setup();
-      const helpAction = vi.fn().mockResolvedValue(undefined);
-      render(<AppShell helpAction={helpAction}>conteúdo</AppShell>);
-
-      const button = screen.getByRole('button', { name: 'Guia de primeiros passos' });
-      expect(button.closest('form')).toBeInTheDocument();
-      expect(button).not.toHaveAttribute('href');
-
-      await user.click(button);
-      await waitFor(() => expect(helpAction).toHaveBeenCalled());
+      render(<AppShell>conteúdo</AppShell>);
+      expect(screen.queryByText('Guia de primeiros passos')).not.toBeInTheDocument();
     });
 
-    it('keeps the label reachable by a screen reader when the sidebar is collapsed', async () => {
+    it('has no axe violations with both slots filled', async () => {
       pathname.current = '/wallets';
-      const user = userEvent.setup();
-      render(<AppShell helpAction={vi.fn()}>conteúdo</AppShell>);
-
-      await user.click(screen.getByRole('button', { name: 'Recolher menu lateral' }));
-
-      expect(screen.getByRole('button', { name: 'Guia de primeiros passos' })).toBeInTheDocument();
-    });
-
-    it('has no axe violations with the help entry present', async () => {
-      pathname.current = '/wallets';
-      const { container } = render(<AppShell helpAction={vi.fn()}>conteúdo</AppShell>);
+      const { container } = render(
+        <AppShell account={<button type="button">Conta</button>}>conteúdo</AppShell>,
+      );
       expect(await audit(container)).toHaveNoViolations();
     });
   });

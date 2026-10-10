@@ -62,7 +62,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell width="wide" title={t('title')}>
+      <PageShell title={t('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -104,7 +104,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
   }));
 
   return (
-    <PageShell width="wide" title={t('title')} description={t('description')}>
+    <PageShell title={t('title')} description={t('description')}>
       <ReportNav />
 
       <Controls

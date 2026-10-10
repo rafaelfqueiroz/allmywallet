@@ -117,25 +117,35 @@ function DropdownMenuRadioGroup({
   return <DropdownMenuPrimitive.RadioGroup data-slot="dropdown-menu-radio-group" {...props} />;
 }
 
+/**
+ * `indicator={false}` drops the trailing check for a group that shows its
+ * choice another way — the account menu's segmented theme switch marks the
+ * chosen item with a raised fill, and a check beside it would collide with the
+ * label. The `menuitemradio` role and `aria-checked` are Radix's either way.
+ */
 function DropdownMenuRadioItem({
   className,
   children,
+  indicator = true,
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.RadioItem> & { indicator?: boolean }) {
   return (
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "relative flex cursor-default items-center gap-1.5 rounded-md py-1.5 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-default items-center gap-1.5 rounded-md py-1.5 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        indicator ? 'pr-8' : 'pr-1.5',
         className,
       )}
       {...props}
     >
-      <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          <CheckIcon aria-hidden="true" />
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
+      {indicator && (
+        <span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
+          <DropdownMenuPrimitive.ItemIndicator>
+            <CheckIcon aria-hidden="true" />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+      )}
       {children}
     </DropdownMenuPrimitive.RadioItem>
   );

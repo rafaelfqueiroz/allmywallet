@@ -86,7 +86,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell width="wide" title={tc('title')}>
+      <PageShell title={tc('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -124,7 +124,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
   const labelOf = (key: GroupKey, names: GroupNames): string => resolveGroupLabel(key, names, t);
 
   return (
-    <PageShell width="wide" title={tc('title')} description={tc('description')}>
+    <PageShell title={tc('title')} description={tc('description')}>
       <ReportNav />
 
       <Controls

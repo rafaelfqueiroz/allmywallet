@@ -53,7 +53,6 @@ export default async function FixedIncomeContractPage({ params }: PageProps) {
 
   return (
     <PageShell
-      width="narrow"
       title={t('title')}
       description={t('assetLabel', { code: form.assetCode, name: form.assetName })}
     >

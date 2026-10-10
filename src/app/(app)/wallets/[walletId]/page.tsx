@@ -41,7 +41,7 @@ export default async function WalletDetailPage({
 
   if (userId === undefined) {
     return (
-      <PageShell width="narrow">
+      <PageShell>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -56,7 +56,6 @@ export default async function WalletDetailPage({
 
   return (
     <PageShell
-      width="narrow"
       title={wallet.name}
       actions={
         <Cluster gap="sm">

@@ -31,7 +31,7 @@ export default async function PrivacyPage() {
 
   if (!userId) {
     return (
-      <PageShell width="narrow" title={t('title')} description={t('description')}>
+      <PageShell title={t('title')} description={t('description')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -43,7 +43,7 @@ export default async function PrivacyPage() {
   ]);
 
   return (
-    <PageShell width="narrow" title={t('title')} description={t('description')}>
+    <PageShell title={t('title')} description={t('description')}>
       <Stack gap="xl">
         <Section title={t('consent.title')} description={t('consent.description')}>
           <List gap="md">

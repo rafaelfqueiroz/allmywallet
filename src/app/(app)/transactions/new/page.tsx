@@ -48,7 +48,7 @@ export default async function NewTransactionPage() {
   );
 
   return (
-    <PageShell width="wide" title={t('form.createTitle')} description={t('form.createDescription')}>
+    <PageShell title={t('form.createTitle')} description={t('form.createDescription')}>
       <TransactionForm
         action={createTransactionAction}
         mode="create"

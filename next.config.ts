@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 import createNextIntlPlugin from 'next-intl/plugin';
+import { LEGACY_REDIRECTS, toNextRedirects } from './src/lib/legacy-redirects';
 
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
@@ -21,6 +22,11 @@ const nextConfig: NextConfig = {
    * so the layout does not shift while they load.
    */
   images: { unoptimized: true },
+  // SPEC-022 BR-022-08: every pre-M10 URL redirects permanently to where its
+  // screen moved. The table, and why it is one, is in src/lib/legacy-redirects.ts.
+  async redirects() {
+    return toNextRedirects(LEGACY_REDIRECTS);
+  },
 };
 
 export default withNextIntl(nextConfig);

@@ -64,8 +64,9 @@ export default async function PrivacyPolicyPage() {
   ] as const;
 
   return (
-    <PageShell width="narrow" title={t('title')} description={t('description')}>
-      <Stack gap="xl">
+    <PageShell title={t('title')} description={t('description')}>
+      {/* Outside the frame, so BR-022-14 does not bind it; a legal text keeps a reading measure. */}
+      <Stack gap="xl" className="max-w-3xl">
         <Text tone="muted" size="xs">
           {t('version', { version: CURRENT_PRIVACY_POLICY_VERSION })}
         </Text>

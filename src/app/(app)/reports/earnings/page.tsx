@@ -58,7 +58,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell width="wide" title={tp('title')}>
+      <PageShell title={tp('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -84,7 +84,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
   });
 
   return (
-    <PageShell width="wide" title={tp('title')} description={tp('description')}>
+    <PageShell title={tp('title')} description={tp('description')}>
       <ReportNav />
 
       <Controls

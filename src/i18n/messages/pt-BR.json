@@ -87,13 +87,39 @@
     "import": "Importar",
     "reports": "Relatórios",
     "settings": "Configurações",
-    "privacy": "Privacidade",
     "appName": "AllMyWallet",
     "menu": "Navegação",
     "openMenu": "Abrir menu",
     "collapseSidebar": "Recolher menu lateral",
     "expandSidebar": "Expandir menu lateral",
     "help": "Guia de primeiros passos"
+  },
+  "accountMenu": {
+    "trigger": "Menu da conta",
+    "account": "Conta",
+    "preferences": "Preferências",
+    "privacy": "Privacidade",
+    "signOut": "Sair",
+    "theme": {
+      "label": "Tema",
+      "light": "Claro",
+      "dark": "Escuro",
+      "system": "Sistema"
+    }
+  },
+  "account": {
+    "title": "Conta",
+    "description": "Os seus dados de perfil, exatamente como o Google os fornece.",
+    "signedOut": "Entre na sua conta para ver o seu perfil.",
+    "profileTitle": "Perfil",
+    "name": "Nome",
+    "email": "E-mail",
+    "picture": "Foto",
+    "notProvided": "Não informado pelo Google",
+    "source": "Estes dados vêm da sua conta Google. O AllMyWallet não guarda nenhum outro dado pessoal.",
+    "privacyTitle": "Seus dados",
+    "privacyBody": "Para exportar os seus dados ou excluir a sua conta, use a página de Privacidade.",
+    "privacyLink": "Ir para Privacidade"
   },
   "dashboard": {
     "title": "Painel",

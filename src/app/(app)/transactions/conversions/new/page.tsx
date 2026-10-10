@@ -25,7 +25,7 @@ export default async function NewAssetConversionPage() {
     institutions: await listInstitutionOptions(),
   }));
   return (
-    <PageShell title={t('createTitle')} description={t('createDescription')} width="wide">
+    <PageShell title={t('createTitle')} description={t('createDescription')}>
       <NewConversionGroupForm
         action={createAssetConversionGroupAction}
         assets={options.assets}

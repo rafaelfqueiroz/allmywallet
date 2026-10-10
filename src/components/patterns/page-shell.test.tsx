@@ -39,18 +39,16 @@ describe('PageShell', () => {
     expect(screen.getByRole('main').querySelector('[data-slot="page-header"]')).not.toBeNull();
   });
 
-  // The drift this component exists to end: five different max-widths across
-  // five peer screens on main.
-  it('offers three named widths and nothing else', () => {
-    const widths = { narrow: 'max-w-2xl', default: 'max-w-5xl', wide: 'max-w-7xl' } as const;
+  // SPEC-022 BR-022-14: one width, and no prop or class to choose another.
+  it('renders one maximum width and one left edge for every page', () => {
+    const { unmount } = render(<PageShell title="Painel">conteúdo</PageShell>);
+    const first = screen.getByRole('main').className;
+    unmount();
 
-    for (const [width, expected] of Object.entries(widths)) {
-      const { unmount } = render(
-        <PageShell width={width as keyof typeof widths}>conteúdo</PageShell>,
-      );
-      expect(screen.getByRole('main').className).toContain(expected);
-      unmount();
-    }
+    render(<PageShell title="Relatórios">conteúdo</PageShell>);
+    expect(screen.getByRole('main').className).toBe(first);
+    expect(first).toContain('max-w-7xl');
+    expect(first).toContain('mx-auto');
   });
 
   it('has no axe violations', async () => {
