@@ -11,7 +11,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
   ArrowDown,
@@ -86,12 +86,21 @@ import { EmptyState } from '@/components/patterns/empty-state';
  * **State lives in the URL** — sort, page, page size and filter text — so a
  * view can be bookmarked and a reload does not lose it (SPEC-011 BR-011-11's
  * reasoning; `lib/table-url-state.ts` is the parser). While mounted the
- * component's own state is the truth and the URL is a mirror of it: the mirror
- * is written with `router.replace` (a history entry per keystroke would make
- * Back useless), the filter text's write is debounced, and the URL is adopted
- * again only when something *else* changed it. Without that last rule a slow
+ * component's own state is the truth and the URL is a mirror of it, and the URL
+ * is adopted again only when something *else* changed it. Without that rule a
  * write landing behind a fast typist would put the input back to what it said
  * a moment ago.
+ *
+ * The mirror is written with **`window.history.replaceState`, not
+ * `router.replace`**. Next syncs `replaceState` into `useSearchParams`, so the
+ * URL is still the shareable, reloadable truth — but nothing goes to the
+ * server. The rows are already here and sorting, paging and filtering narrow
+ * them locally; `router.replace` would refetch the whole page's server data
+ * (a report's use case, on every sort click and every keystroke) to learn
+ * nothing new. It replaces rather than pushes, so Back leaves the page instead
+ * of stepping through column clicks. With no server round trip the write is
+ * cheap enough to happen per keystroke, so the filter text is not debounced.
+ * A control that *should* refetch (the scope selector) navigates instead.
  *
  * `useSearchParams` makes a statically rendered page bail out to client
  * rendering up to the nearest Suspense boundary, so the connected table sits in
@@ -164,8 +173,6 @@ export type DataTableProps<TData> = {
 
 const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 25;
-/** How long typing pauses before the filter text is written to the URL. */
-const QUERY_WRITE_DELAY_MS = 300;
 
 /** A column's id, as TanStack will derive it — needed before the table exists. */
 function columnId<TData>(column: ColumnDef<TData, unknown>): string | undefined {
@@ -200,7 +207,7 @@ function urlOptions<TData>({
   };
 }
 
-type StateChange = (next: TableUrlState, change?: { readonly debounce?: boolean }) => void;
+type StateChange = (next: TableUrlState) => void;
 
 export function DataTable<TData>(props: DataTableProps<TData>) {
   const options = urlOptions(props);
@@ -234,7 +241,6 @@ function UrlDataTable<TData>({
   options,
   ...props
 }: DataTableProps<TData> & { options: TableUrlOptions }) {
-  const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const urlKey = searchParams.toString();
@@ -243,7 +249,6 @@ function UrlDataTable<TData>({
   // Query strings this component wrote itself, so that their arrival back
   // through `useSearchParams` is not mistaken for an outside change.
   const written = useRef(new Set<string>());
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     // Consumed on arrival: one write explains one arrival, so a later outside
@@ -256,21 +261,18 @@ function UrlDataTable<TData>({
     // is the one input whose change should re-read.
   }, [urlKey]);
 
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  const onStateChange: StateChange = (next, change) => {
+  const onStateChange: StateChange = (next) => {
     setState(next);
-    clearTimeout(timer.current);
 
-    const write = () => {
-      const query = writeTableUrlState(urlKey, next, options);
-      // An unchanged URL produces no arrival to explain, and a stale entry
-      // would swallow the next outside navigation to it.
-      if (query !== urlKey) written.current.add(query);
-      router.replace(query === '' ? pathname : `${pathname}?${query}`, { scroll: false });
-    };
-    if (change?.debounce) timer.current = setTimeout(write, QUERY_WRITE_DELAY_MS);
-    else write();
+    const query = writeTableUrlState(urlKey, next, options);
+    // An unchanged URL produces no arrival to explain, and a stale entry
+    // would swallow the next outside navigation to it.
+    if (query !== urlKey) written.current.add(query);
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${query === '' ? pathname : `${pathname}?${query}`}${window.location.hash}`,
+    );
   };
 
   return <DataTableView {...props} state={state} onStateChange={onStateChange} />;
@@ -396,9 +398,7 @@ function DataTableView<TData>({
               aria-label={filter.label ?? t('filterLabel')}
               placeholder={filter.placeholder}
               className="pl-8"
-              onChange={(event) =>
-                onStateChange({ ...state, query: event.target.value, page: 1 }, { debounce: true })
-              }
+              onChange={(event) => onStateChange({ ...state, query: event.target.value, page: 1 })}
             />
           </div>
         )}

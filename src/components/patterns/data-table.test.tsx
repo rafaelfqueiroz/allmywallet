@@ -5,10 +5,13 @@ import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
 import { Money as MoneyValue } from '@/core/shared/money';
-import { audit, render, screen, userEvent, waitFor, within } from '@/components/test-utils';
+import { audit, render, screen, userEvent, within } from '@/components/test-utils';
 
-// The table mirrors its state into the URL, so it needs the router. A test
-// drives the mirror through `search` and reads what was written off `replace`.
+// The table mirrors its state into the URL with `history.replaceState` — never
+// `router.replace`, which would refetch the page's server data (see the
+// component's doc comment). A test drives the mirror through `search` and reads
+// what was written off the `replaceState` spy; `replace` is there to be asserted
+// untouched.
 const nav = vi.hoisted(() => ({ search: '', pathname: '/posicoes', replace: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
@@ -17,9 +20,12 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(nav.search),
 }));
 
+const replaceState = vi.spyOn(window.history, 'replaceState');
+
 beforeEach(() => {
   nav.search = '';
   nav.replace.mockClear();
+  replaceState.mockClear();
 });
 
 type Position = { code: string; cost: MoneyValue };
@@ -238,7 +244,7 @@ describe('DataTable — pagination, filter and URL state', () => {
       .slice(1)
       .map((row) => within(row).getAllByRole('cell')[0]?.textContent);
 
-  const lastReplace = () => nav.replace.mock.lastCall?.[0] as string;
+  const lastReplace = () => replaceState.mock.lastCall?.[2] as string;
   const writtenParams = () => new URLSearchParams(lastReplace().split('?')[1]);
 
   it('shows one page of rows and says which, with the noun the caller supplied', () => {
@@ -372,20 +378,32 @@ describe('DataTable — pagination, filter and URL state', () => {
     expect(screen.getByText('Mostrando 1–8 de 8 importações')).toBeInTheDocument();
   });
 
-  it('writes the filter text to the URL once typing pauses, and resets the page', async () => {
+  it('writes the filter text to the URL, resetting the page and keeping other parameters', async () => {
     const user = userEvent.setup();
     nav.search = 'page=2&wallet=abc';
     render(<Imports />);
 
     await user.type(screen.getByRole('searchbox'), '12');
 
-    await waitFor(() => expect(nav.replace).toHaveBeenCalled());
     expect(writtenParams().get('q')).toBe('12');
     expect(writtenParams().has('page')).toBe(false);
     // Parameters the table does not own are left alone.
     expect(writtenParams().get('wallet')).toBe('abc');
-    // One write for the burst, not one per keystroke.
-    expect(nav.replace).toHaveBeenCalledTimes(1);
+  });
+
+  // The rows are already loaded: a sort, page, size or filter change must not
+  // go to the server, which `router.replace` would.
+  it('mirrors every state change with history.replaceState and never with the router', async () => {
+    const user = userEvent.setup();
+    render(<Imports />);
+
+    await user.click(screen.getByRole('button', { name: 'Ordenar por Arquivo' }));
+    await user.click(screen.getByRole('button', { name: 'Próxima página' }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Itens por página' }), '10');
+    await user.type(screen.getByRole('searchbox'), 'a');
+
+    expect(replaceState).toHaveBeenCalledTimes(4);
+    expect(nav.replace).not.toHaveBeenCalled();
   });
 
   it('reads the filter text from the URL', () => {
