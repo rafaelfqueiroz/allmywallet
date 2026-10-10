@@ -5,7 +5,7 @@ import { WalletId } from '@/core/shared/ids';
 import { deleteWalletAction, updateWalletAction } from '@/app/(app)/wallets/actions';
 import { labelFor, loadWalletDetail } from '@/app/(app)/wallets/data';
 import { tryUserId } from '@/lib/session';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';

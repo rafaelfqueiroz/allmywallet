@@ -41,11 +41,11 @@ import { BackupNotice } from '@/app/backup-notice';
  * and each of the menu's actions calls `requireUserId()`, which throws rather
  * than returning nothing.
  *
- * SPEC-022 BR-022-24/25 — the masking preference is read here for the two
- * things that cannot ask the server themselves: the eye toggle, which has to
- * show its state, and the charts, which label their axes in the browser.
- * `Money` does not depend on this: it reads the same request-cached value
- * itself, because a client-side navigation renders a page without its layout.
+ * SPEC-022 BR-022-24/25 — the masking preference is read here only to seed
+ * the eye toggle's state. Each page then reports the value it was rendered
+ * with (`@/app/page-shell`), because a client-side navigation renders a page
+ * without its layout and the two can disagree. Nothing that hides an amount
+ * depends on this: `Money` and the charts take the page's own read.
  */
 export async function AuthenticatedFrame({ children }: { children: ReactNode }) {
   const [theme, profile, failedBackup, masked] = await Promise.all([
@@ -59,9 +59,7 @@ export async function AuthenticatedFrame({ children }: { children: ReactNode }) 
     <MaskingProvider masked={masked}>
       {theme && <ThemeSync theme={theme} />}
       <AppShell
-        topBarActions={
-          profile ? <HideValuesToggle masked={masked} action={saveHideValuesAction} /> : undefined
-        }
+        topBarActions={profile ? <HideValuesToggle action={saveHideValuesAction} /> : undefined}
         account={
           profile ? (
             <AccountMenu

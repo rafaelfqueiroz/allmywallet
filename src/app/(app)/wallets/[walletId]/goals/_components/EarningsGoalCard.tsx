@@ -78,6 +78,7 @@ function EarningsBody({
 
   // SPEC-022 BR-022-24: rescaled when masked — every mark and the goal line
   // keep their relation, and no amount reaches the browser.
+  const masked = useHideValues();
   const points: EarningsChartPoint[] = concealSeries(
     earnings.months.map((month) => ({
       month: month.month,
@@ -88,7 +89,7 @@ function EarningsBody({
       goal: goalAmountNumber,
     })),
     ['amount', 'cumulative', 'yearToDateAverage', 'goal'],
-    useHideValues(),
+    masked,
   );
 
   return (
@@ -107,6 +108,7 @@ function EarningsBody({
       </Grid>
 
       <EarningsGoalChart
+        masked={masked}
         points={points}
         period={goal.period === 'yearly' ? 'yearly' : 'monthly'}
         title={t('earnings.chartTitle', { name: goal.name, year: earnings.year })}

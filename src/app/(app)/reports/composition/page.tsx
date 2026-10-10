@@ -25,7 +25,7 @@ import {
   type Cell,
   type HoldingRow,
 } from '@/app/(app)/reports/composition/_components/HoldingsTable';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';

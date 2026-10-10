@@ -8,7 +8,7 @@ import { tryUserId } from '@/lib/session';
 import { AttentionQueue } from '@/app/(app)/dashboard/_components/AttentionQueue';
 import { ReconciliationStatus } from '@/app/(app)/dashboard/_components/ReconciliationStatus';
 import { ValuationMarkers } from '@/app/(app)/dashboard/_components/ValuationMarkers';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';

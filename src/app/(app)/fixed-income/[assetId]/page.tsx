@@ -5,7 +5,7 @@ import { loadContractTermsForm } from '@/app/(app)/fixed-income/data';
 import { supplyContractTermsAction } from '@/app/(app)/fixed-income/actions';
 import { ContractTermsForm } from '@/app/(app)/fixed-income/_components/ContractTermsForm';
 import { tryUserId } from '@/lib/session';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Stack } from '@/components/layout/stack';
 import { Text } from '@/components/ui/text';

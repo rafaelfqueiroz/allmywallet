@@ -8,7 +8,6 @@ import {
   type TooltipValueType,
   type YAxisProps,
 } from 'recharts';
-import { useMasked } from '@/components/patterns/masking';
 import { MASKED_CURRENCY } from '@/i18n/masked';
 import { cn } from '@/lib/utils';
 
@@ -115,17 +114,21 @@ export const chartTooltipProps = {
  *   "there is a scale here, hidden" rather than looking empty or broken;
  * - the tooltip keeps each series' name and drops its value.
  *
- * The plotted shape stays, as BR-022-24 requires. The coordinates themselves
- * reach the browser already rescaled when masked (`concealSeries` in
- * `src/app/chart-series.ts`), so there is no amount to read out of the page's
- * data either. A chart whose axis is not money — the rebased benchmark lines,
- * the composition ring's shares — does not use this.
+ * `masked` is a **prop of the chart**, passed by the Server Component that
+ * also rescaled the chart's coordinates with `concealSeries` — never read from
+ * the frame. The frame is a layout, and a client-side navigation does not
+ * re-render it, so its idea of the masking can be older than the page's; the
+ * labels and the coordinates must come from one render or the axis would print
+ * the 0–100 scale as though it were money.
+ *
+ * The plotted shape stays, as BR-022-24 requires. A chart whose axis is not
+ * money — the rebased benchmark lines, the composition ring's shares — does not
+ * use this.
  */
-export function useValueChartProps(): {
+export function valueChartProps(masked: boolean): {
   readonly valueAxis: Pick<YAxisProps, 'tickFormatter'>;
   readonly valueTooltip: Pick<TooltipProps<TooltipValueType, string | number>, 'formatter'>;
 } {
-  const masked = useMasked();
   if (!masked) return { valueAxis: {}, valueTooltip: {} };
   return {
     valueAxis: { tickFormatter: () => MASKED_CURRENCY },

@@ -6,7 +6,7 @@ import {
   chartAxisProps,
   chartGridProps,
   chartTooltipProps,
-  useValueChartProps,
+  valueChartProps,
 } from '@/components/charts/chart-container';
 
 /**
@@ -31,16 +31,20 @@ export interface ContributionBar {
 }
 
 export function ContributionChart({
+  masked,
   bars,
   title,
   summary,
 }: {
   readonly bars: readonly ContributionBar[];
   readonly title: string;
+  /** SPEC-022 BR-022-24 — from the Server Component that rendered this chart's data. */
+  readonly masked: boolean;
   readonly summary: React.ReactNode;
 }) {
-  // SPEC-022 BR-022-24: a money axis and tooltip honour the eye toggle.
-  const { valueAxis, valueTooltip } = useValueChartProps();
+  // SPEC-022 BR-022-24: a money axis and tooltip honour the eye toggle —
+  // from this page's own render, the one that rescaled `points`.
+  const { valueAxis, valueTooltip } = valueChartProps(masked);
   return (
     <ChartContainer title={title} summary={summary} height={240}>
       <BarChart data={[...bars]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>

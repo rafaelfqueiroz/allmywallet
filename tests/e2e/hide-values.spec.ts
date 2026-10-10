@@ -219,7 +219,7 @@ async function html(page: Page, path: string): Promise<string> {
 
 async function turnMaskingOn(page: Page): Promise<void> {
   await page.goto('/dashboard');
-  const toggle = page.getByRole('button', { name: 'Ocultar valores' });
+  const toggle = page.getByRole('button', { name: 'Ocultar valores', exact: true });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();
   // The server applies it: the page comes back re-rendered, already masked.
@@ -299,10 +299,9 @@ test('with masking on, no page sends an amount, and the choice follows the accou
     );
     const other = await elsewhere.newPage();
     await other.goto('/dashboard');
-    await expect(other.getByRole('button', { name: 'Ocultar valores' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
+    await expect(
+      other.getByRole('button', { name: 'Ocultar valores', exact: true }),
+    ).toHaveAttribute('aria-pressed', 'true');
     expect(amountsIn(await html(other, '/reports/composition'))).toEqual([]);
   } finally {
     await elsewhere.close();
@@ -310,12 +309,51 @@ test('with masking on, no page sends an amount, and the choice follows the accou
 
   // And back: the toggle is a toggle.
   await page.goto('/dashboard');
-  await page.getByRole('button', { name: 'Ocultar valores' }).click();
-  await expect(page.getByRole('button', { name: 'Ocultar valores' })).toHaveAttribute(
+  await page.getByRole('button', { name: 'Ocultar valores', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Ocultar valores', exact: true })).toHaveAttribute(
     'aria-pressed',
     'false',
   );
   expect(amountsIn(await html(page, '/reports/composition'))).toContain('4.000,00');
+});
+
+/**
+ * The PR #222 review: a client-side navigation re-renders the page and not the
+ * frame. Masking switched on in another session must not leave this tab's eye
+ * reading "not pressed" over a page the server rendered masked.
+ */
+test('after masking changes elsewhere, the eye follows the next page this tab navigates to', async ({
+  signedIn,
+  browser,
+  baseURL,
+}) => {
+  const { page, userId } = signedIn;
+  await seedHoldings(userId, [{ code: 'TABSX', quantity: '10', averageCost: '30', price: '40' }]);
+  await dismissOnboarding(userId);
+
+  await page.goto('/dashboard');
+  const eye = page.getByRole('button', { name: 'Ocultar valores', exact: true });
+  await expect(eye).toHaveAttribute('aria-pressed', 'false');
+
+  const elsewhere = await browser.newContext();
+  try {
+    await attachSession(
+      elsewhere,
+      await seedSessionFor(userId),
+      baseURL ?? 'http://localhost:3000',
+    );
+    await turnMaskingOn(await elsewhere.newPage());
+  } finally {
+    await elsewhere.close();
+  }
+
+  // A soft navigation, through a `next/link` in the account menu — the
+  // layout, and the eye it rendered, stay mounted.
+  await page.getByRole('button', { name: /menu da conta/i }).click();
+  await page.getByRole('menuitem', { name: 'Preferências' }).click();
+  await expect(page).toHaveURL(/\/preferences$/);
+
+  await expect(eye).toHaveAttribute('aria-pressed', 'true');
 });
 
 /**

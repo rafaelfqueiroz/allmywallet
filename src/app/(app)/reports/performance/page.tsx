@@ -19,7 +19,7 @@ import { tryUserId } from '@/lib/session';
 import { comparisonSeries } from '@/core/reporting/performance/comparison-series';
 import { loadPerformance } from '@/app/(app)/reports/performance/data';
 import { BenchmarkChart } from '@/app/(app)/reports/performance/_components/BenchmarkChart';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';

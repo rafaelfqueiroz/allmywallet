@@ -12,7 +12,7 @@ import { tryUserId } from '@/lib/session';
 import { loadEarnings } from '@/app/(app)/reports/earnings/data';
 import { IncomeChart } from '@/app/(app)/reports/earnings/_components/IncomeChart';
 import { ByTypeBreakdown } from '@/app/(app)/reports/earnings/_components/ByTypeBreakdown';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
@@ -134,6 +134,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
           <Section title={tp('monthly.title')} description={tp('monthly.description')}>
             <Stack gap="md">
               <IncomeChart
+                masked={masked}
                 title={tp('monthly.chartLabel')}
                 summary={<MonthlyTable months={report.monthly} labels={monthlyLabels(tp)} />}
                 labels={{ bars: tp('monthly.bars'), average: tp('monthly.average') }}

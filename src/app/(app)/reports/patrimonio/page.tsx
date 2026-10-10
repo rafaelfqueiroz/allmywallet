@@ -19,7 +19,7 @@ import { basisOf, plot, toValueChartPoints } from '@/app/(app)/reports/patrimoni
 import { ValueChart } from '@/app/(app)/reports/patrimonio/_components/ValueChart';
 import { ContributionChart } from '@/app/(app)/reports/patrimonio/_components/ContributionChart';
 import { StackedChart } from '@/app/(app)/reports/patrimonio/_components/StackedChart';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
@@ -233,6 +233,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
               >
                 <Stack gap="md">
                   <ValueChart
+                    masked={masked}
                     title={tp('chart.title')}
                     summary={<SeriesSummary points={history.series} label={tp('chart.summary')} />}
                     // SPEC-021 BR-021-31: a gap day is plotted as a break; the
@@ -280,6 +281,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                 description={tp('contributions.description')}
               >
                 <ContributionChart
+                  masked={masked}
                   title={tp('contributions.title')}
                   summary={
                     <ContributionSummary
@@ -543,6 +545,8 @@ function StackedComposition({
     bands.map((band) => [band.key, new Map(band.points.map((point) => [point.date, point.value]))]),
   );
 
+  // SPEC-022 BR-022-24 — a synchronous component, so the request-cached read.
+  const masked = useHideValues();
   const rows = concealSeries(
     dates.map((date) => {
       const row: Record<string, string | number> = { date };
@@ -553,8 +557,7 @@ function StackedComposition({
       return row;
     }),
     bands.map((band) => band.key),
-    // SPEC-022 BR-022-24 — a synchronous component, so the request-cached read.
-    useHideValues(),
+    masked,
   );
 
   const legend = bands.map((band, index) => ({
@@ -565,7 +568,13 @@ function StackedComposition({
 
   return (
     <Stack gap="md">
-      <StackedChart rows={rows} bands={legend} title={labels.title} summary={labels.summary} />
+      <StackedChart
+        masked={masked}
+        rows={rows}
+        bands={legend}
+        title={labels.title}
+        summary={labels.summary}
+      />
       <Table>
         <TableCaption className="sr-only">{labels.caption}</TableCaption>
         <TableHeader>

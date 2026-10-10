@@ -11,7 +11,7 @@ import {
   updateRuleAction,
 } from '@/app/(app)/watch/actions';
 import { RuleForm, type RuleFormLabels } from '@/app/(app)/watch/_components/RuleForm';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Note } from '@/components/patterns/note';

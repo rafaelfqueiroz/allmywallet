@@ -49,6 +49,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
 
   // SPEC-022 BR-022-24: rescaled when masked — the line and the goal keep
   // their relation, and no amount reaches the browser.
+  const masked = await loadHideValues();
   const points: GrowthChartPoint[] = concealSeries(
     growth.series.map((point) => ({
       date: point.date,
@@ -56,7 +57,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
       goal: Number(growth.goalAmount.toString()),
     })),
     ['value', 'goal'],
-    await loadHideValues(),
+    masked,
   );
 
   // BR-019-12 / CR-1 — marked beside the chart, not in a footnote read once
@@ -109,6 +110,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
 
             <Stack gap="sm">
               <GrowthChart
+                masked={masked}
                 points={points}
                 title={t('growth.chartTitle', { name: goal.name })}
                 summary={

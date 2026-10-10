@@ -32,6 +32,7 @@ describe('ValueChart', () => {
   it('exposes the plot as a named image', () => {
     render(
       <ValueChart
+        masked={false}
         title="Patrimônio ao longo do tempo"
         summary="De 100.000 a 118.500"
         points={POINTS}
@@ -43,6 +44,7 @@ describe('ValueChart', () => {
   it('describes the plot with the figures, not with a description of the shape', () => {
     render(
       <ValueChart
+        masked={false}
         title="Patrimônio ao longo do tempo"
         summary="De 100.000 a 118.500"
         points={POINTS}
@@ -56,6 +58,7 @@ describe('ValueChart', () => {
   it('has no accessibility violations', async () => {
     const { container } = render(
       <ValueChart
+        masked={false}
         title="Patrimônio ao longo do tempo"
         summary="De 100.000 a 118.500"
         points={POINTS}
@@ -65,7 +68,9 @@ describe('ValueChart', () => {
   });
 
   it('renders without a summary figure when there is nothing to plot', async () => {
-    const { container } = render(<ValueChart title="Patrimônio" summary="Sem dados" points={[]} />);
+    const { container } = render(
+      <ValueChart masked={false} title="Patrimônio" summary="Sem dados" points={[]} />,
+    );
     expect((await audit(container)).violations).toEqual([]);
   });
 
@@ -75,6 +80,7 @@ describe('ValueChart', () => {
   it('SPEC-021 BR-021-31: renders a series holding a null gap point, and stays accessible', async () => {
     const { container } = render(
       <ValueChart
+        masked={false}
         title="Patrimônio ao longo do tempo"
         summary="De 100.000 a 118.500"
         points={[
@@ -91,7 +97,14 @@ describe('ValueChart', () => {
 
 describe('ContributionChart', () => {
   it('exposes the plot as a named image', () => {
-    render(<ContributionChart title="Aportes por mês" summary="Jan 1.000, Fev −500" bars={BARS} />);
+    render(
+      <ContributionChart
+        masked={false}
+        title="Aportes por mês"
+        summary="Jan 1.000, Fev −500"
+        bars={BARS}
+      />,
+    );
     expect(screen.getByRole('img', { name: 'Aportes por mês' })).toBeInTheDocument();
   });
 
@@ -101,7 +114,14 @@ describe('ContributionChart', () => {
    * reader through the summary rather than through the bar's fill.
    */
   it('carries the negative month into the text equivalent', () => {
-    render(<ContributionChart title="Aportes por mês" summary="Jan 1.000, Fev −500" bars={BARS} />);
+    render(
+      <ContributionChart
+        masked={false}
+        title="Aportes por mês"
+        summary="Jan 1.000, Fev −500"
+        bars={BARS}
+      />,
+    );
     const plot = screen.getByRole('img', { name: 'Aportes por mês' });
     const describedBy = plot.getAttribute('aria-describedby');
     expect(document.getElementById(describedBy ?? '')?.textContent).toContain('−500');
@@ -109,7 +129,12 @@ describe('ContributionChart', () => {
 
   it('has no accessibility violations', async () => {
     const { container } = render(
-      <ContributionChart title="Aportes por mês" summary="Jan 1.000, Fev −500" bars={BARS} />,
+      <ContributionChart
+        masked={false}
+        title="Aportes por mês"
+        summary="Jan 1.000, Fev −500"
+        bars={BARS}
+      />,
     );
     expect((await audit(container)).violations).toEqual([]);
   });

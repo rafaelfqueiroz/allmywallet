@@ -5,7 +5,7 @@ import { REGISTRY, type ConfigKey } from '@/config/registry';
 import { tryUserId } from '@/lib/session';
 import { loadUserSettablePreferences } from '@/app/(settings)/preferences/data';
 import { submitPreferenceForm } from '@/app/(settings)/preferences/actions';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Field } from '@/components/patterns/field';
 import { Stack } from '@/components/layout/stack';

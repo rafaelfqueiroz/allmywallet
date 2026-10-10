@@ -522,7 +522,7 @@
     "classifySubmit": "Classificar",
     "subscriptionOffer": {
       "pairing": "Esta linha é o exercício de uma subscrição cujo crédito — {quantity} {assetCode} em {date} — você classificou como {type}, a custo zero.",
-      "priceHint": "Resolver como subscrição vai precificá-lo pelo fechamento de {closeDate} ({closeValue}), marcado como estimativa.",
+      "priceHint": "Resolver como subscrição vai precificá-lo pelo fechamento de {closeDate} (<price>{closeValue}</price>), marcado como estimativa.",
       "closeMissing": "Ainda não há um preço de fechamento guardado para essa data. Importe a Movimentação de novo para buscá-lo.",
       "resolve": "Resolver como subscrição",
       "keep": "Manter minha classificação"

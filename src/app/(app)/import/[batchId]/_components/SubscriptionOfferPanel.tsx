@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { ActionState } from '@/lib/action-state';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Stack } from '@/components/layout/stack';
@@ -23,7 +24,11 @@ export interface SubscriptionOfferLabels {
   /** The pairing sentence — quantity, credit asset, date, and how the user classified it. */
   readonly pairing: string;
   /** Present only with a stored close (DL-005-22 D1): what resolving will price it at. */
-  readonly priceHint: string | null;
+  /**
+   * A sentence, and an element rather than a string: masked, its price is a
+   * `MoneyMask` carrying its own accessible name (SPEC-022 BR-022-26).
+   */
+  readonly priceHint: ReactNode | null;
   /** Present only without a stored close: why "Resolver como subscrição" is disabled. */
   readonly closeMissingReason: string | null;
   readonly estimateBadge: string;

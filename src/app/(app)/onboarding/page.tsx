@@ -4,7 +4,7 @@ import { tryUserId } from '@/lib/session';
 import { DismissButton } from '@/app/(app)/onboarding/_components/DismissButton';
 import { GuidedSteps } from '@/app/(app)/onboarding/_components/GuidedSteps';
 import { CompletionSummary } from '@/app/(app)/onboarding/_components/CompletionSummary';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**

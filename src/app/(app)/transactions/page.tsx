@@ -23,7 +23,7 @@ import {
 } from '@/app/(app)/transactions/data';
 import { withTransactionsDeps } from '@/app/(app)/transactions/composition';
 import { tryUserId } from '@/lib/session';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Money } from '@/app/money';

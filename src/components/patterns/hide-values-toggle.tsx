@@ -4,12 +4,11 @@ import { useFormStatus } from 'react-dom';
 import { useTranslations } from 'next-intl';
 import { Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useMasked } from '@/components/patterns/masking';
 
 type FormAction = (formData: FormData) => Promise<void>;
 
 export interface HideValuesToggleProps {
-  /** The account's `ui.hide_values`, as the server rendered this page with it. */
-  readonly masked: boolean;
   readonly action: FormAction;
 }
 
@@ -28,9 +27,14 @@ export interface HideValuesToggleProps {
  * state, so a screen reader hears "Ocultar valores, pressionado" rather than a
  * label that flips between two commands.
  *
+ * Its state is the one the **page** was rendered with, through `useMasked()`
+ * (`MaskingSync`), not the one the layout read: a client-side navigation does
+ * not re-render the layout, and the eye must not contradict the page under it.
+ *
  * The action is a prop (DS-02); `authenticated-frame.tsx` wires the real one.
  */
-export function HideValuesToggle({ masked, action }: HideValuesToggleProps) {
+export function HideValuesToggle({ action }: HideValuesToggleProps) {
+  const masked = useMasked();
   return (
     <form action={action} data-slot="hide-values-form">
       <input type="hidden" name="hidden" value={String(!masked)} />

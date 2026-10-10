@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  *
  * Masking is applied in exactly two places: `Money` from `@/app/money`, which
  * reads the account's preference on the server, and the charts' shared
- * `useValueChartProps`. An amount that reaches the screen any other way is an
+ * `valueChartProps`. An amount that reaches the screen any other way is an
  * amount the toggle cannot hide, and nothing at runtime would notice — the
  * E2E check finds `R$` followed by a digit, but a chart's raw tick or a
  * hand-formatted string need not look like that. So this holds the routes to
@@ -119,9 +119,24 @@ describe('every amount goes through the masking (BR-022-24)', () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * The eye toggle sits in the frame, which a client-side navigation does not
+   * re-render; each page reports the masking it was rendered with through
+   * `@/app/page-shell` (the PR #222 review). A page on the pattern's shell
+   * would leave the eye contradicting it.
+   */
+  it('renders every signed-in page in the shell that reports its masking', () => {
+    const offenders = sources
+      .filter(({ path }) => /^src\/app\/\((app|settings)\)\/.*page\.tsx$/.test(path))
+      .filter(({ text }) => !text.includes("import { PageShell } from '@/app/page-shell'"))
+      .map(({ path }) => path);
+
+    expect(offenders).toEqual([]);
+  });
+
   it('hands every money chart coordinates through concealSeries', () => {
     const moneyCharts = sources
-      .filter(({ text }) => text.includes('useValueChartProps()'))
+      .filter(({ text }) => text.includes('valueChartProps(masked)'))
       .flatMap(({ text }) => [...text.matchAll(/export function (\w+)\(/g)].map((m) => m[1]!));
     // The composition ring has no value axis, but its slices are amounts too.
     moneyCharts.push('ShareChart');

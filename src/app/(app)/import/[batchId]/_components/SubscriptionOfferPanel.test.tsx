@@ -3,6 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import { failure, IDLE, type ActionState } from '@/lib/action-state';
 import { audit, render, screen } from '@/components/test-utils';
+import { createTranslator } from 'next-intl';
+import messages from '@/i18n/messages/pt-BR.json';
+import { MoneyMask } from '@/components/patterns/money-mask';
 import { SubscriptionOfferPanel, type SubscriptionOfferLabels } from './SubscriptionOfferPanel';
 
 /**
@@ -135,5 +138,33 @@ describe('SubscriptionOfferPanel', () => {
       />,
     );
     expect(await audit(missing)).toHaveNoViolations();
+  });
+
+  /**
+   * SPEC-022 BR-022-26 (PR #222 review) — masked, the price inside the hint is
+   * `MoneyMask`, so a screen reader hears "Valor oculto" rather than six
+   * bullets. Built with the real catalogue entry and its `<price>` tag, the way
+   * the page builds it.
+   */
+  it('renders a masked close price with an accessible hidden-value name', () => {
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'import' });
+    const priceHint = t.rich('subscriptionOffer.priceHint', {
+      closeDate: '02/09/2021',
+      closeValue: 'R$\u00a0••••••',
+      price: () => <MoneyMask />,
+    });
+
+    const { container } = render(
+      <SubscriptionOfferPanel
+        rowId="row-1"
+        resolveAction={async () => IDLE}
+        keepAction={async () => IDLE}
+        labels={{ ...withClose, priceHint }}
+      />,
+    );
+
+    expect(screen.getByText('Valor oculto')).toHaveClass('sr-only');
+    expect(container.textContent).not.toMatch(/R\$\s*\d/);
+    expect(container.textContent).toContain('02/09/2021');
   });
 });

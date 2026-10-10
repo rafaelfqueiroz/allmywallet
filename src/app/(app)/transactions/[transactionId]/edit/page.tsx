@@ -15,7 +15,7 @@ import { tryUserId } from '@/lib/session';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
 import { ConversionGroupForm } from '@/app/(app)/transactions/_components/ConversionGroupForm';
 import { TransactionCostEstimateMarker } from '@/app/(app)/transactions/_components/TransactionCostEstimateMarker';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { RevealValuesForm } from '@/components/patterns/reveal-values-form';
 import { loadHideValues } from '@/app/hide-values';

@@ -13,7 +13,7 @@ import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
 import { HoldingMarkers } from '@/app/(app)/reports/_components/HoldingMarkers';
 import { withReportPort } from '@/app/(app)/reports/data';
 import { tryUserId } from '@/lib/session';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';

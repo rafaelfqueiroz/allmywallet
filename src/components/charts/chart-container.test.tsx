@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PieChart } from 'recharts';
-import { ChartContainer, useValueChartProps } from '@/components/charts/chart-container';
+import { ChartContainer, valueChartProps } from '@/components/charts/chart-container';
 import { ChartLegend } from '@/components/charts/chart-legend';
 import { assetClassColor } from '@/components/charts/palette';
-import { MaskingProvider } from '@/components/patterns/masking';
-import { audit, render, renderHook, screen } from '@/components/test-utils';
+import { audit, render, screen } from '@/components/test-utils';
 
 function Composicao() {
   return (
@@ -82,25 +81,17 @@ describe('ChartLegend', () => {
   });
 });
 
-describe('useValueChartProps (SPEC-022 BR-022-24)', () => {
-  const withMasking =
-    (masked: boolean) =>
-    ({ children }: { children: React.ReactNode }) => (
-      <MaskingProvider masked={masked}>{children}</MaskingProvider>
-    );
-
+describe('valueChartProps (SPEC-022 BR-022-24)', () => {
   it('adds nothing when masking is off, so the shared props decide', () => {
-    const { result } = renderHook(() => useValueChartProps(), { wrapper: withMasking(false) });
-    expect(result.current).toEqual({ valueAxis: {}, valueTooltip: {} });
+    expect(valueChartProps(false)).toEqual({ valueAxis: {}, valueTooltip: {} });
   });
 
   it('labels every tick with the placeholder and keeps only the series name in the tooltip', () => {
-    const { result } = renderHook(() => useValueChartProps(), { wrapper: withMasking(true) });
-    const { valueAxis, valueTooltip } = result.current;
+    const { valueAxis, valueTooltip } = valueChartProps(true);
 
-    expect(valueAxis.tickFormatter?.(123_456.78, 0)).toBe('R$ ••••••');
+    expect(valueAxis.tickFormatter?.(123_456.78, 0)).toBe('R$\u00a0••••••');
     expect(valueTooltip.formatter?.(123_456.78, 'Patrimônio', {} as never, 0, [])).toEqual([
-      'R$ ••••••',
+      'R$\u00a0••••••',
       'Patrimônio',
     ]);
   });

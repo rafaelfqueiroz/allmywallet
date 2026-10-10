@@ -10,7 +10,7 @@ import { TARGET_FIELD_PREFIX } from '@/app/(app)/wallets/target-fields';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletBalance } from '@/app/(app)/wallets/balance-data';
 import { tryUserId } from '@/lib/session';
-import { PageShell } from '@/components/patterns/page-shell';
+import { PageShell } from '@/app/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
