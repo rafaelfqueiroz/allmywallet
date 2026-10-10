@@ -206,7 +206,7 @@ Two caveats carried forward:
 
 Exports never read the key (BR-022-27). Preferências revalidates the layout on save, so the frame's toggle and the charts' context follow a change made there. `tests/structural/amounts-are-masked.test.ts` holds pages to these doors; `tests/e2e/hide-values.spec.ts` fetches every signed-in page's HTML, unmasked and then masked, and finds no figure after `R$` but the catalogue's own copy, no chart coordinate and no edit input carrying an amount.
 
-**DS-30 — A new user preference is a registry key, not a component.** `ui.theme` is a `ZodEnum` at `levels: ['user']`, and the SPEC-002 preferences screen renders it with no other change. Adding a bespoke settings control would fork a surface that is currently generated.
+**DS-30 — A new user preference is a registry key, not a component.** `ui.theme` is a `ZodEnum` at `levels: ['user']`, and the SPEC-002 preferences screen renders it with no other change. Adding a bespoke settings control would fork a surface that is currently generated. **Which screen a key renders on is its registry `surface`** (SPEC-022 BR-022-13, DL-022-10): `preferences` for personal preferences — theme, reminders, display defaults — and `settings.import`, `settings.wallets` or `settings.watch` for a parameter that tunes a feature with a Configurações section. Every surface is rendered by `ParameterForm` (`src/app/parameter-form.tsx`), mounted on exactly one page, so a new key with a surface needs no screen change; `registry.test.ts` requires a surface on every user-level key and `preferences-catalogue.test.ts` requires a page for every surface. A feature with no Configurações section keeps its keys in Preferências.
 
 ## 9. Charts
 

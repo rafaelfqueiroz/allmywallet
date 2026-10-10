@@ -3,7 +3,7 @@ import { resolveConfig } from '@/config/resolve';
 
 /**
  * AR-31: the policy page is a Server Component and does not touch `db` itself
- * — the same split `(settings)/privacy/data.ts` and `preferences/data.ts` use.
+ * — the same split `(settings)/privacy/data.ts` and `parameter-data.ts` use.
  *
  * BR-004-14 makes the retention windows **configuration**, not constants, so
  * the published policy has to read the same registry the deletion sweep and

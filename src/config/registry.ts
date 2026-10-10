@@ -21,6 +21,21 @@ import { z } from 'zod';
 export const CONFIG_LEVELS = ['deployment', 'tenant', 'user'] as const;
 export type ConfigLevel = (typeof CONFIG_LEVELS)[number];
 
+/**
+ * SPEC-022 BR-022-13 — where a user-level key is rendered. `preferences` is
+ * the account menu's Preferências; each `settings.*` is the Configurações
+ * section of the feature the key tunes (BR-022-05). Every surface is mounted
+ * by exactly one page through `ParameterForm`, so a new key with a surface
+ * needs no screen change (DESIGN.md DS-30).
+ */
+export const PARAMETER_SURFACES = [
+  'preferences',
+  'settings.import',
+  'settings.wallets',
+  'settings.watch',
+] as const;
+export type ParameterSurface = (typeof PARAMETER_SURFACES)[number];
+
 export interface RegistryEntryDef<T = unknown> {
   /** Duplicated from the object key so callers iterating `Object.values` never lose it. */
   readonly key: string;
@@ -35,6 +50,15 @@ export interface RegistryEntryDef<T = unknown> {
    * range) and in the operator-facing effective-config view.
    */
   readonly range: string;
+  /**
+   * SPEC-022 BR-022-13 / DL-022-10 — the screen a **user-level** key renders
+   * on. Personal preferences stay in Preferências; a key that tunes a feature
+   * with a Configurações section renders in that section instead. Present on
+   * every key whose `levels` include `'user'` and on no other key — a
+   * deployment-only key has no UI at all (SPEC-002 Out of Scope). Checked by
+   * `registry.test.ts`, so a new user-level key cannot ship without one.
+   */
+  readonly surface?: ParameterSurface;
 }
 
 /**
@@ -222,6 +246,7 @@ export const REGISTRY = {
     schema: z.number().int().min(1).max(365),
     default: 30,
     levels: ['deployment', 'user'],
+    surface: 'settings.import',
     description: 'Days since last import before a staleness reminder is due (FR-4.2).',
     range: 'integer, 1–365',
   },
@@ -230,6 +255,10 @@ export const REGISTRY = {
     schema: z.boolean(),
     default: false,
     levels: ['user'],
+    // SPEC-022 BR-022-13 names reminders as a personal preference: whether
+    // the account wants the e-mail is the person's call, while the staleness
+    // window it fires on tunes Importar.
+    surface: 'preferences',
     description: 'Opt-in staleness reminder emails (FR-4.3).',
     range: 'boolean',
   },
@@ -353,6 +382,10 @@ export const REGISTRY = {
     schema: z.number().int().min(1).max(100),
     default: 20,
     levels: ['user'],
+    // BR-022-13 moves a key only to a feature *with* a Configurações section,
+    // and Relatórios has none (BR-022-05) — so the report thresholds stay with
+    // the other report display defaults (#207 Decision log).
+    surface: 'preferences',
     description: 'Position weight that triggers a concentration flag (FR-5.24).',
     range: 'integer percent, 1–100',
   },
@@ -369,6 +402,7 @@ export const REGISTRY = {
     schema: z.enum(['asset_class', 'wallet', 'asset', 'sector', 'institution']),
     default: 'asset_class',
     levels: ['user'],
+    surface: 'preferences',
     description: 'Default grouping dimension at portfolio scope (FR-5.28, SPEC-011 BR-011-04).',
     range: "one of: 'asset_class', 'wallet', 'asset', 'sector', 'institution'",
   },
@@ -380,6 +414,7 @@ export const REGISTRY = {
     // actually in here" — which is asset-level.
     default: 'asset',
     levels: ['user'],
+    surface: 'preferences',
     description: 'Default grouping dimension within a single-wallet scope (SPEC-011 BR-011-04).',
     range: "one of: 'asset_class', 'wallet', 'asset', 'sector', 'institution'",
   },
@@ -388,6 +423,7 @@ export const REGISTRY = {
     schema: z.array(z.enum(['CDI', 'IPCA', 'IBOV'])).min(1),
     default: ['CDI', 'IPCA', 'IBOV'],
     levels: ['user'],
+    surface: 'preferences',
     description: 'Benchmark series shown alongside the user’s own return (FR-5.4).',
     range: "non-empty array of: 'CDI', 'IPCA', 'IBOV'",
   },
@@ -400,6 +436,7 @@ export const REGISTRY = {
     // explanation appear at one threshold in tests and another in the app.
     default: 200,
     levels: ['deployment', 'user'],
+    surface: 'preferences',
     // SPEC-012 BR-012-04 / DL-012-02: how far apart the two returns must be
     // before the gap is explained inline. A threshold, so it is config rather
     // than a constant (SPEC-002). Expressed in basis points because the two
@@ -435,6 +472,7 @@ export const REGISTRY = {
     schema: z.number().min(0).max(100),
     default: 5,
     levels: ['user'],
+    surface: 'settings.wallets',
     description:
       'Percentage points of drift from a wallet target before the asset is flagged (SPEC-017 BR-017-15).',
     range: 'number, 0–100 (percentage points)',
@@ -444,6 +482,7 @@ export const REGISTRY = {
     schema: z.enum(['system', 'light', 'dark']),
     default: 'system',
     levels: ['user'],
+    surface: 'preferences',
     // DL-03: the persisted half of the three-state theming in globals.css.
     // 'system' stamps no class and lets prefers-color-scheme decide; the other
     // two stamp .light / .dark, which win over it.
@@ -455,6 +494,7 @@ export const REGISTRY = {
     schema: z.boolean(),
     default: false,
     levels: ['user'],
+    surface: 'preferences',
     // SPEC-022 BR-022-25 / DL-022-06: on the account, not in browser storage,
     // because the server has to know it before the first paint.
     description:
@@ -511,6 +551,8 @@ export const REGISTRY = {
     schema: z.number().int().min(1).max(720),
     default: 24,
     levels: ['deployment', 'user'],
+    // Tunes the e-mails SPEC-018's watch rules send — Observar preços.
+    surface: 'settings.watch',
     description:
       'Hours a sent opportunity email suppresses further email for the same asset (SPEC-018 BR-018-22).',
     range: 'integer hours, 1–720',
@@ -532,7 +574,7 @@ export const REGISTRY = {
    * whose halves could be set independently is a window that can be left
    * half-configured between two deploys. Deployment-only — the preferences
    * surface renders numbers, booleans, enums and arrays, and an object
-   * control does not exist there (`src/app/(settings)/preferences/page.tsx`).
+   * control does not exist there (`src/app/parameter-form.tsx`).
    *
    * `start > end` is legal and means the window wraps midnight (22:00–07:00),
    * which is the common case; `start === end` is rejected, since it reads
@@ -640,10 +682,20 @@ export function registryEntry<K extends ConfigKey>(key: K): RegistryEntryDef<Con
 export const CONFIG_KEYS = Object.keys(REGISTRY) as readonly ConfigKey[];
 
 /**
- * Keys a signed-in user may set themselves — what the SPEC-002 preferences
- * surface (src/app/(settings)/preferences/) renders. Everything else is
- * deployment-only and, per the spec's Out of Scope, has no UI at all.
+ * Keys a signed-in user may set themselves — what the SPEC-002 user-level
+ * screens render, split across surfaces by `keysOnSurface` (SPEC-022
+ * BR-022-13). Everything else is deployment-only and, per the spec's Out of
+ * Scope, has no UI at all.
  */
 export const USER_SETTABLE_KEYS = CONFIG_KEYS.filter((key) =>
   registryEntry(key).levels.includes('user'),
 );
+
+/**
+ * SPEC-022 BR-022-13 — the user-settable keys one screen renders, in registry
+ * order. Derived, never hand-listed: a key reaches a screen by naming its
+ * `surface`, and `ParameterForm` renders whatever this returns.
+ */
+export function keysOnSurface(surface: ParameterSurface): readonly ConfigKey[] {
+  return USER_SETTABLE_KEYS.filter((key) => registryEntry(key).surface === surface);
+}

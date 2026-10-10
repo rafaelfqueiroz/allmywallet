@@ -328,8 +328,18 @@
     "description": "Ajustes que valem só para a sua conta.",
     "saved": "Preferência salva.",
     "saveFailed": "Não foi possível salvar. Tente novamente.",
-    "save": "Salvar",
     "signedOut": "Entre na sua conta para ajustar preferências.",
+    "groupingOptions": {
+      "asset_class": "Classe de ativo",
+      "asset": "Ativo",
+      "institution": "Instituição",
+      "wallet": "Carteira"
+    }
+  },
+  "parameters": {
+    "sectionTitle": "Parâmetros",
+    "sectionDescription": "Ajustes desta seção que valem só para a sua conta.",
+    "save": "Salvar",
     "keys": {
       "import": {
         "staleness_days": {
@@ -385,12 +395,6 @@
           "description": "Depois de um e-mail sobre um ativo, quanto tempo esperar antes de enviar outro sobre o mesmo ativo."
         }
       }
-    },
-    "groupingOptions": {
-      "asset_class": "Classe de ativo",
-      "asset": "Ativo",
-      "institution": "Instituição",
-      "wallet": "Carteira"
     }
   },
   "wallets": {

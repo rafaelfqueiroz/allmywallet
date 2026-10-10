@@ -62,3 +62,56 @@ test('a signed-in user sees their stored preferences and a saved change survives
   await page.reload();
   await expect(page.getByLabel(CONCENTRATION, { exact: true })).toHaveValue('42');
 });
+
+/**
+ * SPEC-022 BR-022-13 / DL-022-10 — Preferências holds personal preferences
+ * only; each feature parameter renders on its feature's screen instead, through
+ * the same parameter form. The labels are the catalogue's
+ * (`parameters.keys.*`), which is what a person reads.
+ */
+const FEATURE_PARAMETERS = [
+  { label: 'Dias sem importar até avisar', screen: '/import' },
+  { label: 'Tolerância de desvio (p.p.)', screen: '/wallets' },
+  { label: 'Intervalo mínimo entre e-mails (horas)', screen: '/watch' },
+] as const;
+
+test('Preferências shows no feature parameter; each renders on its feature screen', async ({
+  signedIn,
+}) => {
+  const { page } = signedIn;
+
+  await page.goto('/preferences');
+  await expect(page.getByLabel(CONCENTRATION, { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Tema', { exact: true })).toBeVisible();
+  for (const { label } of FEATURE_PARAMETERS) {
+    await expect(page.getByLabel(label, { exact: true })).toHaveCount(0);
+  }
+
+  for (const { label, screen } of FEATURE_PARAMETERS) {
+    await page.goto(screen);
+    const section = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { level: 2, name: 'Parâmetros' }) });
+    await expect(section.getByLabel(label, { exact: true })).toBeVisible();
+  }
+});
+
+test('a feature parameter saved on its screen survives a reload', async ({ signedIn }) => {
+  const { page } = signedIn;
+  const label = 'Tolerância de desvio (p.p.)';
+
+  await page.goto('/wallets');
+  const field = page.getByLabel(label, { exact: true });
+  await field.fill('2.5');
+  const form = page.locator('form').filter({ has: field });
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' && new URL(response.url()).pathname === '/wallets',
+    ),
+    form.getByRole('button', { name: 'Salvar' }).click(),
+  ]);
+
+  await page.reload();
+  await expect(page.getByLabel(label, { exact: true })).toHaveValue('2.5');
+});

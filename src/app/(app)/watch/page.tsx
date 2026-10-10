@@ -12,6 +12,7 @@ import {
 } from '@/app/(app)/watch/actions';
 import { RuleForm, type RuleFormLabels } from '@/app/(app)/watch/_components/RuleForm';
 import { PageShell } from '@/app/page-shell';
+import { ParameterSection } from '@/app/parameter-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Note } from '@/components/patterns/note';
@@ -188,6 +189,8 @@ export default async function WatchPage() {
           </List>
         </Section>
       )}
+
+      <ParameterSection surface="settings.watch" />
     </PageShell>
   );
 }

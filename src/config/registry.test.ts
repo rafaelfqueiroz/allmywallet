@@ -2,9 +2,11 @@ import { execSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
   CONFIG_KEYS,
+  PARAMETER_SURFACES,
   REGISTRY,
   USER_SETTABLE_KEYS,
   isConfigKey,
+  keysOnSurface,
   registryEntry,
   type ConfigKey,
 } from './registry';
@@ -135,6 +137,40 @@ describe('registry', () => {
       // person receiving the email can decide is worth paying.
       'notifications.opportunity_cooldown_hours',
     ] satisfies ConfigKey[]);
+  });
+
+  // SPEC-022 BR-022-13 / DL-022-10 — the Preferências split is derived from
+  // the registry, so the registry is where it is checked.
+  it('every user-level key has exactly one surface, and no deployment-only key has one', () => {
+    for (const key of CONFIG_KEYS) {
+      const entry = registryEntry(key);
+      if (entry.levels.includes('user')) {
+        expect(PARAMETER_SURFACES, key).toContain(entry.surface);
+      } else {
+        expect(entry.surface, key).toBeUndefined();
+      }
+    }
+  });
+
+  it('the surfaces partition the user-settable keys', () => {
+    const rendered = PARAMETER_SURFACES.flatMap((surface) => keysOnSurface(surface));
+    expect([...rendered].sort()).toEqual([...USER_SETTABLE_KEYS].sort());
+  });
+
+  it('Preferências holds only personal preferences (BR-022-13)', () => {
+    expect(keysOnSurface('preferences')).toEqual([
+      'import.reminder_enabled',
+      'reports.concentration_threshold_pct',
+      'reports.default_grouping',
+      'reports.default_grouping_wallet_scope',
+      'reports.benchmarks',
+      'reports.twr_xirr_divergence_points',
+      'ui.theme',
+      'ui.hide_values',
+    ] satisfies ConfigKey[]);
+    expect(keysOnSurface('settings.import')).toEqual(['import.staleness_days']);
+    expect(keysOnSurface('settings.wallets')).toEqual(['wallets.drift_tolerance_pp']);
+    expect(keysOnSurface('settings.watch')).toEqual(['notifications.opportunity_cooldown_hours']);
   });
 
   it('no key in the registry is a plausible secret name (AR-43/BR-002-08 — secrets never enter the registry)', () => {
