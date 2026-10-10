@@ -77,9 +77,11 @@ export function Field({ id, label, hint, error, width, className, children }: Fi
 
   return (
     <div data-slot="field" className={cn(fieldVariants({ width }), className)}>
-      {/* h-5 is the whole point: the row is the same height whether or not the
-          icon is present (BR-022-20). */}
-      <div data-slot="field-label-row" className="flex h-5 items-center gap-1">
+      {/* One 20px line box whether or not the icon is present (BR-022-20): the
+          icon's layout box is 20px, so only the label's own text can grow the
+          row. `min-h` rather than `h`, so a label that wraps pushes the control
+          down instead of overlapping it. */}
+      <div data-slot="field-label-row" className="flex min-h-5 items-start gap-1">
         <Label id={labelId} htmlFor={id}>
           {label}
         </Label>

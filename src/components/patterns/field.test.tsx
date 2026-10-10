@@ -61,7 +61,7 @@ describe('Field — instructions (BR-022-20)', () => {
     expect(b.field.className).toBe(aFieldClass);
     expect([...b.field.children].map((el) => el.tagName)).toEqual(aTags);
     // The fixed line box: an icon can never make the row taller.
-    expect(aRowClass).toContain('h-5');
+    expect(aRowClass).toContain('min-h-5');
   });
 
   it('opens the instructions from the icon', async () => {
