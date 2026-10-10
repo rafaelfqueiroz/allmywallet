@@ -1538,5 +1538,23 @@
     "rateLabel": "Taxa contratada",
     "rateHint": "Por exemplo, 110 para 110% do CDI, ou 6 para IPCA + 6% a.a.",
     "submit": "Salvar taxa"
+  },
+  "dataTable": {
+    "filterLabel": "Filtrar a tabela",
+    "filterPlaceholder": "Filtrar",
+    "noResultsTitle": "Nenhum resultado para este filtro",
+    "noResultsBody": "Tente outro termo ou limpe o filtro para ver todos os registros.",
+    "clearFilter": "Limpar filtro",
+    "pagination": "Paginação",
+    "previousPage": "Página anterior",
+    "nextPage": "Próxima página",
+    "page": "Página {page}",
+    "pageSize": "Itens por página",
+    "summary": "Mostrando {from}–{to} de {total}",
+    "summaryWithNoun": "Mostrando {from}–{to} de {total} {noun}"
+  },
+  "scopeSelector": {
+    "label": "Escopo",
+    "allWallets": "Todas as carteiras"
   }
 }

@@ -28,6 +28,17 @@ describe('PageShell', () => {
     expect(screen.getByRole('button', { name: 'Nova' })).toBeInTheDocument();
   });
 
+  // BR-022-14: one header implementation, reached through the shell.
+  it('renders its header through PageHeader, scope slot included', () => {
+    render(
+      <PageShell title="Relatórios" scope={<button type="button">Escopo</button>}>
+        conteúdo
+      </PageShell>,
+    );
+    expect(screen.getByRole('button', { name: 'Escopo' })).toBeInTheDocument();
+    expect(screen.getByRole('main').querySelector('[data-slot="page-header"]')).not.toBeNull();
+  });
+
   // The drift this component exists to end: five different max-widths across
   // five peer screens on main.
   it('offers three named widths and nothing else', () => {

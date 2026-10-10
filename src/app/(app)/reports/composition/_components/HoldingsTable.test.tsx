@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { audit, render, screen, userEvent, within } from '@/components/test-utils';
 import {
   HoldingsTable,
@@ -6,6 +6,13 @@ import {
   type HoldingRow,
   type HoldingsTableLabels,
 } from '@/app/(app)/reports/composition/_components/HoldingsTable';
+
+// DataTable mirrors its sort/page state into the URL (SPEC-022 BR-022-18).
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/reports/composition',
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 /**
  * SPEC-015 AC-4 — "the table sorts by every column, ascending and descending",

@@ -124,7 +124,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
 
   return (
     <PageShell width="wide" title={tc('title')} description={tc('description')}>
-      <ReportNav current="/reports/composition" />
+      <ReportNav />
 
       <Controls
         action="/reports/composition"

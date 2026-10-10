@@ -1,8 +1,8 @@
 import type * as React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
-import { Cluster } from '@/components/layout/cluster';
 import { Stack } from '@/components/layout/stack';
+import { PageHeader } from '@/components/patterns/page-header';
 
 /**
  * The one place a page decides how wide it is. Before this existed the five
@@ -31,6 +31,8 @@ export type PageShellProps = React.ComponentProps<'main'> &
     description?: React.ReactNode;
     /** Buttons or filters aligned with the title on wide screens. */
     actions?: React.ReactNode;
+    /** The scope selector (BR-022-17), passed through to the header. */
+    scope?: React.ReactNode;
   };
 
 export function PageShell({
@@ -39,20 +41,21 @@ export function PageShell({
   title,
   description,
   actions,
+  scope,
   children,
   ...props
 }: PageShellProps) {
   return (
     <main data-slot="page-shell" className={cn(pageShellVariants({ width }), className)} {...props}>
       <Stack gap="lg">
-        {(title || description || actions) && (
-          <Cluster justify="between" align="start" gap="md">
-            <Stack gap="xs">
-              {title && <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>}
-              {description && <p className="text-muted-foreground">{description}</p>}
-            </Stack>
-            {actions && <Cluster gap="sm">{actions}</Cluster>}
-          </Cluster>
+        {/* BR-022-14: the header is `PageHeader`'s, so there is one of them. */}
+        {(title || description || actions || scope) && (
+          <PageHeader
+            {...(title ? { title } : {})}
+            {...(description ? { description } : {})}
+            {...(actions ? { actions } : {})}
+            {...(scope ? { scope } : {})}
+          />
         )}
         {children}
       </Stack>
