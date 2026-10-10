@@ -57,6 +57,7 @@ interface PageProps {
 
 export default async function ReportsPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
+  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -104,7 +105,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   return (
     <PageShell width="wide" title={t('title')} description={t('description')}>
-      <ReportNav current="/reports" />
+      <ReportNav />
 
       <Controls
         action="/reports"
@@ -193,7 +194,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
                         own Custo cell below does. */}
                     <CostEstimateMarker
                       shown={result.value.report.total.costEstimated}
-                      label={t('markers.costEstimated.badge')}
+                      label={tCommon('estimated')}
                       title={t('markers.costEstimated.explanation')}
                     />
                   </Cluster>
@@ -260,6 +261,7 @@ async function GroupRow({
   readonly names: GroupNames;
 }) {
   const t = await getTranslations('reports');
+  const tCommon = await getTranslations('common');
 
   return (
     <TableRow className="align-top">
@@ -272,7 +274,7 @@ async function GroupRow({
               </span>
               {group.totals.estimated ? (
                 <Badge variant="outline" title={t('estimate.explanation')}>
-                  {t('estimate.badge')}
+                  {tCommon('estimated')}
                 </Badge>
               ) : null}
             </Cluster>
@@ -308,7 +310,7 @@ async function GroupRow({
               enough to mark the group's own Custo cell. */}
           <CostEstimateMarker
             shown={group.totals.costEstimated}
-            label={t('markers.costEstimated.badge')}
+            label={tCommon('estimated')}
             title={t('markers.costEstimated.explanation')}
           />
         </Cluster>

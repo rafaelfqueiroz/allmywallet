@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { audit, render, screen, userEvent, within } from '@/components/test-utils';
 import {
   HoldingsTable,
@@ -6,6 +6,13 @@ import {
   type HoldingRow,
   type HoldingsTableLabels,
 } from '@/app/(app)/reports/composition/_components/HoldingsTable';
+
+// DataTable mirrors its sort/page state into the URL (SPEC-022 BR-022-18).
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/reports/composition',
+  useRouter: () => ({ replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 /**
  * SPEC-015 AC-4 — "the table sorts by every column, ascending and descending",
@@ -35,12 +42,13 @@ const labels: HoldingsTableLabels = {
   concentratedTitle: 'Marcação informativa, sem recomendação.',
   estimated: 'Estimado',
   estimatedTitle: 'Valor estimado, não observado no mercado.',
-  costEstimated: 'Preço estimado',
+  costEstimated: 'Estimado',
   costEstimatedTitle: 'O custo desta posição inclui uma aquisição estimada.',
   sortBy: 'Ordenar por {column}',
   sortField: 'Ordenar por',
   sortAscending: 'Ordem crescente',
   sortDescending: 'Ordem decrescente',
+  filterPlaceholder: 'Filtrar por ativo, classe ou setor',
 };
 
 const cell = (text: string, rank: number | undefined, negative = false): Cell => ({
@@ -228,21 +236,37 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
   it('BR-015-09: marks the accrued row and only that one', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     // Both renderings of the row are in the DOM (DL-12), so one row yields two.
-    expect(screen.getAllByText('Estimado')).toHaveLength(2);
+    // One wording for both kinds of estimate (BR-022-32); the explanation is
+    // what tells them apart.
+    const accrued = screen
+      .getAllByText('Estimado')
+      .filter((badge) => badge.getAttribute('title') === labels.estimatedTitle);
+    expect(accrued).toHaveLength(2);
+    // Beside the figure it qualifies — the current value — not the code.
+    const cell = within(table())
+      .getAllByText('Estimado')
+      .find((badge) => badge.getAttribute('title') === labels.estimatedTitle)
+      ?.closest('td');
+    const headers = within(table())
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent);
+    expect(cell?.cellIndex).toBe(headers.findIndex((header) => header?.startsWith('Valor')));
   });
 
   it('SPEC-007 BR-007-06 / DL-007-12: marks preço médio for the cost-estimated row, independently of the accrued one', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     // ITSA4 carries a cost estimate; both renderings are in the DOM (DL-12).
-    const badges = screen.getAllByText('Preço estimado');
+    const badges = screen
+      .getAllByText('Estimado')
+      .filter((badge) => badge.getAttribute('title') === labels.costEstimatedTitle);
     expect(badges).toHaveLength(2);
     expect(badges[0]).toHaveAttribute(
       'title',
       'O custo desta posição inclui uma aquisição estimada.',
     );
     // CDBX is the accrued (`estimated`) row, not the cost-estimated one — the
-    // two markers must not collapse into each other.
-    expect(screen.getAllByText('Estimado')).toHaveLength(2);
+    // two markers must not collapse into each other: four badges, two each.
+    expect(screen.getAllByText('Estimado')).toHaveLength(4);
   });
 
   it('has no axe violations', async () => {

@@ -41,6 +41,13 @@ async function queryOne<T extends Record<string, unknown>>(
 }
 
 /**
+ * The upload control is the native file input inside `FileUpload`. Located by
+ * its type and name rather than by label: the field's info icon is named
+ * "Instruções sobre <label>", so a label query matches two elements.
+ */
+const EXTRACT_INPUT = 'input[type="file"][name="file"]';
+
+/**
  * Two queue round trips (`import.stage`, then `import.commit`), each with a
  * pg-boss poll interval in front of it. The default 30s cap expires inside the
  * first one, which reads as "staging is broken" rather than "the test did not
@@ -79,7 +86,7 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
     { data: '03/02/2026', tipo: 'Compra', codigo: 'PETR4', quantidade: '50', preco: '41,00' },
   ]);
 
-  await page.getByLabel(/arquivo/i).setInputFiles({
+  await page.locator(EXTRACT_INPUT).setInputFiles({
     name: 'negociacao.xlsx',
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     buffer: Buffer.from(file),
@@ -199,7 +206,7 @@ test('the three extracts upload together, in whatever order they were picked', a
   ]);
 
   await page.goto('/import');
-  await page.getByLabel(/arquivo/i).setInputFiles([
+  await page.locator(EXTRACT_INPUT).setInputFiles([
     {
       name: 'negociacao.xlsx',
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -293,4 +300,63 @@ test('the export guide shows a diagram, the ordered steps, and the verification 
   // BR-016-18 — dd/mm/yyyy, never the ISO string B3_GUIDE_VERIFIED_AS_OF is
   // stored as.
   await expect(page.getByText(/Verificado na B3 em \d{2}\/\d{2}\/\d{4}/)).toBeVisible();
+});
+
+/**
+ * SPEC-022 BR-022-23 / DS-37 — the drop zone is a pt-BR skin over a **native**
+ * file input, so the upload still posts with JavaScript switched off.
+ *
+ * The extract is generated (DV-24, TS-19). The context is built here, not by
+ * the `signedIn` fixture, because that one cannot be told to disable
+ * scripting; the session cookie is copied across from it instead, so this is
+ * still the same seeded tenant and is torn down by the same fixture.
+ */
+test('the upload posts without JavaScript, and shows no browser-language text', async ({
+  browser,
+  baseURL,
+  signedIn,
+}) => {
+  const { page: seededPage, userId } = signedIn;
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    ...(baseURL ? { baseURL } : {}),
+    locale: 'pt-BR',
+    timezoneId: 'America/Sao_Paulo',
+  });
+
+  try {
+    await context.addCookies(await seededPage.context().cookies());
+    const page = await context.newPage();
+
+    await page.goto('/import');
+
+    // BR-022-23: the zone speaks Portuguese; the browser's own "Choose Files" /
+    // "No file chosen" is painted under a transparent input and never read.
+    const zone = page.locator('[data-slot="file-upload"]');
+    await expect(zone).toContainText('Arraste o extrato da B3 aqui');
+    await expect(zone).toContainText('Nenhum arquivo selecionado');
+    expect(await zone.innerText()).not.toMatch(/choose|no file/i);
+
+    const file = await buildNegociacaoXlsx([
+      { data: '02/01/2026', tipo: 'Compra', codigo: 'PETR4', quantidade: '100', preco: '38,50' },
+    ]);
+    await page.locator(EXTRACT_INPUT).setInputFiles({
+      name: 'negociacao.xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      buffer: Buffer.from(file),
+    });
+    await page.getByRole('button', { name: /^enviar$/i }).click();
+
+    // A native multipart POST to the server action, which redirects to the
+    // batch it created — the same landing the scripted journey asserts.
+    await expect(page).toHaveURL(/\/import\/[0-9a-f-]{36}$/);
+    const batchId = page.url().split('/').pop() ?? '';
+    const row = await queryOne<{ count: string }>(
+      'SELECT count(*)::text AS count FROM import_batches WHERE id = $1 AND user_id = $2',
+      [batchId, userId],
+    );
+    expect(row?.count).toBe('1');
+  } finally {
+    await context.close();
+  }
 });

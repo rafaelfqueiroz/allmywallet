@@ -190,14 +190,14 @@ test.describe('transaction management', () => {
     // AC: "A CDB absent from every B3 extract can be added manually." The
     // catalogue holds only what an import or a quote sync put there, so the
     // instrument is named here rather than picked.
-    await page.getByLabel('Ou informe um código novo').fill('CDB-BANCO-X-2030');
+    await page.getByLabel('Ou informe um código novo', { exact: true }).fill('CDB-BANCO-X-2030');
     await page.getByLabel('Nome do ativo').fill('CDB Banco X 2030');
     await page.getByLabel('Classe').selectOption('cdb');
     await page.getByLabel('Tipo').selectOption('buy');
     await page.getByLabel('Data da operação').fill('2026-04-01');
     await page.getByLabel('Quantidade').fill('1');
     // pt-BR decimal comma, which is what the keyboard actually produces.
-    await page.getByLabel('Preço unitário').fill('5.000,00');
+    await page.getByLabel('Preço unitário', { exact: true }).fill('5.000,00');
     await page.getByRole('button', { name: 'Registrar transação' }).click();
 
     await expect(page).toHaveURL(/\/transactions$/);
@@ -250,7 +250,7 @@ test.describe('transaction management', () => {
     await page.getByLabel('Tipo').selectOption('sell');
     await page.getByLabel('Data da operação').fill('2026-04-01');
     await page.getByLabel('Quantidade').fill('999');
-    await page.getByLabel('Preço unitário').fill('170,00');
+    await page.getByLabel('Preço unitário', { exact: true }).fill('170,00');
     await page.getByRole('button', { name: 'Registrar transação' }).click();
 
     // Not `getByRole('alert')`: Next renders its own empty route announcer
@@ -311,12 +311,12 @@ test.describe('transaction management', () => {
     const walletId = await seedWallet(userId, 'Aposentadoria');
 
     await page.goto('/transactions/new');
-    await page.getByLabel('Ou informe um código novo').fill('ITSA4');
+    await page.getByLabel('Ou informe um código novo', { exact: true }).fill('ITSA4');
     await page.getByLabel('Nome do ativo').fill('Itaúsa PN');
     await page.getByLabel('Tipo').selectOption('buy');
     await page.getByLabel('Data da operação').fill('2026-04-01');
     await page.getByLabel('Quantidade').fill('100');
-    await page.getByLabel('Preço unitário').fill('10,00');
+    await page.getByLabel('Preço unitário', { exact: true }).fill('10,00');
     await page.getByRole('button', { name: 'Registrar transação' }).click();
 
     await expect(page).toHaveURL(/\/transactions$/);
@@ -363,12 +363,12 @@ test.describe('transaction management', () => {
     const trading = await seedWallet(userId, 'Trading');
 
     await page.goto('/transactions/new');
-    await page.getByLabel('Ou informe um código novo').fill('ITSA4');
+    await page.getByLabel('Ou informe um código novo', { exact: true }).fill('ITSA4');
     await page.getByLabel('Nome do ativo').fill('Itaúsa PN');
     await page.getByLabel('Tipo').selectOption('buy');
     await page.getByLabel('Data da operação').fill('2026-04-01');
     await page.getByLabel('Quantidade').fill('100');
-    await page.getByLabel('Preço unitário').fill('10,00');
+    await page.getByLabel('Preço unitário', { exact: true }).fill('10,00');
     await page.getByRole('button', { name: 'Registrar transação' }).click();
     await expect(page).toHaveURL(/\/transactions$/);
 
@@ -399,8 +399,10 @@ test.describe('transaction management', () => {
     await page.getByLabel('Tipo').selectOption('sell');
     await page.getByLabel('Data da operação').fill('2026-04-10');
     await page.getByLabel('Quantidade').fill('20');
-    await page.getByLabel('Preço unitário').fill('12,00');
-    await page.getByLabel('Vendeu de qual carteira?').selectOption({ label: 'Trading' });
+    await page.getByLabel('Preço unitário', { exact: true }).fill('12,00');
+    await page
+      .getByLabel('Vendeu de qual carteira?', { exact: true })
+      .selectOption({ label: 'Trading' });
     await page.getByRole('button', { name: 'Registrar transação' }).click();
     await expect(page).toHaveURL(/\/transactions$/);
 
@@ -498,19 +500,19 @@ test.describe('transaction ledger', () => {
     // Entered through the form so the position exists to be allocated against
     // — the same reason the bulk-assign journey does it this way.
     await page.goto('/transactions/new');
-    await page.getByLabel('Ou informe um código novo').fill('ITSA4');
+    await page.getByLabel('Ou informe um código novo', { exact: true }).fill('ITSA4');
     await page.getByLabel('Nome do ativo').fill('Itaúsa PN');
     await page.getByLabel('Data da operação').fill('2026-04-01');
     await page.getByLabel('Quantidade').fill('100');
-    await page.getByLabel('Preço unitário').fill('10,00');
+    await page.getByLabel('Preço unitário', { exact: true }).fill('10,00');
     await page.getByRole('button', { name: 'Registrar transação' }).click();
 
     await page.goto('/transactions/new');
-    await page.getByLabel('Ou informe um código novo').fill('WEGE3');
+    await page.getByLabel('Ou informe um código novo', { exact: true }).fill('WEGE3');
     await page.getByLabel('Nome do ativo').fill('WEG ON');
     await page.getByLabel('Data da operação').fill('2026-04-02');
     await page.getByLabel('Quantidade').fill('50');
-    await page.getByLabel('Preço unitário').fill('40,00');
+    await page.getByLabel('Preço unitário', { exact: true }).fill('40,00');
     await page.getByRole('button', { name: 'Registrar transação' }).click();
 
     const table = page.getByRole('table', { name: 'Transações' });

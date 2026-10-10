@@ -48,12 +48,13 @@ export function DeletionDownstreamImpact({ rows }: DeletionDownstreamImpactProps
   const tTable = useTranslations('transactions.table');
   // Same catalogue entry every Custo/preço médio surface reads (DL-007-12).
   const tReports = useTranslations('reports');
+  const tCommon = useTranslations('common');
   if (rows.length === 0) return null;
 
   const marker = (shown: boolean) => (
     <CostEstimateMarker
       shown={shown}
-      label={tReports('markers.costEstimated.badge')}
+      label={tCommon('estimated')}
       title={tReports('markers.costEstimated.explanation')}
     />
   );

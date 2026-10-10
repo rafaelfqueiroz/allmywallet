@@ -65,6 +65,7 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
   // `reports.markers.costEstimated`, the same catalogue entry every other
   // Custo/preço médio surface reads, rather than a transactions-scoped copy.
   const tReports = await getTranslations('reports');
+  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -218,7 +219,7 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
                     {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
                     <CostEstimateMarker
                       shown={impact.value.currentCostEstimated}
-                      label={tReports('markers.costEstimated.badge')}
+                      label={tCommon('estimated')}
                       title={tReports('markers.costEstimated.explanation')}
                     />
                   </Cluster>
@@ -228,7 +229,7 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
                     <Money value={impact.value.projectedPosition.averageCost} />
                     <CostEstimateMarker
                       shown={impact.value.projectedCostEstimated}
-                      label={tReports('markers.costEstimated.badge')}
+                      label={tCommon('estimated')}
                       title={tReports('markers.costEstimated.explanation')}
                     />
                   </Cluster>

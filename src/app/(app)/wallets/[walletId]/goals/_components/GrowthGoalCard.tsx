@@ -43,6 +43,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
   if (growth === null || goal.basis === null) return null;
 
   const t = await getTranslations('objetivos');
+  const tCommon = await getTranslations('common');
 
   const points: GrowthChartPoint[] = growth.series.map((point) => ({
     date: point.date,
@@ -167,7 +168,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
                           ? t('growth.table.priceUnavailable')
                           : t('growth.table.unavailable')
                         : point.estimated
-                          ? t('growth.table.estimated')
+                          ? tCommon('estimated')
                           : t('growth.table.observed')}
                     </TableCell>
                   </TableRow>

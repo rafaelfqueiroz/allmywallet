@@ -85,7 +85,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
 
   return (
     <PageShell width="wide" title={tp('title')} description={tp('description')}>
-      <ReportNav current="/reports/earnings" />
+      <ReportNav />
 
       <Controls
         action="/reports/earnings"

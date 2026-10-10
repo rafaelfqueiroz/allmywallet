@@ -3,13 +3,32 @@
 import {
   flexRender,
   getCoreRowModel,
+  getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
+  type Row,
   type SortingState,
 } from '@tanstack/react-table';
-import { useId, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
+import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Search,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import {
+  pageWindow,
+  parseTableUrlState,
+  writeTableUrlState,
+  type TableUrlOptions,
+  type TableUrlState,
+} from '@/lib/table-url-state';
 import {
   Table,
   TableBody,
@@ -19,7 +38,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { NativeSelect } from '@/components/ui/native-select';
+import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
  * DL-12/DL-13 — one dataset, two renderings.
@@ -49,7 +72,42 @@ import { Card, CardContent } from '@/components/ui/card';
  * Sorting is **client-side over an already-scoped result set**: the rows are
  * all present, so re-ordering them is not a question anybody needs to ask the
  * database again. A re-query per sort would also give the sort its own chance
- * to disagree with the totals underneath it.
+ * to disagree with the totals underneath it. Filtering and paging are the same
+ * argument: they narrow a set that is already here.
+ *
+ * ---------------------------------------------------------------------------
+ * SPEC-022 BR-022-18 — "a list never grows a page without bound."
+ *
+ * **Pagination is on by default**, with a selectable page size, because the
+ * table that is bounded today (a user's holdings) is the one that is not in a
+ * year. A caller turns it off with `pagination={false}` only for a list that is
+ * bounded by construction, and says why where it does.
+ *
+ * **State lives in the URL** — sort, page, page size and filter text — so a
+ * view can be bookmarked and a reload does not lose it (SPEC-011 BR-011-11's
+ * reasoning; `lib/table-url-state.ts` is the parser). While mounted the
+ * component's own state is the truth and the URL is a mirror of it, and the URL
+ * is adopted again only when something *else* changed it. Without that rule a
+ * write landing behind a fast typist would put the input back to what it said
+ * a moment ago.
+ *
+ * The mirror is written with **`window.history.replaceState`, not
+ * `router.replace`**. Next syncs `replaceState` into `useSearchParams` — as
+ * long as the call does not pass Next's own history state back (see the call) — so the
+ * URL is still the shareable, reloadable truth — but nothing goes to the
+ * server. The rows are already here and sorting, paging and filtering narrow
+ * them locally; `router.replace` would refetch the whole page's server data
+ * (a report's use case, on every sort click and every keystroke) to learn
+ * nothing new. It replaces rather than pushes, so Back leaves the page instead
+ * of stepping through column clicks. With no server round trip the write is
+ * cheap enough to happen per keystroke, so the filter text is not debounced.
+ * A control that *should* refetch (the scope selector) navigates instead.
+ *
+ * `useSearchParams` makes a statically rendered page bail out to client
+ * rendering up to the nearest Suspense boundary, so the connected table sits in
+ * its own: callers need not wrap it, and the fallback is the same table at its
+ * default state rather than a hole.
+ * ---------------------------------------------------------------------------
  */
 export type DataTableProps<TData> = {
   columns: ColumnDef<TData, unknown>[];
@@ -80,36 +138,253 @@ export type DataTableProps<TData> = {
     readonly ascending: string;
     readonly descending: string;
   };
+  /**
+   * BR-022-18 — paginate. Default `true`; pass `false` only for a list bounded
+   * by construction, and say so where it is passed.
+   */
+  pagination?: boolean;
+  /** The page sizes offered. Default 10 / 25 / 50 / 100. */
+  pageSizeOptions?: readonly number[];
+  /** The page size a view opens on; must be one of the options. Default 25. */
+  defaultPageSize?: number;
+  /**
+   * The plural noun the summary counts — "importações" gives "Mostrando 1–5 de
+   * 23 importações". Translated text. Without it the summary is the generic
+   * "Mostrando 1–5 de 23".
+   */
+  itemNoun?: string;
+  /**
+   * A text filter over the columns whose value is a string. Numeric columns are
+   * not searched: a rank or a `Decimal` is not what the user sees. `label` is
+   * the control's accessible name (catalogue default otherwise); `placeholder`
+   * is the caller's, because "Filtrar por arquivo" says what is being filtered.
+   */
+  filter?: { readonly placeholder: string; readonly label?: string };
+  /** Extra filters (a status select, say), rendered beside the text filter. */
+  toolbar?: ReactNode;
+  /**
+   * Prefix for this table's URL parameters, so two tables on one page do not
+   * share a page number. Without it: `sort`, `page`, `size`, `q`.
+   */
+  paramPrefix?: string;
+  /** Shown when a filter matches nothing. Catalogue default otherwise. */
+  noResults?: ReactNode;
   className?: string;
 };
 
-export function DataTable<TData>({
+const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 25;
+
+/** A column's id, as TanStack will derive it — needed before the table exists. */
+function columnId<TData>(column: ColumnDef<TData, unknown>): string | undefined {
+  if (column.id !== undefined) return column.id;
+  return 'accessorKey' in column ? String(column.accessorKey) : undefined;
+}
+
+function urlOptions<TData>({
+  columns,
+  sortable = false,
+  initialSorting,
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
+  defaultPageSize = DEFAULT_PAGE_SIZE,
+  paramPrefix,
+}: DataTableProps<TData>): TableUrlOptions {
+  const first = initialSorting?.[0];
+  return {
+    ...(paramPrefix ? { prefix: paramPrefix } : {}),
+    pageSizeOptions,
+    sortableIds: sortable
+      ? columns.flatMap((column) => {
+          const id = columnId(column);
+          return id === undefined ? [] : [id];
+        })
+      : [],
+    defaults: {
+      sort: first ? { id: first.id, desc: first.desc } : null,
+      pageSize: pageSizeOptions.includes(defaultPageSize)
+        ? defaultPageSize
+        : (pageSizeOptions[0] ?? DEFAULT_PAGE_SIZE),
+    },
+  };
+}
+
+type StateChange = (next: TableUrlState) => void;
+
+export function DataTable<TData>(props: DataTableProps<TData>) {
+  const options = urlOptions(props);
+
+  return (
+    <Suspense
+      fallback={
+        <DataTableView
+          {...props}
+          state={{
+            sort: options.defaults.sort,
+            page: 1,
+            pageSize: options.defaults.pageSize,
+            query: '',
+          }}
+          onStateChange={() => {}}
+        />
+      }
+    >
+      <UrlDataTable {...props} options={options} />
+    </Suspense>
+  );
+}
+
+/**
+ * The connected table: URL → state on the way in, state → URL on the way out.
+ * See the doc comment on `DataTableProps` for why the state is local and the
+ * URL a mirror.
+ */
+function UrlDataTable<TData>({
+  options,
+  ...props
+}: DataTableProps<TData> & { options: TableUrlOptions }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const urlKey = searchParams.toString();
+
+  const [state, setState] = useState(() => parseTableUrlState(searchParams, options));
+  // Query strings this component wrote itself, so that their arrival back
+  // through `useSearchParams` is not mistaken for an outside change.
+  const written = useRef(new Set<string>());
+
+  useEffect(() => {
+    // Consumed on arrival: one write explains one arrival, so a later outside
+    // navigation to the same URL is still followed.
+    if (written.current.delete(urlKey)) return;
+    // Someone else moved the URL (a Link, the Back button): follow it.
+    written.current.clear();
+    setState(parseTableUrlState(new URLSearchParams(urlKey), options));
+    // `options` is rebuilt every render and only its content matters; the URL
+    // is the one input whose change should re-read.
+  }, [urlKey]);
+
+  const onStateChange: StateChange = (next) => {
+    setState(next);
+
+    const query = writeTableUrlState(urlKey, next, options);
+    // An unchanged URL produces no arrival to explain, and a stale entry
+    // would swallow the next outside navigation to it.
+    if (query !== urlKey) written.current.add(query);
+    // `null`, never `window.history.state`: Next's own entries carry its
+    // `__NA` marker, and its patched `replaceState` treats a call carrying that
+    // marker as internal and skips syncing `useSearchParams`. The address bar
+    // would move while every other reader of the URL — the scope selector
+    // building its next href — kept the stale query and dropped this table's
+    // state on the next navigation. Next restores its own history state
+    // itself when handed `null`.
+    window.history.replaceState(
+      null,
+      '',
+      `${query === '' ? pathname : `${pathname}?${query}`}${window.location.hash}`,
+    );
+  };
+
+  return <DataTableView {...props} state={state} onStateChange={onStateChange} />;
+}
+
+/** Diacritic- and case-insensitive: "acoes" finds "Ações". */
+function normalise(value: string): string {
+  return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+/**
+ * The global filter. TanStack calls it once per column and keeps the row if any
+ * call says yes; a column whose value is not a string says no, which is how
+ * "string columns only" is expressed.
+ */
+function matchesQuery<TData>(row: Row<TData>, columnId: string, filterValue: unknown): boolean {
+  const value: unknown = row.getValue(columnId);
+  return (
+    typeof value === 'string' &&
+    typeof filterValue === 'string' &&
+    // Trimmed, as the URL stores it: "PETR4 " must find what `?q=PETR4` finds.
+    normalise(value).includes(normalise(filterValue.trim()))
+  );
+}
+
+function DataTableView<TData>({
   columns,
   data,
   caption,
   empty,
   sortable = false,
-  initialSorting,
   sortLabel,
   sortControlLabels,
+  pagination = true,
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
+  itemNoun,
+  filter,
+  toolbar,
+  noResults,
   className,
-}: DataTableProps<TData>) {
-  const [sorting, setSorting] = useState<SortingState>(initialSorting ?? []);
+  state,
+  onStateChange,
+}: DataTableProps<TData> & { state: TableUrlState; onStateChange: StateChange }) {
+  const t = useTranslations('dataTable');
+  // Memoised on the sort's content: a fresh array every render reads to
+  // TanStack as a new sort, which re-derives the sorted rows on every render.
+  const sortId = sortable ? (state.sort?.id ?? null) : null;
+  const sortDesc = state.sort?.desc ?? false;
+  const sorting: SortingState = useMemo(
+    () => (sortId === null ? [] : [{ id: sortId, desc: sortDesc }]),
+    [sortId, sortDesc],
+  );
+
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    /*
+     * Paging is ours (the slice below), so TanStack's own reset must be off.
+     * Left on, it queues a page-index reset whenever the row model re-derives,
+     * that reset is a state update, the update re-renders, and the render
+     * re-derives the rows: an endless render loop that only a real browser
+     * shows — it froze the page on the first click (#204), and jsdom never
+     * reproduced it. `tests/e2e/composition.spec.ts`'s sort journeys are the
+     * guard.
+     */
+    autoResetAll: false,
     ...(sortable
       ? {
-          state: { sorting },
-          onSortingChange: setSorting,
           getSortedRowModel: getSortedRowModel(),
+          onSortingChange: (updater: SortingState | ((old: SortingState) => SortingState)) => {
+            const next = (typeof updater === 'function' ? updater(sorting) : updater)[0];
+            // A new order starts from the top; staying on page 3 of a list that
+            // has just been re-ordered shows rows that are no longer neighbours.
+            onStateChange({
+              ...state,
+              sort: next ? { id: next.id, desc: next.desc } : null,
+              page: 1,
+            });
+          },
         }
       : {}),
+    getFilteredRowModel: getFilteredRowModel(),
+    globalFilterFn: matchesQuery,
+    // TanStack searches a column only if its *first* value is a string, which a
+    // leading `undefined` quietly defeats. `matchesQuery` decides per value.
+    getColumnCanGlobalFilter: () => true,
+    state: { sorting, globalFilter: state.query },
   });
   const captionId = useId();
+  const filterId = useId();
+  const sizeId = useId();
 
-  const rows = table.getRowModel().rows;
+  // Sorted and filtered, not yet paged: paging is a slice, done here rather
+  // than in a row model so a page the list has shrunk below can be clamped
+  // before it is applied.
+  const matching = table.getRowModel().rows;
+  const total = matching.length;
+  const pageCount = pagination ? Math.max(1, Math.ceil(total / state.pageSize)) : 1;
+  // A shared link can carry a page the list has since shrunk below.
+  const page = Math.min(state.page, pageCount);
+  const rows = pagination
+    ? matching.slice((page - 1) * state.pageSize, page * state.pageSize)
+    : matching;
 
   /**
    * The card list repeats each column's header as its field label, and a header
@@ -128,10 +403,70 @@ export function DataTable<TData>({
       ]),
   );
 
+  // The caller's empty state wins over everything: with no data there is
+  // nothing to filter, and a toolbar over an empty table would only invite a
+  // search that cannot find anything.
   if (data.length === 0 && empty) return <>{empty}</>;
+
+  const toolbarRow =
+    filter || toolbar ? (
+      <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+        {filter && (
+          <div className="relative w-full min-w-48 sm:w-64">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              id={filterId}
+              type="search"
+              value={state.query}
+              aria-label={filter.label ?? t('filterLabel')}
+              placeholder={filter.placeholder}
+              className="pl-8"
+              onChange={(event) => onStateChange({ ...state, query: event.target.value, page: 1 })}
+            />
+          </div>
+        )}
+        {toolbar}
+      </div>
+    ) : null;
+
+  // A filter that matches nothing is not an empty collection: the records
+  // exist, and the way back is to change the filter, so the toolbar stays.
+  if (total === 0 && data.length > 0) {
+    return (
+      <div data-slot="data-table" className={className}>
+        {toolbarRow}
+        {noResults ?? (
+          <EmptyState
+            title={t('noResultsTitle')}
+            description={t('noResultsBody')}
+            {...(state.query !== ''
+              ? {
+                  action: (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onStateChange({ ...state, query: '', page: 1 })}
+                    >
+                      {t('clearFilter')}
+                    </Button>
+                  ),
+                }
+              : {})}
+          />
+        )}
+      </div>
+    );
+  }
+
+  const from = total === 0 ? 0 : (page - 1) * state.pageSize + 1;
+  const to = pagination ? Math.min(total, page * state.pageSize) : total;
 
   return (
     <div data-slot="data-table" className={className}>
+      {toolbarRow}
       <div className="hidden md:block">
         <Table>
           <TableCaption className="sr-only">{caption}</TableCaption>
@@ -225,11 +560,15 @@ export function DataTable<TData>({
           <div className="mb-2 flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               {sortControlLabels.field}
-              <select
-                className="rounded-md border bg-background px-2 py-1 text-sm text-foreground"
+              <NativeSelect
+                className="w-auto text-foreground"
                 value={sorting[0]?.id ?? ''}
                 onChange={(event) =>
-                  setSorting([{ id: event.target.value, desc: sorting[0]?.desc ?? true }])
+                  onStateChange({
+                    ...state,
+                    sort: { id: event.target.value, desc: sorting[0]?.desc ?? true },
+                    page: 1,
+                  })
                 }
               >
                 {table
@@ -240,29 +579,28 @@ export function DataTable<TData>({
                       {headerText(headerLabels.get(column.id))}
                     </option>
                   ))}
-              </select>
+              </NativeSelect>
             </label>
-            <button
-              type="button"
-              className="rounded-md border px-2 py-1 text-sm"
+            <Button
+              variant="outline"
+              size="icon"
               aria-label={
                 sorting[0]?.desc === false
                   ? sortControlLabels.ascending
                   : sortControlLabels.descending
               }
-              onClick={() =>
-                setSorting((current) => {
-                  const first = current[0];
-                  return first === undefined ? current : [{ ...first, desc: !first.desc }];
-                })
-              }
+              onClick={() => {
+                const first = sorting[0];
+                if (first === undefined) return;
+                onStateChange({ ...state, sort: { id: first.id, desc: !first.desc }, page: 1 });
+              }}
             >
               {sorting[0]?.desc === false ? (
                 <ArrowUp aria-hidden="true" className="size-3.5" />
               ) : (
                 <ArrowDown aria-hidden="true" className="size-3.5" />
               )}
-            </button>
+            </Button>
           </div>
         )}
         <ul aria-labelledby={captionId} className="flex flex-col gap-2">
@@ -299,6 +637,85 @@ export function DataTable<TData>({
           ))}
         </ul>
       </div>
+
+      {pagination && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+          <p className="text-muted-foreground">
+            {itemNoun
+              ? t('summaryWithNoun', { from, to, total, noun: itemNoun })
+              : t('summary', { from, to, total })}
+          </p>
+
+          <nav aria-label={t('pagination')} className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('previousPage')}
+              // `aria-disabled`, not `disabled`: the button a keyboard user just
+              // pressed to reach the first page would otherwise be disabled
+              // under their focus, which drops focus to <body>.
+              {...(page <= 1 ? { 'aria-disabled': true } : {})}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              onClick={() => {
+                if (page > 1) onStateChange({ ...state, page: page - 1 });
+              }}
+            >
+              <ChevronLeft aria-hidden="true" />
+            </Button>
+            {pageWindow(page, pageCount).map((number) => (
+              <Button
+                key={number}
+                variant="ghost"
+                size="icon-sm"
+                aria-label={t('page', { page: number })}
+                {...(number === page ? { 'aria-current': 'page' as const } : {})}
+                className={cn(
+                  'tabular-nums',
+                  // BR-022-33 — the current page is a fill, like the current
+                  // destination; the focus ring stays a ring.
+                  number === page &&
+                    'bg-nav-active font-medium text-nav-active-foreground hover:bg-nav-active',
+                )}
+                onClick={() => onStateChange({ ...state, page: number })}
+              >
+                {number}
+              </Button>
+            ))}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t('nextPage')}
+              {...(page >= pageCount ? { 'aria-disabled': true } : {})}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              onClick={() => {
+                if (page < pageCount) onStateChange({ ...state, page: page + 1 });
+              }}
+            >
+              <ChevronRight aria-hidden="true" />
+            </Button>
+          </nav>
+
+          <div className="flex items-center gap-2">
+            <label htmlFor={sizeId} className="text-muted-foreground">
+              {t('pageSize')}
+            </label>
+            <NativeSelect
+              id={sizeId}
+              className="w-auto"
+              value={state.pageSize}
+              onChange={(event) =>
+                onStateChange({ ...state, pageSize: Number(event.target.value), page: 1 })
+              }
+            >
+              {pageSizeOptions.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

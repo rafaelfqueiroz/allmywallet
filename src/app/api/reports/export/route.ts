@@ -32,6 +32,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const userId = await requireUserId();
   const t = await getTranslations('reports');
+  const tCommon = await getTranslations('common');
 
   const params = { get: (name: string) => request.nextUrl.searchParams.get(name) };
   // Two passes for the same reason the pages do it: the default grouping
@@ -74,7 +75,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // SPEC-007 BR-007-06 / DL-007-12 — never `table.estimated`, which is
     // SPEC-009's unrelated valuation estimate.
     costEstimated: t('table.costEstimated'),
-    estimated: t('table.estimated'),
+    estimated: tCommon('estimated'),
     unassigned: t('group.unassigned'),
     notClassified: t('group.notClassified'),
     yes: t('table.yes'),

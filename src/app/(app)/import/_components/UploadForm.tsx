@@ -4,11 +4,9 @@ import { useActionState } from 'react';
 import { useTranslations } from 'next-intl';
 import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { Field } from '@/components/patterns/field';
-import { ErrorState } from '@/components/patterns/error-state';
+import { FileUpload } from '@/components/patterns/file-upload';
 import { Stack } from '@/components/layout/stack';
-import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 
 /**
  * SPEC-005 — the upload control.
@@ -38,17 +36,26 @@ export function UploadForm({ action }: UploadFormProps) {
   return (
     <form action={formAction}>
       <Stack gap="md">
-        {state.status === 'error' && (
-          <ErrorState title={tErrors(state.code, messageValues(state.context))} />
-        )}
-        <Cluster gap="md" align="end">
-          <Field id="extract-file" label={t('fileLabel')} hint={t('fileHint')}>
-            <Input type="file" name="file" accept=".xlsx,.xls" multiple required />
-          </Field>
+        {/* The refusal renders inside the drop zone (SPEC-022 BR-022-21/23),
+            where the user's eye already is, rather than as a banner above it. */}
+        <Field id="extract-file" label={t('fileLabel')} hint={t('fileHint')} width="full">
+          <FileUpload
+            name="file"
+            accept=".xlsx,.xls"
+            multiple
+            required
+            title={t('dropTitle')}
+            acceptHint={t('acceptHint')}
+            {...(state.status === 'error'
+              ? { error: tErrors(state.code, messageValues(state.context)) }
+              : {})}
+          />
+        </Field>
+        <div>
           <Button type="submit" disabled={pending}>
             {pending ? t('uploading') : t('upload')}
           </Button>
-        </Cluster>
+        </div>
       </Stack>
     </form>
   );

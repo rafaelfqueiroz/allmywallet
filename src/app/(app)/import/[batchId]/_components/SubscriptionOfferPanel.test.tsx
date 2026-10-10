@@ -20,7 +20,7 @@ const withClose: SubscriptionOfferLabels = {
   priceHint:
     'Resolver como subscrição vai precificá-lo pelo fechamento de 02/09/2021 (R$ 114,90), marcado como estimativa.',
   closeMissingReason: null,
-  estimateBadge: 'Preço estimado',
+  estimateBadge: 'Estimado',
   resolve: 'Resolver como subscrição',
   keep: 'Manter minha classificação',
 };
@@ -45,7 +45,7 @@ describe('SubscriptionOfferPanel', () => {
 
     expect(screen.getByText(withClose.pairing)).toBeInTheDocument();
     expect(screen.getByText(/marcado como estimativa/)).toBeInTheDocument();
-    expect(screen.getByText('Preço estimado')).toBeInTheDocument();
+    expect(screen.getByText('Estimado')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resolver como subscrição' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Manter minha classificação' })).toBeEnabled();
   });
@@ -63,7 +63,7 @@ describe('SubscriptionOfferPanel', () => {
     expect(screen.getByRole('button', { name: 'Resolver como subscrição' })).toBeDisabled();
     expect(screen.getByText(withoutClose.closeMissingReason as string)).toBeInTheDocument();
     // No estimate to mark yet, so no badge either.
-    expect(screen.queryByText('Preço estimado')).not.toBeInTheDocument();
+    expect(screen.queryByText('Estimado')).not.toBeInTheDocument();
     // "Keep my classification" needs no price and stays available.
     expect(screen.getByRole('button', { name: 'Manter minha classificação' })).toBeEnabled();
   });
