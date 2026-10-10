@@ -11,8 +11,8 @@ vi.mock('next/navigation', () => ({
 
 const items = [
   { href: '/preferences', label: 'Carteiras', exact: true },
-  { href: '/preferences/importar', label: 'Importar', icon: Upload },
-  { href: '/preferences/observar', label: 'Observar preços', icon: Eye },
+  { href: '/preferences/importar', label: 'Importar', icon: <Upload /> },
+  { href: '/preferences/observar', label: 'Observar preços', icon: <Eye /> },
 ] as const;
 
 function Sections() {
@@ -68,7 +68,7 @@ describe('SubNav', () => {
   it('hides its icons from assistive technology', () => {
     const { container } = render(<Sections />);
     for (const icon of container.querySelectorAll('svg')) {
-      expect(icon).toHaveAttribute('aria-hidden', 'true');
+      expect(icon.closest('[aria-hidden="true"]')).not.toBeNull();
     }
   });
 

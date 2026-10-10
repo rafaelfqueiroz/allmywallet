@@ -3,7 +3,6 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { isPathActive, navItemClassName } from '@/components/patterns/nav-link';
 
@@ -25,7 +24,13 @@ export type SubNavItem = {
   readonly href: string;
   /** Translated text — AR-44. */
   readonly label: ReactNode;
-  readonly icon?: LucideIcon;
+  /**
+   * A rendered icon element (`<Upload />`), not the component: Configurações'
+   * layout is a Server Component, and a component is a function, which cannot
+   * cross into this Client Component as a prop. Hidden from assistive
+   * technology here — the label already names the item.
+   */
+  readonly icon?: ReactNode;
   /** Match the path exactly; see `RouteTab.exact`. */
   readonly exact?: boolean;
 };
@@ -45,8 +50,6 @@ export function SubNav({ label, items, className }: SubNavProps) {
       <ul className="flex flex-col gap-1">
         {items.map((item) => {
           const active = isPathActive(pathname, item.href, item.exact);
-          const Icon = item.icon;
-
           return (
             <li key={item.href}>
               <Link
@@ -54,7 +57,11 @@ export function SubNav({ label, items, className }: SubNavProps) {
                 {...(active ? { 'aria-current': 'page' as const } : {})}
                 className={cn(navItemClassName(active))}
               >
-                {Icon && <Icon className="size-4 shrink-0" aria-hidden="true" />}
+                {item.icon && (
+                  <span aria-hidden="true" className="flex shrink-0 [&>svg]:size-4">
+                    {item.icon}
+                  </span>
+                )}
                 {item.label}
               </Link>
             </li>

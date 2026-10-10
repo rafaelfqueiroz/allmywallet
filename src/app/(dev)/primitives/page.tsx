@@ -8,6 +8,12 @@ import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard, StatCardSkeleton } from '@/components/patterns/stat-card';
 import { Money } from '@/components/patterns/money';
 import { Field } from '@/components/patterns/field';
+import { FileUpload } from '@/components/patterns/file-upload';
+import { PageHeader } from '@/components/patterns/page-header';
+import { RouteTabs } from '@/components/patterns/route-tabs';
+import { ScopeSelector } from '@/components/patterns/scope-selector';
+import { StateBadge } from '@/components/patterns/state-badge';
+import { SubNav } from '@/components/patterns/sub-nav';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
@@ -38,6 +44,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Eye, Upload, Wallet } from 'lucide-react';
+import { DemoTable } from './_components/DemoTable';
 
 /**
  * The kitchen-sink route the visual suite photographs (DL-16).
@@ -89,11 +97,20 @@ const BADGE_VARIANTS = [
   'neutral',
 ] as const;
 
+const STATUS_VARIANTS = ['success', 'progress', 'warning', 'danger', 'neutral'] as const;
+const WATCH_STATES = ['buy', 'hold', 'sell', 'unknown'] as const;
+
 /**
  * Fixture data, not copy. Ticker codes are proper nouns that render identically
  * in every locale — routing them through next-intl would put `PETR4` in the
  * translation catalogue, which is where nobody would ever look for it.
  */
+/** Fixture wallets for the scope selector — names, not copy (see above). */
+const SAMPLE_WALLETS = [
+  { walletId: '00000000-0000-4000-8000-000000000001', name: 'Aposentadoria' },
+  { walletId: '00000000-0000-4000-8000-000000000002', name: 'Reserva de Oportunidade' },
+] as const;
+
 const SAMPLE_ROWS = [
   { code: 'PETR4', quantity: '100', change: '1500.25' },
   { code: 'HGLG11', quantity: '42', change: '-320.75' },
@@ -129,6 +146,48 @@ export default async function PrimitivesPage() {
             </Badge>
           ))}
         </Cluster>
+        {/* SPEC-022 BR-022-31/32 — status badges with their dot, the watch
+            states, and the one wording for an estimated value. */}
+        <Cluster gap="sm">
+          {STATUS_VARIANTS.map((variant) => (
+            <Badge key={variant} variant={variant} dot>
+              {vocabulary('proventos')}
+            </Badge>
+          ))}
+          {WATCH_STATES.map((state) => (
+            <StateBadge key={state} state={state} label={vocabulary('precoMedio')} />
+          ))}
+          <Badge variant="outline">{t('estimated')}</Badge>
+        </Cluster>
+      </Section>
+
+      {/* SPEC-022 BR-022-14/15/16/17 — the page structure: header with the
+          scope selector, route tabs, and the vertical sub-navigation. The
+          first tab and section point here, so each renders its active state. */}
+      <Section title={vocabulary('patrimonio')}>
+        <PageHeader
+          title={vocabulary('patrimonio')}
+          description={vocabulary('composicao')}
+          scope={<ScopeSelector wallets={SAMPLE_WALLETS} />}
+          actions={<Button>{t('save')}</Button>}
+        />
+        <RouteTabs
+          label={vocabulary('patrimonio')}
+          tabs={[
+            { href: '/primitives', label: vocabulary('patrimonio') },
+            { href: '/primitives/composicao', label: vocabulary('composicao') },
+            { href: '/primitives/proventos', label: vocabulary('proventos') },
+          ]}
+        />
+        <SubNav
+          label={vocabulary('composicao')}
+          className="max-w-xs"
+          items={[
+            { href: '/primitives', label: vocabulary('patrimonio'), icon: <Wallet /> },
+            { href: '/primitives/importar', label: vocabulary('proventos'), icon: <Upload /> },
+            { href: '/primitives/observar', label: vocabulary('rentabilidade'), icon: <Eye /> },
+          ]}
+        />
       </Section>
 
       <Section title={vocabulary('precoMedio')}>
@@ -148,6 +207,39 @@ export default async function PrimitivesPage() {
             <Checkbox defaultChecked />
           </Field>
         </Cluster>
+        {/* BR-022-20 — a field with instructions beside two without, in one
+            row: their controls must line up, which only a screenshot shows. */}
+        <Cluster gap="md" align="end">
+          <Field id="demo-plain" label={vocabulary('patrimonio')} width="lg">
+            <Input defaultValue={vocabulary('patrimonio')} />
+          </Field>
+          <Field id="demo-hinted" label={vocabulary('composicao')} hint={t('loading')} width="lg">
+            <Input defaultValue={vocabulary('composicao')} />
+          </Field>
+          <Field id="demo-long-select" label={vocabulary('rentabilidade')} width="lg">
+            <NativeSelect defaultValue="long">
+              <option value="long">{SAMPLE_WALLETS[1].name}</option>
+            </NativeSelect>
+          </Field>
+        </Cluster>
+        {/* BR-022-23 — the pt-BR drop zone, empty and refused. */}
+        <Grid cols={2} gap="md">
+          <Field id="demo-upload" label={vocabulary('proventos')}>
+            <FileUpload name="demo-upload" accept=".xlsx" title={vocabulary('proventos')} />
+          </Field>
+          <Field id="demo-upload-error" label={vocabulary('proventos')}>
+            <FileUpload
+              name="demo-upload-error"
+              accept=".xlsx"
+              title={vocabulary('proventos')}
+              error={t('empty')}
+            />
+          </Field>
+        </Grid>
+      </Section>
+
+      <Section title={vocabulary('proventos')}>
+        <DemoTable />
       </Section>
 
       {/* Controls on a card, where their hover fills land on the card layer.
