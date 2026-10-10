@@ -418,6 +418,10 @@ describe('DataTable — pagination, filter and URL state', () => {
   // go to the server, which `router.replace` would.
   it('mirrors every state change with history.replaceState and never with the router', async () => {
     const user = userEvent.setup();
+    // What Next leaves on its own entries; jsdom's default `null` would make
+    // the assertion below pass whatever the component passed.
+    window.history.replaceState({ __NA: true }, '');
+    replaceState.mockClear();
     render(<Imports />);
 
     await user.click(screen.getByRole('button', { name: 'Ordenar por Arquivo' }));
@@ -427,6 +431,9 @@ describe('DataTable — pagination, filter and URL state', () => {
 
     expect(replaceState).toHaveBeenCalledTimes(4);
     expect(nav.replace).not.toHaveBeenCalled();
+    // Never Next's own history state back: it carries the marker that makes
+    // Next skip syncing `useSearchParams` (tests/e2e/data-table.spec.ts).
+    for (const call of replaceState.mock.calls) expect(call[0]).toBeNull();
   });
 
   it('reads the filter text from the URL', () => {

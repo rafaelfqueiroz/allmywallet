@@ -92,7 +92,8 @@ import { EmptyState } from '@/components/patterns/empty-state';
  * a moment ago.
  *
  * The mirror is written with **`window.history.replaceState`, not
- * `router.replace`**. Next syncs `replaceState` into `useSearchParams`, so the
+ * `router.replace`**. Next syncs `replaceState` into `useSearchParams` — as
+ * long as the call does not pass Next's own history state back (see the call) — so the
  * URL is still the shareable, reloadable truth — but nothing goes to the
  * server. The rows are already here and sorting, paging and filtering narrow
  * them locally; `router.replace` would refetch the whole page's server data
@@ -268,8 +269,15 @@ function UrlDataTable<TData>({
     // An unchanged URL produces no arrival to explain, and a stale entry
     // would swallow the next outside navigation to it.
     if (query !== urlKey) written.current.add(query);
+    // `null`, never `window.history.state`: Next's own entries carry its
+    // `__NA` marker, and its patched `replaceState` treats a call carrying that
+    // marker as internal and skips syncing `useSearchParams`. The address bar
+    // would move while every other reader of the URL — the scope selector
+    // building its next href — kept the stale query and dropped this table's
+    // state on the next navigation. Next restores its own history state
+    // itself when handed `null`.
     window.history.replaceState(
-      window.history.state,
+      null,
       '',
       `${query === '' ? pathname : `${pathname}?${query}`}${window.location.hash}`,
     );
