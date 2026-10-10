@@ -1555,7 +1555,6 @@
   },
   "scopeSelector": {
     "label": "Escopo",
-    "allWallets": "Todas as carteiras",
-    "menu": "Escolher o escopo"
+    "allWallets": "Todas as carteiras"
   }
 }
