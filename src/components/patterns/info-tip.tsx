@@ -120,7 +120,13 @@ export function InfoTip({ children, id, label, labelledBy, className }: InfoTipP
             if (event.pointerType !== 'touch') scheduleLeave();
           }}
           onFocus={pin}
-          onClick={pin}
+          onClick={(event) => {
+            // Radix composes its own toggle after this handler and skips it
+            // when the event is default-prevented — which is how "click only
+            // opens" is enforced.
+            event.preventDefault();
+            pin();
+          }}
           onBlur={(event) => {
             // Moving focus into the content (it has none today, but a link in
             // the instructions would) is not leaving the tip.
