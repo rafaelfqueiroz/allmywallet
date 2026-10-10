@@ -194,7 +194,22 @@
     "close": "Fechar",
     "empty": "Nada por aqui ainda",
     "skipToContent": "Pular para o conteúdo",
-    "retry": "Tentar novamente"
+    "retry": "Tentar novamente",
+    "estimated": "Estimado"
+  },
+  "field": {
+    "instructions": "Instruções sobre"
+  },
+  "fileUpload": {
+    "title": "Arraste o arquivo aqui",
+    "or": "ou",
+    "choose": "escolha um arquivo",
+    "none": "Nenhum arquivo selecionado",
+    "dropping": "Solte para enviar",
+    "count": "{count, plural, one {# arquivo} other {# arquivos}}",
+    "replace": "Trocar",
+    "sizeKb": "{size} KB",
+    "sending": "Enviando…"
   },
   "errors": {
     "NOT_FOUND": "Não encontramos o que você procura.",
@@ -399,7 +414,6 @@
     "needsAttentionBalanceOpen": "Ver metas e desvio",
     "markers": {
       "costEstimated": {
-        "badge": "Preço estimado",
         "explanation": "O custo desta carteira inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
       }
     }
@@ -471,7 +485,6 @@
       "pairing": "Esta linha é o exercício de uma subscrição cujo crédito — {quantity} {assetCode} em {date} — você classificou como {type}, a custo zero.",
       "priceHint": "Resolver como subscrição vai precificá-lo pelo fechamento de {closeDate} ({closeValue}), marcado como estimativa.",
       "closeMissing": "Ainda não há um preço de fechamento guardado para essa data. Importe a Movimentação de novo para buscá-lo.",
-      "estimateBadge": "Preço estimado",
       "resolve": "Resolver como subscrição",
       "keep": "Manter minha classificação"
     },
@@ -636,14 +649,12 @@
       "value": "Valor",
       "costBasis": "Custo",
       "costEstimated": "Custo estimado",
-      "estimated": "Estimado",
       "total": "Total",
       "share": "Participação",
       "yes": "Sim",
       "no": "Não"
     },
     "estimate": {
-      "badge": "Estimado",
       "explanation": "Valor estimado, não observado no mercado. Pode vir do custo de aquisição ou do indexador contratado."
     },
     "empty": {
@@ -675,7 +686,6 @@
         "PRICE_UNAVAILABLE": "Nunca conseguimos um preço para este ativo, então ele aparece pelo custo de aquisição."
       },
       "estimated": {
-        "badge": "Estimado",
         "basis": "Calculado por {indexer} a {rate}% ao longo de {days} dias úteis, até {through}. Não é um preço observado no mercado."
       },
       "carried": {
@@ -688,7 +698,6 @@
         "ipca_spread": "IPCA + juros"
       },
       "costEstimated": {
-        "badge": "Preço estimado",
         "explanation": "O custo desta posição inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
       }
     },
@@ -857,7 +866,6 @@
     },
     "markers": {
       "costEstimated": {
-        "badge": "Preço estimado",
         "closeExplanation": "Preço estimado pelo fechamento de {date}. A B3 não informa o preço da subscrição — o custo usa o preço de fechamento no dia em que os ativos foram creditados.",
         "carriedExplanation": "Custo herdado de uma posição com preço estimado."
       }
@@ -1054,7 +1062,6 @@
       "value": "Patrimônio",
       "basis": "Origem do valor",
       "observed": "Preço observado",
-      "estimated": "Estimado",
       "gap": "Sem cotação de fechamento — valor do último fechamento disponível"
     }
   },
@@ -1331,7 +1338,6 @@
         "value": "Valor",
         "status": "Situação",
         "observed": "Observado",
-        "estimated": "Estimado",
         "unavailable": "Indisponível — custo não registrado",
         "priceUnavailable": "Indisponível — sem preço no dia e sem custo registrado",
         "unavailableShort": "Indisponível"
