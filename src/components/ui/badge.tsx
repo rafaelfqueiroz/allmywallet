@@ -60,7 +60,11 @@ function Badge({
       {...props}
     >
       {dot && !asChild && (
-        <span aria-hidden data-slot="badge-dot" className="size-1.5 shrink-0 rounded-full bg-current" />
+        <span
+          aria-hidden
+          data-slot="badge-dot"
+          className="size-1.5 shrink-0 rounded-full bg-current"
+        />
       )}
       {children}
     </Comp>

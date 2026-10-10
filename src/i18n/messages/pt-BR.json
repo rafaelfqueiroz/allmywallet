@@ -208,7 +208,8 @@
     "dropping": "Solte para enviar",
     "count": "{count, plural, one {# arquivo} other {# arquivos}}",
     "replace": "Trocar",
-    "sizeKb": "{size} KB",
+    "sizeKb": "{size, number} KB",
+    "chooseOther": "Escolher outro",
     "sending": "Enviando…"
   },
   "errors": {
@@ -436,6 +437,8 @@
     "uploadTitle": "Enviar um arquivo",
     "uploadHint": "Envie os arquivos em qualquer ordem, um de cada vez. O tipo é identificado automaticamente pela estrutura do arquivo, não pelo nome.",
     "fileLabel": "Arquivo (.xlsx ou .xls)",
+    "dropTitle": "Arraste o extrato da B3 aqui",
+    "acceptHint": ".xlsx ou .xls",
     "upload": "Enviar",
     "historyTitle": "Importações anteriores",
     "historyEmpty": "Nenhum arquivo importado ainda.",

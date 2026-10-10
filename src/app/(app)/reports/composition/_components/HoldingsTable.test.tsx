@@ -35,7 +35,7 @@ const labels: HoldingsTableLabels = {
   concentratedTitle: 'Marcação informativa, sem recomendação.',
   estimated: 'Estimado',
   estimatedTitle: 'Valor estimado, não observado no mercado.',
-  costEstimated: 'Preço estimado',
+  costEstimated: 'Estimado',
   costEstimatedTitle: 'O custo desta posição inclui uma aquisição estimada.',
   sortBy: 'Ordenar por {column}',
   sortField: 'Ordenar por',
@@ -228,21 +228,28 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
   it('BR-015-09: marks the accrued row and only that one', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     // Both renderings of the row are in the DOM (DL-12), so one row yields two.
-    expect(screen.getAllByText('Estimado')).toHaveLength(2);
+    // One wording for both kinds of estimate (BR-022-32); the explanation is
+    // what tells them apart.
+    const accrued = screen
+      .getAllByText('Estimado')
+      .filter((badge) => badge.getAttribute('title') === labels.estimatedTitle);
+    expect(accrued).toHaveLength(2);
   });
 
   it('SPEC-007 BR-007-06 / DL-007-12: marks preço médio for the cost-estimated row, independently of the accrued one', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     // ITSA4 carries a cost estimate; both renderings are in the DOM (DL-12).
-    const badges = screen.getAllByText('Preço estimado');
+    const badges = screen
+      .getAllByText('Estimado')
+      .filter((badge) => badge.getAttribute('title') === labels.costEstimatedTitle);
     expect(badges).toHaveLength(2);
     expect(badges[0]).toHaveAttribute(
       'title',
       'O custo desta posição inclui uma aquisição estimada.',
     );
     // CDBX is the accrued (`estimated`) row, not the cost-estimated one — the
-    // two markers must not collapse into each other.
-    expect(screen.getAllByText('Estimado')).toHaveLength(2);
+    // two markers must not collapse into each other: four badges, two each.
+    expect(screen.getAllByText('Estimado')).toHaveLength(4);
   });
 
   it('has no axe violations', async () => {
