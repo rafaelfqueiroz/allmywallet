@@ -9,7 +9,6 @@ import { StatCard, StatCardSkeleton } from '@/components/patterns/stat-card';
 import { Money } from '@/components/patterns/money';
 import { Field } from '@/components/patterns/field';
 import { FileUpload } from '@/components/patterns/file-upload';
-import { PageHeader } from '@/components/patterns/page-header';
 import { RouteTabs } from '@/components/patterns/route-tabs';
 import { ScopeSelector } from '@/components/patterns/scope-selector';
 import { StateBadge } from '@/components/patterns/state-badge';
@@ -123,7 +122,15 @@ export default async function PrimitivesPage() {
   const vocabulary = await getTranslations('vocabulary');
 
   return (
-    <PageShell width="wide" title={vocabulary('patrimonio')} description={t('loading')}>
+    // The page's own header is the `PageHeader` demo (BR-022-14): scope
+    // selector and primary action on the right. One `<h1>` per document.
+    <PageShell
+      width="wide"
+      title={vocabulary('patrimonio')}
+      description={t('loading')}
+      scope={<ScopeSelector wallets={SAMPLE_WALLETS} />}
+      actions={<Button>{t('save')}</Button>}
+    >
       <Section title={vocabulary('composicao')}>
         <Cluster gap="sm">
           {BUTTON_VARIANTS.map((variant) => (
@@ -161,16 +168,10 @@ export default async function PrimitivesPage() {
         </Cluster>
       </Section>
 
-      {/* SPEC-022 BR-022-14/15/16/17 — the page structure: header with the
-          scope selector, route tabs, and the vertical sub-navigation. The
-          first tab and section point here, so each renders its active state. */}
+      {/* SPEC-022 BR-022-15/16 — route tabs and the vertical sub-navigation.
+          The first tab and section point here, so each renders its active
+          state. */}
       <Section title={vocabulary('patrimonio')}>
-        <PageHeader
-          title={vocabulary('patrimonio')}
-          description={vocabulary('composicao')}
-          scope={<ScopeSelector wallets={SAMPLE_WALLETS} />}
-          actions={<Button>{t('save')}</Button>}
-        />
         <RouteTabs
           label={vocabulary('patrimonio')}
           tabs={[

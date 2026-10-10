@@ -81,6 +81,7 @@ function RateCell({ rate }: { readonly rate: Rate | null }) {
 export default async function PerformancePage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
   const tr = await getTranslations('rentabilidade');
+  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -370,7 +371,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                           </span>
                           {group.estimated ? (
                             <Badge variant="outline" title={t('estimate.explanation')}>
-                              {t('estimate.badge')}
+                              {tCommon('estimated')}
                             </Badge>
                           ) : null}
                         </Cluster>
@@ -397,7 +398,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                         <span>{t('table.total')}</span>
                         {report.value.contribution.value.estimated ? (
                           <Badge variant="outline" title={t('estimate.explanation')}>
-                            {t('estimate.badge')}
+                            {tCommon('estimated')}
                           </Badge>
                         ) : null}
                       </Cluster>

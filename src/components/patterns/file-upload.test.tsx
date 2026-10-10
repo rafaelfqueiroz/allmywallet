@@ -150,6 +150,23 @@ describe('FileUpload', () => {
       expect(input).toHaveAttribute('aria-invalid', 'true');
       expect(input).toHaveAccessibleDescription('Envie a planilha .xlsx.');
     });
+
+    it('steps aside for a newly chosen file, and returns on the next submission', async () => {
+      const user = userEvent.setup();
+      const { container } = render(
+        <form onSubmit={(event) => event.preventDefault()}>
+          <Labelled error="Envie a planilha .xlsx." />
+        </form>,
+      );
+      await user.upload(screen.getByLabelText('Arquivo'), sheet('outro.xlsx'));
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(zone(container)).toHaveAttribute('data-state', 'idle');
+      expect(screen.getByText(/outro\.xlsx/)).toBeInTheDocument();
+
+      fireEvent.submit(container.querySelector('form') as HTMLFormElement);
+      expect(screen.getByRole('alert')).toHaveTextContent('Envie a planilha .xlsx.');
+    });
   });
 
   it('can be disabled', () => {

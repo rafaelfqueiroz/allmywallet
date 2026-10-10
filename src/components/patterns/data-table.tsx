@@ -10,7 +10,7 @@ import {
   type Row,
   type SortingState,
 } from '@tanstack/react-table';
-import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
@@ -293,7 +293,8 @@ function matchesQuery<TData>(row: Row<TData>, columnId: string, filterValue: unk
   return (
     typeof value === 'string' &&
     typeof filterValue === 'string' &&
-    normalise(value).includes(normalise(filterValue))
+    // Trimmed, as the URL stores it: "PETR4 " must find what `?q=PETR4` finds.
+    normalise(value).includes(normalise(filterValue.trim()))
   );
 }
 
@@ -316,12 +317,29 @@ function DataTableView<TData>({
   onStateChange,
 }: DataTableProps<TData> & { state: TableUrlState; onStateChange: StateChange }) {
   const t = useTranslations('dataTable');
-  const sorting: SortingState = sortable && state.sort ? [state.sort] : [];
+  // Memoised on the sort's content: a fresh array every render reads to
+  // TanStack as a new sort, which re-derives the sorted rows on every render.
+  const sortId = sortable ? (state.sort?.id ?? null) : null;
+  const sortDesc = state.sort?.desc ?? false;
+  const sorting: SortingState = useMemo(
+    () => (sortId === null ? [] : [{ id: sortId, desc: sortDesc }]),
+    [sortId, sortDesc],
+  );
 
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    /*
+     * Paging is ours (the slice below), so TanStack's own reset must be off.
+     * Left on, it queues a page-index reset whenever the row model re-derives,
+     * that reset is a state update, the update re-renders, and the render
+     * re-derives the rows: an endless render loop that only a real browser
+     * shows — it froze the page on the first click (#204), and jsdom never
+     * reproduced it. `tests/e2e/composition.spec.ts`'s sort journeys are the
+     * guard.
+     */
+    autoResetAll: false,
     ...(sortable
       ? {
           getSortedRowModel: getSortedRowModel(),
@@ -625,8 +643,14 @@ function DataTableView<TData>({
               variant="ghost"
               size="icon-sm"
               aria-label={t('previousPage')}
-              disabled={page <= 1}
-              onClick={() => onStateChange({ ...state, page: page - 1 })}
+              // `aria-disabled`, not `disabled`: the button a keyboard user just
+              // pressed to reach the first page would otherwise be disabled
+              // under their focus, which drops focus to <body>.
+              {...(page <= 1 ? { 'aria-disabled': true } : {})}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              onClick={() => {
+                if (page > 1) onStateChange({ ...state, page: page - 1 });
+              }}
             >
               <ChevronLeft aria-hidden="true" />
             </Button>
@@ -653,8 +677,11 @@ function DataTableView<TData>({
               variant="ghost"
               size="icon-sm"
               aria-label={t('nextPage')}
-              disabled={page >= pageCount}
-              onClick={() => onStateChange({ ...state, page: page + 1 })}
+              {...(page >= pageCount ? { 'aria-disabled': true } : {})}
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              onClick={() => {
+                if (page < pageCount) onStateChange({ ...state, page: page + 1 });
+              }}
             >
               <ChevronRight aria-hidden="true" />
             </Button>

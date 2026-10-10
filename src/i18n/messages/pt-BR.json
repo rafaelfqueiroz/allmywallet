@@ -1111,7 +1111,8 @@
       "noPrice": "—",
       "sortField": "Ordenar por",
       "sortAscending": "Ordem crescente",
-      "sortDescending": "Ordem decrescente"
+      "sortDescending": "Ordem decrescente",
+      "filterPlaceholder": "Filtrar por ativo, classe ou setor"
     },
     "concentration": {
       "badge": "Acima de {threshold}%",

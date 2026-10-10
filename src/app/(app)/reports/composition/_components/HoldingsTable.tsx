@@ -124,6 +124,8 @@ export interface HoldingsTableLabels {
   readonly sortField: string;
   readonly sortAscending: string;
   readonly sortDescending: string;
+  /** SPEC-022 BR-022-18 — the holdings list can run past one page. */
+  readonly filterPlaceholder: string;
 }
 
 export function HoldingsTable({
@@ -193,11 +195,6 @@ export function HoldingsTable({
                 {labels.concentrated}
               </Badge>
             )}
-            {row.original.estimated && (
-              <Badge variant="outline" title={labels.estimatedTitle}>
-                {labels.estimated}
-              </Badge>
-            )}
           </Cluster>
         ),
       },
@@ -254,7 +251,28 @@ export function HoldingsTable({
         ),
       },
       numeric('currentPrice', labels.currentPrice),
-      numeric('value', labels.value),
+      /*
+       * SPEC-009's valuation estimate qualifies the *current value* — how the
+       * holding was priced today — so its marker sits beside that figure, the
+       * way the cost estimate sits beside *preço médio*. On the code column the
+       * one word "Estimado" could not say which figure it meant (SPEC-022
+       * BR-022-32: the label sits beside the figure it qualifies).
+       */
+      {
+        ...numeric('value', labels.value),
+        cell: ({ row }) => (
+          <Cluster gap="sm" justify="end" align="baseline">
+            <Text as="span" className="tabular-nums">
+              {row.original.value.text}
+            </Text>
+            {row.original.estimated && (
+              <Badge variant="outline" title={labels.estimatedTitle}>
+                {labels.estimated}
+              </Badge>
+            )}
+          </Cluster>
+        ),
+      },
       numeric('share', labels.share),
       numeric('unrealizedGain', labels.unrealizedGain, { signed: true }),
     ];
@@ -275,6 +293,7 @@ export function HoldingsTable({
         ascending: labels.sortAscending,
         descending: labels.sortDescending,
       }}
+      filter={{ placeholder: labels.filterPlaceholder }}
     />
   );
 }

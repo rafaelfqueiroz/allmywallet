@@ -75,6 +75,10 @@ export function FileUpload({
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [chosen, setChosen] = useState<readonly Chosen[]>([]);
+  // A refusal describes the file that was sent. Once another is chosen it no
+  // longer describes anything on screen, so it steps aside until the next
+  // submission, which may bring a refusal of its own.
+  const [errorDismissed, setErrorDismissed] = useState(false);
 
   // React resets the form after an action settles, which clears the input
   // without firing `change`. Without this the zone would keep naming files the
@@ -83,11 +87,16 @@ export function FileUpload({
     const form = inputRef.current?.form;
     if (!form) return;
     const onReset = () => setChosen([]);
+    const onSubmit = () => setErrorDismissed(false);
     form.addEventListener('reset', onReset);
-    return () => form.removeEventListener('reset', onReset);
+    form.addEventListener('submit', onSubmit);
+    return () => {
+      form.removeEventListener('reset', onReset);
+      form.removeEventListener('submit', onSubmit);
+    };
   }, []);
 
-  const hasError = error !== undefined && error !== null && error !== false;
+  const hasError = error !== undefined && error !== null && error !== false && !errorDismissed;
   const state = hasError ? 'error' : pending ? 'pending' : dragging ? 'dragging' : 'idle';
   const summary = chosen.length === 0 ? t('none') : t('count', { count: chosen.length });
 
@@ -131,11 +140,12 @@ export function FileUpload({
         aria-describedby={
           [describedBy, hasError ? errorId : null].filter(Boolean).join(' ') || undefined
         }
-        onChange={(event) =>
+        onChange={(event) => {
+          setErrorDismissed(true);
           setChosen(
             Array.from(event.currentTarget.files ?? [], (f) => ({ name: f.name, size: f.size })),
-          )
-        }
+          );
+        }}
         className="peer absolute inset-0 size-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
       />
 

@@ -119,7 +119,9 @@ test.describe('the guided onboarding flow', () => {
     await expect(signedIn.page).toHaveURL(/\/onboarding$/);
 
     await expect(signedIn.page.getByText(/pronto para revisão no passo 3/)).toBeVisible();
-    await expect(signedIn.page.getByLabel(/arquivo/i)).toBeVisible();
+    // The file input, not the instructions icon beside its label, whose name
+    // also says "arquivo" (SPEC-022 BR-022-20).
+    await expect(signedIn.page.locator('input[type="file"][name="file"]')).toBeVisible();
     await expect(
       signedIn.page.getByRole('link', { name: 'Revisar e confirmar importação' }),
     ).toHaveAttribute('href', `/import/${batchId}`);
@@ -186,7 +188,7 @@ test.describe('the guided onboarding flow', () => {
     await page.keyboard.press('Tab');
     await expect(page.getByRole('link', { name: 'Pular para o conteúdo' })).toBeFocused();
 
-    const upload = page.getByLabel(/arquivo/i);
+    const upload = page.locator('input[type="file"][name="file"]');
     const submit = page.getByRole('button', { name: /^enviar$/i });
     const portal = page.getByRole('link', { name: /investidor/i }).first();
     const dismiss = page.getByRole('button', { name: 'Dispensar o guia' });

@@ -98,8 +98,13 @@ function TabStrip({
                 href={hrefWithParams(tab.href, params, preserveParams)}
                 {...(active ? { 'aria-current': 'page' as const } : {})}
                 className={cn(
-                  '-mb-px inline-flex h-10 items-center rounded-t-md border-b-2 px-3 text-sm whitespace-nowrap outline-none',
-                  'focus-visible:ring-3 focus-visible:ring-ring/50',
+                  'inline-flex h-10 items-center rounded-t-md border-b-2 px-3 text-sm whitespace-nowrap outline-none',
+                  // Inset: the strip scrolls horizontally on a phone, and a
+                  // scroll container clips anything drawn outside its box —
+                  // an outset ring lost its top edge on every tab. For the same
+                  // reason the underline sits on the border rather than over it
+                  // (no negative margin to overflow by a pixel).
+                  'focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset',
                   active
                     ? 'border-primary font-medium text-foreground'
                     : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',

@@ -288,7 +288,10 @@ describe('DataTable — pagination, filter and URL state', () => {
     render(<Imports />);
     const pagination = screen.getByRole('navigation', { name: 'Paginação' });
 
-    expect(within(pagination).getByRole('button', { name: 'Página anterior' })).toBeDisabled();
+    expect(within(pagination).getByRole('button', { name: 'Página anterior' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
     expect(within(pagination).getByRole('button', { name: 'Página 1' })).toHaveAttribute(
       'aria-current',
       'page',
@@ -308,10 +311,30 @@ describe('DataTable — pagination, filter and URL state', () => {
     await user.click(within(pagination).getByRole('button', { name: 'Página 3' }));
     expect(bodyNames()).toEqual(['arquivo-11.xlsx', 'arquivo-12.xlsx']);
     expect(screen.getByText('Mostrando 11–12 de 12 importações')).toBeInTheDocument();
-    expect(within(pagination).getByRole('button', { name: 'Próxima página' })).toBeDisabled();
+    expect(within(pagination).getByRole('button', { name: 'Próxima página' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
 
     await user.click(within(pagination).getByRole('button', { name: 'Página anterior' }));
     expect(bodyNames()[0]).toBe('arquivo-06.xlsx');
+  });
+
+  it('keeps focus on next when it reaches the last page', async () => {
+    const user = userEvent.setup();
+    render(<Imports />);
+    const pagination = screen.getByRole('navigation', { name: 'Paginação' });
+    const next = within(pagination).getByRole('button', { name: 'Próxima página' });
+
+    next.focus();
+    await user.keyboard('{Enter}');
+    await user.keyboard('{Enter}');
+    expect(bodyNames()).toEqual(['arquivo-11.xlsx', 'arquivo-12.xlsx']);
+    expect(next).toHaveFocus();
+
+    // Pressing it again at the end does nothing.
+    await user.keyboard('{Enter}');
+    expect(bodyNames()).toEqual(['arquivo-11.xlsx', 'arquivo-12.xlsx']);
   });
 
   it('changes the page size and goes back to the first page', async () => {

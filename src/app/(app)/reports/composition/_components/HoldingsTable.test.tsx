@@ -48,6 +48,7 @@ const labels: HoldingsTableLabels = {
   sortField: 'Ordenar por',
   sortAscending: 'Ordem crescente',
   sortDescending: 'Ordem decrescente',
+  filterPlaceholder: 'Filtrar por ativo, classe ou setor',
 };
 
 const cell = (text: string, rank: number | undefined, negative = false): Cell => ({
@@ -241,6 +242,15 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
       .getAllByText('Estimado')
       .filter((badge) => badge.getAttribute('title') === labels.estimatedTitle);
     expect(accrued).toHaveLength(2);
+    // Beside the figure it qualifies — the current value — not the code.
+    const cell = within(table())
+      .getAllByText('Estimado')
+      .find((badge) => badge.getAttribute('title') === labels.estimatedTitle)
+      ?.closest('td');
+    const headers = within(table())
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent);
+    expect(cell?.cellIndex).toBe(headers.findIndex((header) => header?.startsWith('Valor')));
   });
 
   it('SPEC-007 BR-007-06 / DL-007-12: marks preço médio for the cost-estimated row, independently of the accrued one', () => {

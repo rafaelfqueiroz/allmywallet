@@ -206,6 +206,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
                 sortField: tc('holdings.sortField'),
                 sortAscending: tc('holdings.sortAscending'),
                 sortDescending: tc('holdings.sortDescending'),
+                filterPlaceholder: tc('holdings.filterPlaceholder'),
               }}
             />
           </Section>
