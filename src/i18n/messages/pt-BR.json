@@ -326,20 +326,15 @@
   "preferences": {
     "title": "Preferências",
     "description": "Ajustes que valem só para a sua conta.",
-    "saved": "Preferência salva.",
-    "saveFailed": "Não foi possível salvar. Tente novamente.",
-    "signedOut": "Entre na sua conta para ajustar preferências.",
-    "groupingOptions": {
-      "asset_class": "Classe de ativo",
-      "asset": "Ativo",
-      "institution": "Instituição",
-      "wallet": "Carteira"
-    }
+    "signedOut": "Entre na sua conta para ajustar preferências."
   },
   "parameters": {
     "sectionTitle": "Parâmetros",
     "sectionDescription": "Ajustes desta seção que valem só para a sua conta.",
     "save": "Salvar",
+    "saved": "Salvo.",
+    "invalid": "Valor não aceito.",
+    "invalidBetween": "Valor não aceito. Use um número entre {min, number} e {max, number}.",
     "keys": {
       "import": {
         "staleness_days": {
@@ -358,15 +353,34 @@
         },
         "default_grouping": {
           "label": "Agrupamento padrão dos relatórios",
-          "description": "Como os relatórios agrupam suas posições por padrão."
+          "description": "Como os relatórios agrupam suas posições por padrão.",
+          "options": {
+            "asset_class": "Classe de ativo",
+            "wallet": "Carteira",
+            "asset": "Ativo",
+            "sector": "Setor",
+            "institution": "Instituição"
+          }
         },
         "benchmarks": {
           "label": "Benchmarks de comparação",
-          "description": "Índices exibidos junto da sua rentabilidade."
+          "description": "Índices exibidos junto da sua rentabilidade.",
+          "options": {
+            "CDI": "CDI",
+            "IPCA": "IPCA",
+            "IBOV": "Ibovespa"
+          }
         },
         "default_grouping_wallet_scope": {
           "label": "Agrupamento padrão dentro de uma carteira",
-          "description": "Como os relatórios agrupam as posições quando você olha uma única carteira."
+          "description": "Como os relatórios agrupam as posições quando você olha uma única carteira.",
+          "options": {
+            "asset_class": "Classe de ativo",
+            "wallet": "Carteira",
+            "asset": "Ativo",
+            "sector": "Setor",
+            "institution": "Instituição"
+          }
         },
         "twr_xirr_divergence_points": {
           "label": "Divergência entre TWR e XIRR (pontos-base)",
@@ -376,7 +390,12 @@
       "ui": {
         "theme": {
           "label": "Tema",
-          "description": "Seguir o sistema, ou fixar em claro ou escuro."
+          "description": "Seguir o sistema, ou fixar em claro ou escuro.",
+          "options": {
+            "system": "Sistema",
+            "light": "Claro",
+            "dark": "Escuro"
+          }
         },
         "hide_values": {
           "label": "Ocultar valores",

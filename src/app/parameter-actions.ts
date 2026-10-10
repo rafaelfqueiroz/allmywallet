@@ -97,12 +97,14 @@ export async function saveParameter(key: unknown, formData: FormData): Promise<S
 }
 
 /**
- * A `<form action={...}>` bound directly from a Server Component (`ParameterForm`)
- * must itself be a Server Action returning `void` — React's form-action type
- * has no room for `saveParameter`'s result. This is the thin adapter
- * that boundary requires; `saveParameter` stays the testable unit with
- * a real return value.
+ * The shape `useActionState` calls: `ParameterField` binds the key, React
+ * supplies the previous state. `saveParameter` stays the testable unit; this
+ * only adapts its argument order.
  */
-export async function submitParameterForm(key: unknown, formData: FormData): Promise<void> {
-  await saveParameter(key, formData);
+export async function saveParameterAction(
+  key: unknown,
+  _previous: SaveParameterState,
+  formData: FormData,
+): Promise<SaveParameterState> {
+  return saveParameter(key, formData);
 }
