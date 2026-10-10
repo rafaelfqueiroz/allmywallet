@@ -108,10 +108,21 @@ describe('AccountMenu', () => {
 
     const sair = within(menu).getByRole('menuitem', { name: 'Sair' });
     expect(sair).not.toHaveAttribute('href');
-    expect(sair).toHaveAttribute('type', 'submit');
-    expect(document.getElementById(sair.getAttribute('form') ?? '')?.tagName).toBe('FORM');
+    expect(sair.closest('a')).toBeNull();
 
     await user.click(sair);
+    await waitFor(() => expect(signOutAction).toHaveBeenCalled());
+  });
+
+  // The submission must not depend on the menu content still being mounted.
+  it('signs out from the keyboard too, after the menu has closed', async () => {
+    const user = userEvent.setup();
+    const signOutAction = vi.fn().mockResolvedValue(undefined);
+    render(<AccountMenu {...props({ signOutAction })} />);
+    await open(user);
+
+    await user.keyboard('{End}{Enter}');
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
     await waitFor(() => expect(signOutAction).toHaveBeenCalled());
   });
 
@@ -177,6 +188,33 @@ describe('AccountMenu', () => {
     await waitFor(() => expect(document.documentElement).toHaveClass('light'));
     expect(document.documentElement).not.toHaveClass('dark');
     expect(within(menu).getByRole('menuitemradio', { name: 'Claro' })).toBeChecked();
+  });
+
+  // A save that throws (session ended elsewhere, database down) must not
+  // reach an error boundary and replace the page.
+  it('puts the previous theme back when the save throws', async () => {
+    const user = userEvent.setup();
+    const saveTheme = vi.fn().mockRejectedValue(new Error('No authenticated session'));
+    render(<AccountMenu {...props({ theme: 'light', saveTheme })} />);
+    const menu = await open(user);
+
+    await user.click(within(menu).getByRole('menuitemradio', { name: 'Escuro' }));
+
+    await waitFor(() => expect(document.documentElement).toHaveClass('light'));
+    expect(window.localStorage.getItem('amw-theme')).toBe('light');
+    expect(within(menu).getByRole('menuitemradio', { name: 'Claro' })).toBeChecked();
+  });
+
+  // DS-20 / DS-48: the highlighted option's fill is nearly the track's, so
+  // keyboard focus must be a ring.
+  it('shows a focus ring on the theme options', async () => {
+    const user = userEvent.setup();
+    render(<AccountMenu {...props()} />);
+    const menu = await open(user);
+
+    for (const option of within(menu).getAllByRole('menuitemradio')) {
+      expect(option.className).toContain('focus-visible:ring-ring');
+    }
   });
 
   it('does not save when the chosen theme is already the current one', async () => {

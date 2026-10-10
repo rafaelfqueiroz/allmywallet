@@ -11,8 +11,9 @@ import { expectPermanentRedirect } from './support/redirects';
  * Signed out on purpose: the redirect is the router's, before any page or
  * session read, and an e-mail recipient's browser may well have no session.
  *
- * The control journey proves the helper can fail: a route that has *not*
- * moved must not answer with a redirect.
+ * The control journeys prove the helper can fail — on a route that has not
+ * moved, and on a destination that does not exist — so an empty table is not a
+ * vacuous pass.
  */
 for (const row of LEGACY_REDIRECTS) {
   test(`${row.example.from} redirects permanently to ${row.example.to} (#${row.issue})`, async ({
@@ -22,7 +23,15 @@ for (const row of LEGACY_REDIRECTS) {
   });
 }
 
-test('a route that has not moved answers without a redirect', async ({ request }) => {
+test('the check fails for a route that has not moved', async ({ request }) => {
   const response = await request.get('/privacy-policy', { maxRedirects: 0 });
   expect(response.status()).toBe(200);
+  await expect(expectPermanentRedirect(request, '/privacy-policy', '/signin')).rejects.toThrow();
+});
+
+test('the check fails for a destination that does not render', async ({ request }) => {
+  // Not a redirect row: only the landing half of the helper is exercised.
+  await expect(
+    expectPermanentRedirect(request, '/privacy-policy', '/portfolio/does-not-exist'),
+  ).rejects.toThrow();
 });

@@ -95,8 +95,16 @@ export function useThemeChoice(
     setCurrent(next);
     rememberTheme(next);
     startTransition(async () => {
-      const result = await save(next);
-      if (result.status === 'error') {
+      // A save that *throws* — the session ended in another tab, the database
+      // is down — is a refusal too. Left uncaught, React would hand it to the
+      // nearest error boundary and replace the page over a theme.
+      let saved = false;
+      try {
+        saved = (await save(next)).status === 'saved';
+      } catch {
+        saved = false;
+      }
+      if (!saved) {
         setCurrent(previous);
         rememberTheme(previous);
       }
@@ -141,7 +149,9 @@ export function ThemeMenuGroup({
           value={option}
           indicator={false}
           onSelect={(event) => event.preventDefault()}
-          className="flex-1 justify-center data-[state=checked]:bg-card data-[state=checked]:font-medium data-[state=checked]:shadow-sm"
+          // The highlighted item's `accent` fill barely differs from the
+          // group's `muted` track, so keyboard focus is a ring (DS-48, WCAG 2.4.7).
+          className="flex-1 justify-center focus-visible:ring-3 focus-visible:ring-ring/50 data-[state=checked]:bg-card data-[state=checked]:font-medium data-[state=checked]:shadow-sm"
         >
           <Icon aria-hidden="true" />
           {t(option)}

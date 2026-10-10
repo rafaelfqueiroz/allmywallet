@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { getTranslations } from 'next-intl/server';
 import { verifyUnsubscribeToken } from '@/lib/unsubscribe-token';
 import { confirmUnsubscribeAction } from '@/app/unsubscribe/actions';
-import { PageShell } from '@/components/patterns/page-shell';
+import { AuthShell } from '@/components/patterns/auth-shell';
 import { Section } from '@/components/patterns/section';
 import { Stack } from '@/components/layout/stack';
 import { Text } from '@/components/ui/text';
@@ -18,6 +18,9 @@ import { Button } from '@/components/ui/button';
  * (`actions.ts`), behind the form's POST, never here on the GET. See that
  * file's doc comment for why a mail-client link prefetch makes that
  * distinction load-bearing rather than stylistic.
+ *
+ * `AuthShell`, not `PageShell` (DS-39): one centred task for a visitor with
+ * no session and no navigation, which is that shell's shape.
  *
  * One generic message covers every invalid-token case — malformed, wrong
  * purpose, bad signature, not a UUID — matching
@@ -42,9 +45,9 @@ export default async function UnsubscribePage({ searchParams }: PageProps) {
 
   if (params.done === '1') {
     return (
-      <PageShell title={t('title')}>
+      <AuthShell title={t('title')}>
         <Text>{t('done')}</Text>
-      </PageShell>
+      </AuthShell>
     );
   }
 
@@ -59,14 +62,14 @@ export default async function UnsubscribePage({ searchParams }: PageProps) {
   // plain `string` with no cast and no `!` (DV-03).
   if (userId === null || token === null) {
     return (
-      <PageShell title={t('title')}>
+      <AuthShell title={t('title')}>
         <Text tone="muted">{t('invalid')}</Text>
-      </PageShell>
+      </AuthShell>
     );
   }
 
   return (
-    <PageShell title={t('title')}>
+    <AuthShell title={t('title')}>
       <Section title={t('confirmTitle')}>
         <Stack gap="md">
           <Text tone="muted">{t('confirmBody')}</Text>
@@ -78,6 +81,6 @@ export default async function UnsubscribePage({ searchParams }: PageProps) {
           </form>
         </Stack>
       </Section>
-    </PageShell>
+    </AuthShell>
   );
 }

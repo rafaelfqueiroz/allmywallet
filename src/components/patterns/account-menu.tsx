@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import {
@@ -55,10 +55,12 @@ export interface AccountMenuProps {
  * **Two items are state changes, so they are form submissions, never links**
  * (BR-022-11, BR-020-13): Sair deletes the server-side session and the guide
  * entry clears `onboarding_dismissed_at`. A GET — a prefetch, a crawler — must
- * cause neither. The forms sit *outside* the menu content and the items submit
- * them through the `form` attribute: Radix unmounts the content as soon as an
- * item is chosen, and the submission must not depend on a form that is being
- * torn down.
+ * cause neither. The forms sit *outside* the menu content, and choosing an
+ * item calls `requestSubmit()` on its form from Radix's `onSelect`. A submit
+ * button inside the content would depend on the content still being mounted
+ * when the click's default action runs — true today only because the exit
+ * animation delays the unmount — and `onSelect` fires for the pointer and the
+ * keyboard alike, before the menu closes.
  *
  * Every action is a prop rather than an import (DS-02): this pattern knows
  * nothing about Auth.js, the registry or onboarding. `authenticated-frame.tsx`
@@ -74,8 +76,8 @@ export function AccountMenu({
   const t = useTranslations('accountMenu');
   const tNav = useTranslations('nav');
   const [themeChoice, chooseTheme] = useThemeChoice(theme, saveTheme);
-  const signOutFormId = useId();
-  const helpFormId = useId();
+  const signOutForm = useRef<HTMLFormElement>(null);
+  const helpForm = useRef<HTMLFormElement>(null);
   const displayName = profile.name ?? profile.email;
 
   return (
@@ -122,11 +124,9 @@ export function AccountMenu({
                 {t('privacy')}
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <button type="submit" form={helpFormId} className="w-full">
-                <CircleHelp aria-hidden="true" />
-                {tNav('help')}
-              </button>
+            <DropdownMenuItem onSelect={() => helpForm.current?.requestSubmit()}>
+              <CircleHelp aria-hidden="true" />
+              {tNav('help')}
             </DropdownMenuItem>
           </DropdownMenuGroup>
 
@@ -137,17 +137,15 @@ export function AccountMenu({
 
           <DropdownMenuSeparator />
 
-          <DropdownMenuItem asChild>
-            <button type="submit" form={signOutFormId} className="w-full">
-              <LogOut aria-hidden="true" />
-              {t('signOut')}
-            </button>
+          <DropdownMenuItem onSelect={() => signOutForm.current?.requestSubmit()}>
+            <LogOut aria-hidden="true" />
+            {t('signOut')}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <form id={helpFormId} action={helpAction} hidden />
-      <form id={signOutFormId} action={signOutAction} hidden />
+      <form ref={helpForm} action={helpAction} hidden data-slot="account-help-form" />
+      <form ref={signOutForm} action={signOutAction} hidden data-slot="account-sign-out-form" />
     </>
   );
 }

@@ -18,8 +18,10 @@ import { PageHeader } from '@/components/patterns/page-header';
  * that wants a shorter measure constrains *itself* — `Field` widths,
  * `max-w-prose` in `EmptyState` — without moving the page's edge.
  *
- * Pages outside the application frame have their own shells (DS-39):
- * `AuthShell` for a single centred task, `MarketingShell` for public pages.
+ * Pages outside the application frame mostly have their own shells (DS-39):
+ * `AuthShell` for a single centred task such as sign-in or unsubscribing. The
+ * public privacy policy is a document and uses this one, at the same width,
+ * with a reading measure on its own body.
  * A structural test (`tests/structural/one-page-width.test.ts`) bars a page in
  * `(app)`/`(settings)` from setting a width of its own, and an E2E journey
  * measures the rendered edge on every destination.

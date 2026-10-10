@@ -6,8 +6,12 @@ import { LEGACY_REDIRECTS, toNextRedirects, type LegacyRedirect } from '@/lib/le
  * destination issues have added. A violation here is a broken old link that
  * nobody would find until an e-mail recipient clicked it.
  */
-function pathOf(url: string): string {
-  return url.split('?')[0] ?? url;
+/**
+ * A path's shape, with every `:param` reduced to one placeholder, so
+ * `/settings/wallets/:walletId` and `/settings/wallets/:id` compare equal.
+ */
+function shapeOf(url: string): string {
+  return (url.split('?')[0] ?? url).replace(/:[A-Za-z_]\w*\*?/g, ':');
 }
 
 function invariantViolations(rows: readonly LegacyRedirect[]): string[] {
@@ -21,8 +25,8 @@ function invariantViolations(rows: readonly LegacyRedirect[]): string[] {
       // loopback-only); a relative one stays on whatever host served it.
       problems.push(`${row.source}: destination ${row.destination} is not a local path`);
     }
-    if (sources.has(row.source)) problems.push(`${row.source}: listed twice`);
-    sources.add(row.source);
+    if (sources.has(shapeOf(row.source))) problems.push(`${row.source}: listed twice`);
+    sources.add(shapeOf(row.source));
     if (!row.example.from.startsWith('/') || !row.example.to.startsWith('/')) {
       problems.push(`${row.source}: example is not a pair of local paths`);
     }
@@ -34,7 +38,7 @@ function invariantViolations(rows: readonly LegacyRedirect[]): string[] {
   // No chains: a destination that is itself a source costs a second
   // round-trip, and a cycle never lands at all.
   for (const row of rows) {
-    if (sources.has(pathOf(row.destination))) {
+    if (sources.has(shapeOf(row.destination))) {
       problems.push(`${row.source}: destination ${row.destination} is itself redirected`);
     }
   }
@@ -73,12 +77,15 @@ describe('legacy redirects (BR-022-08)', () => {
         { source: '/a', destination: '/c', issue: 1, example },
         { source: '/b', destination: 'https://elsewhere.test/b', issue: 1, example },
         { source: '/d', destination: '/e', issue: 0, example },
+        { source: '/w/:walletId', destination: '/s/w/:walletId', issue: 1, example },
+        { source: '/s/w/:id', destination: '/t/:id', issue: 1, example },
       ]),
     ).toEqual([
       '/a: listed twice',
       '/b: destination https://elsewhere.test/b is not a local path',
       '/d: no issue',
       '/a: destination /b is itself redirected',
+      '/w/:walletId: destination /s/w/:walletId is itself redirected',
     ]);
   });
 });
