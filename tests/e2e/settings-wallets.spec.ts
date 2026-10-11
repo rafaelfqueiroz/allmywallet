@@ -132,6 +132,9 @@ test.describe('Configurações › Carteiras', () => {
     ).toBeVisible();
     // The allocation table shows quantity, not cost (BR-022-05).
     await expect(table).not.toContainText('Custo');
+    // BR-022-05, again with an asset on the wallet: this is where a cost or a
+    // value would have appeared.
+    await expect(page.locator('main')).not.toContainText(/R\$\s*\d/);
 
     // The list counts it.
     await page.goto('/settings/wallets');
@@ -181,6 +184,69 @@ test.describe('Configurações › Carteiras', () => {
     await queueItem.getByRole('button', { name: 'Atribuir', exact: true }).click();
 
     await expect(page.getByText('Nada esperando uma decisão no momento.')).toBeVisible();
+  });
+
+  /**
+   * SPEC-010 BR-010-04/13 — a deliberate split, made in place. After the first
+   * assignment the form must offer what is *left*, not what was just typed: the
+   * queue pre-fills the new remainder, and a wallet's own page starts empty
+   * again. Neither test navigates between the two assignments, which is the
+   * only way to see a form that kept the submitted values after a success.
+   */
+  test('a partial assignment in the queue offers the remainder for the next one', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const [code] = await seedHoldings(userId, [
+      { code: 'SPLT', quantity: '100', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedWallet(userId, 'Aposentadoria');
+    await seedWallet(userId, 'Trading');
+    await dismissOnboarding(userId);
+
+    await page.goto('/settings/wallets/assign');
+    const item = page.getByRole('listitem').filter({ hasText: code! });
+    await item.getByLabel('Atribuir a', { exact: true }).selectOption({ label: 'Aposentadoria' });
+    await item.getByLabel('Quantidade', { exact: true }).fill('60');
+    await item.getByRole('button', { name: 'Atribuir', exact: true }).click();
+
+    // No navigation: the same form, now offering the 40 that remain.
+    await expect(item.getByLabel('Quantidade', { exact: true })).toHaveValue('40');
+    await expect(item.getByLabel('Atribuir a', { exact: true })).toHaveValue('');
+
+    await item.getByLabel('Atribuir a', { exact: true }).selectOption({ label: 'Trading' });
+    await item.getByRole('button', { name: 'Atribuir', exact: true }).click();
+    await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
+    await expect(page.getByText('Nada esperando uma decisão no momento.')).toBeVisible();
+  });
+
+  test('a partial assignment on a wallet’s page leaves the form empty for the next', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const [code] = await seedHoldings(userId, [
+      { code: 'WSPL', quantity: '100', averageCost: '20.00', price: '25.00' },
+    ]);
+    const walletId = await seedWallet(userId, 'Aposentadoria');
+    await dismissOnboarding(userId);
+
+    await page.goto(`/settings/wallets/${walletId}`);
+    const asset = page.getByLabel('Ativo', { exact: true });
+    const quantity = page.getByLabel('Quantidade', { exact: true });
+    await asset.selectOption({ label: `${code} — Ativo ${code} — 100 não atribuída(s)` });
+    await quantity.fill('60');
+    await page.getByRole('button', { name: 'Atribuir', exact: true }).click();
+
+    await expect(page.getByRole('table')).toContainText('60');
+    await expect(quantity).toHaveValue('');
+    await expect(asset).toHaveValue('');
+    // What is left is what the select now offers.
+    await expect(asset.locator('option', { hasText: '40 não atribuída(s)' })).toHaveCount(1);
+
+    await asset.selectOption({ label: `${code} — Ativo ${code} — 40 não atribuída(s)` });
+    await page.getByRole('button', { name: 'Atribuir', exact: true }).click();
+    await expect(page.getByRole('table')).toContainText('100');
+    await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
   });
 
   test('every Carteiras screen holds at a phone width with no page scroll', async ({
