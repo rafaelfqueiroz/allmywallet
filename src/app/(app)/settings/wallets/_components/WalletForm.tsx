@@ -66,8 +66,17 @@ export function WalletForm({
   const t = useTranslations('wallets');
   const tErrors = useTranslations('errors');
   const [draft, setDraft] = useState(values);
+  /*
+   * #210 review R2-1 — the colour control is controlled, and React's form
+   * reset after an action restores a controlled checkbox to its *first*
+   * render, not to its state: "Sem cor" would show one thing and post another.
+   * Re-mounting it from the posted values on every submission makes those
+   * values its defaults, so the reset lands on what was actually sent.
+   */
+  const [submissions, setSubmissions] = useState(0);
   const [state, formAction, pending] = useActionState(
     async (previous: ActionState, formData: FormData) => {
+      setSubmissions((count) => count + 1);
       setDraft({
         name: String(formData.get('name') ?? ''),
         description: String(formData.get('description') ?? ''),
@@ -110,7 +119,12 @@ export function WalletForm({
           <Input name="goal" defaultValue={draft.goal} />
         </Field>
         <Field id={`${idPrefix}-color`} label={t('colorLabel')} width="full">
-          <ColorInput name="color" defaultValue={draft.color} noneLabel={t('colorNone')} />
+          <ColorInput
+            key={submissions}
+            name="color"
+            defaultValue={draft.color}
+            noneLabel={t('colorNone')}
+          />
         </Field>
 
         <Cluster gap="sm" justify="end">

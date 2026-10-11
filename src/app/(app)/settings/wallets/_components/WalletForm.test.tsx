@@ -204,3 +204,59 @@ describe('WalletForm — a refusal lands under its field (BR-022-21)', () => {
     expect(await audit(container)).toHaveNoViolations();
   });
 });
+
+/**
+ * #210 review R2-1 — React resets the form after every action, success
+ * included. "Sem cor" and the colour must come back from what was **posted**,
+ * not from the first render, or the next save quietly posts the opposite.
+ */
+describe('the colour after an action', () => {
+  const checkbox = () => screen.getByRole('checkbox', { name: 'Sem cor' }) as HTMLInputElement;
+
+  it('keeps "Sem cor" after a successful save, so the next save does not restore the colour', async () => {
+    const posted: FormData[] = [];
+    const action = async (_: ActionState, formData: FormData) => {
+      posted.push(formData);
+      return SAVED;
+    };
+    render(
+      <WalletForm
+        action={action}
+        idPrefix="wallet"
+        submitLabel="Salvar"
+        walletId="w1"
+        values={{ name: 'Reserva', description: '', goal: '', color: '#336699' }}
+      />,
+    );
+
+    await userEvent.click(checkbox());
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await screen.findByText('Alterações salvas.');
+    expect(checkbox().checked).toBe(true);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Salvar' }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]!.get('noColor')).toBe('on');
+  });
+
+  it('keeps a picked colour through a refusal, so the retry posts it', async () => {
+    const posted: FormData[] = [];
+    const action = async (_: ActionState, formData: FormData) => {
+      posted.push(formData);
+      return posted.length === 1 ? refusesName() : IDLE;
+    };
+    render(<CreateForm action={action as () => Promise<ActionState>} />);
+
+    fireEvent.change(screen.getByLabelText('Cor'), { target: { value: '#ff0000' } });
+    await userEvent.type(screen.getByLabelText('Nome'), '  ');
+    await userEvent.click(screen.getByRole('button', { name: 'Criar carteira' }));
+    await screen.findByText('A carteira precisa de um nome.');
+    expect(checkbox().checked).toBe(false);
+
+    await userEvent.type(screen.getByLabelText('Nome'), 'Reserva');
+    await userEvent.click(screen.getByRole('button', { name: 'Criar carteira' }));
+    await waitFor(() => expect(posted).toHaveLength(2));
+    expect(posted[1]!.get('noColor')).toBeNull();
+    expect(posted[1]!.get('color')).toBe('#ff0000');
+  });
+});
