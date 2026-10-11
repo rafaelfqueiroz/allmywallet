@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import type { Page } from '@playwright/test';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
+import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
 
 /**
  * SPEC-022 BR-022-02 / #208 — **Portfólio**: Patrimônio, Composição, Carteiras
@@ -288,4 +289,38 @@ test('wallet setup is the last Carteiras sub-tab, apart from the comparison', as
   await page.getByLabel('Nome', { exact: true }).fill('Reserva');
   await page.getByRole('button', { name: 'Criar carteira' }).click();
   await expect(page.getByRole('link', { name: 'Reserva', exact: true })).toBeVisible();
+});
+
+/**
+ * SPEC-009 / BR-011-15 / BR-022-32 (review of #226) — a value that was not
+ * observed carries "Estimado" beside it on every Portfólio total: the
+ * headline, the class card and the wallet comparison. A CDB whose rate is
+ * unknown sits at cost (BR-009-13) and is unassigned, so the marker belongs on
+ * the CDB card, the Não atribuído row and the total — and on nothing that
+ * holds only the quoted stock.
+ */
+test('estimated values are marked beside every total they reach', async ({
+  signedIn,
+  viewport,
+}) => {
+  test.skip(!viewport || viewport.width < 768, 'the comparison is a table; asserted by row');
+  const { page, userId } = signedIn;
+  await seedPortfolio(userId);
+  await seedHeldFixedIncomeWithMissingRate(userId, 'CDBEST');
+
+  await page.goto('/portfolio');
+  const cards = page.locator('[data-slot="class-card"]');
+  await expect(cards.filter({ hasText: 'CDB' })).toContainText('Estimado');
+  await expect(cards.filter({ hasText: 'Ações' })).not.toContainText('Estimado');
+  await expect(
+    page.locator('[data-slot="stat-card"]').filter({ hasText: 'Patrimônio' }),
+  ).toContainText('Estimado');
+
+  await page.goto('/portfolio/wallets');
+  const comparison = page.getByRole('table', { name: 'Comparação entre carteiras' });
+  await expect(comparison.getByRole('row', { name: /Não atribuído/ })).toContainText('Estimado');
+  await expect(comparison.getByRole('row', { name: /Total/ })).toContainText('Estimado');
+  await expect(comparison.getByRole('row', { name: new RegExp(WALLET) })).not.toContainText(
+    'Estimado',
+  );
 });

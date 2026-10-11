@@ -13,6 +13,7 @@ import { tryUserId } from '@/lib/session';
 import { loadCurrentComposition } from '@/app/(app)/portfolio/data';
 import { PortfolioFrame } from '@/app/(app)/portfolio/_components/PortfolioFrame';
 import { holdingRows, holdingsTableLabels } from '@/app/(app)/portfolio/_components/holding-rows';
+import { EstimatedValue } from '@/app/(app)/portfolio/_components/EstimatedValue';
 import { HoldingsTable } from '@/app/(app)/portfolio/composition/_components/HoldingsTable';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { HoldingMarkers } from '@/app/(app)/reports/_components/HoldingMarkers';
@@ -29,7 +30,6 @@ import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
 import { List, ListItem } from '@/components/layout/list';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Text } from '@/components/ui/text';
@@ -173,16 +173,7 @@ async function Headline({ report }: { readonly report: CompositionReport }) {
     <Grid cols={4} gap="md">
       <StatCard
         label={tp('patrimonio.value')}
-        value={
-          <Cluster gap="sm" align="baseline">
-            <Money value={report.total.value} />
-            {report.total.estimated && (
-              <Badge variant="outline" title={t('estimate.explanation')}>
-                {tCommon('estimated')}
-              </Badge>
-            )}
-          </Cluster>
-        }
+        value={<EstimatedValue value={report.total.value} estimated={report.total.estimated} />}
       />
       <StatCard
         label={tp('patrimonio.cost')}
@@ -265,7 +256,7 @@ async function ClassCard({
             )}
           </Cluster>
           <Text as="span" size="lg" weight="semibold">
-            <Money value={slice.totals.value} />
+            <EstimatedValue value={slice.totals.value} estimated={slice.totals.estimated} />
           </Text>
           <ShareBar percent={barPercent(slice.share)} color={color} />
           <Text as="span" size="xs" tone="muted">

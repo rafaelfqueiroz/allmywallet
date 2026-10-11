@@ -11,6 +11,7 @@ import { loadCurrentComposition } from '@/app/(app)/portfolio/data';
 import { PortfolioFrame } from '@/app/(app)/portfolio/_components/PortfolioFrame';
 import { WalletBalance } from '@/app/(app)/portfolio/wallets/_components/WalletBalance';
 import { WalletTabs } from '@/app/(app)/portfolio/wallets/_components/WalletTabs';
+import { EstimatedValue } from '@/app/(app)/portfolio/_components/EstimatedValue';
 import { fromSearchParams } from '@/lib/report-url-state';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
@@ -356,7 +357,9 @@ async function Figures({
   return (
     <>
       <TableCell className="py-row text-right">
-        <Money value={totals.value} />
+        {/* SPEC-009 / BR-011-15 — a wallet holding an accrued CDB is valued,
+            not quoted, and says so beside the figure (BR-022-32). */}
+        <EstimatedValue value={totals.value} estimated={totals.estimated} justify="end" />
       </TableCell>
       <TableCell className="py-row text-right">
         <Cluster gap="sm" justify="end" align="baseline">
