@@ -66,7 +66,7 @@ export function holdingRows(
     /*
      * BR-018-19 — `null` for a holding with no rule, which is most of them.
      * The label and the title are resolved here, on the server, from the same
-     * `watch.*` catalogue entries `/watch` itself renders (AR-44), so the two
+     * `watch.*` catalogue entries the rules screen itself renders (AR-44), so the two
      * screens cannot describe the same state in two different words.
      */
     ...watchCells(watchStates.get(row.assetId), tc, tw),
@@ -153,7 +153,7 @@ function cell<T extends MoneyValue | Quantity>(
  * to an opinion (BR-015-06's concentration badge), and a state that read as a
  * recommendation here would be the product volunteering a view on an asset,
  * which SPEC-018 exists not to do. The full wording — which bound matched and
- * at what threshold — lives on `/watch`, where there is room to state the
+ * at what threshold — lives on the rules screen, where there is room to state the
  * user's own numbers back to them.
  */
 function watchCells(

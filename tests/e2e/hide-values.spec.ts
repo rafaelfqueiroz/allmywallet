@@ -73,7 +73,7 @@ const PAGES_WITH_AMOUNTS = [
   '/portfolio/composition',
   '/reports/earnings',
   '/transactions',
-  '/watch',
+  '/settings/watch',
 ] as const;
 
 interface Seeded {
@@ -214,7 +214,7 @@ function pages(seeded: Seeded): readonly string[] {
     '/settings/import/history',
     `/settings/import/${seeded.batchId}`,
     `/fixed-income/${seeded.fixedIncomeId}`,
-    '/watch',
+    '/settings/watch',
     '/account',
     '/preferences',
     '/privacy',
@@ -259,7 +259,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const goals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(amountsIn(goals)).toContain('9.000,00');
   expect(goals).toMatch(GOAL_INPUT);
-  expect(await html(page, '/watch')).toMatch(RULE_INPUT);
+  expect(await html(page, '/settings/watch')).toMatch(RULE_INPUT);
   expect(await html(page, `/transactions/${seeded.transactionId}/edit`)).toMatch(PRICE_INPUT);
 
   await turnMaskingOn(page);
@@ -274,7 +274,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const maskedGoals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(maskedGoals).not.toMatch(GOAL_INPUT);
   expect(maskedGoals).toContain('Mostrar valores');
-  expect(await html(page, '/watch')).not.toMatch(RULE_INPUT);
+  expect(await html(page, '/settings/watch')).not.toMatch(RULE_INPUT);
   const maskedEdit = await html(page, `/transactions/${seeded.transactionId}/edit`);
   expect(maskedEdit).not.toMatch(PRICE_INPUT);
   expect(maskedEdit).toContain('Mostrar valores');

@@ -10,9 +10,11 @@ import {
   setRuleMutedAction,
   updateRuleAction,
 } from '@/app/(app)/watch/actions';
-import { RuleForm, type RuleFormLabels } from '@/app/(app)/watch/_components/RuleForm';
+import { RuleForm, type RuleFormLabels } from '@/app/(app)/settings/watch/_components/RuleForm';
+import { WatchSection } from '@/app/(app)/settings/watch/_components/WatchSection';
+import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { PageShell } from '@/app/page-shell';
-import { ParameterSection } from '@/app/parameter-form';
+import { watchRuleAnchor } from '@/lib/watch-paths';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Note } from '@/components/patterns/note';
@@ -30,7 +32,10 @@ import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 
 /**
- * SPEC-018 — the watch screen (BR-018-19/20). Lists every held, eligible
+ * SPEC-018 — the watch screen (BR-018-19/20), as Configurações › Observar
+ * preços › **Regras** (SPEC-022 BR-022-05, #212). It was `/watch`, which
+ * redirects here (BR-022-08); the e-mail cooldown that sat at its foot is the
+ * section's Parâmetros tab. Lists every held, eligible
  * asset with its current price, both bounds, the evaluated state and the
  * time of the last email sent for it; offers a rule form for held eligible
  * assets with none yet; and states, for a held CDB/LCI/LCA, that it has no
@@ -45,11 +50,12 @@ export const dynamic = 'force-dynamic';
 
 export default async function WatchPage() {
   const t = await getTranslations('watch');
+  const ts = await getTranslations('settings');
   const userId = await tryUserId();
 
   if (userId === undefined) {
     return (
-      <PageShell title={t('title')}>
+      <PageShell title={ts('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -77,121 +83,121 @@ export default async function WatchPage() {
   const editLabels: RuleFormLabels = { ...formLabels, submit: t('save') };
 
   return (
-    <PageShell title={t('title')} description={t('description')}>
-      <Stack gap="md">
-        {/*
-          BR-018-15 — the delay disclosure lives on this, the rule-configuration
-          screen, stated plainly rather than in a help page. BR-018-18/DL-018-01
-          — the two other disclosures this feature's every string must respect:
-          nothing below is the product's own judgement, and "compra" always
-          means adding to a position already held.
-        */}
-        <Note>{t('delayDisclosure', { minutes: view.delayMinutes })}</Note>
-        <Note>{t('notAdvice')}</Note>
-        <Note>{t('addNotOpenNote')}</Note>
-        {/*
-          BR-018-25 — opt-in is off by default, so for a new account every
-          state below is in-app only. Saying which it is stops the screen from
-          implying an email that will never arrive; `emailConsented` is read
-          from SPEC-004's own consent record, not a feature-local copy.
-        */}
-        <Note>{view.emailConsented ? t('emailOn') : t('emailOff')}</Note>
-      </Stack>
+    <SettingsFrame>
+      <WatchSection>
+        <Stack gap="md">
+          {/*
+            BR-018-15 — the delay disclosure lives on this, the rule-configuration
+            screen, stated plainly rather than in a help page. BR-018-18/DL-018-01
+            — the two other disclosures this feature's every string must respect:
+            nothing below is the product's own judgement, and "compra" always
+            means adding to a position already held.
+          */}
+          <Note>{t('delayDisclosure', { minutes: view.delayMinutes })}</Note>
+          <Note>{t('notAdvice')}</Note>
+          <Note>{t('addNotOpenNote')}</Note>
+          {/*
+            BR-018-25 — opt-in is off by default, so for a new account every
+            state below is in-app only. Saying which it is stops the screen from
+            implying an email that will never arrive; `emailConsented` is read
+            from SPEC-004's own consent record, not a feature-local copy.
+          */}
+          <Note>{view.emailConsented ? t('emailOn') : t('emailOff')}</Note>
+        </Stack>
 
-      <Section title={t('yourRulesTitle')} description={t('yourRulesDescription')}>
-        {view.watched.length === 0 ? (
-          <EmptyState title={t('empty')} />
-        ) : (
-          <List gap="lg">
-            {view.watched.map((row) => (
-              <WatchedRow key={row.assetId} row={row} t={t} editLabels={editLabels} />
-            ))}
-          </List>
+        <Section title={t('yourRulesTitle')} description={t('yourRulesDescription')}>
+          {view.watched.length === 0 ? (
+            <EmptyState title={t('empty')} />
+          ) : (
+            <List gap="lg">
+              {view.watched.map((row) => (
+                <WatchedRow key={row.assetId} row={row} t={t} editLabels={editLabels} />
+              ))}
+            </List>
+          )}
+        </Section>
+
+        {view.retained.length > 0 && (
+          <Section title={t('retainedTitle')} description={t('retainedDescription')}>
+            <List gap="sm">
+              {view.retained.map((rule) => (
+                <ListItem key={rule.assetId} separated>
+                  <Stack gap="sm">
+                    <Cluster justify="between" gap="sm">
+                      <span className="font-medium">
+                        {rule.code} — {rule.name}
+                      </span>
+                      <Badge variant="secondary">{t('retainedBadge')}</Badge>
+                    </Cluster>
+                    <Text as="span" size="xs" tone="muted">
+                      {t('columnLower')}: {boundText(rule.lower, t)} · {t('columnUpper')}:{' '}
+                      {boundText(rule.upper, t)} · {t('columnDefault')}:{' '}
+                      {t(`stateLabel.${rule.defaultState}`)}
+                    </Text>
+                    {/*
+                      The only affordance a paused rule needs. Editing thresholds
+                      on an asset the user no longer holds would be editing a
+                      rule against a position that does not exist; deleting it is
+                      what BR-018-03's "not silently deleted by a sale" leaves to
+                      the person who wrote it.
+                    */}
+                    <ActionForm action={deleteRuleAction}>
+                      <input type="hidden" name="assetId" value={rule.assetId} />
+                      <Button type="submit" variant="destructive" size="sm">
+                        {t('delete')}
+                      </Button>
+                    </ActionForm>
+                  </Stack>
+                </ListItem>
+              ))}
+            </List>
+          </Section>
         )}
-      </Section>
 
-      {view.retained.length > 0 && (
-        <Section title={t('retainedTitle')} description={t('retainedDescription')}>
-          <List gap="sm">
-            {view.retained.map((rule) => (
-              <ListItem key={rule.assetId} separated>
-                <Stack gap="sm">
-                  <Cluster justify="between" gap="sm">
+        <Section title={t('availableTitle')} description={t('availableDescription')}>
+          {view.available.length === 0 ? (
+            <EmptyState title={t('availableEmpty')} />
+          ) : (
+            <List gap="lg">
+              {view.available.map((asset) => (
+                <ListItem key={asset.assetId} separated>
+                  <Stack gap="sm">
                     <span className="font-medium">
-                      {rule.code} — {rule.name}
+                      {asset.code} — {asset.name}
                     </span>
-                    <Badge variant="secondary">{t('retainedBadge')}</Badge>
+                    <RuleForm
+                      action={createRuleAction}
+                      assetId={asset.assetId}
+                      idPrefix={`create-${asset.assetId}`}
+                      labels={formLabels}
+                    />
+                  </Stack>
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Section>
+
+        {view.ineligible.length > 0 && (
+          <Section title={t('ineligibleTitle')} description={t('ineligibleDescription')}>
+            <List gap="sm">
+              {view.ineligible.map((asset) => (
+                <ListItem key={asset.assetId} separated>
+                  <Cluster justify="between" gap="sm">
+                    <span>
+                      {asset.code} — {asset.name}
+                    </span>
+                    <Text as="span" tone="muted" size="xs">
+                      {t('ineligibleNoPrice')}
+                    </Text>
                   </Cluster>
-                  <Text as="span" size="xs" tone="muted">
-                    {t('columnLower')}: {boundText(rule.lower, t)} · {t('columnUpper')}:{' '}
-                    {boundText(rule.upper, t)} · {t('columnDefault')}:{' '}
-                    {t(`stateLabel.${rule.defaultState}`)}
-                  </Text>
-                  {/*
-                    The only affordance a paused rule needs. Editing thresholds
-                    on an asset the user no longer holds would be editing a
-                    rule against a position that does not exist; deleting it is
-                    what BR-018-03's "not silently deleted by a sale" leaves to
-                    the person who wrote it.
-                  */}
-                  <ActionForm action={deleteRuleAction}>
-                    <input type="hidden" name="assetId" value={rule.assetId} />
-                    <Button type="submit" variant="destructive" size="sm">
-                      {t('delete')}
-                    </Button>
-                  </ActionForm>
-                </Stack>
-              </ListItem>
-            ))}
-          </List>
-        </Section>
-      )}
-
-      <Section title={t('availableTitle')} description={t('availableDescription')}>
-        {view.available.length === 0 ? (
-          <EmptyState title={t('availableEmpty')} />
-        ) : (
-          <List gap="lg">
-            {view.available.map((asset) => (
-              <ListItem key={asset.assetId} separated>
-                <Stack gap="sm">
-                  <span className="font-medium">
-                    {asset.code} — {asset.name}
-                  </span>
-                  <RuleForm
-                    action={createRuleAction}
-                    assetId={asset.assetId}
-                    idPrefix={`create-${asset.assetId}`}
-                    labels={formLabels}
-                  />
-                </Stack>
-              </ListItem>
-            ))}
-          </List>
+                </ListItem>
+              ))}
+            </List>
+          </Section>
         )}
-      </Section>
-
-      {view.ineligible.length > 0 && (
-        <Section title={t('ineligibleTitle')} description={t('ineligibleDescription')}>
-          <List gap="sm">
-            {view.ineligible.map((asset) => (
-              <ListItem key={asset.assetId} separated>
-                <Cluster justify="between" gap="sm">
-                  <span>
-                    {asset.code} — {asset.name}
-                  </span>
-                  <Text as="span" tone="muted" size="xs">
-                    {t('ineligibleNoPrice')}
-                  </Text>
-                </Cluster>
-              </ListItem>
-            ))}
-          </List>
-        </Section>
-      )}
-
-      <ParameterSection surface="settings.watch" />
-    </PageShell>
+      </WatchSection>
+    </SettingsFrame>
   );
 }
 
@@ -238,7 +244,9 @@ function WatchedRow({
 }) {
   const masked = useHideValues();
   return (
-    <ListItem separated>
+    // SPEC-022 BR-022-07 — the target of the Painel's "Ver regra" and of the
+    // opportunity e-mail's link, so the rule it names is marked on arrival.
+    <ListItem separated id={watchRuleAnchor(row.assetId)} linkTarget>
       <Stack gap="sm">
         <Cluster justify="between" gap="sm" align="baseline">
           <Cluster gap="sm" align="baseline">

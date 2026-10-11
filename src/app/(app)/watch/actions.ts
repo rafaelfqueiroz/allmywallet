@@ -16,6 +16,7 @@ import {
 import { OpportunityErrorCode, opportunityError } from '@/core/opportunity/errors';
 import { withWatchDeps } from '@/app/(app)/watch/composition';
 import { requireUserId } from '@/lib/session';
+import { WATCH_RULES_PATH } from '@/lib/watch-paths';
 
 /**
  * SPEC-018 — the watch screen's server actions, in the shape of
@@ -94,7 +95,7 @@ export async function createRuleAction(
     }),
   );
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/watch');
+  revalidatePath(WATCH_RULES_PATH);
   return IDLE;
 }
 
@@ -127,7 +128,7 @@ export async function updateRuleAction(
     }),
   );
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/watch');
+  revalidatePath(WATCH_RULES_PATH);
   return IDLE;
 }
 
@@ -149,7 +150,7 @@ export async function setRuleMutedAction(
     }),
   );
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/watch');
+  revalidatePath(WATCH_RULES_PATH);
   return IDLE;
 }
 
@@ -181,6 +182,6 @@ export async function deleteRuleAction(
     return ok(undefined);
   });
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/watch');
+  revalidatePath(WATCH_RULES_PATH);
   return IDLE;
 }

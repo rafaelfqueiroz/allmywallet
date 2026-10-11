@@ -135,6 +135,11 @@ export interface OpportunityNotificationLog {
  * violate BR-018-28 even if an adapter rendered every field it has.
  */
 export interface OpportunityAlert {
+  /**
+   * The asset whose rule matched — opaque, and used only to link the message
+   * to that rule's screen (SPEC-022 #212). It is not rendered as text.
+   */
+  readonly assetId: AssetId;
   readonly assetCode: string;
   readonly assetName: string;
   readonly price: Money;

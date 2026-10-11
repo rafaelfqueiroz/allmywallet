@@ -1,4 +1,5 @@
 import { env } from '@/lib/env';
+import { watchRulePath } from '@/lib/watch-paths';
 
 /**
  * `AUTH_URL` (SPEC-001 #42) is `https://host/api/auth` — or, on the personal
@@ -19,4 +20,13 @@ export function appOrigin(): string {
     }
   }
   return 'http://localhost:3000';
+}
+
+/**
+ * SPEC-022 BR-022-07/08 (#212) — the rule an opportunity e-mail is about, on
+ * Configurações › Observar preços. Built from the same path helper the Painel
+ * links with, so the e-mail and the screen cannot name different places.
+ */
+export function opportunityRuleUrl(assetId: string): string {
+  return `${appOrigin()}${watchRulePath(assetId)}`;
 }

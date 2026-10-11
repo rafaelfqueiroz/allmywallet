@@ -66,7 +66,7 @@ test('a signed-in user sees their stored preferences and a saved change survives
 const FEATURE_PARAMETERS = [
   { label: 'Dias sem importar até avisar', screen: '/settings/import/parameters' },
   { label: 'Tolerância de desvio (p.p.)', screen: '/settings/wallets/parameters' },
-  { label: 'Intervalo mínimo entre e-mails (horas)', screen: '/watch' },
+  { label: 'Intervalo mínimo entre e-mails (horas)', screen: '/settings/watch/parameters' },
 ] as const;
 
 test('Preferências shows no feature parameter; each renders on its feature screen', async ({

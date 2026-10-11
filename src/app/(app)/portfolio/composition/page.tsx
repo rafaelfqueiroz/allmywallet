@@ -94,7 +94,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
   const tCommon = await getTranslations('common');
   const tc = await getTranslations('composicao');
   const tp = await getTranslations('portfolio');
-  // SPEC-018 BR-018-19: the badge reuses `/watch`'s own state labels rather
+  // SPEC-018 BR-018-19: the badge reuses the rules screen's own state labels rather
   // than a second set here, so one state never has two names (AR-44).
   const tw = await getTranslations('watch');
   const userId = await tryUserId();

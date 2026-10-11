@@ -20,7 +20,8 @@ import type { OpportunityAlert } from '@/core/opportunity/ports';
  *
  * BR-018-28: the only fields this function ever touches are `alert`'s own —
  * the asset, its price, the user's own threshold and the resulting state —
- * and `unsubscribeUrl`. There is no path from here to a CPF, a position size
+ * and two links: `unsubscribeUrl`, and `ruleUrl`, the user's rule on
+ * Configurações › Observar preços (SPEC-022 #212). A link carries no figure. There is no path from here to a CPF, a position size
  * or a portfolio value: `OpportunityAlert` (`core/opportunity/ports.ts`)
  * cannot carry any of the three, so this function could not render them even
  * if it tried. `./opportunity-email.test.ts` scans the actual
@@ -45,6 +46,7 @@ function escapeHtml(value: string): string {
 export function renderOpportunityEmail(
   alert: OpportunityAlert,
   unsubscribeUrl: string,
+  ruleUrl: string,
 ): RenderedOpportunityEmail {
   const t = createTranslator({ locale: DEFAULT_LOCALE, messages, namespace: 'email.opportunity' });
 
@@ -82,6 +84,7 @@ export function renderOpportunityEmail(
   const quoteMeta = t('quoteMeta', { quotedAt, source: alert.source });
   const delayDisclosure = t('delayDisclosure', { minutes: alert.delayMinutes });
   const notAdvice = t('notAdvice');
+  const ruleLinkText = t('ruleLinkText');
   const unsubscribeLinkText = t('unsubscribeLinkText');
 
   const text = [
@@ -89,6 +92,7 @@ export function renderOpportunityEmail(
     quoteMeta,
     delayDisclosure,
     notAdvice,
+    `${ruleLinkText}: ${ruleUrl}`,
     '',
     `${unsubscribeLinkText}: ${unsubscribeUrl}`,
   ].join('\n\n');
@@ -98,6 +102,7 @@ export function renderOpportunityEmail(
     `<p>${escapeHtml(quoteMeta)}</p>`,
     `<p>${escapeHtml(delayDisclosure)}</p>`,
     `<p>${escapeHtml(notAdvice)}</p>`,
+    `<p><a href="${escapeHtml(ruleUrl)}">${escapeHtml(ruleLinkText)}</a></p>`,
     `<p><a href="${escapeHtml(unsubscribeUrl)}">${escapeHtml(unsubscribeLinkText)}</a></p>`,
   ].join('\n');
 

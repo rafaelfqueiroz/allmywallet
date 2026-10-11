@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Money } from '@/core/shared/money';
+import { AssetId } from '@/core/shared/ids';
 import type { OpportunityAlert } from '@/core/opportunity/ports';
 import { renderOpportunityEmail } from '@/adapters/email/opportunity-email';
 
@@ -11,9 +12,12 @@ import { renderOpportunityEmail } from '@/adapters/email/opportunity-email';
  */
 
 const UNSUBSCRIBE_URL = 'https://allmywallet.example.com/unsubscribe?token=abc.def';
+const RULE_URL =
+  'https://allmywallet.example.com/settings/watch#regra-0190a000-0000-7000-8000-0000000000bb';
 
 function aBoundAlert(overrides: Partial<OpportunityAlert> = {}): OpportunityAlert {
   return {
+    assetId: AssetId.of('0190a000-0000-7000-8000-0000000000bb'),
     assetCode: 'PETR4',
     assetName: 'Petrobras PN',
     price: Money.fromString('29.50'),
@@ -54,7 +58,7 @@ const FORBIDDEN_TERMS = ['cpf', 'posição', 'quantidade', 'patrimônio', 'saldo
 describe('renderOpportunityEmail — BR-018-28 (no CPF, no position size, no portfolio value)', () => {
   it('a lower-bound alert carries only the asset, price, threshold and state', () => {
     const alert = aBoundAlert();
-    const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL);
+    const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL, RULE_URL);
 
     for (const body of [rendered.subject, rendered.text, rendered.html]) {
       expect(body).not.toMatch(CPF_PATTERN);
@@ -80,7 +84,7 @@ describe('renderOpportunityEmail — BR-018-28 (no CPF, no position size, no por
       threshold: Money.fromString('45'),
       price: Money.fromString('45.10'),
     });
-    const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL);
+    const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL, RULE_URL);
     expect(rendered.text).toContain('limite de venda');
     // Not the bare word "compra" — the fixed disclaimer sentence present in
     // every message ("não recomenda comprar, vender ou manter") contains
@@ -90,7 +94,7 @@ describe('renderOpportunityEmail — BR-018-28 (no CPF, no position size, no por
 
   it('a default-band alert (no threshold) still renders without a threshold figure', () => {
     const alert = aBoundAlert({ state: 'hold', matched: 'default', threshold: null });
-    const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL);
+    const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL, RULE_URL);
     expect(rendered.text).toContain('PETR4');
     expect(rendered.text).toContain('manutenção');
   });
@@ -102,7 +106,7 @@ describe('renderOpportunityEmail — BR-018-28 (no CPF, no position size, no por
         threshold: state === 'hold' ? null : Money.fromString('30'),
         matched: state === 'hold' ? 'default' : 'lower',
       });
-      const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL);
+      const rendered = renderOpportunityEmail(alert, UNSUBSCRIBE_URL, RULE_URL);
       const lowered = `${rendered.subject} ${rendered.text}`.toLowerCase();
       for (const phrase of ADVISORY_PHRASES) {
         expect(lowered).not.toContain(phrase);
@@ -111,7 +115,7 @@ describe('renderOpportunityEmail — BR-018-28 (no CPF, no position size, no por
   });
 
   it('discloses the quote’s own timestamp, source and the delay it was read at (BR-018-15)', () => {
-    const rendered = renderOpportunityEmail(aBoundAlert(), UNSUBSCRIBE_URL);
+    const rendered = renderOpportunityEmail(aBoundAlert(), UNSUBSCRIBE_URL, RULE_URL);
     expect(rendered.text).toContain('brapi_free');
     // The alert's own `delayMinutes` (60 here — a degraded cadence, BR-008-22),
     // not a constant: a message quoting 30 while the screen quotes 60 would be
@@ -121,7 +125,13 @@ describe('renderOpportunityEmail — BR-018-28 (no CPF, no position size, no por
   });
 
   it('carries an unsubscribe link built from the caller-supplied URL', () => {
-    const rendered = renderOpportunityEmail(aBoundAlert(), UNSUBSCRIBE_URL);
+    const rendered = renderOpportunityEmail(aBoundAlert(), UNSUBSCRIBE_URL, RULE_URL);
     expect(rendered.html).toContain(`href="${UNSUBSCRIBE_URL}"`);
+  });
+
+  it('links to the user’s own rule on Configurações › Observar preços (SPEC-022 #212)', () => {
+    const rendered = renderOpportunityEmail(aBoundAlert(), UNSUBSCRIBE_URL, RULE_URL);
+    expect(rendered.html).toContain(`href="${RULE_URL}"`);
+    expect(rendered.text).toContain(RULE_URL);
   });
 });

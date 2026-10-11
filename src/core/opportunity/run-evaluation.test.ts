@@ -173,6 +173,7 @@ describe('BR-018-21 — a state change with notifications enabled sends exactly 
     });
     expect(summary.alerts).toHaveLength(1);
     expect(summary.alerts[0]).toEqual({
+      assetId: ASSET,
       assetCode: 'PETR4',
       assetName: 'Petrobras PN',
       price: money('25'),

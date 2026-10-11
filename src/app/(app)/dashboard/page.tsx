@@ -8,6 +8,8 @@ import { tryUserId } from '@/lib/session';
 import { AttentionQueue } from '@/app/(app)/dashboard/_components/AttentionQueue';
 import { ReconciliationStatus } from '@/app/(app)/dashboard/_components/ReconciliationStatus';
 import { ValuationMarkers } from '@/app/(app)/dashboard/_components/ValuationMarkers';
+import { WatchOpportunities } from '@/app/(app)/dashboard/_components/WatchOpportunities';
+import { loadWatchOpportunities } from '@/app/(app)/watch/data';
 import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
@@ -71,7 +73,12 @@ export default async function DashboardPage() {
   const onboarding = await loadOnboardingStatus(userId);
   if (onboarding.shouldGuide) redirect('/onboarding');
 
-  const { summary } = await loadDashboard(userId);
+  // SPEC-022 BR-022-07 — the watch-state card reads SPEC-018's evaluation over
+  // the stored quotes; it requests none (BR-018-11).
+  const [{ summary }, opportunities] = await Promise.all([
+    loadDashboard(userId),
+    loadWatchOpportunities(userId),
+  ]);
   const { portfolio, freshness, reconciliation, attention, attentionTotal } = summary;
 
   /**
@@ -190,6 +197,8 @@ export default async function DashboardPage() {
           <ReconciliationStatus reconciliation={reconciliation} />
           {/* BR-010-12 */}
           <AttentionQueue items={attention} total={attentionTotal} />
+          {/* SPEC-022 BR-022-07 / SPEC-018 */}
+          <WatchOpportunities opportunities={opportunities} />
         </>
       )}
     </PageShell>

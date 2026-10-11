@@ -191,6 +191,7 @@ export async function evaluateOpportunities(
         });
         if (claimed) {
           alerts.push({
+            assetId: rule.assetId,
             assetCode: asset.code,
             assetName: asset.name,
             price: result.quote.price,

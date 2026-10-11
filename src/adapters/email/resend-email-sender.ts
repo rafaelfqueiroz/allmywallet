@@ -7,7 +7,7 @@ import type { OpportunityAlert, OpportunityNotifier } from '@/core/opportunity/p
 import { hashUserId, logger } from '@/lib/logger';
 import { signUnsubscribeToken } from '@/lib/unsubscribe-token';
 import { renderOpportunityEmail } from '@/adapters/email/opportunity-email';
-import { appOrigin } from '@/adapters/email/app-origin';
+import { appOrigin, opportunityRuleUrl } from '@/adapters/email/app-origin';
 
 /**
  * SPEC-021 BR-021-34/DL-021-04 — real delivery, through Resend's HTTP API on
@@ -52,7 +52,11 @@ export class ResendEmailSender implements OpportunityNotifier {
 
     const token = signUnsubscribeToken(userId, this.clock.now());
     const unsubscribeUrl = `${appOrigin()}/unsubscribe?token=${encodeURIComponent(token)}`;
-    const rendered = renderOpportunityEmail(alert, unsubscribeUrl);
+    const rendered = renderOpportunityEmail(
+      alert,
+      unsubscribeUrl,
+      opportunityRuleUrl(alert.assetId),
+    );
 
     const response = await this.fetchImpl(
       `${this.config.baseUrl ?? 'https://api.resend.com'}/emails`,

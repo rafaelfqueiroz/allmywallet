@@ -13,7 +13,7 @@ import { db } from '@/db/client';
 import { withTenant, type Tx } from '@/db/tenant';
 
 /**
- * SPEC-018 — the composition root for `/watch` (AR-02), in the shape of
+ * SPEC-018 — the composition root for the watch rules (`/settings/watch`, AR-02), in the shape of
  * `src/app/(app)/wallets/composition.ts`: the one place that wires
  * `core/opportunity`'s ports to their Drizzle adapters for this route's
  * Server Components and server actions.
