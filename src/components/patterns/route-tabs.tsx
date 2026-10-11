@@ -39,8 +39,8 @@ export type RouteTab = {
   /** Translated text — AR-44. */
   readonly label: ReactNode;
   /**
-   * Match the path exactly. For a tab that is the root of the others — an
-   * overview at `/reports` beside `/reports/patrimonio` — which would otherwise
+   * Match the path exactly. For a tab that is the root of the others — the
+   * first tab at `/reports` beside `/reports/performance` — which would otherwise
    * stay active under every sibling (DS-27's boundary rule matches sections).
    */
   readonly exact?: boolean;

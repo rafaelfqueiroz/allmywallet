@@ -11,8 +11,8 @@ import { cn } from '@/lib/utils';
  *
  * Matching is on a path boundary: `/wallets/abc` lights up `/wallets`, but
  * `/importar-outro` does not light up `/import`. `exact` is for a destination
- * that is the *root* of others — the reports overview at `/reports` must not
- * stay lit on `/reports/patrimonio`.
+ * that is the *root* of others — Evolução patrimonial at `/reports` must not
+ * stay lit on `/reports/performance`.
  */
 export function isPathActive(pathname: string, href: string, exact = false): boolean {
   if (pathname === href) return true;

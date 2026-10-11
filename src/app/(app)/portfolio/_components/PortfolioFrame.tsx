@@ -21,7 +21,8 @@ import { Text } from '@/components/ui/text';
  *   one `ScopeSelector` in the header and carried by every tab link
  *   (`preserveParams`), so switching tabs keeps the wallet and a reload keeps
  *   it too (BR-011-11). The parameter is Relatórios' own (`PARAM.wallet`);
- *   carrying it across the two destinations lands with #209.
+ *   the application menu carries it between the two
+ *   destinations (#209, `navHref`).
  * - **Each tab has its own URL** (BR-022-15). Patrimônio is the destination's
  *   root, matched exactly so it is not also active under its siblings.
  */
