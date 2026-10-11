@@ -220,6 +220,71 @@ test.describe('Configurações › Carteiras', () => {
     await expect(page.getByText('Nada esperando uma decisão no momento.')).toBeVisible();
   });
 
+  /**
+   * DESIGN.md DS-37 — the setup forms post **without JavaScript** (PR #229
+   * review). A client function wrapped around the server action has no
+   * `$$FORM_ACTION`, so the form would render with nowhere to post: every
+   * form here must hand the server action itself to the hook.
+   *
+   * The context is built here because the `signedIn` fixture cannot disable
+   * scripting; its cookies are copied so this is the same seeded tenant.
+   */
+  test('creates, edits and assigns with JavaScript switched off', async ({
+    browser,
+    baseURL,
+    signedIn,
+  }) => {
+    const { page: seededPage, userId } = signedIn;
+    const [held, pending] = await seedHoldings(userId, [
+      { code: 'NOJS', quantity: '10', averageCost: '20.00', price: '25.00' },
+      { code: 'NJSQ', quantity: '5', averageCost: '20.00', price: '25.00' },
+    ]);
+    await dismissOnboarding(userId);
+
+    const context = await browser.newContext({
+      javaScriptEnabled: false,
+      ...(baseURL ? { baseURL } : {}),
+      locale: 'pt-BR',
+      timezoneId: 'America/Sao_Paulo',
+    });
+    try {
+      await context.addCookies(await seededPage.context().cookies());
+      const page = await context.newPage();
+
+      // Create: the action redirects to the new wallet's page.
+      await page.goto('/settings/wallets/new');
+      await page.getByLabel('Nome', { exact: true }).fill('Sem script');
+      await page.getByRole('button', { name: 'Criar carteira' }).click();
+      await expect(page).toHaveURL(/\/settings\/wallets\/[0-9a-f-]{36}$/);
+      await expect(page.getByRole('heading', { level: 2, name: 'Sem script' })).toBeVisible();
+
+      // Edit.
+      await page.getByLabel('Nome', { exact: true }).fill('Sem script, editada');
+      await page.getByRole('button', { name: 'Salvar alterações' }).click();
+      await expect(
+        page.getByRole('heading', { level: 2, name: 'Sem script, editada' }),
+      ).toBeVisible();
+
+      // Assign from the wallet's page: an empty quantity takes everything (BR-010-03).
+      await page
+        .getByLabel('Ativo', { exact: true })
+        .selectOption({ label: `${held} — Ativo ${held} — 10 não atribuída(s)` });
+      await page.getByRole('button', { name: 'Atribuir', exact: true }).click();
+      await expect(page.getByRole('table')).toContainText(held!);
+
+      // Assign from the queue (BR-010-13): the same form, the wallet chosen.
+      await page.goto('/settings/wallets/assign');
+      const item = page.getByRole('listitem').filter({ hasText: pending! }).first();
+      await item.getByLabel('Atribuir a', { exact: true }).selectOption({
+        label: 'Sem script, editada',
+      });
+      await item.getByRole('button', { name: 'Atribuir', exact: true }).click();
+      await expect(page.getByRole('listitem').filter({ hasText: pending! })).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  });
+
   test('a partial assignment on a wallet’s page leaves the form empty for the next', async ({
     signedIn,
   }) => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useState, type FormEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import { WalletErrorCode } from '@/core/wallets/errors';
 import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
@@ -67,16 +67,16 @@ export function AllocateForm({
   const t = useTranslations('wallets');
   const tErrors = useTranslations('errors');
   const [submitted, setSubmitted] = useState<{ choice: string; quantity: string } | null>(null);
-  const [state, formAction, pending] = useActionState(
-    async (previous: ActionState, formData: FormData) => {
-      setSubmitted({
-        choice: String(formData.get(choice.name) ?? ''),
-        quantity: String(formData.get('quantity') ?? ''),
-      });
-      return action(previous, formData);
-    },
-    IDLE,
-  );
+  // The server action goes to the hook as is, so the form posts without
+  // JavaScript (DS-37); what was sent is read in `onSubmit` (see `WalletForm`).
+  const [state, formAction, pending] = useActionState(action, IDLE);
+  const remember = (event: FormEvent<HTMLFormElement>) => {
+    const formData = new FormData(event.currentTarget);
+    setSubmitted({
+      choice: String(formData.get(choice.name) ?? ''),
+      quantity: String(formData.get('quantity') ?? ''),
+    });
+  };
 
   const refusal = state.status === 'error' ? state : null;
   // What was typed survives a **refusal** only. After a success the form falls
@@ -89,7 +89,7 @@ export function AllocateForm({
   const quantityRefused = refusal !== null && QUANTITY_CODES.includes(refusal.code);
 
   return (
-    <form action={formAction}>
+    <form action={formAction} onSubmit={remember}>
       <Stack gap="sm">
         {refusal && !quantityRefused && <ErrorState title={message} />}
         <input type="hidden" name={fixed.name} value={fixed.value} />

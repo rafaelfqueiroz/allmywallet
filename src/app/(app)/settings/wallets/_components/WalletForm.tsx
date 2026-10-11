@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useState } from 'react';
+import { useActionState, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { WalletErrorCode } from '@/core/wallets/errors';
@@ -74,27 +74,30 @@ export function WalletForm({
    * values its defaults, so the reset lands on what was actually sent.
    */
   const [submissions, setSubmissions] = useState(0);
-  const [state, formAction, pending] = useActionState(
-    async (previous: ActionState, formData: FormData) => {
-      setSubmissions((count) => count + 1);
-      setDraft({
-        name: String(formData.get('name') ?? ''),
-        description: String(formData.get('description') ?? ''),
-        goal: String(formData.get('goal') ?? ''),
-        color:
-          formData.get('noColor') === 'on' ? null : String(formData.get('color') ?? '') || null,
-      });
-      return action(previous, formData);
-    },
-    IDLE,
-  );
+  /*
+   * The server action goes to the hook **as is** (DS-37, PR #229 review): a
+   * client function wrapped around it has no `$$FORM_ACTION`, and the form
+   * would render with nowhere to post when JavaScript is off. What was sent is
+   * read in `onSubmit` instead, which runs before the action is dispatched.
+   */
+  const [state, formAction, pending] = useActionState(action, IDLE);
+  const remember = (event: FormEvent<HTMLFormElement>) => {
+    const formData = new FormData(event.currentTarget);
+    setSubmissions((count) => count + 1);
+    setDraft({
+      name: String(formData.get('name') ?? ''),
+      description: String(formData.get('description') ?? ''),
+      goal: String(formData.get('goal') ?? ''),
+      color: formData.get('noColor') === 'on' ? null : String(formData.get('color') ?? '') || null,
+    });
+  };
 
   const refusal = state.status === 'error' ? state : null;
   const message = refusal ? tErrors(refusal.code, messageValues(refusal.context)) : undefined;
   const nameRefused = refusal?.code === WalletErrorCode.INVALID_NAME;
 
   return (
-    <form action={formAction}>
+    <form action={formAction} onSubmit={remember}>
       <Stack gap="md">
         {refusal && !nameRefused && <ErrorState title={message} />}
         {walletId !== undefined && <input type="hidden" name="walletId" value={walletId} />}
