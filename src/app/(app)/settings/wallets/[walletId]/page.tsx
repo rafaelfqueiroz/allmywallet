@@ -4,6 +4,8 @@ import { WalletId } from '@/core/shared/ids';
 import { loadWalletDetail } from '@/app/(app)/wallets/data';
 import { WalletDetail } from '@/app/(app)/settings/wallets/_components/WalletDetail';
 import { tryUserId } from '@/lib/session';
+import { PageShell } from '@/app/page-shell';
+import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
@@ -22,13 +24,24 @@ export default async function WalletDetailPage({
 }) {
   const { walletId: rawWalletId } = await params;
   const t = await getTranslations('wallets');
+  const ts = await getTranslations('settings');
   const userId = await tryUserId();
 
-  if (userId === undefined) return <EmptyState title={t('signedOut')} />;
+  if (userId === undefined) {
+    return (
+      <PageShell title={ts('title')}>
+        <EmptyState title={t('signedOut')} />
+      </PageShell>
+    );
+  }
 
   if (!/^[0-9a-f-]{36}$/i.test(rawWalletId)) notFound();
   const detail = await loadWalletDetail(userId, WalletId.of(rawWalletId));
   if (detail === null) notFound();
 
-  return <WalletDetail detail={detail} />;
+  return (
+    <SettingsFrame>
+      <WalletDetail detail={detail} />
+    </SettingsFrame>
+  );
 }

@@ -34,25 +34,20 @@ const sources = GROUPS.flatMap((group) => [...files(join(ROOT, group))]).map((pa
 }));
 
 /**
- * A destination whose **layout** renders the shell (Configurações: one header
- * and one sub-navigation for every section) puts its pages inside it, so the
- * page need not render the shell itself. A page counts when it, or a layout
- * above it in the same route group, does — and a page that only redirects has
- * nothing to put in a shell.
+ * A page that does nothing but `redirect()` has nothing to put in a shell
+ * (Configurações' `/settings`, which only forwards to its first section). The
+ * exemption is exactly that: the whole module is imports, comments and one
+ * default export whose body is a single `redirect('/…')` — a page that also
+ * renders anything is not exempt, and still needs the shell.
  */
-export function rendersShell(path: string, text: string): boolean {
-  if (text.includes('<PageShell')) return true;
-  if (/export default (async )?function \w+\([^)]*\)(: never)? \{\s*redirect\(/.test(text)) {
-    return true;
-  }
-  const parts = path.split('/');
-  for (let depth = parts.length - 1; depth > 0; depth -= 1) {
-    const layout = sources.find(
-      ({ path: other }) => other === [...parts.slice(0, depth), 'layout.tsx'].join('/'),
-    );
-    if (layout?.text.includes('<PageShell')) return true;
-  }
-  return false;
+export function isRedirectOnly(text: string): boolean {
+  const body = text
+    .replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '')
+    .replace(/^import .*$/gm, '')
+    .trim();
+  return /^export default (async )?function \w+\([^)]*\)(: never)? \{\s*redirect\((['"])[^'"]+\3\);?\s*\}$/.test(
+    body,
+  );
 }
 
 /** A width the page would be choosing for itself. */
@@ -65,7 +60,10 @@ describe('one page width (BR-022-14)', () => {
 
   it('renders every signed-in page through PageShell', () => {
     const offenders = sources
-      .filter(({ path, text }) => path.endsWith('page.tsx') && !rendersShell(path, text))
+      .filter(
+        ({ path, text }) =>
+          path.endsWith('page.tsx') && !text.includes('<PageShell') && !isRedirectOnly(text),
+      )
       .map(({ path }) => path);
 
     expect(offenders).toEqual([]);
@@ -79,17 +77,24 @@ describe('one page width (BR-022-14)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('accepts a page inside a layout that renders the shell, and a page that only redirects', () => {
-    expect(rendersShell('src/app/(app)/settings/wallets/page.tsx', '')).toBe(true);
+  it('exempts only a page that does nothing but redirect', () => {
+    const redirectOnly = [
+      "import { redirect } from 'next/navigation';",
+      '/** forwards */',
+      'export default function P(): never {',
+      "  redirect('/settings/wallets');",
+      '}',
+    ].join('\n');
+    expect(isRedirectOnly(redirectOnly)).toBe(true);
+    // A page that renders anything else, or has no shell and no redirect, still fails.
     expect(
-      rendersShell(
-        'src/app/(app)/settings/page.tsx',
-        "export default function P(): never {\n  redirect('/settings/wallets');\n}",
+      isRedirectOnly(
+        "export default function P() {\n  redirect('/x');\n  return <main>conteúdo</main>;\n}",
       ),
-    ).toBe(true);
-    expect(rendersShell('src/app/(app)/dashboard/page.tsx', 'export default () => null')).toBe(
-      false,
-    );
+    ).toBe(false);
+    expect(
+      isRedirectOnly('export default function P() {\n  return <main>sem shell</main>;\n}'),
+    ).toBe(false);
   });
 
   it('recognises the widths it bars', () => {
