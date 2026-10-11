@@ -546,7 +546,7 @@
     "assignNothingBody": "Todos os seus ativos já estão atribuídos a carteiras.",
     "rulesTitle": "Regras permanentes",
     "rulesEmpty": "Nenhuma regra permanente aponta para esta carteira.",
-    "rulesAsset": "Ativo",
+    "rulesAsset": "Ativo da regra",
     "rulesChooseAsset": "Escolha um ativo",
     "rulesNothing": "Você não tem ativos para criar uma regra.",
     "deleteTitle": "Excluir carteira",

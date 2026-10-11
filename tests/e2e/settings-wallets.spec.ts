@@ -135,8 +135,9 @@ test.describe('Configurações › Carteiras', () => {
 
     // The list counts it.
     await page.goto('/settings/wallets');
-    const row = page.getByRole('row').filter({ hasText: 'Reserva de emergência' });
-    await expect(row).toContainText('1');
+    // A table row on a desktop, a card on a phone (DL-12): whichever is shown.
+    const row = page.locator('tr:visible, li:visible').filter({ hasText: 'Reserva de emergência' });
+    await expect(row.getByText('1', { exact: true })).toBeVisible();
 
     // Delete (BR-010-07): back on the list, and the wallet is gone.
     await row.getByRole('link', { name: 'Reserva de emergência' }).click();
@@ -188,6 +189,8 @@ test.describe('Configurações › Carteiras', () => {
     const { page, userId } = signedIn;
     const walletId = await seedWallet(userId, 'Aposentadoria');
     await dismissOnboarding(userId);
+    // 360px is the floor (SPEC-016 BR-016-12), below the Pixel 5 profile's own.
+    await page.setViewportSize({ width: 360, height: 800 });
 
     for (const path of [
       '/settings/wallets',
