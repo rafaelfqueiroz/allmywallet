@@ -240,11 +240,6 @@
       "byAsset": "Por ativo"
     },
     "wallets": {
-      "tabs": {
-        "label": "Carteiras",
-        "comparison": "Comparação",
-        "setup": "Configurar"
-      },
       "comparisonTitle": "Comparação entre carteiras",
       "comparisonDescription": "Valor, custo, resultado e participação de cada carteira no portfólio, pela última cotação. Não atribuído é o que nenhuma carteira tem.",
       "columnWallet": "Carteira",
@@ -478,8 +473,6 @@
     "signedOut": "Entre na sua conta para acessar as configurações."
   },
   "wallets": {
-    "title": "Carteiras",
-    "description": "Agrupe seus ativos por objetivo — a aposentadoria separada do resto, sem depender de nenhuma corretora.",
     "signedOut": "Entre na sua conta para gerenciar suas carteiras.",
     "createTitle": "Nova carteira",
     "nameLabel": "Nome",
@@ -489,7 +482,6 @@
     "goalHint": "O propósito desta carteira, em suas palavras. Metas com valor e progresso ficam em Portfólio › Metas.",
     "colorLabel": "Cor",
     "create": "Criar carteira",
-    "yourWallets": "Suas carteiras",
     "empty": "Você ainda não criou nenhuma carteira.",
     "delete": "Excluir carteira",
     "needsAttentionTitle": "Precisa de atenção",
@@ -498,11 +490,9 @@
     "reasonNoWallet": "Ativo novo, nunca atribuído",
     "reasonAmbiguousSplit": "Este ativo está dividido entre carteiras",
     "resolveAssign": "Atribuir a",
-    "resolveQuantity": "Quantidade",
     "resolveSubmit": "Atribuir",
     "chooseWallet": "Escolha uma carteira",
     "columnQuantity": "Quantidade",
-    "columnCostBasis": "Custo",
     "columnAsset": "Ativo",
     "standingRuleTitle": "Regra permanente",
     "standingRuleDescription": "Direciona automaticamente as próximas compras deste ativo para uma carteira escolhida, mesmo com a posição dividida. Desativada por padrão.",
@@ -512,19 +502,12 @@
     "walletDetailBack": "Voltar às carteiras",
     "allocationsTitle": "Ativos atribuídos",
     "allocationsEmpty": "Nenhum ativo atribuído a esta carteira ainda.",
-    "costBasisUnknown": "Custo não registrado",
-    "editTitle": "Editar carteira",
     "save": "Salvar alterações",
     "balanceLink": "Balanceamento",
     "goalsLink": "Metas",
     "needsAttentionOutOfBalance": "{wallet}: ao menos um ativo passou da tolerância que você definiu.",
     "needsAttentionNeedsReview": "{wallet}: as metas não somam 100%.",
     "needsAttentionBalanceOpen": "Ver balanceamento",
-    "markers": {
-      "costEstimated": {
-        "explanation": "O custo desta carteira inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
-      }
-    },
     "sectionTitle": "Carteiras",
     "newWallet": "Nova carteira",
     "tabs": {
