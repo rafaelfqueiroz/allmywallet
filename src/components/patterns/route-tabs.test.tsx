@@ -76,6 +76,24 @@ describe('RouteTabs', () => {
     );
   });
 
+  it('keeps a tab current on the extra paths it names, and only those', () => {
+    nav.pathname = '/reports/novo';
+    render(
+      <RouteTabs
+        label="Relatórios"
+        tabs={[
+          { href: '/reports', label: 'Visão geral', exact: true, alsoActiveOn: ['/reports/novo'] },
+          { href: '/reports/patrimonio', label: 'Patrimônio' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('link', { name: 'Visão geral' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('link', { name: 'Patrimônio' })).not.toHaveAttribute('aria-current');
+  });
+
   it('carries nothing across tabs by default', () => {
     nav.search = 'wallet=abc&period=12m';
     render(<Tabs />);

@@ -468,6 +468,15 @@
       }
     }
   },
+  "settings": {
+    "title": "Configurações",
+    "description": "Carteiras, importação de extratos e regras de observação de preços",
+    "navLabel": "Seções de Configurações",
+    "sections": {
+      "wallets": "Carteiras"
+    },
+    "signedOut": "Entre na sua conta para acessar as configurações."
+  },
   "wallets": {
     "title": "Carteiras",
     "description": "Agrupe seus ativos por objetivo — a aposentadoria separada do resto, sem depender de nenhuma corretora.",
@@ -501,7 +510,7 @@
     "standingRuleSet": "Definir regra",
     "standingRuleClear": "Remover regra",
     "walletDetailBack": "Voltar às carteiras",
-    "allocationsTitle": "Ativos alocados",
+    "allocationsTitle": "Ativos atribuídos",
     "allocationsEmpty": "Nenhum ativo atribuído a esta carteira ainda.",
     "costBasisUnknown": "Custo não registrado",
     "editTitle": "Editar carteira",
@@ -515,7 +524,50 @@
       "costEstimated": {
         "explanation": "O custo desta carteira inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
       }
-    }
+    },
+    "sectionTitle": "Carteiras",
+    "newWallet": "Nova carteira",
+    "tabs": {
+      "label": "Tarefas de Carteiras",
+      "mine": "Minhas carteiras",
+      "assign": "Atribuir ativos",
+      "parameters": "Parâmetros"
+    },
+    "list": {
+      "caption": "Minhas carteiras, com objetivo, quantidade de ativos e data da última alteração",
+      "noun": "carteiras",
+      "search": "Buscar carteira",
+      "columnWallet": "Carteira",
+      "columnGoal": "Objetivo",
+      "columnAssets": "Ativos",
+      "columnUpdated": "Atualizada em",
+      "noGoal": "—",
+      "sortBy": "Ordenar por {column}",
+      "sortField": "Ordenar por",
+      "sortAscending": "Ordem crescente",
+      "sortDescending": "Ordem decrescente",
+      "emptyBody": "Crie a primeira em Nova carteira para agrupar seus ativos por objetivo."
+    },
+    "dataTitle": "Dados",
+    "cancel": "Cancelar",
+    "saved": "Alterações salvas.",
+    "assignTitle": "Atribuir ativo",
+    "assignDescription": "Traga para esta carteira um ativo que ainda não pertence a nenhuma. Sem quantidade, vai tudo o que ainda não está atribuído.",
+    "assignAsset": "Ativo",
+    "assignChooseAsset": "Escolha um ativo",
+    "assignOption": "{asset} — {quantity} não atribuída(s)",
+    "assignQuantity": "Quantidade",
+    "assignQuantityHint": "Opcional. Em branco, atribui toda a quantidade que ainda não está em nenhuma carteira.",
+    "assignSubmit": "Atribuir",
+    "assignNothing": "Nada para atribuir",
+    "assignNothingBody": "Todos os seus ativos já estão atribuídos a carteiras.",
+    "rulesTitle": "Regras permanentes",
+    "rulesEmpty": "Nenhuma regra permanente aponta para esta carteira.",
+    "rulesAsset": "Ativo",
+    "rulesChooseAsset": "Escolha um ativo",
+    "rulesNothing": "Você não tem ativos para criar uma regra.",
+    "deleteTitle": "Excluir carteira",
+    "deleteDescription": "As atribuições desta carteira voltam para Não atribuído e as regras permanentes que apontam para ela são removidas. Nenhuma transação é excluída."
   },
   "import": {
     "title": "Importar extratos B3",
