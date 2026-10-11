@@ -35,13 +35,7 @@ import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
 export type NavItem = {
   readonly href: string;
   readonly labelKey:
-    | 'dashboard'
-    | 'portfolio'
-    | 'transactions'
-    | 'watch'
-    | 'import'
-    | 'reports'
-    | 'settings';
+    'dashboard' | 'portfolio' | 'transactions' | 'watch' | 'import' | 'reports' | 'settings';
   readonly icon: LucideIcon;
   /**
    * SPEC-022 BR-022-17 — the destination reads the shared scope selector's

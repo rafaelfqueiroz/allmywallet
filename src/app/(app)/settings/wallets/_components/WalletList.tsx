@@ -1,5 +1,8 @@
 import type { WalletListRow } from '@/app/(app)/wallets/data';
-import { WalletsTable, type WalletRow } from '@/app/(app)/settings/wallets/_components/WalletsTable';
+import {
+  WalletsTable,
+  type WalletRow,
+} from '@/app/(app)/settings/wallets/_components/WalletsTable';
 import { formatDate } from '@/i18n/format';
 import { Card, CardContent } from '@/components/ui/card';
 

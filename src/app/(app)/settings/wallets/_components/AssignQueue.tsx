@@ -1,6 +1,10 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import { allocateAction, clearStandingRuleAction, setStandingRuleAction } from '@/app/(app)/wallets/actions';
+import {
+  allocateAction,
+  clearStandingRuleAction,
+  setStandingRuleAction,
+} from '@/app/(app)/wallets/actions';
 import { labelFor, type loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { AllocateForm } from '@/app/(app)/settings/wallets/_components/AllocateForm';
 import { Money } from '@/app/money';

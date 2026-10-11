@@ -29,9 +29,7 @@ export default async function SettingsLayout({ children }: { children: ReactNode
       <Split side="start">
         <SubNav
           label={t('navLabel')}
-          items={[
-            { href: '/settings/wallets', label: t('sections.wallets'), icon: <Wallet /> },
-          ]}
+          items={[{ href: '/settings/wallets', label: t('sections.wallets'), icon: <Wallet /> }]}
         />
         <Stack gap="lg">{children}</Stack>
       </Split>

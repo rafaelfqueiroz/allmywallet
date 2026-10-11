@@ -44,11 +44,7 @@ export type SplitProps = React.ComponentProps<'div'> & VariantProps<typeof split
 export function Split({ className, side, gap, ...props }: SplitProps) {
   return (
     <div data-slot="split-container" className="@container w-full">
-      <div
-        data-slot="split"
-        className={cn(splitVariants({ side, gap }), className)}
-        {...props}
-      />
+      <div data-slot="split" className={cn(splitVariants({ side, gap }), className)} {...props} />
     </div>
   );
 }

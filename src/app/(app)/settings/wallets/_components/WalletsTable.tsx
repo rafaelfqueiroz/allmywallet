@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
+import { ColorSwatch } from '@/components/patterns/color-swatch';
 import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Cluster } from '@/components/layout/cluster';
@@ -52,8 +53,8 @@ export function WalletsTable({ rows }: { readonly rows: readonly WalletRow[] }) 
         header: t('list.columnWallet'),
         accessorFn: (row) => row.name,
         cell: ({ row }) => (
-          <Cluster gap="sm" align="start" className="flex-nowrap">
-            <Swatch color={row.original.color} />
+          <Cluster gap="sm" align="center" className="flex-nowrap">
+            <ColorSwatch color={row.original.color} />
             <Stack gap="none">
               <Link
                 href={`/settings/wallets/${row.original.id}`}
@@ -110,22 +111,6 @@ export function WalletsTable({ rows }: { readonly rows: readonly WalletRow[] }) 
       filter={{ placeholder: t('list.search') }}
       itemNoun={t('list.noun')}
       empty={<EmptyState title={t('empty')} description={t('list.emptyBody')} />}
-    />
-  );
-}
-
-/**
- * The wallet's colour, as a dot. `color` is a stored hex the user picked
- * (`ColorInput`), applied as the background through `style` — the one place a
- * colour is data rather than a design token.
- */
-function Swatch({ color }: { readonly color: string | null }) {
-  return (
-    <span
-      aria-hidden="true"
-      data-slot="wallet-swatch"
-      className="mt-1 size-3 shrink-0 rounded-full border border-input"
-      style={color === null ? undefined : { backgroundColor: color }}
     />
   );
 }

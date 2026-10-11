@@ -2,7 +2,10 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePortfolio } from '@/app/(app)/portfolio/revalidate';
-import { revalidateWalletSettings, walletSettingsPath } from '@/app/(app)/settings/wallets/revalidate';
+import {
+  revalidateWalletSettings,
+  walletSettingsPath,
+} from '@/app/(app)/settings/wallets/revalidate';
 import { z } from 'zod';
 import { AssetId, WalletId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';

@@ -95,17 +95,17 @@ export function WalletForm({
           width="full"
           {...(nameRefused ? { error: message } : {})}
         >
-          <Input name="name" required defaultValue={draft.name} placeholder={t('namePlaceholder')} />
+          <Input
+            name="name"
+            required
+            defaultValue={draft.name}
+            placeholder={t('namePlaceholder')}
+          />
         </Field>
         <Field id={`${idPrefix}-description`} label={t('descriptionLabel')} width="full">
           <Input name="description" defaultValue={draft.description} />
         </Field>
-        <Field
-          id={`${idPrefix}-goal`}
-          label={t('goalLabel')}
-          hint={t('goalHint')}
-          width="full"
-        >
+        <Field id={`${idPrefix}-goal`} label={t('goalLabel')} hint={t('goalHint')} width="full">
           <Input name="goal" defaultValue={draft.goal} />
         </Field>
         <Field id={`${idPrefix}-color`} label={t('colorLabel')} width="full">
