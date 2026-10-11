@@ -28,7 +28,8 @@ import { NativeSelect } from '@/components/ui/native-select';
  * assigned in one click (BR-010-03). The queue pre-fills it with that
  * remainder (BR-010-13); the wallet's own page leaves it empty and says so.
  * What was typed survives a refusal (React would otherwise reset the form to
- * its defaults), so correcting a number does not mean choosing again.
+ * its defaults), so correcting a number does not mean choosing again — and
+ * only a refusal: after a success the form returns to the server's defaults.
  */
 export interface AllocateChoice {
   /** The form field the choice posts as: the wallet in the queue, the asset on a wallet's page. */
@@ -65,10 +66,10 @@ export function AllocateForm({
 }) {
   const t = useTranslations('wallets');
   const tErrors = useTranslations('errors');
-  const [draft, setDraft] = useState({ choice: '', quantity: defaultQuantity });
+  const [submitted, setSubmitted] = useState<{ choice: string; quantity: string } | null>(null);
   const [state, formAction, pending] = useActionState(
     async (previous: ActionState, formData: FormData) => {
-      setDraft({
+      setSubmitted({
         choice: String(formData.get(choice.name) ?? ''),
         quantity: String(formData.get('quantity') ?? ''),
       });
@@ -78,6 +79,12 @@ export function AllocateForm({
   );
 
   const refusal = state.status === 'error' ? state : null;
+  // What was typed survives a **refusal** only. After a success the form falls
+  // back to the server's own defaults: a partial assignment leaves a smaller
+  // remainder, which the queue pre-fills (`defaultQuantity`), and keeping the
+  // submitted 60 of 100 would offer a second assignment that is refused.
+  const kept = refusal === null ? null : submitted;
+  const draft = { choice: kept?.choice ?? '', quantity: kept?.quantity ?? defaultQuantity };
   const message = refusal ? tErrors(refusal.code, messageValues(refusal.context)) : undefined;
   const quantityRefused = refusal !== null && QUANTITY_CODES.includes(refusal.code);
 

@@ -535,7 +535,7 @@
     "cancel": "Cancelar",
     "saved": "Alterações salvas.",
     "assignTitle": "Atribuir ativo",
-    "assignDescription": "Traga para esta carteira um ativo que ainda não pertence a nenhuma. Sem quantidade, vai tudo o que ainda não está atribuído.",
+    "assignDescription": "Traga para esta carteira a quantidade de um ativo que você tem e que ainda não está atribuída a nenhuma carteira. Sem quantidade, vai toda a quantidade não atribuída.",
     "assignAsset": "Ativo",
     "assignChooseAsset": "Escolha um ativo",
     "assignOption": "{asset} — {quantity} não atribuída(s)",
@@ -551,7 +551,8 @@
     "rulesNothing": "Você não tem ativos para criar uma regra.",
     "deleteTitle": "Excluir carteira",
     "deleteDescription": "As atribuições desta carteira voltam para Não atribuído e as regras permanentes que apontam para ela são removidas. Nenhuma transação é excluída.",
-    "standingRuleClearFor": "Remover regra de {asset}"
+    "standingRuleClearFor": "Remover regra de {asset}",
+    "rulesOptionMoves": "{asset} (regra atual: {wallet})"
   },
   "import": {
     "title": "Importar extratos B3",

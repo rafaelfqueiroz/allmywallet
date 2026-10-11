@@ -1,4 +1,5 @@
 import { revalidatePath } from 'next/cache';
+import { revalidateWalletSettings } from '@/app/(app)/settings/wallets/revalidate';
 
 /**
  * SPEC-022 BR-022-02 — Portfólio's four tabs read one holding set, so a write
@@ -14,13 +15,11 @@ export const PORTFOLIO_PATHS = [
   '/portfolio/goals',
 ] as const;
 
-/**
- * Not Portfólio's, but a reader of the same holding set: Configurações ›
- * Carteiras › Atribuir ativos lists what is held and not yet assigned, so a
- * transaction or import that changes the holdings changes that queue too.
- */
-const HOLDING_SETUP_PATHS = ['/settings/wallets/assign'] as const;
-
 export function revalidatePortfolio(): void {
-  for (const path of [...PORTFOLIO_PATHS, ...HOLDING_SETUP_PATHS]) revalidatePath(path);
+  for (const path of PORTFOLIO_PATHS) revalidatePath(path);
+  // Not Portfólio's, but readers of the same holding set: Configurações ›
+  // Carteiras counts the assets of each wallet, lists what is held and not yet
+  // assigned, and shows each wallet's allocations — so a transaction or import
+  // that changes the holdings changes those too.
+  revalidateWalletSettings();
 }

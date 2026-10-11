@@ -48,7 +48,7 @@ import { formatQuantity } from '@/i18n/format';
  */
 export async function WalletDetail({ detail }: { readonly detail: WalletDetailData }) {
   const t = await getTranslations('wallets');
-  const { wallet, allocations, unassigned, standingRules, held, labels } = detail;
+  const { wallet, allocations, unassigned, standingRules, rulesElsewhere, held, labels } = detail;
 
   const assetName = (assetId: Parameters<typeof labelFor>[1]) => {
     const label = labelFor(labels, assetId);
@@ -57,6 +57,7 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
 
   const ruled = new Set(standingRules.map((rule) => rule.assetId));
   const ruleCandidates = held.filter((assetId) => !ruled.has(assetId));
+  const ruleElsewhere = new Map(rulesElsewhere.map((rule) => [rule.assetId, rule.walletName]));
 
   return (
     <Stack gap="lg">
@@ -199,7 +200,12 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
                     <option value="">{t('rulesChooseAsset')}</option>
                     {ruleCandidates.map((assetId) => (
                       <option key={assetId} value={assetId}>
-                        {assetName(assetId)}
+                        {ruleElsewhere.has(assetId)
+                          ? t('rulesOptionMoves', {
+                              asset: assetName(assetId),
+                              wallet: ruleElsewhere.get(assetId) ?? '',
+                            })
+                          : assetName(assetId)}
                       </option>
                     ))}
                   </NativeSelect>

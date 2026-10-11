@@ -29,6 +29,53 @@ function Form({ action }: { action: (s: ActionState, f: FormData) => Promise<Act
   );
 }
 
+describe('AllocateForm — after a success', () => {
+  const walletChoice = {
+    name: 'walletId',
+    label: 'Atribuir a',
+    placeholder: 'Escolha uma carteira',
+    options: [{ value: 'w1', label: 'Aposentadoria' }],
+  } as const;
+
+  function Queue({ defaultQuantity }: { defaultQuantity: string }) {
+    return (
+      <AllocateForm
+        action={async () => IDLE}
+        idPrefix="allocate-a1"
+        fixed={{ name: 'assetId', value: 'a1' }}
+        choice={walletChoice}
+        defaultQuantity={defaultQuantity}
+        submitLabel="Atribuir"
+      />
+    );
+  }
+
+  it('offers the new remainder, not the 60 that was just assigned', async () => {
+    const { rerender } = render(<Queue defaultQuantity="100" />);
+
+    await userEvent.selectOptions(screen.getByLabelText('Atribuir a'), 'w1');
+    const quantity = screen.getByLabelText('Quantidade');
+    await userEvent.clear(quantity);
+    await userEvent.type(quantity, '60');
+    await userEvent.click(screen.getByRole('button', { name: 'Atribuir' }));
+
+    // The server re-renders the queue with what is left unassigned.
+    rerender(<Queue defaultQuantity="40" />);
+    await waitFor(() => expect(screen.getByLabelText('Quantidade')).toHaveValue('40'));
+    expect(screen.getByLabelText('Atribuir a')).toHaveValue('');
+  });
+
+  it('clears the asset and the quantity on the wallet page, where there is no default', async () => {
+    render(<Form action={async () => IDLE} />);
+    await userEvent.selectOptions(screen.getByLabelText('Ativo'), 'a1');
+    await userEvent.type(screen.getByLabelText('Quantidade'), '60');
+    await userEvent.click(screen.getByRole('button', { name: 'Atribuir' }));
+
+    await waitFor(() => expect(screen.getByLabelText('Quantidade')).toHaveValue(''));
+    expect(screen.getByLabelText('Ativo')).toHaveValue('');
+  });
+});
+
 describe('AllocateForm', () => {
   it('renders the refusal of an over-allocation under Quantidade, with the held ceiling', async () => {
     const exceeds = async () =>

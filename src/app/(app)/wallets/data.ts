@@ -141,6 +141,12 @@ export interface WalletDetailData {
   readonly unassigned: readonly UnassignedHolding[];
   /** BR-010-14 — the standing rules that point at **this** wallet. */
   readonly standingRules: readonly StandingRule[];
+  /**
+   * BR-010-14 — the standing rules that point at **another** wallet, with its
+   * name. Setting a rule for one of these assets *moves* it, so the screen says
+   * where it points now before the user does.
+   */
+  readonly rulesElsewhere: readonly { readonly assetId: AssetId; readonly walletName: string }[];
   /** Every asset currently held: what a standing rule can be set for. */
   readonly held: readonly AssetId[];
 }
@@ -152,17 +158,22 @@ export async function loadWalletDetail(
   const result = await withWalletDeps(userId, async (deps) => {
     const wallet = await deps.wallets.findById(walletId);
     if (wallet === null) return null;
-    const [allocations, unassigned, rules, held] = await Promise.all([
+    const [allocations, unassigned, rules, held, wallets] = await Promise.all([
       deps.allocations.listForWallet(walletId),
       computeUnassigned(deps, userId),
       listStandingRules(deps, userId),
       deps.positionQuery.listHeld(),
+      deps.wallets.list(),
     ]);
+    const nameOf = new Map(wallets.map((other) => [other.id, other.name]));
     return {
       wallet,
       allocations,
       unassigned,
       standingRules: rules.filter((rule) => rule.walletId === walletId),
+      rulesElsewhere: rules
+        .filter((rule) => rule.walletId !== walletId)
+        .map((rule) => ({ assetId: rule.assetId, walletName: nameOf.get(rule.walletId) ?? '' })),
       held: held.map((position) => position.assetId),
     };
   });

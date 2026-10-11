@@ -206,7 +206,9 @@ export async function setStandingRuleAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  revalidateWalletSettings(parsed.data.walletId);
+  // Setting a rule *moves* it when the asset already had one, so the wallet it
+  // came from changes too, and this action does not know which that was.
+  revalidateWalletSettings();
   return IDLE;
 }
 
