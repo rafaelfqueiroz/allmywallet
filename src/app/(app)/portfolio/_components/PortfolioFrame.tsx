@@ -37,7 +37,6 @@ export async function PortfolioFrame({
   wallets,
   freshness,
   actions,
-  scoped = true,
   children,
 }: {
   readonly wallets: readonly ScopeWallet[];
@@ -48,11 +47,6 @@ export async function PortfolioFrame({
    */
   readonly freshness?: Freshness | undefined;
   readonly actions?: ReactNode;
-  /**
-   * `false` for a page the scope does not change (Carteiras › Configurar):
-   * the header carries the selector only "where it applies" (BR-022-14).
-   */
-  readonly scoped?: boolean;
   readonly children: ReactNode;
 }) {
   const t = await getTranslations('portfolio');
@@ -61,7 +55,7 @@ export async function PortfolioFrame({
     <PageShell
       title={t('title')}
       description={t('description')}
-      {...(scoped ? { scope: <ScopeSelector wallets={wallets} /> } : {})}
+      scope={<ScopeSelector wallets={wallets} />}
       {...(actions ? { actions } : {})}
     >
       <RouteTabs
