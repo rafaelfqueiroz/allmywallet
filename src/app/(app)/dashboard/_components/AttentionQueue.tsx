@@ -2,8 +2,8 @@ import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { AttentionItem } from '@/core/dashboard/summary';
 import { describeGate, type GateResolution } from '@/core/onboarding/gates';
-import { Section } from '@/components/patterns/section';
-import { EmptyState } from '@/components/patterns/empty-state';
+import { SummaryCard } from '@/components/patterns/summary-card';
+import { Badge } from '@/components/ui/badge';
 import { Money } from '@/app/money';
 import { List, ListItem } from '@/components/layout/list';
 import { Stack } from '@/components/layout/stack';
@@ -35,6 +35,10 @@ import { importBatchPath } from '@/app/(app)/import/paths';
  * rather than a second queue: BR-020-15 forbids a dedicated onboarding panel,
  * and this queue was always the "is there anything for me to do?" surface a
  * missing fixed-income rate belongs in.
+ *
+ * **A Painel card (SPEC-022 BR-022-07, #213)**: the first items, the total as
+ * a count beside the heading, and a link to the rest. What each item says is
+ * #215's to change; this owns the card around it.
  */
 export async function AttentionQueue({
   items,
@@ -48,9 +52,39 @@ export async function AttentionQueue({
   const hidden = total - items.length;
 
   return (
-    <Section title={t('title')} description={t('description')}>
+    <SummaryCard
+      title={t('title')}
+      badge={
+        total > 0 ? (
+          // A count of work waiting, so a warning — never the loss colour
+          // (BR-022-31, DS-05).
+          <Badge variant="warning" dot>
+            {t('count', { count: total })}
+          </Badge>
+        ) : undefined
+      }
+      {...(hidden > 0
+        ? {
+            /*
+             * Said, not silently truncated. The ordinary first-week state — a
+             * full extract imported and no wallet created yet — produces one
+             * item per held asset, which at reference scale is a hundred rows
+             * that would bury everything else on the screen.
+             * `/settings/wallets/assign` is where the work is actually done and
+             * shows all of them with the forms to resolve each.
+             *
+             * Only pending allocations are ever hidden (`attentionQueue` never
+             * caps a gate, SPEC-020 BR-020-18), so `/settings/wallets/assign`
+             * is the right destination for everything this link counts.
+             */
+            link: { href: '/settings/wallets/assign', label: t('more', { count: hidden }) },
+          }
+        : {})}
+    >
       {items.length === 0 ? (
-        <EmptyState title={t('empty')} />
+        <Text size="sm" tone="muted" role="status">
+          {t('empty')}
+        </Text>
       ) : (
         <List gap="md">
           {items.map((item) => {
@@ -67,7 +101,7 @@ export async function AttentionQueue({
                         <Text as="span" weight="medium">
                           {t('importRows.label', { count: item.count })}
                         </Text>
-                        <Button asChild variant="link" size="sm">
+                        <Button asChild variant="outline" size="sm">
                           <Link href={href}>{t('importRows.action')}</Link>
                         </Button>
                       </Cluster>
@@ -86,7 +120,7 @@ export async function AttentionQueue({
                         <Text as="span" weight="medium">
                           {item.assetCode ?? t('fixedIncomeRate.unknownAsset')}
                         </Text>
-                        <Button asChild variant="link" size="sm">
+                        <Button asChild variant="outline" size="sm">
                           <Link href={href}>{t('fixedIncomeRate.action')}</Link>
                         </Button>
                       </Cluster>
@@ -111,7 +145,7 @@ export async function AttentionQueue({
                           </Text>
                           <Money value={item.quantity} kind="quantity" />
                         </Cluster>
-                        <Button asChild variant="link" size="sm">
+                        <Button asChild variant="outline" size="sm">
                           <Link href={href}>{t('pending.action')}</Link>
                         </Button>
                       </Cluster>
@@ -130,24 +164,7 @@ export async function AttentionQueue({
           })}
         </List>
       )}
-
-      {hidden > 0 && (
-        /*
-         * Said, not silently truncated. The ordinary first-week state — a full
-         * extract imported and no wallet created yet — produces one item per
-         * held asset, which at reference scale is a hundred rows that would
-         * bury everything else on the screen. `/settings/wallets/assign` is where the work is
-         * actually done and shows all of them with the forms to resolve each.
-         *
-         * Only pending allocations are ever hidden (`attentionQueue` never caps
-         * a gate, SPEC-020 BR-020-18), so `/settings/wallets/assign` is the right destination
-         * for everything this link counts.
-         */
-        <Button asChild variant="link" size="sm">
-          <Link href="/settings/wallets/assign">{t('more', { count: hidden })}</Link>
-        </Button>
-      )}
-    </Section>
+    </SummaryCard>
   );
 }
 

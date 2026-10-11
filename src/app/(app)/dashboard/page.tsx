@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import { Upload } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import type { DashboardFreshness, DashboardPortfolio } from '@/core/dashboard/summary';
 import { formatBusinessDate, formatDateTime } from '@/i18n/format';
 import { loadDashboard } from '@/app/(app)/dashboard/data';
 import { loadOnboardingStatus } from '@/app/(app)/onboarding/data';
@@ -13,10 +15,13 @@ import { loadWatchOpportunities } from '@/app/(app)/watch/data';
 import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
+import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Money } from '@/app/money';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
+import { Grid } from '@/components/layout/grid';
+import { Split } from '@/components/layout/split';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 import { IMPORT_SEND_PATH } from '@/app/(app)/import/paths';
@@ -38,6 +43,12 @@ import { IMPORT_SEND_PATH } from '@/app/(app)/import/paths';
  * reconciliation report and the allocation queue already produced — see that
  * module's header for why, and `tests/structural/reports-read-snapshots.test.ts`
  * for the check that keeps it true (SPEC-016 BR-016-07a, blocking).
+ *
+ * **A summary hub (SPEC-022 BR-022-07, #213).** The Painel summarises and
+ * links; it owns no detail of its own. Every card names the destination that
+ * owns its detail — Portfólio, Transações, the import batch, Configurações.
+ * `tests/structural/dashboard-reads-the-summary.test.ts` keeps its figures
+ * coming from the two loaders above and nothing else.
  *
  * Never statically prerendered: this renders one tenant's own *patrimônio*, so
  * a cached copy built once would be served to every visitor — the same
@@ -91,37 +102,22 @@ export default async function DashboardPage() {
   const firstRun = portfolio.kind === 'onboarding';
 
   return (
-    <PageShell title={t('title')} description={t('description')}>
-      {/*
-        SPEC-005 BR-005-27 / SPEC-008 BR-008-04 / SPEC-013 BR-013-13 — the four
-        dates a figure on this screen has to answer for: what it is valued at,
-        how fresh the quotes behind it are, how far behind the market that tier
-        is, and how old the custody data underneath it is. "The product never
-        implies real-time."
-      */}
-      <Cluster gap="md" align="baseline">
-        <Text tone="muted" size="xs">
-          {/* AR-47 / BR-016-18 — `dd/mm/yyyy` through the shared formatter. A
-              `BusinessDate` interpolated straight into an ICU message renders
-              as the ISO string it is stored as, which is a format the spec
-              forbids and which reads as a machine's date to a Brazilian. */}
-          {t('freshness.valuation', { date: formatBusinessDate(freshness.valuationAsOf) })}
-        </Text>
-        <Text tone="muted" size="xs">
-          {freshness.quotedAt === null
-            ? t('freshness.noQuote')
-            : t('freshness.quotedAt', { timestamp: formatDateTime(freshness.quotedAt) })}
-        </Text>
-        <Text tone="muted" size="xs">
-          {t('freshness.delay', { minutes: freshness.delayMinutes })}
-        </Text>
-        <Text tone="muted" size="xs">
-          {freshness.lastImportAt === null
-            ? t('freshness.neverImported')
-            : t('freshness.lastImport', { date: formatBusinessDate(freshness.lastImportAt) })}
-        </Text>
-      </Cluster>
-
+    <PageShell
+      title={t('title')}
+      description={freshnessLine(freshness, t)}
+      {...(firstRun
+        ? {}
+        : {
+            actions: (
+              <Button asChild variant="outline">
+                <Link href={IMPORT_SEND_PATH}>
+                  <Upload aria-hidden />
+                  {t('staleness.action')}
+                </Link>
+              </Button>
+            ),
+          })}
+    >
       {/*
         BR-005-28 — non-blocking, and suppressed on the first run because
         `isImportStale` reports "never imported" as stale (correctly: it is the
@@ -134,41 +130,20 @@ export default async function DashboardPage() {
             {/* The wording is `/import`'s own (`import.staleness.*`), reused
                 rather than restated: two near-identical prompts about the same
                 threshold are two things that can drift, and the one a user
-                meets second would then contradict the one they met first. Only
-                the action differs — `/import`'s links to the export guide on
-                its own page, which does not exist here. */}
+                meets second would then contradict the one they met first. The
+                action is the header's "Importar extrato". */}
             <Text weight="medium">
               {tImport('staleTitle', { days: freshness.daysSinceImport })}
             </Text>
             <Text size="sm" tone="muted">
               {tImport('body', { threshold: freshness.thresholdDays })}
             </Text>
-            <div>
-              <Button asChild variant="link" size="sm">
-                <Link href={IMPORT_SEND_PATH}>{t('staleness.action')}</Link>
-              </Button>
-            </div>
           </Stack>
         </Note>
       )}
 
       {portfolio.kind === 'valued' ? (
-        <Stack gap="sm">
-          <StatCard
-            label={t('value.label')}
-            value={<Money value={portfolio.value} />}
-            /* SPEC-009 AC-3/9/11 — *how* this was priced, where the figure is
-               read rather than in a footnote read once. Three separate facts:
-               see `ValuationMarkers` on why one badge covering all of them told
-               some users a false reason for a true warning. */
-            hint={<ValuationMarkers markers={portfolio.markers} />}
-          />
-          <div>
-            <Button asChild variant="link" size="sm">
-              <Link href="/reports">{t('value.reportLink')}</Link>
-            </Button>
-          </div>
-        </Stack>
+        <Headline portfolio={portfolio} />
       ) : (
         /*
          * BR-020-27 — "a portfolio displayed as R$ 0,00 is a false claim; an
@@ -192,15 +167,116 @@ export default async function DashboardPage() {
       )}
 
       {!firstRun && (
-        <>
-          {/* BR-005-26 */}
-          <ReconciliationStatus reconciliation={reconciliation} />
+        // The prototype's two columns (DL-022-13): the work queue beside the
+        // two status cards, one column on a narrow container.
+        <Split side="aside">
           {/* BR-010-12 */}
           <AttentionQueue items={attention} total={attentionTotal} />
-          {/* SPEC-022 BR-022-07 / SPEC-018 */}
-          <WatchOpportunities opportunities={opportunities} />
-        </>
+          <Stack gap="lg">
+            {/* BR-005-26 */}
+            <ReconciliationStatus reconciliation={reconciliation} />
+            {/* SPEC-022 BR-022-07 / SPEC-018 */}
+            <WatchOpportunities opportunities={opportunities} />
+          </Stack>
+        </Split>
       )}
     </PageShell>
+  );
+}
+
+/**
+ * SPEC-005 BR-005-27 / SPEC-008 BR-008-04 / SPEC-013 BR-013-13 — the four
+ * dates a figure on this screen has to answer for: what it is valued at, how
+ * fresh the quotes behind it are, how far behind the market that tier is, and
+ * how old the custody data underneath it is. "The product never implies
+ * real-time."
+ *
+ * The page header's description, as in the prototype, so it reads as a fact
+ * about the whole page. The quote instant is the **freshest** behind the
+ * figures ("Cotação mais recente"); the Patrimônio card's "Preço mais antigo"
+ * marker is the other end of the same range, and its explanation says so
+ * (#213 — the two used to read as a contradiction).
+ *
+ * AR-47 / BR-016-18 — `dd/mm/yyyy` through the shared formatter. A
+ * `BusinessDate` interpolated straight into an ICU message renders as the ISO
+ * string it is stored as.
+ */
+function freshnessLine(
+  freshness: DashboardFreshness,
+  t: Awaited<ReturnType<typeof getTranslations<'dashboard'>>>,
+): string {
+  return [
+    t('freshness.valuation', { date: formatBusinessDate(freshness.valuationAsOf) }),
+    freshness.quotedAt === null
+      ? t('freshness.noQuote')
+      : t('freshness.quotedAt', { timestamp: formatDateTime(freshness.quotedAt) }),
+    t('freshness.delay', { minutes: freshness.delayMinutes }),
+    freshness.lastImportAt === null
+      ? t('freshness.neverImported')
+      : t('freshness.lastImport', { date: formatBusinessDate(freshness.lastImportAt) }),
+  ].join(' · ');
+}
+
+/**
+ * The headline figures (BR-022-07), each linking to the destination that owns
+ * its detail. The same three Portfólio › Patrimônio leads with, in its words
+ * (`portfolio.patrimonio.*`, BR-022-32) — and the same report totals, so the
+ * two screens cannot disagree (BR-013-12).
+ */
+async function Headline({
+  portfolio,
+}: {
+  readonly portfolio: Extract<DashboardPortfolio, { kind: 'valued' }>;
+}) {
+  const t = await getTranslations('dashboard');
+  const tp = await getTranslations('portfolio.patrimonio');
+  const tCommon = await getTranslations('common');
+  const tReports = await getTranslations('reports');
+  const { result, ratio } = portfolio.result;
+
+  return (
+    <Grid cols={3} gap="md">
+      <StatCard
+        label={t('value.label')}
+        value={<Money value={portfolio.value} />}
+        /* SPEC-009 AC-3/9/11 — *how* this was priced, where the figure is read
+           rather than in a footnote read once. Three separate facts: see
+           `ValuationMarkers` on why one badge covering all of them told some
+           users a false reason for a true warning. */
+        hint={<ValuationMarkers markers={portfolio.markers} />}
+        link={{ href: '/portfolio', label: t('value.link') }}
+      />
+      <StatCard
+        label={tp('cost')}
+        value={
+          <Cluster gap="sm" align="baseline">
+            <Money value={portfolio.costBasis} />
+            <CostEstimateMarker
+              shown={portfolio.costEstimated}
+              label={tCommon('estimated')}
+              title={tReports('markers.costEstimated.explanation')}
+            />
+          </Cluster>
+        }
+        hint={tp('costHint')}
+        link={{ href: '/transactions', label: t('cost.link') }}
+      />
+      <StatCard
+        label={tp('result')}
+        value={<Money value={result} signed />}
+        hint={
+          ratio === null ? (
+            tp('resultNoRatio')
+          ) : (
+            <Cluster gap="xs" align="baseline">
+              <Money value={ratio} kind="percent" signed />
+              <span>{tp('resultOnCost')}</span>
+            </Cluster>
+          )
+        }
+        // BR-015-08 — the result per asset is Composição's table.
+        link={{ href: '/portfolio/composition', label: t('result.link') }}
+      />
+    </Grid>
   );
 }

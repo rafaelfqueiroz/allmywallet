@@ -64,6 +64,25 @@ async function seedCommittedPosicaoBatch(
   }
 }
 
+/** Moves one seeded asset's only prices `days` back, so it is carried forward. */
+async function ageQuote(code: string, days: number): Promise<void> {
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    const asset = `(SELECT id FROM assets WHERE code = $1)`;
+    await pool.query(
+      `UPDATE latest_quotes SET quoted_at = now() - make_interval(days => $2)
+        WHERE asset_id = ${asset}`,
+      [code, days],
+    );
+    await pool.query(
+      `UPDATE price_quotes SET date = CURRENT_DATE - $2::int WHERE asset_id = ${asset}`,
+      [code, days],
+    );
+  } finally {
+    await pool.end();
+  }
+}
+
 test.describe('the dashboard', () => {
   /**
    * SPEC-001 BR-001-04 — the landing. Asserted through the redirect a signed-in
@@ -111,6 +130,11 @@ test.describe('the dashboard', () => {
     await expect(
       signedIn.page.getByRole('link', { name: 'Importar meu primeiro extrato' }),
     ).toBeVisible();
+    // #213 — the hub's cards and its header action are for a portfolio that
+    // exists; the first run keeps the one action its empty state offers.
+    await expect(signedIn.page.locator('[data-slot="summary-card"]')).toHaveCount(0);
+    await expect(signedIn.page.locator('[data-slot="stat-card"]')).toHaveCount(0);
+    await expect(signedIn.page.getByRole('link', { name: 'Importar extrato' })).toHaveCount(0);
   });
 
   /**
@@ -257,6 +281,229 @@ test.describe('the dashboard', () => {
     await expect(signedIn.page.getByText('Confere com a B3')).toBeVisible();
     // BR-016-18 again, on the Posição date beside the badge.
     await expect(signedIn.page.getByText(/Posição de \d{2}\/\d{2}\/\d{4}/)).toBeVisible();
+  });
+
+  /**
+   * SPEC-022 BR-022-07 (#213) — "each card links to the destination that owns
+   * its detail." Asserted by following every link the hub renders, so a card
+   * pointing at a moved route fails here rather than on the owner's screen.
+   */
+  test('every card links to the destination that owns its detail', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedHoldings(userId, [
+      { code: 'HUB', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedCommittedPosicaoBatch(userId, []);
+
+    await page.goto('/dashboard');
+
+    // By the figure's own label (`dt`): "sobre o valor aplicado" is in the
+    // result card's hint, so a text filter would match two cards.
+    const stat = (label: string) =>
+      page
+        .locator('[data-slot="stat-card"]')
+        .filter({ has: page.locator('dt').getByText(label, { exact: true }) });
+    const card = (heading: string) =>
+      page
+        .locator('[data-slot="summary-card"]')
+        .filter({ has: page.getByRole('heading', { level: 2, name: heading }) });
+
+    // Hand-computed: 10 × R$ 25,00 = R$ 250,00; cost 10 × R$ 20,00 =
+    // R$ 200,00; result R$ 50,00, +25,00 % on the cost.
+    await expect(stat('Patrimônio')).toContainText('R$ 250,00');
+    await expect(stat('Valor aplicado')).toContainText('R$ 200,00');
+    await expect(stat('Resultado não realizado')).toContainText('R$ 50,00');
+
+    const links: readonly (readonly [ReturnType<typeof page.locator>, string, RegExp])[] = [
+      [stat('Patrimônio').getByRole('link'), 'Ver no Portfólio', /\/portfolio$/],
+      [stat('Valor aplicado').getByRole('link'), 'Ver em Transações', /\/transactions$/],
+      [
+        stat('Resultado não realizado').getByRole('link'),
+        'Ver em Composição',
+        /\/portfolio\/composition$/,
+      ],
+      [
+        card('Conferência com a B3').getByRole('link'),
+        'Ver a conferência',
+        /\/settings\/import\/[0-9a-f-]+$/,
+      ],
+      [
+        card('Em zona de compra ou venda').getByRole('link', { name: /^Regras/ }),
+        'Regras',
+        /\/settings\/watch$/,
+      ],
+      // Five items at most; a sixth holding is not seeded, so the queue's
+      // link to the rest is asserted in its own test below.
+    ];
+
+    for (const [link, name, destination] of links) {
+      await expect(link).toHaveText(name);
+      await link.click();
+      await expect(page).toHaveURL(destination);
+      await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+      await page.goto('/dashboard');
+    }
+  });
+
+  /**
+   * BR-022-07 — "Precisa da sua atenção" shows the first items and links to
+   * the rest. Six holdings in no wallet are six pending allocations, one more
+   * than `ATTENTION_QUEUE_LIMIT`.
+   */
+  test('the attention card counts every item and links to the ones it does not show', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    await seedHoldings(
+      userId,
+      ['QA', 'QB', 'QC', 'QD', 'QE', 'QF'].map((code) => ({
+        code,
+        quantity: '1',
+        averageCost: '10.00',
+        price: '10.00',
+      })),
+    );
+    await dismissOnboarding(userId);
+
+    await page.goto('/dashboard');
+
+    const card = page
+      .locator('[data-slot="summary-card"]')
+      .filter({ has: page.getByRole('heading', { name: 'Precisa da sua atenção' }) });
+    await expect(card.locator('[data-slot="badge"]')).toHaveText('6 itens');
+    await expect(card.getByRole('listitem')).toHaveCount(5);
+    const rest = card.getByRole('link', { name: 'mais 1 compra a distribuir em Carteiras' });
+    await rest.click();
+    await expect(page).toHaveURL(/\/settings\/wallets\/assign$/);
+  });
+
+  /**
+   * SPEC-022 BR-022-31 — "a warning, such as an open divergence, never uses the
+   * loss colour or the destructive-action colour." Asserted on the rendered
+   * badge's variant and on its computed colour, which must be the warning
+   * token's and not the loss or destructive one.
+   */
+  test('an open B3 divergence renders as a warning, never the loss colour', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    await seedHoldings(userId, [
+      { code: 'DIV', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedCommittedPosicaoBatch(userId, [
+      {
+        assetId: randomUUID(),
+        assetCode: 'DIV3',
+        institutionId: null,
+        computedQuantity: '10',
+        b3Quantity: '12',
+        difference: '2',
+        cause: 'undetermined',
+        resolved: false,
+      },
+    ]);
+
+    await page.goto('/dashboard');
+
+    const card = page
+      .locator('[data-slot="summary-card"]')
+      .filter({ has: page.getByRole('heading', { name: 'Conferência com a B3' }) });
+    const badge = card.locator('[data-slot="badge"]');
+    await expect(badge).toHaveText('1 divergência em aberto');
+    await expect(badge).toHaveAttribute('data-variant', 'warning');
+
+    const colours = await page.evaluate(() => {
+      const probe = (name: string) => {
+        const el = document.createElement('span');
+        el.style.color = `var(--${name})`;
+        document.body.append(el);
+        const colour = getComputedStyle(el).color;
+        el.remove();
+        return colour;
+      };
+      return {
+        warning: probe('warning'),
+        negative: probe('negative'),
+        destructive: probe('destructive'),
+      };
+    });
+    const badgeColour = await badge.evaluate((el) => getComputedStyle(el).color);
+    expect(badgeColour).toBe(colours.warning);
+    expect(badgeColour).not.toBe(colours.negative);
+    expect(badgeColour).not.toBe(colours.destructive);
+  });
+
+  /**
+   * BR-005-27 / BR-008-24 (#213) — a price carried from an earlier close is
+   * marked, its explanation is reachable by keyboard (not only a `title` a
+   * phone never shows), and the header names the freshest quote as the
+   * freshest, so the two read as the ends of one range.
+   */
+  test('an older price is marked, and its explanation opens from the keyboard', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const [, oldCode] = await seedHoldings(userId, [
+      { code: 'NEW', quantity: '10', averageCost: '20.00', price: '25.00' },
+      { code: 'OLD', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await ageQuote(oldCode!, 10);
+    await dismissOnboarding(userId);
+
+    await page.goto('/dashboard');
+
+    await expect(
+      page.getByText(/Cotação intradiária mais recente: \d{2}\/\d{2}\/\d{4}/),
+    ).toBeVisible();
+    const marker = page.getByText(/^Preço mais antigo: \d{2}\/\d{2}\/\d{4}$/);
+    await expect(marker).toBeVisible();
+
+    const tip = page.getByRole('button', { name: /^Instruções sobre Preço mais antigo/ });
+    // Read on reaching the icon, not only once the tip is open (#213 review).
+    await expect(tip).toHaveAccessibleDescription(/o mais antigo deles é de/);
+    await tip.focus();
+    await expect(page.getByRole('note')).toContainText('o mais antigo deles é de');
+  });
+
+  /**
+   * #213 — on the owner's screen the links sat indented off their headings'
+   * left edge and every section stacked on one long page. Measured, not
+   * inferred from class names: a card's link starts where its heading starts,
+   * and from a desktop width the queue and the B3 card share a row.
+   */
+  test('links start at their heading’s edge, and the cards sit in two columns', async ({
+    signedIn,
+    viewport,
+  }) => {
+    const { page, userId } = signedIn;
+    await seedHoldings(userId, [
+      { code: 'LAY', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedCommittedPosicaoBatch(userId, []);
+
+    await page.goto('/dashboard');
+
+    const left = async (locator: ReturnType<typeof page.locator>) =>
+      (await locator.boundingBox())?.x ?? Number.NaN;
+
+    const stat = page
+      .locator('[data-slot="stat-card"]')
+      .filter({ has: page.locator('dt').getByText('Patrimônio', { exact: true }) });
+    expect(await left(stat.getByRole('link'))).toBeCloseTo(await left(stat.locator('dt')), 0);
+
+    const b3 = page
+      .locator('[data-slot="summary-card"]')
+      .filter({ has: page.getByRole('heading', { name: 'Conferência com a B3' }) });
+    expect(await left(b3.getByRole('link'))).toBeCloseTo(await left(b3.getByRole('heading')), 0);
+
+    if ((viewport?.width ?? 0) >= 1100) {
+      const queue = page
+        .locator('[data-slot="summary-card"]')
+        .filter({ has: page.getByRole('heading', { name: 'Precisa da sua atenção' }) });
+      const [queueBox, b3Box] = await Promise.all([queue.boundingBox(), b3.boundingBox()]);
+      expect(queueBox?.y).toBeCloseTo(b3Box?.y ?? Number.NaN, 0);
+      expect(b3Box?.x ?? 0).toBeGreaterThan((queueBox?.x ?? 0) + (queueBox?.width ?? 0) - 1);
+    }
   });
 
   /** TS-27 / BR-016-15 — axe on the populated page, in a real browser. */

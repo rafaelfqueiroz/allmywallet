@@ -169,7 +169,8 @@ Two caveats carried forward:
 | `AccountMenu` | The Google name, e-mail and picture; Conta, Preferências, Privacidade, the guide, the theme switch and Sair — DS-58. Every action is a prop. |
 | `EmptyState` | `role="status"`. Explains an absence. |
 | `ErrorState` | `role="alert"`. Explains a failure. |
-| `StatCard` | One headline figure as `dt`/`dd`. Owns framing, never formatting — pass a `<Money>`. |
+| `StatCard` | One headline figure as `dt`/`dd`. Owns framing, never formatting — pass a `<Money>`. `link` adds a footer row to the destination that owns the figure (BR-022-07) — DS-65. |
+| `SummaryCard` | A card that is a region of the page: `section` with an `h2`, a status badge or action beside the heading, and an optional `CardLink` footer to the owning destination (BR-022-07) — DS-65. `CardHeaderLink` is the link beside a heading. |
 | `DataTable` | A real table from `md`, a labelled card list below it. `caption` is required. Sorts, paginates and filters, with its state in the URL — DS-54. |
 | `Money` | The only place a figure becomes text. Pages import it from `@/app/money`, which applies the account's masking (DS-59). |
 
@@ -228,7 +229,7 @@ Exports never read the key (BR-022-27). Preferências revalidates the layout on 
 
 **DS-56 — A file field is a `FileUpload`** (BR-022-23). A native `<input type="file">`, transparent, covers a pt-BR drop zone: click and drag-and-drop work without JavaScript, the form posts natively (DS-37), and the browser's English "Choose Files" is never painted. With JavaScript the zone adds the dragging state, the chosen files and the pending state. Its own `title` and `acceptHint` are props, so the component holds no B3-specific text.
 
-**DS-60 — A fixed column beside a fluid one is a `Split`, and it breaks on its container, not the viewport** (SPEC-022 BR-022-16, #210). `side="start"` is a sub-navigation beside its content, `side="end"` a panel beside a list, `side="even"` a task beside its reference in two equal halves (Importar › Enviar's upload beside the B3 guide, #211); below the container breakpoint it is one column. A page inside a destination with a sub-navigation is narrower than the viewport by the sidebar and the sub-navigation both, so a viewport breakpoint would put a table and a form side by side in 360px — and DS-22 bars `grid-cols-[…]` in `src/app/`. The fluid track is `minmax(0,1fr)`, so a wide table scrolls inside its own container.
+**DS-60 — A fixed column beside a fluid one is a `Split`, and it breaks on its container, not the viewport** (SPEC-022 BR-022-16, #210). `side="start"` is a sub-navigation beside its content, `side="end"` a panel beside a list, `side="even"` a task beside its reference in two equal halves (Importar › Enviar's upload beside the B3 guide, #211); `side="aside"` a main column beside a narrower one that still holds lists, 3:2 (the Painel's queue beside its status cards, #213); below the container breakpoint it is one column. A page inside a destination with a sub-navigation is narrower than the viewport by the sidebar and the sub-navigation both, so a viewport breakpoint would put a table and a form side by side in 360px — and DS-22 bars `grid-cols-[…]` in `src/app/`. The fluid track is `minmax(0,1fr)`, so a wide table scrolls inside its own container.
 
 **DS-61 — A colour field is a `ColorInput`, never a bare `<Input type="color">`** (BR-022-20). It is the native control at `Input`'s `h-8` with the `border-input` boundary (3:1 on card and page in both themes, the token table, pinned by `design-token-colour.test.ts`) and its hex shown as text beside it, because a bare colour well on a dark card is a near-invisible black square and a colour must not be the only way to read a colour. `noneLabel` adds **"Sem cor"** — a checkbox posting `noColor=on` — because a native colour input cannot be empty and every colourless record would be saved black; picking a colour unchecks it, and the server action, not the script, maps `noColor` to `null`, so it holds without JavaScript (DS-37).
 
@@ -238,9 +239,11 @@ Exports never read the key (BR-022-27). Preferências revalidates the layout on 
 
 **DS-64 — A tab can stay current on pages that are not tabs: `RouteTab.alsoActiveOn`** (DS-27, #210). Carteiras' "Nova carteira" form is part of "Minhas carteiras"; with no tab lit the reader would not know where they are. It names extra path prefixes — nothing else changes how a tab matches.
 
+**DS-65 — A card links through a row, never a padded button** (SPEC-022 BR-022-07, #213). The link to the destination that owns a card's detail is `CardLink`: a full-width row under a hairline, its label flush with the card's left edge and a chevron at the right. `Button variant="link"` carries its own horizontal padding, which put every "Ver o relatório…" on the old Painel visibly indented off the heading above it. A card link's `ariaLabel`, when two cards would otherwise share a name, must begin with the visible label (WCAG 2.5.3); one that does not is dropped. `tests/e2e/dashboard.spec.ts` measures the edge.
+
 **DS-37 — Form controls are native.** `NativeSelect` and `Checkbox` exist alongside the Radix `Select`, and the reason is not taste: every form on these screens is a `<form action={serverAction}>` that posts without JavaScript, and a Radix control contributes nothing to a native submission without a mirrored hidden input. Reach for Radix `Select` when the control drives client state; reach for the native one when it is a form field.
 
-**DS-38 — A titled region within a page is a `Section`.** `h2` under `PageShell`'s `h1`. Nesting deeper is a signal the page is doing too much, not a reason to add a level prop.
+**DS-38 — A titled region within a page is a `Section`.** `h2` under `PageShell`'s `h1`. Nesting deeper is a signal the page is doing too much, not a reason to add a level prop. A region drawn as a card — the Painel's — is a `SummaryCard`, which is the same `section` + `h2` inside a card (DS-65).
 
 **DS-39 — Pages outside the application frame use `AuthShell`.** Sign-in is a viewport-centred card with no navigation, which is a different shape from `PageShell`'s top-aligned document. Collapsing them would produce a component whose props contradict each other half the time. The public landing page is a third shape again and uses `MarketingShell` (DS-43).
 
