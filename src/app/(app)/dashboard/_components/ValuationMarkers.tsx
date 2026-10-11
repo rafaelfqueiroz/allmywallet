@@ -3,6 +3,7 @@ import type { ValuationMarkers as Markers } from '@/core/dashboard/summary';
 import { formatBusinessDate } from '@/i18n/format';
 import { Badge } from '@/components/ui/badge';
 import { Cluster } from '@/components/layout/cluster';
+import { InfoTip } from '@/components/patterns/info-tip';
 
 /**
  * SPEC-009 AC-3/AC-9/AC-11 — **how the total above was priced**, at portfolio
@@ -21,8 +22,13 @@ import { Cluster } from '@/components/layout/cluster';
  * it" signal never appeared at all.
  *
  * **Colour is never the sole carrier (BR-016-16).** Each badge's meaning is its
- * text; the `title` adds the explanation, and a `title` survives a print, a
- * screen reader and a page with JavaScript disabled.
+ * text, and its explanation sits behind an `InfoTip` beside it (#213, DS-55).
+ * It used to be the badge's `title`, which a phone never shows and a keyboard
+ * never reaches — so the one sentence that reconciles "Preço mais antigo"
+ * with the freshest quote in the page header was out of reach for exactly the
+ * users most likely to read both. The explanation is also the badge's
+ * accessible description (`aria-describedby` on a `hidden` copy), so a screen
+ * reader hears it with the badge rather than only when the tip is opened.
  */
 export async function ValuationMarkers({ markers }: { readonly markers: Markers }) {
   const t = await getTranslations('dashboard.markers');
@@ -33,42 +39,80 @@ export async function ValuationMarkers({ markers }: { readonly markers: Markers 
   // something, and the only one styled as a problem.
   if (markers.unpriced > 0) {
     badges.push(
-      <Badge
+      <Marker
         key="attention"
+        id="marker-attention"
         // SPEC-022 BR-022-31 — asks for attention, so a warning; not a loss and
         // not a destructive action (DS-05).
         variant="warning"
-        title={t('attention.explanation', { count: markers.unpriced })}
-      >
-        {t('attention.badge')}
-      </Badge>,
+        label={t('attention.badge')}
+        explanation={t('attention.explanation', { count: markers.unpriced })}
+      />,
     );
   }
 
   if (markers.accrued) {
     badges.push(
-      <Badge key="accrued" variant="outline" title={t('accrued.explanation')}>
-        {t('accrued.badge')}
-      </Badge>,
+      <Marker
+        key="accrued"
+        id="marker-accrued"
+        variant="neutral"
+        label={t('accrued.badge')}
+        explanation={t('accrued.explanation')}
+      />,
     );
   }
 
   if (markers.carriedForward && markers.oldestPriceDate !== null) {
     // BR-008-24 — "never shown as current when it is not". The date is the
-    // *oldest* behind the total, because the quote instant beside it is already
-    // the freshest and the two together are what make the gap visible.
+    // *oldest* behind the total, because the quote instant in the page header
+    // is already the freshest and the two together are what make the gap
+    // visible. Worded as "mais antigo" so it reads as the other end of a
+    // range rather than as a contradiction of the header (#213).
+    const date = formatBusinessDate(markers.oldestPriceDate);
     badges.push(
-      <Badge key="carried" variant="secondary" title={t('carried.explanation')}>
-        {t('carried.badge', { date: formatBusinessDate(markers.oldestPriceDate) })}
-      </Badge>,
+      <Marker
+        key="carried"
+        id="marker-carried"
+        variant="neutral"
+        label={t('carried.badge', { date })}
+        explanation={t('carried.explanation', { date })}
+      />,
     );
   }
 
   if (badges.length === 0) return null;
 
   return (
-    <Cluster gap="sm" align="baseline">
+    <Cluster gap="sm" align="center">
       {badges}
+    </Cluster>
+  );
+}
+
+/** One marker: its badge, and its explanation reachable by hover, focus and tap. */
+function Marker({
+  id,
+  variant,
+  label,
+  explanation,
+}: {
+  readonly id: string;
+  readonly variant: 'warning' | 'neutral';
+  readonly label: string;
+  readonly explanation: string;
+}) {
+  return (
+    <Cluster gap="xs" align="center" data-slot="valuation-marker">
+      <Badge id={`${id}-badge`} variant={variant} aria-describedby={`${id}-explanation`}>
+        {label}
+      </Badge>
+      <InfoTip id={id} label={label} labelledBy={`${id}-badge`}>
+        {explanation}
+      </InfoTip>
+      <span id={`${id}-explanation`} hidden>
+        {explanation}
+      </span>
     </Cluster>
   );
 }

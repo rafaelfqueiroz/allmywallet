@@ -155,6 +155,29 @@ describe('portfolio value (BR-020-27, BR-011-16, BR-013-12)', () => {
     expect(summary.portfolio).toMatchObject({ value: query.report.total.value });
   });
 
+  it('carries the report’s cost and the unrealised result over it (SPEC-022 BR-022-07)', async () => {
+    // Hand-computed: cost 800 + 900 = R$ 1.700,00; result 2.000 − 1.700 =
+    // R$ 300,00; ratio 300 / 1.700 (a fraction, not ×100).
+    const query = await queryFor([
+      { assetId: PETR, quantity: qty('100'), value: money('1000'), costBasis: money('800') },
+      { assetId: VALE, quantity: qty('50'), value: money('1000'), costBasis: money('900') },
+    ]);
+
+    const summary = buildDashboardSummary(input({ query }));
+    if (summary.portfolio.kind !== 'valued') throw new Error('expected a valued portfolio');
+
+    expect(summary.portfolio.costBasis.equals(Money.fromString('1700'))).toBe(true);
+    expect(summary.portfolio.costEstimated).toBe(false);
+    expect(summary.portfolio.result.result.equals(Money.fromString('300'))).toBe(true);
+    expect(
+      summary.portfolio.result.ratio?.equals(
+        Money.fromString('300').dividedBy(Money.fromString('1700').toDecimal()),
+      ),
+    ).toBe(true);
+    // The report's own figure, not an equal recomputation (BR-013-12).
+    expect(summary.portfolio.costBasis).toBe(query.report.total.costBasis);
+  });
+
   it('marks the figure accrued when a contract-based component is in it', async () => {
     // BR-011-15 / BR-009-11: one accrued component is enough. `basis` is the
     // accrual's own evidence, and its presence is what separates this from the

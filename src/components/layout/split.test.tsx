@@ -34,6 +34,12 @@ describe('Split', () => {
     expect(even.container.querySelector('[data-slot="split"]')?.className).toContain(
       '@2xl:grid-cols-2',
     );
+    even.unmount();
+
+    const aside = render(<Split side="aside">x</Split>);
+    expect(aside.container.querySelector('[data-slot="split"]')?.className).toContain(
+      'minmax(0,3fr)_minmax(0,2fr)',
+    );
   });
 
   it('has no axe violations', async () => {

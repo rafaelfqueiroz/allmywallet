@@ -36,6 +36,13 @@ const splitVariants = cva('grid grid-cols-1 items-start', {
        * (Importar › Enviar: the upload beside the B3 export guide, #211).
        */
       even: '@2xl:grid-cols-2',
+      /**
+       * A main column beside a narrower one that still holds lists of its
+       * own — the Painel's "Precisa da sua atenção" beside the B3 and watch
+       * cards (#213, the prototype's 3:2). `end`'s fixed 20rem is a form's
+       * width; a list row with a figure, a badge and a link needs more.
+       */
+      aside: '@4xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]',
     },
     gap: {
       md: 'gap-4',

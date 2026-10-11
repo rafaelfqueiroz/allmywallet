@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { WatchOpportunities as WatchOpportunitiesData } from '@/app/(app)/watch/data';
 import { WATCH_RULES_PATH, watchRulePath } from '@/lib/watch-paths';
-import { Section } from '@/components/patterns/section';
+import { CardHeaderLink, SummaryCard } from '@/components/patterns/summary-card';
 import { StateBadge } from '@/components/patterns/state-badge';
 import { Money } from '@/app/money';
 import { List, ListItem } from '@/components/layout/list';
@@ -45,14 +45,14 @@ export async function WatchOpportunities({
     ) : null;
 
   return (
-    <Section
+    <SummaryCard
       title={t('title')}
-      actions={
-        <Button asChild variant="link" size="sm">
-          <Link href={WATCH_RULES_PATH} aria-label={t('rulesLinkLabel')}>
-            {t('rulesLink')}
-          </Link>
-        </Button>
+      action={
+        <CardHeaderLink
+          href={WATCH_RULES_PATH}
+          label={t('rulesLink')}
+          ariaLabel={t('rulesLinkLabel')}
+        />
       }
     >
       {items.length === 0 ? (
@@ -109,6 +109,6 @@ export async function WatchOpportunities({
           </Text>
         </Stack>
       )}
-    </Section>
+    </SummaryCard>
   );
 }

@@ -108,7 +108,7 @@ test('states the quote timestamp and the delay tier next to the figures', async 
 
   // Portfólio's freshness line, in the dashboard's words (BR-022-32), with
   // SPEC-005 BR-005-27's import date beside the quote's.
-  await expect(page.getByText(/cotações de/i)).toBeVisible();
+  await expect(page.getByText(/cotação mais recente/i)).toBeVisible();
   await expect(page.getByText(/atraso de até 30 minutos/i)).toBeVisible();
   await expect(page.getByText(/nunca em tempo real/i)).toBeVisible();
   await expect(page.getByText(/nenhum extrato importado ainda/i)).toBeVisible();

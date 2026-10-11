@@ -3,6 +3,7 @@ import type { AssetId, ImportBatchId } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { ReportQueryResult } from '@/core/reporting/base-query';
 import type { ReportHolding } from '@/core/reporting/ports';
+import { unrealizedResult, type UnrealizedResult } from '@/core/reporting/composition/result';
 import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import { daysSinceImport, isImportStale } from '@/core/ingestion/staleness';
@@ -75,6 +76,17 @@ export type DashboardPortfolio =
       /** BR-013-12 — the same total the Patrimônio and Composição reports show. */
       readonly value: Money;
       readonly markers: ValuationMarkers;
+      /**
+       * SPEC-022 BR-022-07 — the Painel's other headline figures, the ones
+       * Portfólio › Patrimônio leads with: *valor aplicado* and the unrealised
+       * result over it. Both are the same report's own totals (`costBasis`,
+       * and BR-015-08's subtraction through `unrealizedResult`), so the two
+       * screens cannot disagree about them either.
+       */
+      readonly costBasis: Money;
+      /** SPEC-007 DL-007-12 — any constituent cost is an estimate. */
+      readonly costEstimated: boolean;
+      readonly result: UnrealizedResult;
     };
 
 /**
@@ -526,6 +538,9 @@ function portfolioOf(input: DashboardSummaryInput): DashboardPortfolio {
       kind: 'valued',
       value: input.query.report.total.value,
       markers: valuationMarkers(input.query.report.groups.flatMap((group) => group.holdings)),
+      costBasis: input.query.report.total.costBasis,
+      costEstimated: input.query.report.total.costEstimated,
+      result: unrealizedResult(input.query.report.total),
     };
   }
   const hasHistory =

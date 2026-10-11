@@ -129,8 +129,8 @@
     "description": "Quanto você tem, o que precisa da sua atenção e de quando são os dados.",
     "signedOut": "Entre na sua conta para ver seu painel.",
     "value": {
-      "label": "Patrimônio atual",
-      "reportLink": "Ver o relatório de patrimônio"
+      "label": "Patrimônio",
+      "link": "Ver no Portfólio"
     },
     "markers": {
       "attention": {
@@ -142,13 +142,13 @@
         "explanation": "Parte do total é calculada a partir do indexador contratado, não observada em um mercado. É um número real, só não é um preço."
       },
       "carried": {
-        "badge": "Preços de até {date}",
-        "explanation": "Parte dos preços é o fechamento de um pregão anterior — fim de semana, feriado, negociação suspensa, ou uma cotação que o orçamento do provedor não pôde atualizar. São preços reais e observados; só não são os de hoje."
+        "badge": "Preço mais antigo: {date}",
+        "explanation": "Os valores são de hoje, e a cotação no topo da página é a mais recente que temos. Parte dos preços, porém, é o fechamento de um pregão anterior — o mais antigo deles é de {date}: fim de semana, feriado, negociação suspensa, ou uma cotação que o orçamento do provedor não pôde atualizar. São preços reais e observados; só não são os de hoje."
       }
     },
     "freshness": {
       "valuation": "Valores de {date}",
-      "quotedAt": "Cotações de {timestamp}",
+      "quotedAt": "Cotação mais recente: {timestamp}",
       "noQuote": "Nenhuma cotação de mercado por trás destes valores",
       "delay": "Atraso de até {minutes} minutos — nunca em tempo real",
       "lastImport": "Última importação: {date}",
@@ -210,7 +210,8 @@
         "portfolio_value_understated": "Sem a taxa contratada, este contrato não pode ser avaliado — o patrimônio acima está subestimado até você informá-la.",
         "position_not_imported": "Sem a taxa contratada, este contrato não pode ser avaliado — e a aplicação ainda não aparece nas suas posições. Informe a taxa e importe a Movimentação que contém a aplicação para que ela entre no patrimônio.",
         "allocation_missing": "O valor já está no total acima; falta decidir de qual carteira ele faz parte."
-      }
+      },
+      "count": "{count, plural, one {# item} other {# itens}}"
     },
     "opportunities": {
       "title": "Em zona de compra ou venda",
@@ -226,6 +227,12 @@
       "emptyWithUnknown": "Nenhum ativo observado com cotação válida está em compra ou venda pelas suas regras agora.",
       "unknown": "{count, plural, one {# regra sem cotação válida não pôde ser avaliada agora.} other {# regras sem cotação válida não puderam ser avaliadas agora.}}",
       "notAdvice": "Cada estado vem de uma regra sua; a AllMyWallet não recomenda comprar nem vender."
+    },
+    "cost": {
+      "link": "Ver em Transações"
+    },
+    "result": {
+      "link": "Ver em Composição"
     }
   },
   "portfolio": {

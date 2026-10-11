@@ -43,7 +43,11 @@ export function PageHeader({
   return (
     <header data-slot="page-header" className={cn(className)} {...props}>
       <Cluster justify="between" align="start" gap="md">
-        <Stack gap="xs">
+        {/* Grows and shrinks from a 20rem basis, so a long description wraps
+            beside the actions instead of pushing them onto a line of their
+            own (the Painel's freshness line, #213). Below that basis the
+            cluster wraps as before. */}
+        <Stack gap="xs" className="min-w-0 flex-[1_1_20rem]">
           {title && <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>}
           {description && <p className="text-muted-foreground">{description}</p>}
         </Stack>

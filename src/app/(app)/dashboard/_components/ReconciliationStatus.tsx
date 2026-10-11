@@ -1,12 +1,9 @@
-import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { formatBusinessDate } from '@/i18n/format';
 import type { DashboardReconciliation } from '@/core/dashboard/summary';
-import { Section } from '@/components/patterns/section';
+import { SummaryCard } from '@/components/patterns/summary-card';
 import { Stack } from '@/components/layout/stack';
-import { Cluster } from '@/components/layout/cluster';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 import { IMPORT_SEND_PATH, importBatchPath } from '@/app/(app)/import/paths';
 
@@ -27,6 +24,11 @@ import { IMPORT_SEND_PATH, importBatchPath } from '@/app/(app)/import/paths';
  * **Colour is never the sole carrier (SPEC-016 BR-016-16).** The badge's
  * variant is redundant with its text in all three states, and the count is in
  * the text rather than implied by a colour's intensity.
+ *
+ * **A Painel card (SPEC-022 BR-022-07, #213).** The status sits beside the
+ * heading as a semantic status badge (BR-022-31); the card links to the one
+ * screen that owns the detail — the batch's per-asset comparison, or the
+ * import that would produce one.
  */
 export async function ReconciliationStatus({
   reconciliation,
@@ -48,52 +50,47 @@ export async function ReconciliationStatus({
     state === 'reconciled' && resolvedCount > 0 ? 'reconciledAfterAdjustments' : state;
 
   return (
-    <Section title={t('title')}>
-      <Stack gap="sm">
-        <Cluster gap="sm" align="baseline">
-          <Badge
-            variant={
-              state === 'reconciled'
-                ? 'secondary'
-                : state === 'discrepancies_found'
-                  ? // SPEC-022 BR-022-31 — an open divergence is a warning,
-                    // never the loss or destructive-action colour (DS-05).
-                    'warning'
-                  : 'outline'
-            }
-          >
-            {t(`state.${state}`, { count: unresolvedCount })}
-          </Badge>
-          {asOf !== null && (
-            // BR-005-22 — the Posição date the comparison was made against.
-            // Without it the badge is a claim with no date attached, which is
-            // the same failure BR-005-27 exists to prevent for portfolio value.
-            <Text as="span" size="xs" tone="muted">
-              {/* AR-47 / BR-016-18 — `dd/mm/yyyy`, through the shared formatter. */}
-              {t('asOf', { date: formatBusinessDate(asOf) })}
-            </Text>
-          )}
-        </Cluster>
-
+    <SummaryCard
+      title={t('title')}
+      badge={
+        <Badge
+          dot
+          variant={
+            state === 'reconciled'
+              ? 'success'
+              : state === 'discrepancies_found'
+                ? // SPEC-022 BR-022-31 — an open divergence is a warning,
+                  // never the loss or destructive-action colour (DS-05).
+                  'warning'
+                : 'neutral'
+          }
+        >
+          {t(`state.${state}`, { count: unresolvedCount })}
+        </Badge>
+      }
+      link={
+        batchId === null
+          ? { href: IMPORT_SEND_PATH, label: t('importPosicao') }
+          : // BR-005-23's per-asset table lives on the batch, which is also
+            // where BR-005-25's "accept B3's figure" action is. One link, to
+            // the one screen that resolves it.
+            { href: importBatchPath(batchId), label: t('open') }
+      }
+    >
+      <Stack gap="xs">
+        {asOf !== null && (
+          // BR-005-22 — the Posição date the comparison was made against.
+          // Without it the badge is a claim with no date attached, which is
+          // the same failure BR-005-27 exists to prevent for portfolio value.
+          <Text size="sm">
+            {/* AR-47 / BR-016-18 — `dd/mm/yyyy`, through the shared formatter. */}
+            {t('asOf', { date: formatBusinessDate(asOf) })}
+          </Text>
+        )}
         <Text size="sm" tone="muted">
           {t(`body.${bodyKey}`, { count: resolvedCount })}
         </Text>
-
-        <div>
-          {batchId === null ? (
-            <Button asChild variant="link" size="sm">
-              <Link href={IMPORT_SEND_PATH}>{t('importPosicao')}</Link>
-            </Button>
-          ) : (
-            // BR-005-23's per-asset table lives on the batch, which is also
-            // where BR-005-25's "accept B3's figure" action is. One link, to the
-            // one screen that resolves it.
-            <Button asChild variant="link" size="sm">
-              <Link href={importBatchPath(batchId)}>{t('open')}</Link>
-            </Button>
-          )}
-        </div>
       </Stack>
-    </Section>
+    </SummaryCard>
   );
 }

@@ -79,6 +79,22 @@ describe('StatCard', () => {
     expect(await audit(container)).toHaveNoViolations();
   });
 
+  // SPEC-022 BR-022-07 — the figure links to the destination that owns it.
+  it('links to the destination that owns the figure, outside the description list', async () => {
+    const { container } = render(
+      <StatCard
+        label="Patrimônio"
+        value="R$ 1,00"
+        link={{ href: '/portfolio', label: 'Ver no Portfólio' }}
+      />,
+    );
+    const link = screen.getByRole('link', { name: 'Ver no Portfólio' });
+    expect(link).toHaveAttribute('href', '/portfolio');
+    // A `dl` may hold only `dt`/`dd` groups; the link is the card's, not the pair's.
+    expect(link.closest('dl')).toBeNull();
+    expect(await audit(container)).toHaveNoViolations();
+  });
+
   it('has no axe violations while loading', async () => {
     const { container } = render(<StatCardSkeleton />);
     expect(await audit(container)).toHaveNoViolations();
