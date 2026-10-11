@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FakeClock } from '@/core/shared/clock';
 import { UserId, type AssetId } from '@/core/shared/ids';
+import * as schema from '@/db/schema';
+import type { Database } from '@/db/client';
 import { loadWatchOpportunities } from '@/app/(app)/watch/data';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { seedAsset } from '../support/ledger-fixtures';
@@ -29,6 +32,9 @@ import { seedUser } from '../support/users';
 describe('#212 — the Painel watch-state card (integration)', () => {
   let database: TestDatabase;
   let pool: Pool;
+  /** The app role's connection to the container — the reads under test, RLS on. */
+  let appPool: Pool;
+  let appDb: Database;
 
   const userId = UserId.generate();
   const clock = new FakeClock('2026-03-16T13:00:00Z');
@@ -98,10 +104,13 @@ describe('#212 — the Painel watch-state card (integration)', () => {
     await cleanUp();
     await seedUser(database.migrationUrl, userId);
     pool = new Pool({ connectionString: database.migrationUrl, max: 2 });
+    appPool = new Pool({ connectionString: database.appUrl, max: 2 });
+    appDb = drizzle(appPool, { schema });
   }, 180_000);
 
   afterAll(async () => {
     await pool?.end();
+    await appPool?.end();
     await cleanUp();
     await database.stop();
   });
@@ -142,7 +151,7 @@ describe('#212 — the Painel watch-state card (integration)', () => {
     const before = await budgetRows();
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
-      const card = await loadWatchOpportunities(userId, clock);
+      const card = await loadWatchOpportunities(userId, clock, appDb);
 
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(await budgetRows()).toEqual(before);
@@ -172,7 +181,7 @@ describe('#212 — the Painel watch-state card (integration)', () => {
   it('says when the user has no rule at all', async () => {
     const other = UserId.generate();
     await seedUser(database.migrationUrl, other);
-    expect(await loadWatchOpportunities(other, clock)).toEqual({
+    expect(await loadWatchOpportunities(other, clock, appDb)).toEqual({
       hasRules: false,
       items: [],
       unknownCount: 0,
@@ -190,7 +199,7 @@ describe('#212 — the Painel watch-state card (integration)', () => {
     await rule(sold, { price: '50.00', state: 'buy' }, null, { owner: other });
     await rule(steady, { price: '30.00', state: 'buy' }, null, { owner: other });
 
-    expect(await loadWatchOpportunities(other, clock)).toEqual({
+    expect(await loadWatchOpportunities(other, clock, appDb)).toEqual({
       hasRules: true,
       items: [],
       unknownCount: 0,

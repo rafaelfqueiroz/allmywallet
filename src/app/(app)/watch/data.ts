@@ -10,7 +10,7 @@ import type { AssetClass } from '@/core/quotes/ports';
 import { previousTradingDay } from '@/core/quotes/staleness';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
 import { buildWatchDeps } from '@/app/(app)/watch/composition';
-import { db } from '@/db/client';
+import { db, type Database } from '@/db/client';
 import { withTenant } from '@/db/tenant';
 
 /**
@@ -237,7 +237,11 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
  * deactivated and retained), so a holding that no longer exists cannot put a
  * badge on a row, or a line on the Painel, that no longer exists either.
  */
-async function evaluateHeldRules(userId: UserId, clock: Clock): Promise<HeldRuleEvaluations> {
+async function evaluateHeldRules(
+  userId: UserId,
+  clock: Clock,
+  database: Database,
+): Promise<HeldRuleEvaluations> {
   const calendar = new B3TradingCalendar();
   const now = clock.now();
   const sessionOpen = calendar.isSessionOpen(now);
@@ -295,7 +299,7 @@ async function evaluateHeldRules(userId: UserId, clock: Clock): Promise<HeldRule
       });
       return { ruleCount: rules.length, rows };
     },
-    db,
+    database,
   );
 }
 
@@ -320,7 +324,7 @@ export async function loadWatchStates(
   userId: UserId,
   clock: Clock = new SystemClock(),
 ): Promise<ReadonlyMap<AssetId, EvaluatedState>> {
-  const { rows } = await evaluateHeldRules(userId, clock);
+  const { rows } = await evaluateHeldRules(userId, clock, db);
   return new Map(rows.map((row) => [row.assetId, row.evaluated.state]));
 }
 
@@ -362,8 +366,11 @@ export interface WatchOpportunities {
 export async function loadWatchOpportunities(
   userId: UserId,
   clock: Clock = new SystemClock(),
+  // Injected by the integration test, so its reads hit the seeded container
+  // rather than the app's `DATABASE_URL` (TESTING.md §2).
+  database: Database = db,
 ): Promise<WatchOpportunities> {
-  const { ruleCount, rows } = await evaluateHeldRules(userId, clock);
+  const { ruleCount, rows } = await evaluateHeldRules(userId, clock, database);
   const items: WatchOpportunity[] = [];
   let unknownCount = 0;
   for (const row of rows) {
