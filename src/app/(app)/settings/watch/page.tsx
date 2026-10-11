@@ -121,7 +121,14 @@ export default async function WatchPage() {
           <Section title={t('retainedTitle')} description={t('retainedDescription')}>
             <List gap="sm">
               {view.retained.map((rule) => (
-                <ListItem key={rule.assetId} separated>
+                // A retained rule keeps its anchor: an e-mail sent before the
+                // sale still links here (BR-018-03).
+                <ListItem
+                  key={rule.assetId}
+                  separated
+                  id={watchRuleAnchor(rule.assetId)}
+                  linkTarget
+                >
                   <Stack gap="sm">
                     <Cluster justify="between" gap="sm">
                       <span className="font-medium">

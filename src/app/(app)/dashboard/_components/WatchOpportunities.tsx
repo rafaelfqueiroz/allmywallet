@@ -34,7 +34,15 @@ export async function WatchOpportunities({
 }) {
   const t = await getTranslations('dashboard.opportunities');
   const tState = await getTranslations('watch.stateLabel');
-  const { hasRules, items } = opportunities;
+  const { hasRules, items, unknownCount } = opportunities;
+  // BR-018-16 — said whether or not anything is listed, so an empty list is
+  // never read as "nothing crossed" when the price to tell is missing.
+  const unknownNote =
+    unknownCount > 0 ? (
+      <Text size="xs" tone="muted">
+        {t('unknown', { count: unknownCount })}
+      </Text>
+    ) : null;
 
   return (
     <Section
@@ -48,9 +56,12 @@ export async function WatchOpportunities({
       }
     >
       {items.length === 0 ? (
-        <Text size="sm" tone="muted">
-          {hasRules ? t('empty') : t('emptyNoRules')}
-        </Text>
+        <Stack gap="sm">
+          <Text size="sm" tone="muted">
+            {hasRules ? t(unknownCount > 0 ? 'emptyWithUnknown' : 'empty') : t('emptyNoRules')}
+          </Text>
+          {unknownNote}
+        </Stack>
       ) : (
         <Stack gap="sm">
           <List gap="sm">
@@ -92,6 +103,7 @@ export async function WatchOpportunities({
               );
             })}
           </List>
+          {unknownNote}
           <Text size="xs" tone="muted">
             {t('notAdvice')}
           </Text>

@@ -237,10 +237,7 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
  * deactivated and retained), so a holding that no longer exists cannot put a
  * badge on a row, or a line on the Painel, that no longer exists either.
  */
-async function evaluateHeldRules(
-  userId: UserId,
-  clock: Clock,
-): Promise<readonly HeldRuleEvaluation[]> {
+async function evaluateHeldRules(userId: UserId, clock: Clock): Promise<HeldRuleEvaluations> {
   const calendar = new B3TradingCalendar();
   const now = clock.now();
   const sessionOpen = calendar.isSessionOpen(now);
@@ -272,7 +269,7 @@ async function evaluateHeldRules(
         held.filter((row) => !row.quantity.isZero()).map((row) => row.assetId),
       );
       const active = rules.filter((rule) => heldAssetIds.has(rule.assetId));
-      if (active.length === 0) return [];
+      if (active.length === 0) return { ruleCount: rules.length, rows: [] };
 
       const assetIds = active.map((rule) => rule.assetId);
       const [quotesByAsset, assets] = await Promise.all([
@@ -281,7 +278,7 @@ async function evaluateHeldRules(
       ]);
       const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
 
-      return active.map((rule) => {
+      const rows = active.map((rule) => {
         const quote = quotesByAsset.get(rule.assetId) ?? null;
         const asset = assetsById.get(rule.assetId);
         return {
@@ -296,9 +293,16 @@ async function evaluateHeldRules(
           }),
         };
       });
+      return { ruleCount: rules.length, rows };
     },
     db,
   );
+}
+
+interface HeldRuleEvaluations {
+  /** Every rule the user has, retained ones included (BR-018-03). */
+  readonly ruleCount: number;
+  readonly rows: readonly HeldRuleEvaluation[];
 }
 
 interface HeldRuleEvaluation {
@@ -316,7 +320,7 @@ export async function loadWatchStates(
   userId: UserId,
   clock: Clock = new SystemClock(),
 ): Promise<ReadonlyMap<AssetId, EvaluatedState>> {
-  const rows = await evaluateHeldRules(userId, clock);
+  const { rows } = await evaluateHeldRules(userId, clock);
   return new Map(rows.map((row) => [row.assetId, row.evaluated.state]));
 }
 
@@ -335,10 +339,19 @@ export interface WatchOpportunity {
 }
 
 export interface WatchOpportunities {
-  /** Whether any rule is on a held asset at all — the card's two empty states differ. */
+  /**
+   * Whether the user has any rule at all, a retained one included — "you have
+   * no rules" is false for someone whose only rule is paused (BR-018-03).
+   */
   readonly hasRules: boolean;
-  /** BR-022-07 — buy and sell only, by asset code. Hold and unknown are not news. */
+  /** BR-022-07 — buy and sell only, by asset code. Hold is not news. */
   readonly items: readonly WatchOpportunity[];
+  /**
+   * BR-018-16 — held rules with no usable quote. They are not listed, but the
+   * card says how many there are: "nothing is in buy or sell" is not a claim
+   * a missing price can support.
+   */
+  readonly unknownCount: number;
 }
 
 /**
@@ -350,11 +363,16 @@ export async function loadWatchOpportunities(
   userId: UserId,
   clock: Clock = new SystemClock(),
 ): Promise<WatchOpportunities> {
-  const rows = await evaluateHeldRules(userId, clock);
+  const { ruleCount, rows } = await evaluateHeldRules(userId, clock);
   const items: WatchOpportunity[] = [];
+  let unknownCount = 0;
   for (const row of rows) {
     const { evaluated } = row;
-    if (evaluated.state === 'unknown' || evaluated.state === 'hold') continue;
+    if (evaluated.state === 'unknown') {
+      unknownCount += 1;
+      continue;
+    }
+    if (evaluated.state === 'hold') continue;
     items.push({
       assetId: row.assetId,
       code: row.code,
@@ -366,5 +384,5 @@ export async function loadWatchOpportunities(
     });
   }
   items.sort((a, b) => a.code.localeCompare(b.code, 'pt-BR'));
-  return { hasRules: rows.length > 0, items };
+  return { hasRules: ruleCount > 0, items, unknownCount };
 }
