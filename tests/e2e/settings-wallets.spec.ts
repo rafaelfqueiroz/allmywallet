@@ -249,6 +249,33 @@ test.describe('Configurações › Carteiras', () => {
     await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
   });
 
+  /**
+   * SPEC-010 BR-010-14 — a standing rule is per asset, so setting one on a
+   * second wallet *moves* it. The select says where it points now, so the move
+   * is never silent.
+   */
+  test('says where a standing rule currently points before moving it', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const [code] = await seedHoldings(userId, [
+      { code: 'RULE', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    const first = await seedWallet(userId, 'Aposentadoria');
+    const second = await seedWallet(userId, 'Trading');
+    await dismissOnboarding(userId);
+
+    await page.goto(`/settings/wallets/${first}`);
+    await page.getByLabel('Ativo da regra', { exact: true }).selectOption({ index: 1 });
+    await page.getByRole('button', { name: 'Definir regra' }).click();
+    await expect(page.getByRole('button', { name: `Remover regra de ${code}` })).toBeVisible();
+
+    await page.goto(`/settings/wallets/${second}`);
+    await expect(
+      page
+        .getByLabel('Ativo da regra', { exact: true })
+        .locator('option', { hasText: '(regra atual: Aposentadoria)' }),
+    ).toHaveCount(1);
+  });
+
   test('every Carteiras screen holds at a phone width with no page scroll', async ({
     signedIn,
   }) => {
