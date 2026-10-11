@@ -1,20 +1,25 @@
 import Link from 'next/link';
+import { Pencil, Trash2 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { listTransactions } from '@/core/ledger/list-transactions';
 import type { TransactionListItem } from '@/core/ledger/ports';
 import { formatBusinessDate } from '@/i18n/format';
 import {
   PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
   PARAM,
   fromSearchParams,
   hasActiveFilters,
+  lastPage,
+  ledgerViewFrom,
   paginationFor,
   toQueryString,
 } from '@/lib/transactions-url-state';
+import { tableParamNames } from '@/lib/table-url-state';
 import { bulkTransactionsAction } from '@/app/(app)/transactions/actions';
-import { BulkBar } from '@/app/(app)/transactions/_components/BulkBar';
+import { BULK_FORM_ID, BulkBar } from '@/app/(app)/transactions/_components/BulkBar';
 import { Controls } from '@/app/(app)/transactions/_components/Controls';
-import { Pagination } from '@/app/(app)/transactions/_components/Pagination';
+import { LedgerTable, type LedgerRow } from '@/app/(app)/transactions/_components/LedgerTable';
 import { TransactionCostEstimateMarker } from '@/app/(app)/transactions/_components/TransactionCostEstimateMarker';
 import {
   listAssetOptions,
@@ -33,15 +38,6 @@ import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { importBatchPath } from '@/app/(app)/import/paths';
 
 /**
@@ -55,8 +51,14 @@ import { importBatchPath } from '@/app/(app)/import/paths';
  *
  * Follows `(app)/reports/page.tsx`'s shape: a `data.ts`/`composition.ts` pair
  * (AR-02), one `withTenant` transaction for the whole render (AR-11), and a
- * plain `<form method="get">` control bar with state in the URL (DL-011-06,
+ * plain `<form method="get">` filter bar with state in the URL (DL-011-06,
  * applied to this surface by `lib/transactions-url-state.ts`).
+ *
+ * SPEC-022 BR-022-04/18: the ledger is its own destination and renders as a
+ * `DataTable` (`LedgerTable`), sorted and paged **by the query** — the table
+ * shows one page of a ledger that can run to 10.000+ rows (BR-006-07). Sort,
+ * page and page size are the table's URL parameters, read here with
+ * `ledgerViewFrom`; the filters are SPEC-006's own, in the table's toolbar.
  *
  * Never statically prerendered — this renders one tenant's own ledger, so a
  * cached copy would be served to everyone (same reasoning as `(app)/reports`
@@ -89,18 +91,25 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
     },
   };
 
-  const { filter, page } = fromSearchParams(params);
-  const pagination = paginationFor(page);
+  const { filter } = fromSearchParams(params);
+  const view = ledgerViewFrom(params);
 
   const { result, assetOptions, institutionOptions, wallets } = await withTransactionsDeps(
     userId,
     async (deps, tx) => {
-      const [result, assetOptions, institutionOptions, wallets] = await Promise.all([
-        listTransactions(deps.transactions, filter, pagination),
+      const list = (page: number) =>
+        listTransactions(deps.transactions, filter, paginationFor(page, view.pageSize), view.sort);
+      const [first, assetOptions, institutionOptions, wallets] = await Promise.all([
+        list(view.page),
         listAssetOptions(tx),
         listInstitutionOptions(),
         listWalletChoices(tx),
       ]);
+      // A shared link can carry a page the ledger has since shrunk below (a
+      // bulk delete, a narrower filter). Serve the last page that exists, the
+      // same clamp `DataTable` applies to the page number it shows.
+      const last = first.ok ? lastPage(first.value.total, view.pageSize) : 1;
+      const result = first.ok && view.page > last ? await list(last) : first;
       return { result, assetOptions, institutionOptions, wallets };
     },
   );
@@ -113,9 +122,19 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
 
   // BR-006-10: the CSV export honours the *active* filters and nothing else —
   // built from the same query-string parameters the page itself was loaded
-  // with, with `page` dropped so the export is never accidentally scoped to
-  // one page of results.
+  // with, with the table's sort and page dropped so the export is never
+  // accidentally scoped to one page of results.
   const exportHref = `/api/transactions/export${toQueryString(params)}`;
+
+  // The table's own parameters, which the filter bar carries through a filter
+  // change and its "Limpar filtros" keeps.
+  const names = tableParamNames(undefined);
+  const sort = params.get(names.sort) ?? '';
+  const size = params.get(names.size) ?? '';
+  const kept = new URLSearchParams();
+  if (sort !== '') kept.set(names.sort, sort);
+  if (size !== '') kept.set(names.size, size);
+  const clearHref = kept.size === 0 ? '/transactions' : `/transactions?${kept.toString()}`;
 
   return (
     <PageShell
@@ -136,82 +155,69 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         </Cluster>
       }
     >
-      <Controls
-        from={params.get(PARAM.from) ?? ''}
-        to={params.get(PARAM.to) ?? ''}
-        asset={params.get(PARAM.asset) ?? ''}
-        assetClass={params.get(PARAM.assetClass) ?? ''}
-        type={params.get(PARAM.type) ?? ''}
-        institution={params.get(PARAM.institution) ?? ''}
-        status={params.get(PARAM.status) ?? ''}
-        wallet={params.get(PARAM.wallet) ?? ''}
-        search={params.get(PARAM.q) ?? ''}
-        assetOptions={assetOptions}
-        institutionOptions={institutionOptions}
-        walletOptions={wallets}
-      />
-
       {!result.ok ? (
         // AR-37/AR-38: the use case returns a stable code, not a formatted
-        // string — this is the errors.* catalogue's first real consumer
-        // (`INVALID_PAGINATION` is the only code `listTransactions` can
-        // actually produce here, since `paginationFor` always builds a valid
-        // limit/offset — this branch exists for defence, not the common case).
+        // string. `INVALID_PAGINATION` is the only code `listTransactions` can
+        // produce, and `ledgerViewFrom` only offers sizes under its ceiling —
+        // this branch exists for defence, not the common case.
         <ErrorState title={tErrors(result.error.code)} />
-      ) : result.value.total === 0 ? (
-        <EmptyState
-          title={filtered ? t('empty.filteredTitle') : t('empty.ledgerTitle')}
-          description={filtered ? t('empty.filteredBody') : t('empty.ledgerBody')}
-        />
       ) : (
         <Stack gap="md">
-          {/*
-            BR-006-17: the selection lives in the DOM, inside the form the bulk
-            bar renders, so the checkboxes below are submitted natively and no
-            client state can disagree with what is ticked on screen.
-          */}
-          <BulkBar action={bulkTransactionsAction} wallets={wallets}>
-            <Table>
-              <TableCaption className="sr-only">{t('table.caption')}</TableCaption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col">
-                    <span className="sr-only">{t('bulk.select')}</span>
-                  </TableHead>
-                  <TableHead scope="col">{t('table.date')}</TableHead>
-                  <TableHead scope="col">{t('table.asset')}</TableHead>
-                  <TableHead scope="col">{t('table.type')}</TableHead>
-                  <TableHead scope="col">{t('table.institution')}</TableHead>
-                  <TableHead scope="col" className="text-right">
-                    {t('table.quantity')}
-                  </TableHead>
-                  <TableHead scope="col" className="text-right">
-                    {t('table.unitPrice')}
-                  </TableHead>
-                  <TableHead scope="col" className="text-right">
-                    {t('table.total')}
-                  </TableHead>
-                  <TableHead scope="col">{t('table.status')}</TableHead>
-                  <TableHead scope="col">{t('table.provenance')}</TableHead>
-                  <TableHead scope="col">
-                    <span className="sr-only">{t('table.actions')}</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {result.value.items.map((item) => (
-                  <TransactionRow key={item.transaction.id} item={item} />
-                ))}
-              </TableBody>
-            </Table>
-          </BulkBar>
-
-          <Pagination
-            page={page}
-            pageSize={PAGE_SIZE}
+          <LedgerTable
+            rows={await Promise.all(result.value.items.map(ledgerRow))}
             total={result.value.total}
-            hrefFor={(target) => `/transactions${toQueryString(params, target)}`}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            defaultPageSize={PAGE_SIZE}
+            toolbar={
+              <Controls
+                from={params.get(PARAM.from) ?? ''}
+                to={params.get(PARAM.to) ?? ''}
+                asset={params.get(PARAM.asset) ?? ''}
+                assetClass={params.get(PARAM.assetClass) ?? ''}
+                type={params.get(PARAM.type) ?? ''}
+                institution={params.get(PARAM.institution) ?? ''}
+                status={params.get(PARAM.status) ?? ''}
+                wallet={params.get(PARAM.wallet) ?? ''}
+                search={params.get(PARAM.q) ?? ''}
+                sort={sort}
+                size={size}
+                clearHref={filtered ? clearHref : undefined}
+                assetOptions={assetOptions}
+                institutionOptions={institutionOptions}
+                walletOptions={wallets}
+              />
+            }
+            {...(filtered
+              ? {}
+              : {
+                  empty: (
+                    <EmptyState
+                      title={t('empty.ledgerTitle')}
+                      description={t('empty.ledgerBody')}
+                    />
+                  ),
+                })}
+            noResults={
+              <EmptyState
+                title={t('empty.filteredTitle')}
+                description={t('empty.filteredBody')}
+                action={
+                  <Button asChild variant="outline" size="sm">
+                    <Link href={clearHref}>{t('filters.clear')}</Link>
+                  </Button>
+                }
+              />
+            }
           />
+
+          {/*
+            BR-006-17: the selection lives in the DOM. The row checkboxes name
+            this form with their `form` attribute, so the browser collects the
+            selection natively on submit — no client state that can disagree
+            with what is ticked — without the bulk form having to wrap the
+            table and, with it, the filter bar's own GET form.
+          */}
+          {result.value.total > 0 && <BulkBar action={bulkTransactionsAction} wallets={wallets} />}
         </Stack>
       )}
     </PageShell>
@@ -219,23 +225,27 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
 }
 
 /**
+ * One ledger row, rendered on the server cell by cell (see `LedgerTable` for
+ * why the cells arrive finished).
+ *
  * BR-006-03: `active` renders plainly; `unclassified` and `superseded` carry a
  * visible badge rather than being hidden or blended in — the row still shows
  * its real figures, but its status is never ambiguous.
  */
-async function TransactionRow({ item }: { readonly item: TransactionListItem }) {
+async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
   const t = await getTranslations('transactions');
   const tCommon = await getTranslations('common');
   const tType = await getTranslations('import.transactionType');
   const tx = item.transaction;
 
-  return (
-    <TableRow>
-      <TableCell className="py-row">
-        <Checkbox name="selected" value={tx.id} aria-label={t('bulk.select')} />
-      </TableCell>
-      <TableCell className="py-row whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</TableCell>
-      <TableCell className="py-row">
+  return {
+    id: tx.id,
+    cells: {
+      select: (
+        <Checkbox form={BULK_FORM_ID} name="selected" value={tx.id} aria-label={t('bulk.select')} />
+      ),
+      tradeDate: <span className="whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</span>,
+      asset: (
         <Stack gap="none">
           <Text as="span" weight="medium">
             {item.assetCode}
@@ -244,13 +254,11 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
             {item.assetName}
           </Text>
         </Stack>
-      </TableCell>
-      <TableCell className="py-row whitespace-nowrap">{tType(tx.type)}</TableCell>
-      <TableCell className="py-row whitespace-nowrap">{item.institutionName ?? '—'}</TableCell>
-      <TableCell className="py-row text-right">
-        <Money value={tx.quantity} kind="quantity" />
-      </TableCell>
-      <TableCell className="py-row text-right">
+      ),
+      type: <span className="whitespace-nowrap">{tType(tx.type)}</span>,
+      institution: <span className="whitespace-nowrap">{item.institutionName ?? '—'}</span>,
+      quantity: <Money value={tx.quantity} kind="quantity" />,
+      unitPrice: (
         <Cluster gap="sm" justify="end" align="baseline">
           <Money value={tx.unitPrice} />
           {/* SPEC-007 BR-007-06 / SPEC-005 BR-005-20d — never hidden: this
@@ -263,20 +271,17 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
             carriedExplanation={t('markers.costEstimated.carriedExplanation')}
           />
         </Cluster>
-      </TableCell>
-      <TableCell className="py-row text-right">
-        <Money value={tx.totalValue} />
-      </TableCell>
-      <TableCell className="py-row whitespace-nowrap">
-        {tx.status === 'active' ? (
+      ),
+      totalValue: <Money value={tx.totalValue} />,
+      status:
+        tx.status === 'active' ? (
           <Text as="span" size="sm" tone="muted">
             {t(`status.${tx.status}`)}
           </Text>
         ) : (
           <Badge variant="outline">{t(`status.${tx.status}`)}</Badge>
-        )}
-      </TableCell>
-      <TableCell className="py-row whitespace-nowrap">
+        ),
+      provenance: (
         <Cluster gap="xs" align="center">
           {/* BR-006-02: provenance is visible in the UI, not merely stored —
               and, for an imported row, links back to the batch it came from,
@@ -295,23 +300,38 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
             </Badge>
           )}
         </Cluster>
-      </TableCell>
-      <TableCell className="py-row whitespace-nowrap">
-        {/*
-          BR-006-12/13 as links rather than buttons: both lead to a page that
-          asks something before it writes — the edit form, and the deletion's
-          mandatory disclosure of what will be recalculated. A link also keeps
-          them out of the bulk form's submission entirely.
-        */}
-        <Cluster gap="xs">
-          <Button asChild variant="ghost" size="sm">
-            <Link href={`/transactions/${tx.id}/edit`}>{t('edit.action')}</Link>
+      ),
+      /*
+        BR-006-12/13 as links rather than buttons: both lead to a page that
+        asks something before it writes — the edit form, and the deletion's
+        mandatory disclosure of what will be recalculated. A link also keeps
+        them out of the bulk form's submission entirely.
+      */
+      actions: (
+        // Icon buttons, as the prototype's row actions: eleven columns of
+        // text actions do not fit the content width. The accessible name is
+        // the word, and `title` shows it on hover.
+        <Cluster gap="xs" className="flex-nowrap">
+          <Button asChild variant="ghost" size="icon-sm">
+            <Link
+              href={`/transactions/${tx.id}/edit`}
+              aria-label={t('edit.action')}
+              title={t('edit.action')}
+            >
+              <Pencil aria-hidden="true" />
+            </Link>
           </Button>
-          <Button asChild variant="ghost" size="sm">
-            <Link href={`/transactions/${tx.id}/delete`}>{t('delete.action')}</Link>
+          <Button asChild variant="ghost" size="icon-sm">
+            <Link
+              href={`/transactions/${tx.id}/delete`}
+              aria-label={t('delete.action')}
+              title={t('delete.action')}
+            >
+              <Trash2 aria-hidden="true" />
+            </Link>
           </Button>
         </Cluster>
-      </TableCell>
-    </TableRow>
-  );
+      ),
+    },
+  };
 }

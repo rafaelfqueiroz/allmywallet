@@ -921,7 +921,9 @@
       "apply": "Aplicar",
       "wallet": "Carteira",
       "walletAll": "Todas as carteiras",
-      "walletHint": "Mostra as transações dos ativos que a carteira tem hoje."
+      "walletHint": "Mostra as transações dos ativos que a carteira tem hoje.",
+      "clear": "Limpar filtros",
+      "label": "Filtrar transações"
     },
     "status": {
       "active": "Ativa",
@@ -945,7 +947,12 @@
       "total": "Total",
       "status": "Status",
       "provenance": "Origem",
-      "actions": "Ações"
+      "actions": "Ações",
+      "sortBy": "Ordenar por {column}",
+      "sortField": "Ordenar por",
+      "sortAscending": "Ordem crescente",
+      "sortDescending": "Ordem decrescente",
+      "noun": "transações"
     },
     "pagination": {
       "label": "Paginação da lista de transações",
@@ -1027,7 +1034,7 @@
       "createTitle": "Nova conversão de ativos",
       "createDescription": "Registre a troca de um ativo por outro sem criar caixa ou ganho realizado.",
       "hint": "Todas as pernas desta conversão são salvas juntas. O custo total das saídas deve ser exatamente igual ao das entradas.",
-      "leg": "Perna {index}: {type} · ativo {assetId}",
+      "leg": "Perna {index}: {type} · {asset}",
       "sourceAsset": "Ativo de origem",
       "targetAsset": "Ativo de destino",
       "chooseAsset": "Escolha um ativo",
@@ -1041,7 +1048,10 @@
       "submitCreate": "Registrar conversão",
       "submit": "Salvar conversão",
       "submitting": "Salvando…",
-      "cancel": "Cancelar"
+      "cancel": "Cancelar",
+      "assetsSection": "Ativos",
+      "quantitiesSection": "Quantidades e custo",
+      "costBasisHint": "O custo que sai do ativo de origem e passa ao de destino. Nenhum caixa nem ganho é realizado."
     },
     "bulk": {
       "label": "Ações em massa",

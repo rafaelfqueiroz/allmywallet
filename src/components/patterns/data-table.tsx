@@ -8,10 +8,12 @@ import {
   useReactTable,
   type ColumnDef,
   type Row,
+  type RowData,
   type SortingState,
 } from '@tanstack/react-table';
 import { Suspense, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
   ArrowDown,
@@ -108,6 +110,18 @@ import { EmptyState } from '@/components/patterns/empty-state';
  * its own: callers need not wrap it, and the fallback is the same table at its
  * default state rather than a hole.
  * ---------------------------------------------------------------------------
+ * **Server-paged mode** (`server`). Everything above assumes the rows are all
+ * here. A collection that is not — the transaction ledger runs to 10.000+ rows
+ * (SPEC-006 BR-006-07) — is sorted, filtered and paged by its query, and the
+ * table renders the one page it was handed. The URL is then the *only* state:
+ * the server read it to fetch these rows, so a sort or a page is a navigation
+ * to a new URL, never a local re-order of rows the server did not choose.
+ *
+ * Sort headers and page buttons are real links in this mode, so a reader
+ * without JavaScript can still sort and page; the page-size select navigates
+ * on change. The parameters are the same ones `lib/table-url-state.ts` writes
+ * in the client mode, so the server parses them with the same options.
+ * ---------------------------------------------------------------------------
  */
 export type DataTableProps<TData> = {
   columns: ColumnDef<TData, unknown>[];
@@ -169,8 +183,27 @@ export type DataTableProps<TData> = {
   paramPrefix?: string;
   /** Shown when a filter matches nothing. Catalogue default otherwise. */
   noResults?: ReactNode;
+  /**
+   * Server-paged mode: `data` is the current page, already sorted and filtered
+   * by the server, and `total` is how many rows match in all. `filter` does
+   * not apply — the search belongs to the query, so it lives in `toolbar`.
+   */
+  server?: { readonly total: number };
   className?: string;
 };
+
+declare module '@tanstack/react-table' {
+  // `TData`/`TValue` are TanStack's own parameters; the interface must repeat them.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface ColumnMeta<TData extends RowData, TValue> {
+    /**
+     * A column of figures reads down its decimal point, so its header and its
+     * cells sit right (DS-13). The card rendering ignores it:
+     * there the label is on the left and the value already on the right.
+     */
+    readonly align?: 'right';
+  }
+}
 
 const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50, 100];
 const DEFAULT_PAGE_SIZE = 25;
@@ -196,7 +229,8 @@ function urlOptions<TData>({
     sortableIds: sortable
       ? columns.flatMap((column) => {
           const id = columnId(column);
-          return id === undefined ? [] : [id];
+          // A column that opted out cannot be named by a link either.
+          return id === undefined || column.enableSorting === false ? [] : [id];
         })
       : [],
     defaults: {
@@ -209,9 +243,12 @@ function urlOptions<TData>({
 }
 
 type StateChange = (next: TableUrlState) => void;
+/** Server mode: the URL a state lives at, for controls that are links. */
+type HrefFor = (next: TableUrlState) => string;
 
 export function DataTable<TData>(props: DataTableProps<TData>) {
   const options = urlOptions(props);
+  const Connected = props.server ? ServerDataTable : UrlDataTable;
 
   return (
     <Suspense
@@ -228,7 +265,7 @@ export function DataTable<TData>(props: DataTableProps<TData>) {
         />
       }
     >
-      <UrlDataTable {...props} options={options} />
+      <Connected {...props} options={options} />
     </Suspense>
   );
 }
@@ -286,6 +323,37 @@ function UrlDataTable<TData>({
   return <DataTableView {...props} state={state} onStateChange={onStateChange} />;
 }
 
+/**
+ * The server-paged table: the URL is the state, and every change navigates.
+ * `push`, not `replace`, unlike the client mode: each of these is a new
+ * server render the reader asked for, and Back should return to the previous
+ * page of the ledger rather than leave it.
+ */
+function ServerDataTable<TData>({
+  options,
+  ...props
+}: DataTableProps<TData> & { options: TableUrlOptions }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const state = parseTableUrlState(searchParams, options);
+
+  const hrefFor: HrefFor = (next) => {
+    const query = writeTableUrlState(searchParams.toString(), next, options);
+    return query === '' ? pathname : `${pathname}?${query}`;
+  };
+
+  return (
+    <DataTableView
+      {...props}
+      state={state}
+      hrefFor={hrefFor}
+      sortableIds={options.sortableIds}
+      onStateChange={(next) => router.push(hrefFor(next))}
+    />
+  );
+}
+
 /** Diacritic- and case-insensitive: "acoes" finds "Ações". */
 function normalise(value: string): string {
   return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -320,10 +388,18 @@ function DataTableView<TData>({
   filter,
   toolbar,
   noResults,
+  server,
   className,
   state,
   onStateChange,
-}: DataTableProps<TData> & { state: TableUrlState; onStateChange: StateChange }) {
+  hrefFor,
+  sortableIds,
+}: DataTableProps<TData> & {
+  state: TableUrlState;
+  onStateChange: StateChange;
+  hrefFor?: HrefFor;
+  sortableIds?: readonly string[];
+}) {
   const t = useTranslations('dataTable');
   // Memoised on the sort's content: a fresh array every render reads to
   // TanStack as a new sort, which re-derives the sorted rows on every render.
@@ -348,6 +424,9 @@ function DataTableView<TData>({
      * guard.
      */
     autoResetAll: false,
+    // Server mode: the rows arrive in the order the query chose, and the
+    // sort state only drives the headers' indicators.
+    manualSorting: server !== undefined,
     ...(sortable
       ? {
           getSortedRowModel: getSortedRowModel(),
@@ -363,7 +442,8 @@ function DataTableView<TData>({
           },
         }
       : {}),
-    getFilteredRowModel: getFilteredRowModel(),
+    ...(server === undefined ? { getFilteredRowModel: getFilteredRowModel() } : {}),
+    manualFiltering: server !== undefined,
     globalFilterFn: matchesQuery,
     // TanStack searches a column only if its *first* value is a string, which a
     // leading `undefined` quietly defeats. `matchesQuery` decides per value.
@@ -378,13 +458,23 @@ function DataTableView<TData>({
   // than in a row model so a page the list has shrunk below can be clamped
   // before it is applied.
   const matching = table.getRowModel().rows;
-  const total = matching.length;
+  const total = server ? server.total : matching.length;
   const pageCount = pagination ? Math.max(1, Math.ceil(total / state.pageSize)) : 1;
-  // A shared link can carry a page the list has since shrunk below.
+  // A shared link can carry a page the list has since shrunk below. In server
+  // mode the server clamped the same way before it fetched.
   const page = Math.min(state.page, pageCount);
-  const rows = pagination
-    ? matching.slice((page - 1) * state.pageSize, page * state.pageSize)
-    : matching;
+  const rows =
+    pagination && !server
+      ? matching.slice((page - 1) * state.pageSize, page * state.pageSize)
+      : matching;
+
+  /** Server mode decides sortability from the URL's own list, not TanStack's accessors. */
+  const canSortColumn = (id: string, tanstack: boolean): boolean =>
+    sortable && (sortableIds ? sortableIds.includes(id) : tanstack);
+
+  /** Server mode: a header press asks for ascending first, then flips. */
+  const nextSort = (id: string): TableUrlState['sort'] =>
+    state.sort?.id === id ? { id, desc: !state.sort.desc } : { id, desc: false };
 
   /**
    * The card list repeats each column's header as its field label, and a header
@@ -434,7 +524,7 @@ function DataTableView<TData>({
 
   // A filter that matches nothing is not an empty collection: the records
   // exist, and the way back is to change the filter, so the toolbar stays.
-  if (total === 0 && data.length > 0) {
+  if (total === 0 && (data.length > 0 || server)) {
     return (
       <div data-slot="data-table" className={className}>
         {toolbarRow}
@@ -477,14 +567,25 @@ function DataTableView<TData>({
                   const label = header.isPlaceholder
                     ? null
                     : flexRender(header.column.columnDef.header, header.getContext());
-                  const canSort = sortable && header.column.getCanSort();
+                  const canSort = canSortColumn(header.column.id, header.column.getCanSort());
                   const direction = header.column.getIsSorted();
+                  const sortIcon =
+                    direction === 'asc' ? (
+                      <ArrowUp aria-hidden="true" className="size-3" />
+                    ) : direction === 'desc' ? (
+                      <ArrowDown aria-hidden="true" className="size-3" />
+                    ) : (
+                      <ChevronsUpDown aria-hidden="true" className="size-3 opacity-50" />
+                    );
 
                   return (
                     <TableHead
                       key={header.id}
                       scope="col"
-                      className="py-row"
+                      className={cn(
+                        'py-row',
+                        header.column.columnDef.meta?.align === 'right' && 'text-right',
+                      )}
                       /*
                        * `aria-sort` belongs on the header cell, not on the
                        * button inside it — a screen reader announces the
@@ -500,7 +601,20 @@ function DataTableView<TData>({
                             : undefined
                       }
                     >
-                      {canSort ? (
+                      {canSort && hrefFor ? (
+                        <Link
+                          href={hrefFor({
+                            ...state,
+                            sort: nextSort(header.column.id),
+                            page: 1,
+                          })}
+                          aria-label={sortLabel?.(headerText(label))}
+                          className="inline-flex items-center gap-1 hover:text-foreground"
+                        >
+                          {label}
+                          {sortIcon}
+                        </Link>
+                      ) : canSort ? (
                         <button
                           type="button"
                           onClick={header.column.getToggleSortingHandler()}
@@ -508,13 +622,7 @@ function DataTableView<TData>({
                           className="inline-flex cursor-pointer items-center gap-1 hover:text-foreground"
                         >
                           {label}
-                          {direction === 'asc' ? (
-                            <ArrowUp aria-hidden="true" className="size-3" />
-                          ) : direction === 'desc' ? (
-                            <ArrowDown aria-hidden="true" className="size-3" />
-                          ) : (
-                            <ChevronsUpDown aria-hidden="true" className="size-3 opacity-50" />
-                          )}
+                          {sortIcon}
                         </button>
                       ) : (
                         label
@@ -529,7 +637,13 @@ function DataTableView<TData>({
             {rows.map((row) => (
               <TableRow key={row.id}>
                 {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id} className="py-row">
+                  <TableCell
+                    key={cell.id}
+                    className={cn(
+                      'py-row',
+                      cell.column.columnDef.meta?.align === 'right' && 'text-right',
+                    )}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </TableCell>
                 ))}
@@ -573,7 +687,7 @@ function DataTableView<TData>({
               >
                 {table
                   .getAllColumns()
-                  .filter((column) => column.getCanSort())
+                  .filter((column) => canSortColumn(column.id, column.getCanSort()))
                   .map((column) => (
                     <option key={column.id} value={column.id}>
                       {headerText(headerLabels.get(column.id))}
@@ -647,52 +761,62 @@ function DataTableView<TData>({
           </p>
 
           <nav aria-label={t('pagination')} className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t('previousPage')}
-              // `aria-disabled`, not `disabled`: the button a keyboard user just
-              // pressed to reach the first page would otherwise be disabled
-              // under their focus, which drops focus to <body>.
-              {...(page <= 1 ? { 'aria-disabled': true } : {})}
-              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-              onClick={() => {
-                if (page > 1) onStateChange({ ...state, page: page - 1 });
-              }}
-            >
-              <ChevronLeft aria-hidden="true" />
-            </Button>
-            {pageWindow(page, pageCount).map((number) => (
-              <Button
-                key={number}
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t('page', { page: number })}
-                {...(number === page ? { 'aria-current': 'page' as const } : {})}
-                className={cn(
-                  'tabular-nums',
-                  // BR-022-33 — the current page is a fill, like the current
-                  // destination; the focus ring stays a ring.
-                  number === page &&
-                    'bg-nav-active font-medium text-nav-active-foreground hover:bg-nav-active',
-                )}
-                onClick={() => onStateChange({ ...state, page: number })}
-              >
-                {number}
-              </Button>
-            ))}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t('nextPage')}
-              {...(page >= pageCount ? { 'aria-disabled': true } : {})}
-              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-              onClick={() => {
-                if (page < pageCount) onStateChange({ ...state, page: page + 1 });
-              }}
-            >
-              <ChevronRight aria-hidden="true" />
-            </Button>
+            {hrefFor ? (
+              <PageLinks
+                page={page}
+                pageCount={pageCount}
+                hrefFor={(n) => hrefFor({ ...state, page: n })}
+              />
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('previousPage')}
+                  // `aria-disabled`, not `disabled`: the button a keyboard user just
+                  // pressed to reach the first page would otherwise be disabled
+                  // under their focus, which drops focus to <body>.
+                  {...(page <= 1 ? { 'aria-disabled': true } : {})}
+                  className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                  onClick={() => {
+                    if (page > 1) onStateChange({ ...state, page: page - 1 });
+                  }}
+                >
+                  <ChevronLeft aria-hidden="true" />
+                </Button>
+                {pageWindow(page, pageCount).map((number) => (
+                  <Button
+                    key={number}
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t('page', { page: number })}
+                    {...(number === page ? { 'aria-current': 'page' as const } : {})}
+                    className={cn(
+                      'tabular-nums',
+                      // BR-022-33 — the current page is a fill, like the current
+                      // destination; the focus ring stays a ring.
+                      number === page &&
+                        'bg-nav-active font-medium text-nav-active-foreground hover:bg-nav-active',
+                    )}
+                    onClick={() => onStateChange({ ...state, page: number })}
+                  >
+                    {number}
+                  </Button>
+                ))}
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t('nextPage')}
+                  {...(page >= pageCount ? { 'aria-disabled': true } : {})}
+                  className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                  onClick={() => {
+                    if (page < pageCount) onStateChange({ ...state, page: page + 1 });
+                  }}
+                >
+                  <ChevronRight aria-hidden="true" />
+                </Button>
+              </>
+            )}
           </nav>
 
           <div className="flex items-center gap-2">
@@ -717,6 +841,69 @@ function DataTableView<TData>({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Server mode's page controls: the same buttons, as links to the page's URL,
+ * so paging needs no JavaScript. The edges stay `aria-disabled` buttons rather
+ * than links to nowhere — a disabled link is not a thing HTML has.
+ */
+function PageLinks({
+  page,
+  pageCount,
+  hrefFor,
+}: {
+  page: number;
+  pageCount: number;
+  hrefFor: (page: number) => string;
+}) {
+  const t = useTranslations('dataTable');
+  const edge = (label: string, icon: ReactNode, target: number, enabled: boolean) =>
+    enabled ? (
+      <Button asChild variant="ghost" size="icon-sm">
+        <Link href={hrefFor(target)} aria-label={label}>
+          {icon}
+        </Link>
+      </Button>
+    ) : (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={label}
+        aria-disabled
+        className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+      >
+        {icon}
+      </Button>
+    );
+
+  return (
+    <>
+      {edge(t('previousPage'), <ChevronLeft aria-hidden="true" />, page - 1, page > 1)}
+      {pageWindow(page, pageCount).map((number) => (
+        <Button
+          key={number}
+          asChild
+          variant="ghost"
+          size="icon-sm"
+          className={cn(
+            'tabular-nums',
+            number === page &&
+              'bg-nav-active font-medium text-nav-active-foreground hover:bg-nav-active',
+          )}
+        >
+          <Link
+            href={hrefFor(number)}
+            aria-label={t('page', { page: number })}
+            {...(number === page ? { 'aria-current': 'page' as const } : {})}
+          >
+            {number}
+          </Link>
+        </Button>
+      ))}
+      {edge(t('nextPage'), <ChevronRight aria-hidden="true" />, page + 1, page < pageCount)}
+    </>
   );
 }
 

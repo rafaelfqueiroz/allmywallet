@@ -6,6 +6,7 @@ import type {
   TransactionFilter,
   TransactionListItem,
   TransactionPage,
+  TransactionSort,
   TransactionRepository,
 } from '@/core/ledger/ports';
 import type { Transaction } from '@/core/ledger/transaction';
@@ -102,10 +103,18 @@ export class FakeTransactionRepository implements TransactionRepository {
     return identities;
   }
 
-  async search(_filter: TransactionFilter, pagination: Pagination): Promise<TransactionPage> {
-    // Filter semantics belong to SQL and are integration-tested; what the unit
-    // tests need from this method is that the page window is applied and the
-    // total reflects the whole match, not the page.
+  /** The order each `search` was asked for, so a use case's default is observable. */
+  readonly searchSorts: (TransactionSort | undefined)[] = [];
+
+  async search(
+    _filter: TransactionFilter,
+    pagination: Pagination,
+    sort?: TransactionSort,
+  ): Promise<TransactionPage> {
+    // Filter and sort semantics belong to SQL and are integration-tested; what
+    // the unit tests need from this method is that the page window is applied
+    // and the total reflects the whole match, not the page.
+    this.searchSorts.push(sort);
     const items = this.#rows.slice(pagination.offset, pagination.offset + pagination.limit);
     return { items: items.map((row) => this.#toListItem(row)), total: this.#rows.length };
   }

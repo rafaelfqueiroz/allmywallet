@@ -12,11 +12,16 @@ import { audit, render, screen, userEvent, within } from '@/components/test-util
 // component's doc comment). A test drives the mirror through `search` and reads
 // what was written off the `replaceState` spy; `replace` is there to be asserted
 // untouched.
-const nav = vi.hoisted(() => ({ search: '', pathname: '/posicoes', replace: vi.fn() }));
+const nav = vi.hoisted(() => ({
+  search: '',
+  pathname: '/posicoes',
+  replace: vi.fn(),
+  push: vi.fn(),
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => nav.pathname,
-  useRouter: () => ({ replace: nav.replace }),
+  useRouter: () => ({ replace: nav.replace, push: nav.push }),
   useSearchParams: () => new URLSearchParams(nav.search),
 }));
 
@@ -25,6 +30,7 @@ const replaceState = vi.spyOn(window.history, 'replaceState');
 beforeEach(() => {
   nav.search = '';
   nav.replace.mockClear();
+  nav.push.mockClear();
   replaceState.mockClear();
 });
 
@@ -543,5 +549,150 @@ describe('DataTable — pagination, filter and URL state', () => {
     screen.getByRole('button', { name: 'Página 2' }).focus();
     await user.keyboard('{Enter}');
     expect(bodyNames()[0]).toBe('arquivo-06.xlsx');
+  });
+});
+
+/**
+ * Server-paged mode (#214): the rows are one page the server already sorted
+ * and paged — the transaction ledger, 10.000+ rows (SPEC-006 BR-006-07). The
+ * URL is the only state, so every control is a link or a navigation, and the
+ * table never re-orders or slices what it was handed.
+ */
+describe('DataTable — server-paged', () => {
+  type Entry = { id: string; code: string; total: string };
+
+  // Deliberately not in code order: the server chose this order.
+  const page2: Entry[] = [
+    { id: 'a', code: 'VALE3', total: '30' },
+    { id: 'b', code: 'ABEV3', total: '10' },
+  ];
+
+  const entryColumns: ColumnDef<Entry, unknown>[] = [
+    { id: 'code', header: 'Ativo', cell: ({ row }) => row.original.code },
+    { id: 'kind', header: 'Tipo', enableSorting: false, cell: () => 'Compra' },
+    {
+      id: 'total',
+      header: 'Total',
+      meta: { align: 'right' },
+      cell: ({ row }) => row.original.total,
+    },
+  ];
+
+  function Ledger({ data = page2, total = 27 }: { data?: Entry[]; total?: number }) {
+    return (
+      <DataTable
+        columns={entryColumns}
+        data={data}
+        server={{ total }}
+        caption="Transações"
+        sortable
+        initialSorting={[{ id: 'code', desc: true }]}
+        sortLabel={(column) => `Ordenar por ${column}`}
+        pageSizeOptions={[25, 50]}
+        defaultPageSize={25}
+        itemNoun="transações"
+        toolbar={<span>barra de filtros</span>}
+        noResults={<EmptyState title="Nada com esses filtros" />}
+      />
+    );
+  }
+
+  const bodyCodes = () =>
+    within(screen.getByRole('table'))
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0]?.textContent);
+
+  it('renders the rows in the order the server sent, and counts the server total', () => {
+    nav.search = 'page=2&type=buy';
+    render(<Ledger />);
+    expect(bodyCodes()).toEqual(['VALE3', 'ABEV3']);
+    expect(screen.getByText('Mostrando 26–27 de 27 transações')).toBeInTheDocument();
+  });
+
+  it('makes sort headers links that keep the other parameters and drop the page', () => {
+    nav.search = 'page=2&type=buy';
+    render(<Ledger />);
+    const table = screen.getByRole('table');
+    // The open sort is code descending, so pressing it asks for ascending.
+    expect(within(table).getByRole('link', { name: 'Ordenar por Ativo' })).toHaveAttribute(
+      'href',
+      '/posicoes?type=buy&sort=code%3Aasc',
+    );
+    // Another column starts ascending.
+    expect(within(table).getByRole('link', { name: 'Ordenar por Total' })).toHaveAttribute(
+      'href',
+      '/posicoes?type=buy&sort=total%3Aasc',
+    );
+    expect(within(table).getByRole('columnheader', { name: 'Ordenar por Ativo' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+  });
+
+  it('leaves a column that opted out of sorting as plain text, and keeps it out of the URL', () => {
+    nav.search = 'sort=kind%3Aasc';
+    render(<Ledger />);
+    const table = screen.getByRole('table');
+    expect(within(table).queryByRole('link', { name: /Tipo/ })).not.toBeInTheDocument();
+    // An unsortable id in the URL falls back to the default sort.
+    expect(within(table).getByRole('columnheader', { name: 'Ordenar por Ativo' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+  });
+
+  it('aligns a figures column right, header and cells', () => {
+    render(<Ledger />);
+    const table = screen.getByRole('table');
+    expect(within(table).getAllByRole('columnheader')[2]?.className).toContain('text-right');
+    expect(within(table).getAllByRole('cell')[2]?.className).toContain('text-right');
+    expect(within(table).getAllByRole('cell')[0]?.className).not.toContain('text-right');
+  });
+
+  it('pages with links to the same URL, marking the current page', () => {
+    nav.search = 'page=2&type=buy';
+    render(<Ledger />);
+    const pager = screen.getByRole('navigation', { name: 'Paginação' });
+    expect(within(pager).getByRole('link', { name: 'Página 1' })).toHaveAttribute(
+      'href',
+      '/posicoes?type=buy',
+    );
+    expect(within(pager).getByRole('link', { name: 'Página 2' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(within(pager).getByRole('link', { name: 'Página anterior' })).toHaveAttribute(
+      'href',
+      '/posicoes?type=buy',
+    );
+    // The last page has no next: an aria-disabled button, not a link to nowhere.
+    expect(within(pager).queryByRole('link', { name: 'Próxima página' })).not.toBeInTheDocument();
+    expect(within(pager).getByRole('button', { name: 'Próxima página' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+  });
+
+  it('navigates on a page-size change, back to page 1, and never mirrors locally', async () => {
+    const user = userEvent.setup();
+    nav.search = 'page=2&type=buy';
+    render(<Ledger />);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Itens por página' }), '50');
+    expect(nav.push).toHaveBeenCalledWith('/posicoes?type=buy&size=50');
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+
+  it('keeps the toolbar and shows the no-results state when the server matched nothing', () => {
+    render(<Ledger data={[]} total={0} />);
+    expect(screen.getByText('barra de filtros')).toBeInTheDocument();
+    expect(screen.getByText('Nada com esses filtros')).toBeInTheDocument();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('has no axe violations', async () => {
+    nav.search = 'page=2';
+    const { container } = render(<Ledger />);
+    expect(await audit(container)).toHaveNoViolations();
   });
 });

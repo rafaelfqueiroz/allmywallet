@@ -1,5 +1,19 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, max, or } from 'drizzle-orm';
-import type { SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  max,
+  or,
+  sql,
+} from 'drizzle-orm';
+import type { AnyColumn, SQL } from 'drizzle-orm';
 import { BusinessDate } from '@/core/shared/clock';
 import {
   AssetId,
@@ -17,7 +31,10 @@ import type {
   TransactionListItem,
   TransactionPage,
   TransactionRepository,
+  TransactionSort,
+  TransactionSortKey,
 } from '@/core/ledger/ports';
+import { DEFAULT_TRANSACTION_SORT } from '@/core/ledger/ports';
 import type { Transaction, TransactionStatus, TransactionType } from '@/core/ledger/transaction';
 import { chunked } from '@/adapters/db/chunk';
 import { assets, institutions } from '@/db/schema/assets';
@@ -143,15 +160,15 @@ export class DrizzleTransactionRepository implements TransactionRepository {
     }));
   }
 
-  async search(filter: TransactionFilter, pagination: Pagination): Promise<TransactionPage> {
+  async search(
+    filter: TransactionFilter,
+    pagination: Pagination,
+    sort: TransactionSort = DEFAULT_TRANSACTION_SORT,
+  ): Promise<TransactionPage> {
     const where = buildWhere(filter, this.tx);
 
     const rows = await this.baseQuery(where)
-      // BR-006-07: newest first, and **fully deterministic** down to the id.
-      // Two rows tied on date and timestamp would otherwise be free to swap
-      // places between pages, which over 10.000 rows means an item shown twice
-      // and another never shown at all.
-      .orderBy(desc(transactions.tradeDate), desc(transactions.createdAt), desc(transactions.id))
+      .orderBy(...orderFor(sort))
       .limit(pagination.limit)
       .offset(pagination.offset);
 
@@ -273,6 +290,45 @@ export class DrizzleTransactionRepository implements TransactionRepository {
         .where(where)
     );
   }
+}
+
+const SORT_COLUMNS: Record<TransactionSortKey, AnyColumn> = {
+  tradeDate: transactions.tradeDate,
+  asset: assets.code,
+  institution: institutions.name,
+  quantity: transactions.quantity,
+  unitPrice: transactions.unitPrice,
+  totalValue: transactions.totalValue,
+};
+
+/**
+ * SPEC-022 BR-022-18 over BR-006-07's paging: the chosen column first, then
+ * newest first and **fully deterministic** down to the id. Two rows tied on
+ * the sorted value would otherwise be free to swap places between pages, which
+ * over 10.000 rows means an item shown twice and another never shown at all.
+ *
+ * Ordering by date reverses the whole key, so oldest-first is the exact mirror
+ * of newest-first rather than oldest day, newest entry within it.
+ *
+ * A holding with no institution sorts last in both directions: an absent name
+ * is not alphabetically first, and Postgres's default would put it at the top
+ * of every descending order.
+ */
+function orderFor(sort: TransactionSort): SQL[] {
+  const direction = sort.desc ? desc : asc;
+  const tieBreak = [
+    direction(transactions.tradeDate),
+    direction(transactions.createdAt),
+    direction(transactions.id),
+  ];
+  if (sort.key === 'tradeDate') return tieBreak;
+  const column = SORT_COLUMNS[sort.key];
+  return [
+    sort.desc ? sql`${column} desc nulls last` : sql`${column} asc nulls last`,
+    desc(transactions.tradeDate),
+    desc(transactions.createdAt),
+    desc(transactions.id),
+  ];
 }
 
 /**

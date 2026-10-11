@@ -35,12 +35,12 @@ export function DeleteConfirm({ action, transactionId }: DeleteConfirmProps) {
           <ErrorState title={tErrors(state.code, messageValues(state.context))} />
         )}
         <input type="hidden" name="transactionId" value={transactionId} />
-        <Cluster gap="sm">
-          <Button type="submit" variant="destructive" disabled={pending}>
-            {t('confirm')}
-          </Button>
+        <Cluster gap="sm" justify="end">
           <Button asChild variant="outline">
             <Link href="/transactions">{t('cancel')}</Link>
+          </Button>
+          <Button type="submit" variant="destructive" disabled={pending}>
+            {t('confirm')}
           </Button>
         </Cluster>
       </Stack>

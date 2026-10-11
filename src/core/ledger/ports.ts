@@ -57,6 +57,34 @@ export interface Pagination {
 }
 
 /**
+ * SPEC-022 BR-022-18 — the columns the history can be ordered by. The list
+ * runs to 10.000+ rows (BR-006-07), so it is ordered where it is paged: in the
+ * query. A client-side sort would reorder one page and call it the ledger.
+ *
+ * Type and status are absent on purpose. Their stored values are codes, and an
+ * order over codes (`buy`, `dividend`, `sell`…) is not the order of the pt-BR
+ * labels on screen — a sort that visibly disagrees with what it sorts.
+ */
+export const TRANSACTION_SORT_KEYS = [
+  'tradeDate',
+  'asset',
+  'institution',
+  'quantity',
+  'unitPrice',
+  'totalValue',
+] as const;
+
+export type TransactionSortKey = (typeof TRANSACTION_SORT_KEYS)[number];
+
+export interface TransactionSort {
+  readonly key: TransactionSortKey;
+  readonly desc: boolean;
+}
+
+/** BR-006-07: "chronological" — newest first, unless the user asks otherwise. */
+export const DEFAULT_TRANSACTION_SORT: TransactionSort = { key: 'tradeDate', desc: true };
+
+/**
  * The read model for the history list (BR-006-07) and the CSV export
  * (BR-006-10). It carries the asset and institution *names* the repository
  * joined in, because a list of 10.000 rows must not turn into 10.000 lookups.
@@ -133,8 +161,16 @@ export interface TransactionRepository {
    */
   describeAmortizedAssets(including: readonly AssetId[]): Promise<readonly AssetIdentity[]>;
 
-  /** BR-006-07/08/09: the paginated, filtered, searchable history. */
-  search(filter: TransactionFilter, pagination: Pagination): Promise<TransactionPage>;
+  /**
+   * BR-006-07/08/09: the paginated, filtered, searchable history, ordered by
+   * `sort` (SPEC-022 BR-022-18) and then newest first down to the id, so the
+   * order is total and no row can appear on two pages.
+   */
+  search(
+    filter: TransactionFilter,
+    pagination: Pagination,
+    sort?: TransactionSort,
+  ): Promise<TransactionPage>;
 
   /** BR-006-10: the same query without pagination, for a filtered export. */
   export(filter: TransactionFilter): Promise<readonly TransactionListItem[]>;

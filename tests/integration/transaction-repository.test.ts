@@ -24,6 +24,7 @@ import { earliestFromDate } from '@/core/ledger/recalculate-from';
 import { editTransaction } from '@/core/ledger/edit-transaction';
 import { exportTransactionsCsv } from '@/core/ledger/export-transactions';
 import { listTransactions } from '@/core/ledger/list-transactions';
+import type { TransactionSort } from '@/core/ledger/ports';
 import { rebuildPositions } from '@/core/positions/rebuild';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { resetLedger, resetUsers } from '../support/reset';
@@ -478,6 +479,101 @@ describe('SPEC-006 — transaction ledger (integration)', () => {
         ...second.value.items.map((i) => i.transaction.id),
       ]);
       expect(ids.size).toBe(4);
+    });
+
+    /**
+     * SPEC-022 BR-022-18 — the ledger table sorts in the query, because it
+     * pages in the query: a sort over one page would reorder 50 rows of
+     * 10.000 and call it the ledger. `seedHistory`'s totals are 1000, 500, 300
+     * and 100, oldest to newest.
+     */
+    describe('SPEC-022 BR-022-18 — sorted by a chosen column', () => {
+      const datesSortedBy = async (sort: TransactionSort, limit = 50, offset = 0) => {
+        const page = await asTenant((deps) =>
+          listTransactions(deps.transactions, {}, { limit, offset }, sort),
+        );
+        expect(page.ok).toBe(true);
+        return page.ok ? page.value.items.map((i) => i.transaction.tradeDate) : [];
+      };
+
+      it('orders by total in both directions', async () => {
+        await seedHistory();
+        expect(await datesSortedBy({ key: 'totalValue', desc: false })).toEqual([
+          '2026-04-05',
+          '2026-03-05',
+          '2026-02-05',
+          '2026-01-05',
+        ]);
+        expect(await datesSortedBy({ key: 'totalValue', desc: true })).toEqual([
+          '2026-01-05',
+          '2026-02-05',
+          '2026-03-05',
+          '2026-04-05',
+        ]);
+      });
+
+      it('orders oldest first as the exact mirror of newest first', async () => {
+        await seedHistory();
+        const newest = await datesSortedBy({ key: 'tradeDate', desc: true });
+        expect(await datesSortedBy({ key: 'tradeDate', desc: false })).toEqual(
+          [...newest].reverse(),
+        );
+      });
+
+      it('orders by asset code, newest first within one asset', async () => {
+        await seedHistory();
+        // HGLG11, PETR4 (Feb, then Jan), VALE3.
+        expect(await datesSortedBy({ key: 'asset', desc: false })).toEqual([
+          '2026-04-05',
+          '2026-02-05',
+          '2026-01-05',
+          '2026-03-05',
+        ]);
+      });
+
+      it('puts a holding with no institution last in both directions', async () => {
+        await seedHistory();
+        await asTenant(async (deps) => {
+          const result = await createTransaction(deps, userId, {
+            assetId: petr4,
+            institutionId: null,
+            type: 'buy',
+            tradeDate: BusinessDate.of('2026-05-05'),
+            quantity: Quantity.fromString('1'),
+            unitPrice: Money.fromString('10.00'),
+            fees: Money.zero(),
+          });
+          expect(result.ok).toBe(true);
+        });
+        const names = async (desc: boolean) => {
+          const page = await asTenant((deps) =>
+            listTransactions(
+              deps.transactions,
+              {},
+              { limit: 50, offset: 0 },
+              { key: 'institution', desc },
+            ),
+          );
+          return page.ok ? page.value.items.map((i) => i.institutionName) : [];
+        };
+        expect(await names(false)).toEqual(['Clear', 'Clear', 'Clear', 'Rico', null]);
+        expect(await names(true)).toEqual(['Rico', 'Clear', 'Clear', 'Clear', null]);
+      });
+
+      it('pages a sorted list with no row shown twice', async () => {
+        await seedHistory();
+        const sort: TransactionSort = { key: 'unitPrice', desc: false };
+        // Every unit price is R$ 10: the order rests entirely on the tie-break.
+        const first = await datesSortedBy(sort, 2, 0);
+        const second = await datesSortedBy(sort, 2, 2);
+        expect(new Set([...first, ...second]).size).toBe(4);
+        expect([...first, ...second]).toEqual([
+          '2026-04-05',
+          '2026-03-05',
+          '2026-02-05',
+          '2026-01-05',
+        ]);
+      });
     });
 
     it('joins the asset and institution names the list renders', async () => {

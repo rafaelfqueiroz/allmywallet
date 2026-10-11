@@ -12,6 +12,7 @@ import {
   listInstitutionOptions,
 } from '@/app/(app)/transactions/data';
 import { tryUserId } from '@/lib/session';
+import { formatBusinessDate } from '@/i18n/format';
 import { TransactionForm } from '@/app/(app)/transactions/_components/TransactionForm';
 import { ConversionGroupForm } from '@/app/(app)/transactions/_components/ConversionGroupForm';
 import { TransactionCostEstimateMarker } from '@/app/(app)/transactions/_components/TransactionCostEstimateMarker';
@@ -88,8 +89,13 @@ export default async function EditTransactionPage({ params }: PageProps) {
           legs={loaded.conversionGroup.map((leg) => ({
             id: leg.id,
             assetId: leg.assetId,
+            // Every leg's asset has a transaction — this one — so it is among
+            // the tenant's transacted assets; the id is only a fallback.
+            assetCode:
+              loaded.assetOptions.find((option) => option.assetId === leg.assetId)?.code ??
+              leg.assetId,
             type: leg.type === 'conversion_out' ? 'conversion_out' : 'conversion_in',
-            tradeDate: leg.tradeDate,
+            date: formatBusinessDate(leg.tradeDate),
             quantity: leg.quantity.toString(),
             costBasis: leg.costBasis?.toString() ?? '',
           }))}

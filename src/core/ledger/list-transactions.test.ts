@@ -88,4 +88,14 @@ describe('listTransactions', () => {
     await listTransactions(spy, filter, { limit: 10, offset: 0 });
     expect(seen).toEqual(filter);
   });
+
+  it('asks the repository for newest first unless a sort is given (BR-006-07)', async () => {
+    const repo = repository();
+    await listTransactions(repo, {}, { limit: 10, offset: 0 });
+    await listTransactions(repo, {}, { limit: 10, offset: 0 }, { key: 'totalValue', desc: false });
+    expect(repo.searchSorts).toEqual([
+      { key: 'tradeDate', desc: true },
+      { key: 'totalValue', desc: false },
+    ]);
+  });
 });

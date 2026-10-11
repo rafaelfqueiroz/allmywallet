@@ -1,15 +1,17 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, useState, type FormEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { USER_EDITABLE_TRANSACTION_TYPES } from '@/core/ledger/transaction';
+import { LedgerErrorCode } from '@/core/ledger/errors';
 import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { Field } from '@/components/patterns/field';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Section } from '@/components/patterns/section';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
+import { Grid } from '@/components/layout/grid';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -28,6 +30,17 @@ import { NativeSelect } from '@/components/ui/native-select';
  * form's native POST, so the browser posts, the server runs the action and
  * re-renders with the returned state. Nothing below depends on hydration
  * having happened — the same reason every control here is native.
+ *
+ * SPEC-022 BR-022-20/21: instructions sit behind each field's info icon, the
+ * fields sit in a grid so every row has one height, and a refusal that is
+ * about one field (`FIELD_ERRORS`) renders under that field rather than in a
+ * banner above the form. A refusal about the transaction as a whole — selling
+ * more than was held — stays in the banner: no single field is wrong.
+ *
+ * **The user's typing survives a refusal.** React resets an uncontrolled form
+ * once its action finishes; the values that were posted are kept and the
+ * fields re-mounted with them as defaults (the WalletForm pattern, #210), so a
+ * refused sale does not empty eight fields to say one of them was wrong.
  *
  * AR-44: every string comes from `next-intl`. Type labels are reused from
  * `import.transactionType.*` and asset classes from `reports.assetClass.*`
@@ -66,6 +79,49 @@ export interface TransactionFormValues {
   readonly fees: string;
   readonly ratio: string;
   readonly soldFromWallet?: string;
+  /** A new asset's code, name and class, and a new institution — blank by default. */
+  readonly assetCode?: string;
+  readonly assetName?: string;
+  readonly assetClass?: string;
+  readonly institutionName?: string;
+}
+
+type ErrorField = 'tradeDate' | 'quantity' | 'unitPrice' | 'fees' | 'ratio';
+
+/**
+ * BR-022-21 — the domain refusals that are about one field, and the field.
+ * Anything absent here is about the transaction as a whole and stays in the
+ * banner.
+ */
+export const FIELD_ERRORS: Readonly<Record<string, ErrorField>> = {
+  [LedgerErrorCode.FUTURE_TRADE_DATE]: 'tradeDate',
+  [LedgerErrorCode.INVALID_QUANTITY]: 'quantity',
+  [LedgerErrorCode.NEGATIVE_UNIT_PRICE]: 'unitPrice',
+  [LedgerErrorCode.NEGATIVE_FEES]: 'fees',
+  [LedgerErrorCode.RATIO_REQUIRED]: 'ratio',
+  [LedgerErrorCode.RATIO_NOT_APPLICABLE]: 'ratio',
+  [LedgerErrorCode.INVALID_RATIO]: 'ratio',
+};
+
+/** The posted values, as the next render's defaults. */
+function posted(formData: FormData, previous: TransactionFormValues): TransactionFormValues {
+  const text = (name: string) => String(formData.get(name) ?? '');
+  return {
+    ...previous,
+    assetId: text('assetId'),
+    assetCode: text('assetCode'),
+    assetName: text('assetName'),
+    assetClass: text('assetClass'),
+    institutionId: text('institutionId'),
+    institutionName: text('institutionName'),
+    type: text('type'),
+    tradeDate: text('tradeDate'),
+    quantity: text('quantity'),
+    unitPrice: text('unitPrice'),
+    fees: text('fees'),
+    ratio: text('ratio'),
+    soldFromWallet: text('soldFromWallet'),
+  };
 }
 
 export interface WalletChoiceView {
@@ -98,30 +154,43 @@ export function TransactionForm({
   const tErrors = useTranslations('errors');
   const tType = useTranslations('import.transactionType');
   const tAssetClass = useTranslations('reports.assetClass');
+  // The server action goes to the hook as is (DS-37): a wrapping closure has
+  // no `$$FORM_ACTION`, and the form would not post without JavaScript.
   const [state, formAction, pending] = useActionState(action, IDLE);
+  const [draft, setDraft] = useState(values);
+  const [submissions, setSubmissions] = useState(0);
+  const remember = (event: FormEvent<HTMLFormElement>) => {
+    const formData = new FormData(event.currentTarget);
+    setDraft((previous) => posted(formData, previous));
+    setSubmissions((count) => count + 1);
+  };
+
+  const refusal = state.status === 'error' ? state : null;
+  /**
+   * AR-38: the domain returned a code and a context; the catalogue turns them
+   * into pt-BR. `INSUFFICIENT_QUANTITY` is the one that makes BR-006-15 true —
+   * its message names the quantity held on the date, which is the whole
+   * difference between an explanation and a rejection.
+   */
+  const message = refusal ? tErrors(refusal.code, messageValues(refusal.context)) : undefined;
+  const errorField = refusal ? FIELD_ERRORS[refusal.code] : undefined;
+  const errorFor = (field: ErrorField) => (errorField === field ? { error: message } : {});
 
   return (
-    <form action={formAction}>
-      <Stack gap="lg">
-        {state.status === 'error' && (
-          /**
-           * AR-38: the domain returned a code and a context; the catalogue
-           * turns them into pt-BR. `INSUFFICIENT_QUANTITY` is the one that
-           * makes BR-006-15 true — its message names the quantity held on the
-           * date, which is the whole difference between an explanation and a
-           * rejection.
-           */
-          <ErrorState title={tErrors(state.code, messageValues(state.context))} />
-        )}
+    <form action={formAction} onSubmit={remember}>
+      {/* Re-mounted per submission, so React's post-action reset lands on
+          what was posted rather than on the page's original values. */}
+      <Stack gap="lg" key={submissions}>
+        {refusal && errorField === undefined && <ErrorState title={message} />}
 
         {values.transactionId !== undefined && (
           <input type="hidden" name="transactionId" value={values.transactionId} />
         )}
 
         <Section title={t('assetSection')}>
-          <Cluster gap="md" align="end">
-            <Field id="transaction-asset" label={t('assetExisting')} width="lg">
-              <NativeSelect name="assetId" defaultValue={values.assetId}>
+          <Grid cols={4}>
+            <Field id="transaction-asset" label={t('assetExisting')} width="full">
+              <NativeSelect name="assetId" defaultValue={draft.assetId}>
                 <option value="">{t('assetExistingNone')}</option>
                 {assetOptions.map((option) => (
                   <option key={option.assetId} value={option.assetId}>
@@ -143,17 +212,17 @@ export function TransactionForm({
               id="transaction-asset-code"
               label={t('assetNewCode')}
               hint={t('assetNewCodeHint')}
-              width="md"
+              width="full"
             >
-              <Input name="assetCode" autoComplete="off" />
+              <Input name="assetCode" autoComplete="off" defaultValue={draft.assetCode ?? ''} />
             </Field>
-            <Field id="transaction-asset-name" label={t('assetNewName')} width="lg">
-              <Input name="assetName" autoComplete="off" />
+            <Field id="transaction-asset-name" label={t('assetNewName')} width="full">
+              <Input name="assetName" autoComplete="off" defaultValue={draft.assetName ?? ''} />
             </Field>
-            <Field id="transaction-asset-class" label={t('assetNewClass')} width="md">
+            <Field id="transaction-asset-class" label={t('assetNewClass')} width="full">
               {/* #110: blank states nothing, so typing an existing code never
                   overwrites the class Posição stated. */}
-              <NativeSelect name="assetClass" defaultValue="">
+              <NativeSelect name="assetClass" defaultValue={draft.assetClass ?? ''}>
                 <option value="">{t('assetNewClassUnstated')}</option>
                 {assetClasses.map((value) => (
                   <option key={value} value={value}>
@@ -162,13 +231,13 @@ export function TransactionForm({
                 ))}
               </NativeSelect>
             </Field>
-          </Cluster>
+          </Grid>
         </Section>
 
         <Section title={t('institutionSection')}>
-          <Cluster gap="md" align="end">
-            <Field id="transaction-institution" label={t('institutionExisting')} width="lg">
-              <NativeSelect name="institutionId" defaultValue={values.institutionId}>
+          <Grid cols={4}>
+            <Field id="transaction-institution" label={t('institutionExisting')} width="full">
+              <NativeSelect name="institutionId" defaultValue={draft.institutionId}>
                 {/* BR-007-08: no institution is a real, distinct bucket — an
                     asset held directly — not "any institution". */}
                 <option value="">{t('institutionExistingNone')}</option>
@@ -179,17 +248,21 @@ export function TransactionForm({
                 ))}
               </NativeSelect>
             </Field>
-            <Field id="transaction-institution-name" label={t('institutionNew')} width="lg">
-              <Input name="institutionName" autoComplete="off" />
+            <Field id="transaction-institution-name" label={t('institutionNew')} width="full">
+              <Input
+                name="institutionName"
+                autoComplete="off"
+                defaultValue={draft.institutionName ?? ''}
+              />
             </Field>
-          </Cluster>
+          </Grid>
         </Section>
 
         <Section title={t('detailsSection')}>
-          <Cluster gap="md" align="end">
+          <Grid cols={4}>
             {/* BR-006-05: grouped conversion legs are never edited alone. */}
-            <Field id="transaction-type" label={t('type')} width="md">
-              <NativeSelect name="type" defaultValue={values.type} required>
+            <Field id="transaction-type" label={t('type')} width="full">
+              <NativeSelect name="type" defaultValue={draft.type} required>
                 {USER_EDITABLE_TRANSACTION_TYPES.map((value) => (
                   <option key={value} value={value}>
                     {tType(value)}
@@ -197,8 +270,13 @@ export function TransactionForm({
                 ))}
               </NativeSelect>
             </Field>
-            <Field id="transaction-date" label={t('tradeDate')} width="md">
-              <Input type="date" name="tradeDate" defaultValue={values.tradeDate} required />
+            <Field
+              id="transaction-date"
+              label={t('tradeDate')}
+              width="full"
+              {...errorFor('tradeDate')}
+            >
+              <Input type="date" name="tradeDate" defaultValue={draft.tradeDate} required />
             </Field>
 
             {/*
@@ -208,23 +286,35 @@ export function TransactionForm({
               reads both forms, and AR-06 keeps the value a string the whole
               way to `Money`/`Quantity`.
             */}
-            <Field id="transaction-quantity" label={t('quantity')} width="md">
-              <Input name="quantity" inputMode="decimal" defaultValue={values.quantity} required />
+            <Field
+              id="transaction-quantity"
+              label={t('quantity')}
+              width="full"
+              {...errorFor('quantity')}
+            >
+              <Input name="quantity" inputMode="decimal" defaultValue={draft.quantity} required />
             </Field>
-            <Field id="transaction-price" label={t('unitPrice')} hint={t('decimalHint')} width="md">
-              <Input
-                name="unitPrice"
-                inputMode="decimal"
-                defaultValue={values.unitPrice}
-                required
-              />
+            <Field
+              id="transaction-price"
+              label={t('unitPrice')}
+              hint={t('decimalHint')}
+              width="full"
+              {...errorFor('unitPrice')}
+            >
+              <Input name="unitPrice" inputMode="decimal" defaultValue={draft.unitPrice} required />
             </Field>
-            <Field id="transaction-fees" label={t('fees')} width="md">
-              <Input name="fees" inputMode="decimal" defaultValue={values.fees} />
+            <Field id="transaction-fees" label={t('fees')} width="full" {...errorFor('fees')}>
+              <Input name="fees" inputMode="decimal" defaultValue={draft.fees} />
             </Field>
             {/* SPEC-007 BR-007-04 — split and grupamento only. */}
-            <Field id="transaction-ratio" label={t('ratio')} hint={t('ratioHint')} width="md">
-              <Input name="ratio" inputMode="decimal" defaultValue={values.ratio} />
+            <Field
+              id="transaction-ratio"
+              label={t('ratio')}
+              hint={t('ratioHint')}
+              width="full"
+              {...errorFor('ratio')}
+            >
+              <Input name="ratio" inputMode="decimal" defaultValue={draft.ratio} />
             </Field>
             {/*
               SPEC-010 BR-010-17 / AC-010-15 — "a sale with a specified wallet
@@ -244,9 +334,9 @@ export function TransactionForm({
                 id="transaction-sold-from"
                 label={t('soldFromWallet')}
                 hint={t('soldFromWalletHint')}
-                width="md"
+                width="full"
               >
-                <NativeSelect name="soldFromWallet" defaultValue={values.soldFromWallet ?? ''}>
+                <NativeSelect name="soldFromWallet" defaultValue={draft.soldFromWallet ?? ''}>
                   <option value="">{t('soldFromWalletProportional')}</option>
                   {walletOptions.map((wallet) => (
                     <option key={wallet.walletId} value={wallet.walletId}>
@@ -256,15 +346,16 @@ export function TransactionForm({
                 </NativeSelect>
               </Field>
             )}
-          </Cluster>
+          </Grid>
         </Section>
 
-        <Cluster gap="sm">
-          <Button type="submit" disabled={pending}>
-            {pending ? t('submitting') : t(mode === 'create' ? 'submitCreate' : 'submitEdit')}
-          </Button>
+        {/* The Configurações forms' order (#210): Cancelar, then the action. */}
+        <Cluster gap="sm" justify="end">
           <Button asChild variant="outline">
             <Link href="/transactions">{t('cancel')}</Link>
+          </Button>
+          <Button type="submit" disabled={pending}>
+            {pending ? t('submitting') : t(mode === 'create' ? 'submitCreate' : 'submitEdit')}
           </Button>
         </Cluster>
       </Stack>
