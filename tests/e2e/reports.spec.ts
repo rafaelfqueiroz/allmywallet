@@ -116,6 +116,30 @@ test('the scope chosen in Portfólio is still the scope in Relatórios, tab afte
 });
 
 /**
+ * #227 review — the filter fields are uncontrolled, and the header's scope
+ * selector navigates on the client. Choosing a wallet moves the default
+ * grouping from asset class to asset (BR-011-04); the select must follow, or
+ * it disagrees with the report and the next Aplicar changes the grouping
+ * again. Portfólio › Composição's grouping form has the same shape.
+ */
+test('the grouping field follows a scope chosen in the header', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  const name = 'Agrupamento';
+  const walletId = await seedWallet(userId, name);
+
+  for (const path of ['/reports', '/portfolio/composition']) {
+    await page.goto(path);
+    const grouping = page.getByRole('combobox', { name: /agrupar por/i });
+    await expect(grouping).toHaveValue('asset_class');
+
+    await page.locator('[data-slot="scope-selector"]').click();
+    await page.getByRole('menuitemradio', { name }).click();
+    await expect(page).toHaveURL(new RegExp(`wallet=${walletId}`));
+    await expect(grouping).toHaveValue('asset');
+  }
+});
+
+/**
  * SPEC-022 BR-022-03 / SPEC-015 BR-015-04 — composition drift over the period
  * is shown in Evolução patrimonial. A baseline snapshot before the period
  * holds stock and FII half and half; today the tenant holds stock alone, so

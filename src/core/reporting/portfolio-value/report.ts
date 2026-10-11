@@ -151,13 +151,16 @@ export function buildPortfolioValueReport({
     monthlyContributions: available(monthlyContributions(snapshots, opening)),
     stacked: stackedSeries(snapshots, granularity, grouping),
     /**
-     * SPEC-015 BR-015-04 — the closing end is the report's own breakdown, the
-     * same holdings the headline totals, so "no fim" agrees with the value
-     * line's live endpoint rather than with the last nightly snapshot.
+     * SPEC-015 BR-015-04 — a period ending today closes on the report's own
+     * breakdown, the holdings the headline totals, so "no fim" agrees with
+     * the value line's live endpoint. A period that ended in the past closes
+     * on its last snapshot, like the value line and the stacked series: the
+     * holding set is today's positions priced at that date, so its shares
+     * would report allocations the portfolio did not have then.
      */
     drift: allocationDrift({
       opening,
-      closing: sliceBreakdown(report),
+      closing: asOf === today ? sliceBreakdown(report) : { snapshot: closing },
       grouping,
       scope: scope.scope,
     }),

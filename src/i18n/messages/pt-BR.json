@@ -1171,7 +1171,7 @@
       "unavailable": {
         "WALLET_SCOPE_NOT_SNAPSHOTTED": "O histórico diário é gravado para o portfólio inteiro, sem separar quanto cabia a cada carteira em cada dia. Por isso a variação no período não aparece quando o escopo é uma carteira.",
         "NO_HISTORICAL_BREAKDOWN": "O histórico de composição só existe por classe de ativo. Não há histórico guardado por {grouping}, então a variação no período não pode ser montada para o agrupamento selecionado.",
-        "NO_ALLOCATION_TO_COMPARE": "Não há nada registrado antes deste período para comparar. Escolha um período que comece depois do seu primeiro registro."
+        "NO_ALLOCATION_TO_COMPARE": "Não há registro diário antes deste período, ou dentro dele, para comparar o início com o fim. Escolha um período que comece depois do seu primeiro registro."
       }
     }
   },

@@ -248,7 +248,15 @@ async function GroupingForm({
   const t = await getTranslations('reports');
 
   return (
-    <form method="get" action="/portfolio/composition" aria-label={t('grouping.label')}>
+    <form
+      method="get"
+      action="/portfolio/composition"
+      aria-label={t('grouping.label')}
+      // Remounted when the header's scope changes the resolved grouping, so
+      // the uncontrolled select cannot keep showing the old one (see
+      // `reports/_components/Controls.tsx`).
+      key={`${walletId ?? ''}|${grouping}`}
+    >
       {walletId !== null && <input type="hidden" name={PARAM.wallet} value={walletId} />}
       <Cluster gap="sm" align="end">
         <Field id="composition-grouping" label={t('grouping.label')} width="lg">

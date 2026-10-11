@@ -451,6 +451,54 @@ describe('SPEC-015 AC — BR-015-04: drift, on Evolução patrimonial (SPEC-022 
     expect(cdb?.change.isZero()).toBe(true);
   });
 
+  it("closes a period that ended in the past on that period's snapshot (#227 review)", async () => {
+    /**
+     * By 2026-07-31 the portfolio was half stock, half fii, and held no cdb.
+     * Today's positions priced at that date would say 40 / 40 / 20 — an
+     * allocation it did not have then. The drift must close on the snapshot,
+     * as the stacked series does: from 20 / 60 / 20 to 50 / 50 / 0.
+     */
+    const data = fixture();
+    const port = new FakeReportDataPort({
+      ...data,
+      snapshots: [
+        ...data.snapshots,
+        snapshot('2026-07-31', [
+          ['stock', '500'],
+          ['fii', '500'],
+        ]),
+      ],
+    });
+    const result = await runReportQuery(
+      port,
+      {
+        period: { kind: 'custom', from: day('2026-06-01'), to: day('2026-07-31') },
+        scope: { kind: 'portfolio' },
+        grouping: 'asset_class',
+        today: TODAY,
+      },
+      day('2026-01-01'),
+    );
+    if (!result.ok) throw new Error(result.error.code);
+
+    const report = buildPortfolioValueReport({
+      query: result.value,
+      opening: await port.findSnapshotBefore(result.value.range.from),
+      grouping: 'asset_class',
+      today: TODAY,
+      lastImportAt: null,
+    });
+
+    if (report.drift.kind === 'unavailable') throw new Error(report.drift.reason);
+    const closing = Object.fromEntries(
+      report.drift.value.map((shift) => [shift.key.id, shift.closing.toString()]),
+    );
+    expect(closing).toEqual({ cdb: '0', fii: '0.5', stock: '0.5' });
+    expect(report.drift.value.find((shift) => shift.key.id === 'cdb')?.change.toString()).toBe(
+      '-0.2',
+    );
+  });
+
   it('refuses drift at wallet scope rather than lending it the portfolio history', async () => {
     const scope: Scope = { kind: 'wallet', walletId: walletA };
     const port = new FakeReportDataPort(fixture());

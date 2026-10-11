@@ -97,7 +97,19 @@ export async function Controls({
   const t = await getTranslations('reports');
 
   return (
-    <form method="get" action={action} aria-label={t('title')}>
+    <form
+      method="get"
+      action={action}
+      aria-label={t('title')}
+      // The fields are uncontrolled (`defaultValue`), so a client navigation
+      // that changes the view without this form — the header's scope selector
+      // — would leave them showing the old values: choosing a wallet moves the
+      // default grouping from asset class to asset (BR-011-04) while the
+      // select still says asset class, and Aplicar would then change the
+      // grouping again. Keyed on the applied state, the form remounts and
+      // reads its defaults afresh (#227 review).
+      key={formKey({ period, scope, grouping })}
+    >
       {Object.entries(hidden ?? {}).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
@@ -169,4 +181,14 @@ export async function Controls({
       </Card>
     </form>
   );
+}
+
+/** The applied view, as a React key: any change remounts the form. */
+function formKey({ period, scope, grouping }: ReportUrlState): string {
+  return [
+    period.kind,
+    period.kind === 'custom' ? `${period.from}..${period.to}` : '',
+    scope.kind === 'wallet' ? scope.walletId : '',
+    grouping,
+  ].join('|');
 }
