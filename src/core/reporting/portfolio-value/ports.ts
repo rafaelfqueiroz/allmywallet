@@ -1,6 +1,7 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import type { Money } from '@/core/shared/money';
 import type { Grouping } from '@/core/reporting/ports';
+import type { AllocationShift } from '@/core/reporting/composition/ports';
 import type { HistoryUnavailable, SnapshotDerived } from '@/core/reporting/snapshot-derived';
 
 /**
@@ -189,5 +190,12 @@ export interface PortfolioValueReport {
   readonly headline: HeadlineFigures;
   readonly monthlyContributions: SnapshotDerived<readonly MonthlyContribution[]>;
   readonly stacked: StackedSeries;
+  /**
+   * SPEC-015 BR-015-04 / SPEC-022 BR-022-03 — composition drift over the
+   * period, shown beside the stacked series it summarises. It lives here
+   * rather than on SPEC-015's report because drift needs a period, and
+   * Composição moved to Portfólio, which takes none (DL-022-02).
+   */
+  readonly drift: SnapshotDerived<readonly AllocationShift[]>;
   readonly freshness: Freshness;
 }

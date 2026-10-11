@@ -68,6 +68,22 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
       to: '/portfolio/composition?grouping=sector',
     },
   },
+  /*
+   * #209 — Relatórios (BR-022-03). Evolução patrimonial is the destination's
+   * first tab and so its root, `/reports` — the slug #205 proposed,
+   * `/reports/value-history`, would have made the menu item itself a
+   * redirect. Visão geral left with #208, so `/reports` needs no row; the
+   * query string carries period, scope and grouping across.
+   */
+  {
+    source: '/reports/patrimonio',
+    destination: '/reports',
+    issue: 209,
+    example: {
+      from: '/reports/patrimonio?period=12m',
+      to: '/reports?period=12m',
+    },
+  },
 ];
 
 /** The shape `next.config.ts`'s `redirects()` returns. */

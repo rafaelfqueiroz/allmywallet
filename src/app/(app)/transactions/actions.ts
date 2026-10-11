@@ -571,6 +571,7 @@ async function resolveInstitution(
 function revalidateLedger(): void {
   revalidatePath('/transactions');
   revalidatePortfolio();
-  revalidatePath('/reports/patrimonio');
+  revalidatePath('/reports');
   revalidatePath('/reports/performance');
+  revalidatePath('/reports/earnings');
 }

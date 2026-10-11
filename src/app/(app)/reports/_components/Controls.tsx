@@ -6,7 +6,7 @@ import {
   type Period,
   type Scope,
 } from '@/core/reporting/ports';
-import { PARAM } from '@/lib/report-url-state';
+import { PARAM, toQueryString, type ReportUrlState } from '@/lib/report-url-state';
 import { Field } from '@/components/patterns/field';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 
 /**
- * SPEC-011 BR-011-01/02/03/05/06/11 — the control bar every report shares.
+ * SPEC-011 BR-011-01/03/05/06/11 — the filter bar every report shares.
  *
  * **One component, used by all four reports** (AC-1: "all four reports expose
  * identical period, scope and grouping controls"). DL-011-02: four separate
@@ -33,10 +33,29 @@ import { NativeSelect } from '@/components/ui/native-select';
  * This is also why the selects are `NativeSelect` rather than the Radix
  * `Select`: a GET form submits native controls and nothing else.
  *
+ * **No scope field** (SPEC-022 BR-022-17, DL-022-09). The scope is chosen in
+ * the page header, by the one `ScopeSelector` Portfólio uses too, and arrives
+ * here as the `wallet` parameter. The form carries it as a hidden field, or
+ * applying a period would drop the wallet the header selected.
+ *
+ * **Exportar CSV sits in the bar** (#209): the file is the grouped view for
+ * the period, scope and grouping this bar applied, so it belongs beside them.
+ *
  * AR-44: every string comes from `next-intl`; there is not one literal below.
  * AR-46 keeps the market vocabulary Portuguese — *patrimônio*, never "net
  * worth".
  */
+
+/**
+ * SPEC-011 BR-011-12 — the export URL for the view on screen. Serialised
+ * against the **same** default grouping the page parsed the URL with: passing
+ * `state.grouping` as the default would omit the parameter every time, and the
+ * file would silently fall back to the scope's default grouping rather than
+ * the one the table shows.
+ */
+export function reportExportHref(state: ReportUrlState, defaultGrouping: Grouping): string {
+  return `/api/reports/export${toQueryString(state, defaultGrouping)}`;
+}
 
 export interface ControlsProps {
   /** Where the form submits — each report passes its own route. */
@@ -48,16 +67,21 @@ export interface ControlsProps {
    * Report-specific state this shared form must carry across a submit — today
    * only SPEC-012's `earnings` (#63). Rendered as hidden inputs.
    *
-   * **This is not the hidden `scope` field the comment below warns about.**
-   * That one derived its value from the *current* scope while the user was
-   * changing it in the select beside it, so the form contradicted itself. A
-   * value here belongs to a control this form does not render, so carrying the
-   * current value forward is the only correct thing it can do — without it,
-   * changing the period silently reverts "sem proventos" to "com proventos".
+   * A value here belongs to a control this form does not render — like the
+   * header's wallet — so carrying the current value forward is the only
+   * correct thing it can do. Without it, changing the period silently reverts
+   * "sem proventos" to "com proventos". (A hidden field that *shadowed* a
+   * visible one was the defect: the old Escopo select posted `scope=` derived
+   * from the current scope beside the wallet being chosen, and the form
+   * contradicted itself.)
    */
   readonly hidden?: Readonly<Record<string, string>>;
-  /** The tenant's wallets, for the scope selector (BR-011-02). */
-  readonly wallets: readonly { readonly walletId: string; readonly name: string }[];
+  /**
+   * SPEC-011 BR-011-12 — the CSV of the view as applied, serialised by the
+   * page against the same default grouping it parsed the URL with. Absent
+   * when there is nothing to export (an empty scope, an invalid range).
+   */
+  readonly exportHref?: string | undefined;
 }
 
 export async function Controls({
@@ -65,8 +89,8 @@ export async function Controls({
   period,
   scope,
   grouping,
-  wallets,
   hidden,
+  exportHref,
 }: ControlsProps) {
   const t = await getTranslations('reports');
 
@@ -75,6 +99,10 @@ export async function Controls({
       {Object.entries(hidden ?? {}).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
+      {/* BR-022-17 — the header's scope, carried across a submit. */}
+      {scope.kind === 'wallet' && (
+        <input type="hidden" name={PARAM.wallet} value={scope.walletId} />
+      )}
       <Card>
         <CardContent>
           <Cluster gap="md" align="end">
@@ -110,38 +138,6 @@ export async function Controls({
               />
             </Field>
 
-            {/*
-          BR-011-02 — scope. The two URL parameters (`scope` and `wallet`) are
-          collapsed into one control here, because "portfolio or which wallet" is
-          one question to a user even though it is two values in the URL.
-        */}
-            <Field id="report-scope" label={t('scope.label')} width="lg">
-              <NativeSelect
-                name={PARAM.wallet}
-                defaultValue={scope.kind === 'wallet' ? scope.walletId : ''}
-              >
-                <option value="">{t('scope.portfolio')}</option>
-                {wallets.map((wallet) => (
-                  <option key={wallet.walletId} value={wallet.walletId}>
-                    {wallet.name}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            {/*
-          No hidden `scope` field. It used to be submitted here, with its value
-          derived from the *current* scope rather than from the select above —
-          so from portfolio scope this form posted `wallet=<uuid>&scope=`, and
-          `parseScope` returned portfolio because it tested `scope` before it
-          looked at the id. Choosing a wallet and pressing Aplicar reloaded the
-          whole portfolio, and no link in the app emitted `scope=wallet` either,
-          which left wallet scope reachable only by hand-typing a URL.
-
-          The comment that used to sit here already described the right
-          contract — "`scope=wallet` is implied by a non-empty wallet id" — so
-          the parser now implements it, and the select is the only thing that
-          says which scope this is.
-        */}
             {/* BR-011-03 — grouping. Independent of scope (DL-011-01). */}
             <Field id="report-grouping" label={t('grouping.label')} width="lg">
               <NativeSelect name={PARAM.grouping} defaultValue={grouping}>
@@ -154,6 +150,18 @@ export async function Controls({
             </Field>
 
             <Button type="submit">{t('apply')}</Button>
+
+            {/*
+              BR-011-12 / AC-011-11 — a link rather than a button: the
+              response is a file and the handler is a GET. It exports the
+              view as applied — the page's URL — not the fields as edited and
+              not yet applied.
+            */}
+            {exportHref !== undefined && (
+              <Button asChild variant="outline">
+                <a href={exportHref}>{t('export.csv')}</a>
+              </Button>
+            )}
           </Cluster>
         </CardContent>
       </Card>

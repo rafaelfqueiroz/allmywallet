@@ -1,15 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { Menu, PanelLeft, PanelLeftClose, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { NAV_ITEMS, type NavItem } from '@/components/patterns/nav-items';
+import { NAV_ITEMS, navHref, type NavItem } from '@/components/patterns/nav-items';
 import { isPathActive, navItemClassName } from '@/components/patterns/nav-link';
 
 /**
@@ -127,7 +127,30 @@ export function AppShell({
   );
 }
 
-function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+type NavListProps = { collapsed: boolean; onNavigate?: () => void };
+
+function NavList(props: NavListProps) {
+  // `useSearchParams` needs a Suspense boundary on a statically rendered page
+  // (see `RouteTabs`). The fallback is the same list with plain hrefs; the
+  // carried scope is filled in as soon as the client has the URL.
+  return (
+    <Suspense fallback={<Items {...props} params={NO_PARAMS} />}>
+      <ConnectedItems {...props} />
+    </Suspense>
+  );
+}
+
+const NO_PARAMS = { get: () => null } as const;
+
+function ConnectedItems(props: NavListProps) {
+  return <Items {...props} params={useSearchParams()} />;
+}
+
+function Items({
+  collapsed,
+  onNavigate,
+  params,
+}: NavListProps & { readonly params: { get(name: string): string | null } }) {
   const t = useTranslations('nav');
   const pathname = usePathname();
 
@@ -137,6 +160,8 @@ function NavList({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: (
         <NavLink
           key={item.href}
           item={item}
+          // BR-022-17 — the wallet scope survives Portfólio ⇄ Relatórios.
+          href={navHref(item, pathname, params)}
           label={t(item.labelKey)}
           // `/wallets/abc` should light up `/wallets`, but `/import` must not
           // light up because `/importar` shares a prefix — hence the boundary.
@@ -168,12 +193,14 @@ function Brand() {
 
 function NavLink({
   item,
+  href,
   label,
   active,
   collapsed,
   onNavigate,
 }: {
   item: NavItem;
+  href: string;
   label: string;
   active: boolean;
   collapsed: boolean;
@@ -183,7 +210,7 @@ function NavLink({
 
   return (
     <Link
-      href={item.href}
+      href={href}
       // `exactOptionalPropertyTypes` (DV-01) treats an explicit `undefined` as
       // different from an absent prop, so the handler is spread in rather than
       // passed as possibly-undefined.

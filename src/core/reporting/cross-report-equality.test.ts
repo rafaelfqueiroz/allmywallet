@@ -140,7 +140,6 @@ function bothReports(result: ReportQueryResult, grouping: Grouping) {
     }),
     composicao: buildCompositionReport({
       query: result,
-      opening: null,
       thresholdPct: THRESHOLD_PCT,
       quotedAt: null,
       delayMinutes: 30,

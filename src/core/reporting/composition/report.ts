@@ -1,8 +1,6 @@
 import type { ReportQueryResult } from '@/core/reporting/base-query';
-import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import { assetRows, sliceBreakdown } from '@/core/reporting/composition/breakdown';
 import { flagConcentration } from '@/core/reporting/composition/concentration';
-import { allocationDrift } from '@/core/reporting/composition/drift';
 import type { CompositionReport } from '@/core/reporting/composition/ports';
 
 /**
@@ -26,12 +24,6 @@ import type { CompositionReport } from '@/core/reporting/composition/ports';
  */
 export interface CompositionInput {
   readonly query: ReportQueryResult;
-  /**
-   * The snapshot immediately preceding the range, for BR-015-04's baseline.
-   * Portfolio grain like every other snapshot, and therefore ignored entirely
-   * at wallet scope.
-   */
-  readonly opening: DailyValuationSnapshot | null;
   /** SPEC-002 `reports.concentration_threshold_pct` — the user's number, not ours. */
   readonly thresholdPct: number;
   /** SPEC-008 BR-008-04 — the freshest quote instant behind these figures. */
@@ -65,12 +57,6 @@ export function buildCompositionReport(input: CompositionInput): CompositionRepo
     breakdown,
     rows,
     total: query.report.total,
-    drift: allocationDrift({
-      opening: input.opening,
-      closing: breakdown,
-      grouping: query.report.grouping,
-      scope: query.scope.scope,
-    }),
     concentration,
     quotes: {
       valuationAsOf: query.asOf,

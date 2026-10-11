@@ -3,6 +3,8 @@ import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import type { Grouping } from '@/core/reporting/ports';
 import type { ReportQueryResult } from '@/core/reporting/base-query';
 import { decomposeGrowth, investedFigures } from '@/core/reporting/portfolio-value/decomposition';
+import { sliceBreakdown } from '@/core/reporting/composition/breakdown';
+import { allocationDrift } from '@/core/reporting/composition/drift';
 import {
   granularityFor,
   monthlyContributions,
@@ -123,6 +125,7 @@ export function buildPortfolioValueReport({
       headline: { currentValue: report.total.value, invested: unavailable(reason) },
       monthlyContributions: unavailable(reason),
       stacked: { kind: 'unavailable', grouping, reason },
+      drift: unavailable(reason),
       freshness,
     };
   }
@@ -147,6 +150,17 @@ export function buildPortfolioValueReport({
     },
     monthlyContributions: available(monthlyContributions(snapshots, opening)),
     stacked: stackedSeries(snapshots, granularity, grouping),
+    /**
+     * SPEC-015 BR-015-04 — the closing end is the report's own breakdown, the
+     * same holdings the headline totals, so "no fim" agrees with the value
+     * line's live endpoint rather than with the last nightly snapshot.
+     */
+    drift: allocationDrift({
+      opening,
+      closing: sliceBreakdown(report),
+      grouping,
+      scope: scope.scope,
+    }),
     freshness,
   };
 }
