@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { revalidatePortfolio } from '@/app/(app)/portfolio/revalidate';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { BusinessDate } from '@/core/shared/clock';
@@ -569,7 +570,7 @@ async function resolveInstitution(
  */
 function revalidateLedger(): void {
   revalidatePath('/transactions');
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   revalidatePath('/reports/patrimonio');
   revalidatePath('/reports/performance');
 }

@@ -2,9 +2,9 @@ import {
   ArrowDownUp,
   Binoculars,
   ChartLine,
+  ChartPie,
   LayoutGrid,
   Upload,
-  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -30,7 +30,7 @@ import {
  */
 export type NavItem = {
   readonly href: string;
-  readonly labelKey: 'dashboard' | 'transactions' | 'wallets' | 'watch' | 'import' | 'reports';
+  readonly labelKey: 'dashboard' | 'portfolio' | 'transactions' | 'watch' | 'import' | 'reports';
   readonly icon: LucideIcon;
 };
 
@@ -41,7 +41,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
    * item is not the one the product opens on reads as an accident.
    */
   { href: '/dashboard', labelKey: 'dashboard', icon: LayoutGrid },
-  { href: '/wallets', labelKey: 'wallets', icon: Wallet },
+  /*
+   * SPEC-022 BR-022-01/02 (#208) — Portfólio replaces Carteiras (DS-26): the
+   * wallets' analysis is its Carteiras tab, and `/wallets` redirects there.
+   * The prototype's pie, because the destination answers "what do I hold".
+   */
+  { href: '/portfolio', labelKey: 'portfolio', icon: ChartPie },
   { href: '/reports', labelKey: 'reports', icon: ChartLine },
   { href: '/transactions', labelKey: 'transactions', icon: ArrowDownUp },
   { href: '/import', labelKey: 'import', icon: Upload },

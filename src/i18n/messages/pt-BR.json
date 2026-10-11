@@ -81,8 +81,8 @@
   },
   "nav": {
     "dashboard": "Painel",
+    "portfolio": "Portfólio",
     "transactions": "Transações",
-    "wallets": "Carteiras",
     "watch": "Observar preços",
     "import": "Importar",
     "reports": "Relatórios",
@@ -213,6 +213,58 @@
         "position_not_imported": "Sem a taxa contratada, este contrato não pode ser avaliado — e a aplicação ainda não aparece nas suas posições. Informe a taxa e importe a Movimentação que contém a aplicação para que ela entre no patrimônio.",
         "allocation_missing": "O valor já está no total acima; falta decidir de qual carteira ele faz parte."
       }
+    }
+  },
+  "portfolio": {
+    "title": "Portfólio",
+    "description": "O que você tem agora, pela última cotação.",
+    "signedOut": "Entre na sua conta para ver seu portfólio.",
+    "tabs": {
+      "label": "Portfólio",
+      "patrimonio": "Patrimônio",
+      "composicao": "Composição",
+      "carteiras": "Carteiras",
+      "metas": "Metas"
+    },
+    "patrimonio": {
+      "value": "Patrimônio",
+      "cost": "Valor aplicado",
+      "costHint": "Custo pelo preço médio",
+      "result": "Resultado não realizado",
+      "resultOnCost": "sobre o valor aplicado",
+      "resultNoRatio": "Sem valor aplicado para comparar",
+      "assets": "Ativos",
+      "assetsInClasses": "{classes, plural, one {em # classe} other {em # classes}}",
+      "byClass": "Por classe",
+      "classAssets": "{count, plural, one {# ativo} other {# ativos}}",
+      "byAsset": "Por ativo"
+    },
+    "wallets": {
+      "tabs": {
+        "label": "Carteiras",
+        "comparison": "Comparação",
+        "setup": "Configurar"
+      },
+      "comparisonTitle": "Comparação entre carteiras",
+      "comparisonDescription": "Valor, custo, resultado e participação de cada carteira no portfólio, pela última cotação. Não atribuído é o que nenhuma carteira tem.",
+      "columnWallet": "Carteira",
+      "columnAssets": "Ativos",
+      "columnValue": "Valor",
+      "columnCost": "Custo",
+      "columnResult": "Resultado",
+      "columnShare": "% do portfólio",
+      "total": "Total",
+      "noHoldings": "Nenhum ativo nesta carteira",
+      "empty": "Você ainda não criou nenhuma carteira.",
+      "unassignedTitle": "Não atribuído",
+      "unassignedDescription": "O que sobra de cada ativo depois de somar todas as carteiras — sempre visível, para que nada fique escondido.",
+      "unassignedEmpty": "Tudo o que você tem está atribuído a alguma carteira.",
+      "balanceTitle": "Balanceamento · {wallet}"
+    },
+    "goals": {
+      "title": "Metas · {wallet}",
+      "chooseTitle": "Metas por carteira",
+      "chooseDescription": "Cada meta pertence a uma carteira. Escolha uma para ver o progresso e criar metas."
     }
   },
   "common": {
@@ -425,19 +477,12 @@
     "namePlaceholder": "Aposentadoria",
     "descriptionLabel": "Descrição",
     "goalLabel": "Objetivo",
-    "goalHint": "O propósito desta carteira, em suas palavras. Metas com valor e progresso ficam na tela de Metas, dentro da carteira.",
+    "goalHint": "O propósito desta carteira, em suas palavras. Metas com valor e progresso ficam em Portfólio › Metas.",
     "colorLabel": "Cor",
     "create": "Criar carteira",
     "yourWallets": "Suas carteiras",
     "empty": "Você ainda não criou nenhuma carteira.",
-    "assets": "ativo(s)",
-    "totalQuantity": "Quantidade total",
-    "totalCostBasis": "Custo total",
-    "viewDetails": "Ver detalhes",
     "delete": "Excluir carteira",
-    "unassignedTitle": "Não atribuído",
-    "unassignedDescription": "O que sobra de cada ativo depois de somar todas as carteiras — sempre visível, para que nada fique escondido.",
-    "unassignedEmpty": "Tudo o que você tem está atribuído a alguma carteira.",
     "needsAttentionTitle": "Precisa de atenção",
     "needsAttentionDescription": "Compras que não puderam ser atribuídas automaticamente porque o destino era ambíguo.",
     "needsAttentionEmpty": "Nada esperando uma decisão no momento.",
@@ -447,17 +492,11 @@
     "resolveQuantity": "Quantidade",
     "resolveSubmit": "Atribuir",
     "chooseWallet": "Escolha uma carteira",
-    "comparisonTitle": "Comparação entre carteiras",
-    "comparisonDescription": "Quantidade e custo alocados, por carteira — a base disponível hoje; rentabilidade chega com os relatórios.",
-    "columnWallet": "Carteira",
-    "columnAssetCount": "Ativos",
     "columnQuantity": "Quantidade",
     "columnCostBasis": "Custo",
     "columnAsset": "Ativo",
-    "columnReason": "Motivo",
     "standingRuleTitle": "Regra permanente",
     "standingRuleDescription": "Direciona automaticamente as próximas compras deste ativo para uma carteira escolhida, mesmo com a posição dividida. Desativada por padrão.",
-    "standingRuleCurrentNone": "Nenhuma regra definida",
     "standingRuleCurrent": "Compras futuras vão para",
     "standingRuleSet": "Definir regra",
     "standingRuleClear": "Remover regra",
@@ -467,11 +506,11 @@
     "costBasisUnknown": "Custo não registrado",
     "editTitle": "Editar carteira",
     "save": "Salvar alterações",
-    "balanceLink": "Metas e desvio",
-    "goalsLink": "Objetivos",
+    "balanceLink": "Balanceamento",
+    "goalsLink": "Metas",
     "needsAttentionOutOfBalance": "{wallet}: ao menos um ativo passou da tolerância que você definiu.",
     "needsAttentionNeedsReview": "{wallet}: as metas não somam 100%.",
-    "needsAttentionBalanceOpen": "Ver metas e desvio",
+    "needsAttentionBalanceOpen": "Ver balanceamento",
     "markers": {
       "costEstimated": {
         "explanation": "O custo desta carteira inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
@@ -676,8 +715,8 @@
     },
     "scope": {
       "label": "Escopo",
-      "portfolio": "Carteira completa",
-      "walletNotFound": "Esta carteira não existe mais. Escolha outra ou volte à carteira completa."
+      "portfolio": "Todas as carteiras",
+      "walletNotFound": "Esta carteira não existe mais. Escolha outra carteira ou todas as carteiras no Escopo."
     },
     "grouping": {
       "label": "Agrupar por",
@@ -737,7 +776,6 @@
       "overview": "Visão geral",
       "patrimonio": "Patrimônio",
       "performance": "Rentabilidade",
-      "composicao": "Composição",
       "proventos": "Proventos"
     },
     "markers": {
@@ -1130,12 +1168,6 @@
   "composicao": {
     "title": "Composição",
     "description": "O que você tem, e como está distribuído.",
-    "freshness": {
-      "valuation": "Valores de {date}",
-      "quotedAt": "Cotação de {timestamp}",
-      "noQuote": "Nenhum destes valores vem de cotação de mercado.",
-      "delay": "Cotações com atraso de cerca de {minutes} minutos. Não são valores em tempo real."
-    },
     "chart": {
       "title": "Participação de cada grupo",
       "summary": "Participação de cada grupo no valor total do escopo selecionado. Os mesmos números estão na tabela abaixo.",

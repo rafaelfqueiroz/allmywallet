@@ -31,7 +31,6 @@ export async function ReportNav() {
         { href: '/reports', label: t('links.overview'), exact: true },
         { href: '/reports/patrimonio', label: t('links.patrimonio') },
         { href: '/reports/performance', label: t('links.performance') },
-        { href: '/reports/composition', label: t('links.composicao') },
         { href: '/reports/earnings', label: t('links.proventos') },
       ]}
     />

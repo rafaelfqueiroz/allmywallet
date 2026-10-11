@@ -108,7 +108,7 @@ test.describe('SPEC-018 — Observar preços', () => {
     // journey runs in both projects. Scoping to `row` passes on one and finds
     // nothing on the other. The tenant has exactly one watched asset, so the
     // pair of assertions below is unambiguous about which badge this is.
-    await page.goto('/reports/composition');
+    await page.goto('/portfolio/composition');
     //
     // `filter({ visible: true })` is load-bearing: the table and the cards are
     // both in the DOM at every width, with CSS deciding which one is shown, so

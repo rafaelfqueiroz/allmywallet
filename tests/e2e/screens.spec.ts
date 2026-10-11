@@ -25,7 +25,12 @@ const ROUTES = [
   // immediately above: the signed-in guide's own axe pass is
   // `onboarding.spec.ts`.
   '/onboarding',
-  '/wallets',
+  // SPEC-022 #208 — Portfólio's four tabs (BR-022-02).
+  '/portfolio',
+  '/portfolio/composition',
+  '/portfolio/wallets',
+  '/portfolio/wallets/setup',
+  '/portfolio/goals',
   // SPEC-006 #9 — added when the ledger got a surface. Both render their
   // signed-out state here, which is the state this suite runs in.
   '/transactions',
@@ -107,7 +112,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
  * smoke test that only checked the page loaded.
  */
 test('an empty screen explains itself rather than rendering nothing', async ({ page }) => {
-  await page.goto('/wallets');
+  await page.goto('/portfolio/wallets');
 
   await expect(page.getByRole('status').first()).toBeVisible();
 });

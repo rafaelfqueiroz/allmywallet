@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { revalidatePortfolio } from '@/app/(app)/portfolio/revalidate';
 import { z } from 'zod';
 import { AssetId, WalletId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
@@ -59,7 +60,7 @@ export async function createWalletAction(
 
   const result = await withWalletDeps(userId, (deps) => createWallet(deps, userId, parsed.data));
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   return IDLE;
 }
 
@@ -84,7 +85,7 @@ export async function updateWalletAction(
     updateWallet(deps, userId, { ...parsed.data, walletId }),
   );
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   revalidatePath(`/wallets/${walletId}`);
   return IDLE;
 }
@@ -102,7 +103,7 @@ export async function deleteWalletAction(
 
   const result = await withWalletDeps(userId, (deps) => deleteWallet(deps, userId, walletId));
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   return IDLE;
 }
 
@@ -149,7 +150,7 @@ export async function allocateAction(
   // BR-010-05 / AC-010-04: the sum invariant refused this write. The message
   // names the held quantity, so the user can see what the ceiling actually is.
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   revalidatePath(`/wallets/${parsed.data.walletId}`);
   return IDLE;
 }
@@ -173,7 +174,7 @@ export async function setStandingRuleAction(
     ),
   );
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   return IDLE;
 }
 
@@ -191,7 +192,7 @@ export async function clearStandingRuleAction(
     clearStandingRule(deps, userId, AssetId.of(parsed.data.assetId)),
   );
   if (isErr(result)) return failure(result.error);
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   return IDLE;
 }
 
@@ -251,8 +252,7 @@ export async function setWalletTargetsAction(
   );
   if (isErr(result)) return failure(result.error);
 
-  revalidatePath('/wallets');
+  revalidatePortfolio();
   revalidatePath(`/wallets/${walletId}`);
-  revalidatePath(`/wallets/${walletId}/balance`);
   return IDLE;
 }

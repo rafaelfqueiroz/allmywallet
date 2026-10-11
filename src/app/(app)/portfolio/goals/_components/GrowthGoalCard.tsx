@@ -6,9 +6,9 @@ import type { Money as MoneyValue } from '@/core/shared/money';
 import {
   GrowthChart,
   type GrowthChartPoint,
-} from '@/app/(app)/wallets/[walletId]/goals/_components/GrowthChart';
-import { AchievedMarker } from '@/app/(app)/wallets/[walletId]/goals/_components/AchievedMarker';
-import { EditDeleteForms } from '@/app/(app)/wallets/[walletId]/goals/_components/GoalEditDeleteForms';
+} from '@/app/(app)/portfolio/goals/_components/GrowthChart';
+import { AchievedMarker } from '@/app/(app)/portfolio/goals/_components/AchievedMarker';
+import { EditDeleteForms } from '@/app/(app)/portfolio/goals/_components/GoalEditDeleteForms';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';

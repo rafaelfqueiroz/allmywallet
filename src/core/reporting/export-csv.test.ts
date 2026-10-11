@@ -73,10 +73,25 @@ describe('exportGroupedCsv — BR-011-12', () => {
     const lines = exportGroupedCsv(report, LABELS, defaultGroupLabeller(LABELS, names)).split(
       '\r\n',
     );
-    // 600 + 1050.55 = 1650.55; quantity 60 + 1 = 61; cost 480 + 1000 = 1480.
+    // 600 + 1050.55 = 1650.55; cost 480 + 1000 = 1480. Quantity left empty:
+    // 60 ITSA4 + 1 CDB is not 61 of anything (SPEC-022 BR-022-34).
     // Neither holding is cost-estimated, so the total column reads "Não"
     // even though the (unrelated) valuation-estimate total reads "Sim".
-    expect(lines.at(-1)).toBe('Total,,,61,1650.55,1480,Não,Sim');
+    expect(lines.at(-1)).toBe('Total,,,,1650.55,1480,Não,Sim');
+  });
+
+  it('SPEC-022 BR-022-34 — totals the quantity only where every row is the same asset', () => {
+    // One asset split across a wallet and Não atribuído: 60 + 40 = 100 ITSA4.
+    const oneAsset = [
+      aHolding({ assetId: assetIdOf('1'), walletId: walletIdOf('1'), quantity: qty('60') }),
+      aHolding({ assetId: assetIdOf('1'), walletId: null, quantity: qty('40') }),
+    ];
+    const lines = exportGroupedCsv(
+      aggregate(oneAsset, 'wallet'),
+      LABELS,
+      defaultGroupLabeller(LABELS, names),
+    ).split('\r\n');
+    expect(lines.at(-1)?.split(',')[3]).toBe('100');
   });
 
   it('SPEC-007 BR-007-06 / DL-007-12 — the cost-estimate column is separate from the valuation-estimate one', () => {

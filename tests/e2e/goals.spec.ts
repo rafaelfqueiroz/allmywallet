@@ -190,7 +190,7 @@ test('a wallet shows its growth and earnings goals on separate charts (AC-1), re
     period: 'monthly',
   });
 
-  await page.goto(`/wallets/${walletId}/goals`);
+  await page.goto(`/portfolio/goals?wallet=${walletId}`);
   await expect(page.locator('#__next_error__')).toHaveCount(0);
 
   // AC-1: both goal names appear as their own titled section, each with a
@@ -246,7 +246,7 @@ test('switching the year redraws the earnings chart and leaves the growth chart 
 
   // Default view: the current year. Its total (200) is on the page, 2020's
   // (100) is not, and the growth figure (2.000,00) is present either way.
-  await page.goto(`/wallets/${walletId}/goals`);
+  await page.goto(`/portfolio/goals?wallet=${walletId}`);
   await expect(page.getByText(/R\$\s*2\.000,00/).first()).toBeVisible();
   await expect(page.getByText(/R\$\s*200,00/).first()).toBeVisible();
   await expect(page.getByText(/R\$\s*100,00/)).toHaveCount(0);
@@ -261,7 +261,7 @@ test('switching the year redraws the earnings chart and leaves the growth chart 
   for (const month of monthCellsNow) expect(month.startsWith(`${CURRENT_YEAR}-`)).toBe(true);
 
   // Switch to 2020 via the year selector.
-  await page.goto(`/wallets/${walletId}/goals?year=${OLD_YEAR}`);
+  await page.goto(`/portfolio/goals?wallet=${walletId}&year=${OLD_YEAR}`);
 
   // AC-7 — the earnings figure redrew: 2020's total (100) is now on the page
   // and this year's (200) is gone.

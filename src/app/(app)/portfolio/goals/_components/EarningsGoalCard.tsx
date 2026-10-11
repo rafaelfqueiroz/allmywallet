@@ -4,9 +4,9 @@ import type { EarningsMonth, EarningsProgress } from '@/core/goals/earnings-prog
 import {
   EarningsGoalChart,
   type EarningsChartPoint,
-} from '@/app/(app)/wallets/[walletId]/goals/_components/EarningsGoalChart';
-import { AchievedMarker } from '@/app/(app)/wallets/[walletId]/goals/_components/AchievedMarker';
-import { EditDeleteForms } from '@/app/(app)/wallets/[walletId]/goals/_components/GoalEditDeleteForms';
+} from '@/app/(app)/portfolio/goals/_components/EarningsGoalChart';
+import { AchievedMarker } from '@/app/(app)/portfolio/goals/_components/AchievedMarker';
+import { EditDeleteForms } from '@/app/(app)/portfolio/goals/_components/GoalEditDeleteForms';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
