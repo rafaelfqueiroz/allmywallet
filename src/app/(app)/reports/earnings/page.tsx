@@ -6,7 +6,7 @@ import type { AssetIncome, EarningsReport, MonthlyIncome } from '@/core/reportin
 import { fromSearchParams } from '@/lib/report-url-state';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
-import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
+import { ReportsFrame } from '@/app/(app)/reports/_components/ReportsFrame';
 import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
 import { tryUserId } from '@/lib/session';
 import { loadEarnings } from '@/app/(app)/reports/earnings/data';
@@ -60,7 +60,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell title={tp('title')}>
+      <PageShell title={t('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -88,15 +88,15 @@ export default async function EarningsPage({ searchParams }: PageProps) {
   });
 
   return (
-    <PageShell title={tp('title')} description={tp('description')}>
-      <ReportNav />
-
+    <ReportsFrame
+      wallets={wallets.map((wallet) => ({ walletId: wallet.walletId, name: wallet.name }))}
+      description={tp('description')}
+    >
       <Controls
         action="/reports/earnings"
         period={state.period}
         scope={state.scope}
         grouping={state.grouping}
-        wallets={wallets.map((wallet) => ({ walletId: wallet.walletId, name: wallet.name }))}
       />
 
       {!query.ok ? (
@@ -180,7 +180,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
           </Section>
         </Stack>
       )}
-    </PageShell>
+    </ReportsFrame>
   );
 }
 

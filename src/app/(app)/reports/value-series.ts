@@ -1,6 +1,6 @@
 import type { Money } from '@/core/shared/money';
 import type { ValuePoint } from '@/core/reporting/portfolio-value/ports';
-import type { ValueChartPoint } from '@/app/(app)/reports/patrimonio/_components/ValueChart';
+import type { ValueChartPoint } from '@/app/(app)/reports/_components/ValueChart';
 
 /**
  * SPEC-013 / SPEC-021 BR-021-31 — how a snapshot point is *presented*, kept

@@ -26,6 +26,11 @@ import { getTranslations } from 'next-intl/server';
  * the same `runReportQuery`, so period, scope and grouping cannot drift
  * between the table and the file — which is the whole point of exporting a
  * *grouped* view rather than a flat list.
+ *
+ * The file is the holdings by grouping at the end of the period, so the link
+ * sits on Relatórios › Evolução patrimonial only (#209) — value by grouping is
+ * that tab's subject. Rentabilidade and Proventos show neither positions nor
+ * cost, and a link there would download a report of something else.
  */
 export const dynamic = 'force-dynamic';
 

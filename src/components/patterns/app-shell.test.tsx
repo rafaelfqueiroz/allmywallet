@@ -3,10 +3,11 @@ import { AppShell } from '@/components/patterns/app-shell';
 import { NAV_ITEMS } from '@/components/patterns/nav-items';
 import { audit, render, screen, userEvent, waitFor, within } from '@/components/test-utils';
 
-const pathname = vi.hoisted(() => ({ current: '/portfolio' }));
+const pathname = vi.hoisted(() => ({ current: '/portfolio', search: '' }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathname.current,
+  useSearchParams: () => new URLSearchParams(pathname.search),
 }));
 
 describe('AppShell', () => {
@@ -160,5 +161,22 @@ describe('AppShell', () => {
       );
       expect(await audit(container)).toHaveNoViolations();
     });
+  });
+
+  // SPEC-022 BR-022-17 (#209) — `navHref` holds the rule; this is the wiring.
+  it('carries the wallet scope from Portfólio to Relatórios', () => {
+    pathname.current = '/portfolio/composition';
+    pathname.search = 'wallet=abc&grouping=sector';
+    render(<AppShell>conteúdo</AppShell>);
+    pathname.search = '';
+
+    expect(screen.getByRole('link', { name: 'Relatórios' })).toHaveAttribute(
+      'href',
+      '/reports?wallet=abc',
+    );
+    expect(screen.getByRole('link', { name: 'Transações' })).toHaveAttribute(
+      'href',
+      '/transactions',
+    );
   });
 });

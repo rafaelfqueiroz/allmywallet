@@ -9,7 +9,6 @@ import type {
   NeedsAttentionReason,
   ReportTotals,
 } from '@/core/reporting/ports';
-import type { SnapshotDerived } from '@/core/reporting/snapshot-derived';
 
 /**
  * SPEC-015 — the Composition report's domain types.
@@ -206,8 +205,6 @@ export interface CompositionReport {
    * with something to catch. The same figure SPEC-013's headline reports.
    */
   readonly total: ReportTotals;
-  /** BR-015-04 — snapshot-derived, so absent at wallet scope (ADR-002). */
-  readonly drift: SnapshotDerived<readonly AllocationShift[]>;
   readonly concentration: Concentration;
   readonly quotes: QuoteFreshness;
 }

@@ -230,6 +230,46 @@ describe('allocationDrift — BR-015-04: the shift itself', () => {
     expect(shifts.find((shift) => shift.key.id === 'stock')?.closing.toString()).toBe('0.9');
   });
 
+  it('closes a past period on its last snapshot, not on the live breakdown', () => {
+    /**
+     * #227 review. The report's holding set is today's positions priced at the
+     * period's close, so for a period that ended before a sale its shares are
+     * an allocation the portfolio never had. The closing snapshot is what the
+     * portfolio held then, and what the stacked series beside it draws.
+     */
+    const shifts = shiftsOf(
+      allocationDrift({
+        opening: aSnapshot([['stock', '1000']]),
+        closing: {
+          snapshot: aSnapshot([
+            ['stock', '500'],
+            ['fii', '500'],
+          ]),
+        },
+        grouping: 'asset_class',
+        scope: PORTFOLIO,
+      }),
+    );
+
+    expect(shifts.map((shift) => [shift.key.id, shift.closing.toString()])).toEqual([
+      ['fii', '0.5'],
+      ['stock', '0.5'],
+    ]);
+  });
+
+  it('refuses a past period with no snapshot inside it to close on', () => {
+    expect(
+      reasonOf(
+        allocationDrift({
+          opening: aSnapshot([['stock', '1000']]),
+          closing: { snapshot: null },
+          grouping: 'asset_class',
+          scope: PORTFOLIO,
+        }),
+      ),
+    ).toBe(HistoryUnavailable.NO_ALLOCATION_TO_COMPARE);
+  });
+
   it('marks the asset-class dimension so the UI labels it from the catalogue', () => {
     const shifts = shiftsOf(
       allocationDrift({

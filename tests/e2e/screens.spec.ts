@@ -37,7 +37,6 @@ const ROUTES = [
   '/transactions/new',
   '/import',
   '/reports',
-  '/reports/patrimonio',
   '/reports/performance',
   // SPEC-014 #17 — the fourth report.
   '/reports/earnings',

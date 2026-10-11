@@ -157,7 +157,7 @@ export default async function DashboardPage() {
           />
           <div>
             <Button asChild variant="link" size="sm">
-              <Link href="/reports/patrimonio">{t('value.reportLink')}</Link>
+              <Link href="/reports">{t('value.reportLink')}</Link>
             </Button>
           </div>
         </Stack>

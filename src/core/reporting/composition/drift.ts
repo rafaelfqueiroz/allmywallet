@@ -51,11 +51,28 @@ export interface DriftInput {
    * reads the same row.
    */
   readonly opening: DailyValuationSnapshot | null;
-  /** The report's own closing breakdown — the same slices the chart draws. */
-  readonly closing: readonly CompositionSlice[];
+  /**
+   * The closing end: the report's own breakdown when the period ends today —
+   * the same slices the chart draws — or, for a period that ended in the
+   * past, the last snapshot of the period.
+   */
+  readonly closing: ClosingAllocation;
   readonly grouping: Grouping;
   readonly scope: Scope;
 }
+
+/**
+ * Where the closing allocation comes from.
+ *
+ * **A period that ends today closes on the live breakdown** (see
+ * `allocationDrift`). **A period that ended in the past closes on its last
+ * snapshot**, because the report's holding set is today's positions priced at
+ * the period's close (`runReportQuery`): after selling every FII in October, a
+ * September report built from it would show the FIIs gone in September, while
+ * the stacked series beside it — read from snapshots — still shows them held.
+ */
+export type ClosingAllocation =
+  readonly CompositionSlice[] | { readonly snapshot: DailyValuationSnapshot | null };
 
 /**
  * BR-015-04 — the shift, or a named reason there is none.
@@ -77,7 +94,10 @@ export function allocationDrift(input: DriftInput): SnapshotDerived<readonly All
   }
 
   const openingShares = snapshotShares(input.opening);
-  const closingShares = closingSharesOf(input.closing);
+  const closingShares =
+    'snapshot' in input.closing
+      ? snapshotShares(input.closing.snapshot)
+      : closingSharesOf(input.closing);
   if (openingShares === null || closingShares === null) {
     return unavailable(HistoryUnavailable.NO_ALLOCATION_TO_COMPARE);
   }

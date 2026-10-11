@@ -175,11 +175,9 @@ async function query(grouping: Grouping, scope: Scope): Promise<ReportQueryResul
 }
 
 async function build(grouping: Grouping, scope: Scope = { kind: 'portfolio' }) {
-  const port = new FakeReportDataPort(fixture());
   const result = await query(grouping, scope);
   return buildCompositionReport({
     query: result,
-    opening: await port.findSnapshotBefore(result.range.from),
     thresholdPct: 20,
     quotedAt: new Date('2026-08-14T17:30:00Z'),
     delayMinutes: 30,
@@ -325,7 +323,6 @@ describe('SPEC-015 AC — BR-015-10 / DL-015-06: the cross-report equality', () 
 
     const composition = buildCompositionReport({
       query: result,
-      opening,
       thresholdPct: 20,
       quotedAt: null,
       delayMinutes: 30,
@@ -348,7 +345,6 @@ describe('SPEC-015 AC — BR-015-10 / DL-015-06: the cross-report equality', () 
 
     const composition = buildCompositionReport({
       query: result,
-      opening: null,
       thresholdPct: 20,
       quotedAt: null,
       delayMinutes: 30,
@@ -379,14 +375,11 @@ describe('SPEC-015 AC — BR-015-05: the concentration flag', () => {
   });
 
   it('changing the threshold changes which holdings flag', async () => {
-    const port = new FakeReportDataPort(fixture());
     const result = await query('asset_class', { kind: 'portfolio' });
-    const opening = await port.findSnapshotBefore(result.range.from);
 
     const at = (thresholdPct: number) =>
       buildCompositionReport({
         query: result,
-        opening,
         thresholdPct,
         quotedAt: null,
         delayMinutes: 30,
@@ -402,7 +395,13 @@ describe('SPEC-015 AC — BR-015-05: the concentration flag', () => {
   });
 });
 
-describe('SPEC-015 AC — BR-015-04: drift, and BR-015-13: quote freshness', () => {
+/**
+ * BR-015-04 is computed by `drift.ts` beside this report, but it is carried by
+ * SPEC-013's report since SPEC-022 BR-022-03 (#209): drift needs a period, and
+ * Composição moved to Portfólio, which takes none. The fixture is this file's,
+ * so the assertions stay here.
+ */
+describe('SPEC-015 AC — BR-015-04: drift, on Evolução patrimonial (SPEC-022 BR-022-03)', () => {
   it('reports the allocation shift by asset class against the baseline snapshot', async () => {
     /**
      * The baseline is 2026-01-05: 200 stock, 600 fii, 200 cdb of 1.000 —
@@ -429,12 +428,12 @@ describe('SPEC-015 AC — BR-015-04: drift, and BR-015-13: quote freshness', () 
     );
     if (!result.ok) throw new Error(result.error.code);
 
-    const report = buildCompositionReport({
+    const report = buildPortfolioValueReport({
       query: result.value,
       opening: await port.findSnapshotBefore(result.value.range.from),
-      thresholdPct: 20,
-      quotedAt: null,
-      delayMinutes: 30,
+      grouping: 'asset_class',
+      today: TODAY,
+      lastImportAt: null,
     });
 
     if (report.drift.kind === 'unavailable') throw new Error(report.drift.reason);
@@ -452,8 +451,65 @@ describe('SPEC-015 AC — BR-015-04: drift, and BR-015-13: quote freshness', () 
     expect(cdb?.change.isZero()).toBe(true);
   });
 
+  it("closes a period that ended in the past on that period's snapshot (#227 review)", async () => {
+    /**
+     * By 2026-07-31 the portfolio was half stock, half fii, and held no cdb.
+     * Today's positions priced at that date would say 40 / 40 / 20 — an
+     * allocation it did not have then. The drift must close on the snapshot,
+     * as the stacked series does: from 20 / 60 / 20 to 50 / 50 / 0.
+     */
+    const data = fixture();
+    const port = new FakeReportDataPort({
+      ...data,
+      snapshots: [
+        ...data.snapshots,
+        snapshot('2026-07-31', [
+          ['stock', '500'],
+          ['fii', '500'],
+        ]),
+      ],
+    });
+    const result = await runReportQuery(
+      port,
+      {
+        period: { kind: 'custom', from: day('2026-06-01'), to: day('2026-07-31') },
+        scope: { kind: 'portfolio' },
+        grouping: 'asset_class',
+        today: TODAY,
+      },
+      day('2026-01-01'),
+    );
+    if (!result.ok) throw new Error(result.error.code);
+
+    const report = buildPortfolioValueReport({
+      query: result.value,
+      opening: await port.findSnapshotBefore(result.value.range.from),
+      grouping: 'asset_class',
+      today: TODAY,
+      lastImportAt: null,
+    });
+
+    if (report.drift.kind === 'unavailable') throw new Error(report.drift.reason);
+    const closing = Object.fromEntries(
+      report.drift.value.map((shift) => [shift.key.id, shift.closing.toString()]),
+    );
+    expect(closing).toEqual({ cdb: '0', fii: '0.5', stock: '0.5' });
+    expect(report.drift.value.find((shift) => shift.key.id === 'cdb')?.change.toString()).toBe(
+      '-0.2',
+    );
+  });
+
   it('refuses drift at wallet scope rather than lending it the portfolio history', async () => {
-    const report = await build('asset_class', { kind: 'wallet', walletId: walletA });
+    const scope: Scope = { kind: 'wallet', walletId: walletA };
+    const port = new FakeReportDataPort(fixture());
+    const result = await query('asset_class', scope);
+    const report = buildPortfolioValueReport({
+      query: result,
+      opening: await port.findSnapshotBefore(result.range.from),
+      grouping: 'asset_class',
+      today: TODAY,
+      lastImportAt: null,
+    });
 
     expect(report.drift.kind).toBe('unavailable');
     expect(report.drift.kind === 'unavailable' && report.drift.reason).toBe(
@@ -461,6 +517,24 @@ describe('SPEC-015 AC — BR-015-04: drift, and BR-015-13: quote freshness', () 
     );
   });
 
+  it('refuses drift for a grouping the snapshot does not decompose', async () => {
+    const port = new FakeReportDataPort(fixture());
+    const result = await query('sector', { kind: 'portfolio' });
+    const report = buildPortfolioValueReport({
+      query: result,
+      opening: await port.findSnapshotBefore(result.range.from),
+      grouping: 'sector',
+      today: TODAY,
+      lastImportAt: null,
+    });
+
+    expect(report.drift.kind === 'unavailable' && report.drift.reason).toBe(
+      HistoryUnavailable.NO_HISTORICAL_BREAKDOWN,
+    );
+  });
+});
+
+describe('SPEC-015 AC — BR-015-13: quote freshness', () => {
   it('BR-015-13: carries the valuation date, the quote instant and the delay tier', async () => {
     const report = await build('asset_class');
 

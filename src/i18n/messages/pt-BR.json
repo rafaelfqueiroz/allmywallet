@@ -62,7 +62,7 @@
     },
     "cta": {
       "title": "Comece pelo seu último extrato",
-      "description": "Importe o arquivo da B3 e veja sua carteira consolidada em minutos.",
+      "description": "Importe o arquivo da B3 e veja seu portfólio consolidado em minutos.",
       "button": "Entrar com o Google"
     },
     "footer": {
@@ -395,7 +395,7 @@
         },
         "reminder_enabled": {
           "label": "Lembrete de importação",
-          "description": "Receber um aviso quando a carteira estiver desatualizada."
+          "description": "Receber um aviso quando o seu portfólio estiver desatualizado."
         }
       },
       "reports": {
@@ -519,12 +519,12 @@
   },
   "import": {
     "title": "Importar extratos B3",
-    "description": "Envie os extratos exportados da Área do Investidor da B3 — Movimentação, Negociação e Posição — para atualizar sua carteira.",
+    "description": "Envie os extratos exportados da Área do Investidor da B3 — Movimentação, Negociação e Posição — para atualizar seu portfólio.",
     "signedOut": "Entre na sua conta para importar extratos.",
     "guide": {
       "title": "Como exportar seus extratos da B3",
       "firstRunLead": "Você ainda não importou nada. São três arquivos, exportados da Área do Investidor da B3 — leva alguns minutos e só precisa ser feito uma vez para começar.",
-      "returningLead": "Os mesmos três arquivos, sempre que quiser atualizar sua carteira."
+      "returningLead": "Os mesmos três arquivos, sempre que quiser atualizar seu portfólio."
     },
     "staleness": {
       "neverTitle": "Você ainda não importou nenhum extrato",
@@ -699,7 +699,6 @@
   },
   "reports": {
     "title": "Relatórios",
-    "description": "Patrimônio, rentabilidade, proventos e composição da sua carteira.",
     "signedOut": "Entre na sua conta para ver seus relatórios.",
     "grossOfTax": "Renda fixa: valores brutos. Nenhum tributo é descontado — nem IR, nem IOF.",
     "period": {
@@ -714,8 +713,6 @@
       "invalidRange": "A data final não pode ser anterior à data inicial."
     },
     "scope": {
-      "label": "Escopo",
-      "portfolio": "Todas as carteiras",
       "walletNotFound": "Esta carteira não existe mais. Escolha outra carteira ou todas as carteiras no Escopo."
     },
     "grouping": {
@@ -773,8 +770,7 @@
     "apply": "Aplicar",
     "links": {
       "label": "Relatórios",
-      "overview": "Visão geral",
-      "patrimonio": "Patrimônio",
+      "patrimonio": "Evolução patrimonial",
       "performance": "Rentabilidade",
       "proventos": "Proventos"
     },
@@ -1027,7 +1023,7 @@
       "description": "Art. 7º da LGPD. Cada finalidade tem uma base própria.",
       "items": {
         "contract": {
-          "purpose": "Consolidar a sua carteira e gerar relatórios",
+          "purpose": "Consolidar o seu portfólio e gerar relatórios",
           "basis": "Execução de contrato (art. 7º, V)"
         },
         "legalObligation": {
@@ -1115,7 +1111,7 @@
     },
     "walletScope": {
       "title": "Não guardamos histórico separado por carteira",
-      "body": "O histórico diário do seu patrimônio é gravado para a carteira completa, sem separar quanto cabia a cada carteira em cada dia. E como a atribuição de ativos a carteiras não guarda histórico, aplicar a divisão de hoje aos dias passados reescreveria o passado toda vez que você remanejasse um ativo. Por isso o gráfico ao longo do tempo, a origem do crescimento, os aportes por mês, a composição histórica e o total investido não aparecem quando o escopo é uma carteira. Mostrar aqui os números da carteira completa daria um resultado que parece certo e não é. O patrimônio atual acima é só desta carteira e está correto."
+      "body": "O histórico diário do seu patrimônio é gravado para o portfólio inteiro, sem separar quanto cabia a cada carteira em cada dia. E como a atribuição de ativos a carteiras não guarda histórico, aplicar a divisão de hoje aos dias passados reescreveria o passado toda vez que você remanejasse um ativo. Por isso o gráfico ao longo do tempo, a origem do crescimento, os aportes por mês, a composição histórica e o total investido não aparecem quando o escopo é uma carteira. Mostrar aqui os números do portfólio inteiro daria um resultado que parece certo e não é. O patrimônio atual acima é só desta carteira e está correto."
     },
     "granularity": {
       "daily": "Um ponto por dia",
@@ -1163,6 +1159,20 @@
       "basis": "Origem do valor",
       "observed": "Preço observado",
       "gap": "Sem cotação de fechamento — valor do último fechamento disponível"
+    },
+    "drift": {
+      "title": "Variação da composição no período",
+      "description": "Como a participação de cada classe mudou entre o início e o fim do período. Um ativo pode valer mais e ainda assim perder participação.",
+      "caption": "Participação de cada classe de ativo no início e no fim do período",
+      "group": "Classe de ativo",
+      "opening": "No início do período",
+      "closing": "No fim do período",
+      "change": "Variação",
+      "unavailable": {
+        "WALLET_SCOPE_NOT_SNAPSHOTTED": "O histórico diário é gravado para o portfólio inteiro, sem separar quanto cabia a cada carteira em cada dia. Por isso a variação no período não aparece quando o escopo é uma carteira.",
+        "NO_HISTORICAL_BREAKDOWN": "O histórico de composição só existe por classe de ativo. Não há histórico guardado por {grouping}, então a variação no período não pode ser montada para o agrupamento selecionado.",
+        "NO_ALLOCATION_TO_COMPARE": "Não há registro diário antes deste período, ou dentro dele, para comparar o início com o fim. Escolha um período que comece depois do seu primeiro registro."
+      }
     }
   },
   "composicao": {
@@ -1211,28 +1221,14 @@
       "description": "Estes ativos passam de {threshold}% do escopo selecionado — o limite que você configurou. É uma marcação informativa: o AllMyWallet não dá recomendação de investimento e não sugere nenhuma ação sobre estes ativos.",
       "explanation": "Participação acima do limite de {threshold}% que você configurou. Marcação informativa, sem recomendação.",
       "none": "Nenhum ativo passa de {threshold}% do escopo selecionado."
-    },
-    "drift": {
-      "title": "Variação da composição no período",
-      "description": "Como a participação de cada classe mudou entre o início e o fim do período. Um ativo pode valer mais e ainda assim perder participação.",
-      "caption": "Participação de cada classe de ativo no início e no fim do período",
-      "group": "Classe de ativo",
-      "opening": "No início",
-      "closing": "Hoje",
-      "change": "Variação",
-      "unavailable": {
-        "WALLET_SCOPE_NOT_SNAPSHOTTED": "O histórico diário é gravado para a carteira completa, sem separar quanto cabia a cada carteira em cada dia. Por isso a variação no período não aparece quando o escopo é uma carteira. As participações acima são só desta carteira e estão corretas.",
-        "NO_HISTORICAL_BREAKDOWN": "O histórico de composição só existe por classe de ativo. Não há histórico guardado por {grouping}, então a variação no período não pode ser montada para o agrupamento selecionado.",
-        "NO_ALLOCATION_TO_COMPARE": "Não há nada registrado antes deste período para comparar. Escolha um período que comece depois do seu primeiro registro."
-      }
     }
   },
   "rentabilidade": {
     "title": "Rentabilidade",
-    "description": "Quanto sua carteira rendeu — e como isso se compara ao CDI, ao IPCA e ao Ibovespa.",
+    "description": "Quanto seu portfólio rendeu — e como isso se compara ao CDI, ao IPCA e ao Ibovespa.",
     "unavailable": "Indisponível",
     "headline": {
-      "twr": "Rentabilidade da carteira (TWR)",
+      "twr": "Rentabilidade do portfólio (TWR)",
       "twrHint": "Ignora o efeito de aportes e retiradas. É a comparação justa com um índice.",
       "xirr": "Rentabilidade do seu dinheiro (XIRR)",
       "xirrHint": "Leva em conta quanto você aportou e quando. É o que o seu dinheiro de fato rendeu.",
@@ -1242,10 +1238,10 @@
       "realReturnHint": "O que sobrou depois da inflação do período."
     },
     "walletScope": {
-      "explanation": "A rentabilidade no tempo (TWR e XIRR), a comparação com os índices e a simulação dos seus aportes em cada índice só existem para a carteira completa: o histórico diário é gravado sem separar quanto cabia a cada carteira em cada dia, e a atribuição de ativos a carteiras não guarda histórico. Usar aqui os números da carteira completa daria um resultado plausível e errado. A tabela “De onde veio a rentabilidade”, abaixo, é desta carteira e está correta."
+      "explanation": "A rentabilidade no tempo (TWR e XIRR), a comparação com os índices e a simulação dos seus aportes em cada índice só existem para o portfólio inteiro: o histórico diário é gravado sem separar quanto cabia a cada carteira em cada dia, e a atribuição de ativos a carteiras não guarda histórico. Usar aqui os números do portfólio inteiro daria um resultado plausível e errado. A tabela “De onde veio a rentabilidade”, abaixo, é desta carteira e está correta."
     },
     "divergence": {
-      "explanation": "As duas rentabilidades acima estão bem diferentes, e isso não é um erro. A TWR mede o desempenho da carteira ignorando quando você aportou; a XIRR mede o que o seu dinheiro rendeu, considerando as datas e os valores de cada aporte. Um aporte grande feito pouco antes de uma alta — ou de uma queda — separa as duas."
+      "explanation": "As duas rentabilidades acima estão bem diferentes, e isso não é um erro. A TWR mede o desempenho do portfólio ignorando quando você aportou; a XIRR mede o que o seu dinheiro rendeu, considerando as datas e os valores de cada aporte. Um aporte grande feito pouco antes de uma alta — ou de uma queda — separa as duas."
     },
     "dietz": {
       "disclosure": "Faltam dados diários em {count, plural, one {um trecho} other {# trechos}} do período. Nesses trechos a rentabilidade foi calculada por Dietz modificado, que é uma aproximação. O resto do período usa o cálculo diário."
@@ -1265,7 +1261,7 @@
     },
     "contribution": {
       "title": "De onde veio a rentabilidade",
-      "description": "Quanto cada grupo pesa na carteira, quanto rendeu por conta própria e quanto disso chegou ao total. As contribuições somam exatamente o total.",
+      "description": "Quanto cada grupo pesa no total, quanto rendeu por conta própria e quanto disso chegou ao total. As contribuições somam exatamente o total.",
       "columnWeight": "Peso",
       "columnOwnReturn": "Rendimento próprio",
       "columnContribution": "Contribuição",
@@ -1273,19 +1269,19 @@
       "unavailable": "Não há base suficiente no período para decompor a rentabilidade por grupo."
     },
     "chart": {
-      "title": "Sua carteira x os índices",
-      "description": "Todas as linhas começam em 100 no início do período. A distância entre elas é o quanto sua carteira ficou à frente ou atrás.",
-      "summary": "Comparação da rentabilidade acumulada da carteira com a dos índices selecionados. Os números exatos estão na tabela abaixo."
+      "title": "Seu portfólio x os índices",
+      "description": "Todas as linhas começam em 100 no início do período. A distância entre elas é o quanto seu portfólio ficou à frente ou atrás.",
+      "summary": "Comparação da rentabilidade acumulada do portfólio com a dos índices selecionados. Os números exatos estão na tabela abaixo."
     }
   },
   "proventos": {
     "title": "Proventos",
-    "description": "Quanto sua carteira paga — e se isso está crescendo.",
+    "description": "Quanto seu portfólio paga — e se isso está crescendo.",
     "headline": {
       "total": "Recebido no período",
       "totalHint": "Soma de dividendos, JCP, rendimentos, amortizações e leilões de frações, na data em que o dinheiro entrou.",
       "yieldOnCost": "Yield on cost",
-      "yieldOnCostHint": "O que os proventos do período representam sobre o custo da carteira — quanto o seu dinheiro rende, não quanto renderia para quem comprasse hoje.",
+      "yieldOnCostHint": "O que os proventos do período representam sobre o custo dos seus ativos — quanto o seu dinheiro rende, não quanto renderia para quem comprasse hoje.",
       "growth": "Variação sobre o período anterior",
       "growthHint": "Comparação com o período de mesma duração imediatamente anterior.",
       "growthUnavailable": "Sem período anterior com proventos para comparar.",
@@ -1329,7 +1325,7 @@
       "columnYieldOnCost": "Yield on cost",
       "columnCurrentYield": "Dividend yield (12m)",
       "caption": "Proventos por ativo, com os dois indicadores de rendimento",
-      "notHeld": "Não faz mais parte da carteira",
+      "notHeld": "Não faz mais parte do portfólio",
       "unavailable": "—"
     },
     "upcoming": {
@@ -1544,7 +1540,7 @@
   },
   "onboarding": {
     "title": "Primeiros passos",
-    "description": "O caminho do primeiro extrato até um painel com a sua carteira de verdade.",
+    "description": "O caminho do primeiro extrato até um painel com o seu portfólio de verdade.",
     "signedOut": "Entre na sua conta para ver o guia de primeiros passos.",
     "dismiss": "Dispensar o guia",
     "queueNote": "Itens que precisam da sua atenção — como uma taxa de renda fixa não informada — aparecem no painel, na lista \"Precisa da sua atenção\".",
@@ -1561,7 +1557,7 @@
       },
       "review": {
         "title": "3. Revise a prévia",
-        "description": "Confira o que foi lido antes de confirmar. Nada entra na sua carteira até você confirmar.",
+        "description": "Confira o que foi lido antes de confirmar. Nada entra no seu portfólio até você confirmar.",
         "processingLink": "Acompanhar processamento",
         "reviewLink": "Revisar e confirmar importação",
         "upcoming": "Disponível depois do envio."
@@ -1573,7 +1569,7 @@
       }
     },
     "done": {
-      "title": "Pronto — sua carteira está importada",
+      "title": "Pronto — seu portfólio está importado",
       "description": "A partir de agora, o painel mostra o seu patrimônio de verdade.",
       "dashboardLink": "Ir para o painel",
       "walletLink": "Criar minha primeira carteira (opcional)"
@@ -1593,7 +1589,7 @@
         "posicao": {
           "title": "{number}. Posição",
           "path": "Minha carteira → Investimentos → Posição → Baixar",
-          "why": "A foto da sua carteira na data. Serve para conferir se o que calculamos bate com o que a B3 diz que você tem."
+          "why": "A foto do seu portfólio na data. Serve para conferir se o que calculamos bate com o que a B3 diz que você tem."
         }
       },
       "earliestDate": "Escolha sempre a data inicial mais antiga que a B3 oferecer. Uma compra antiga que ficar de fora não aparece como um buraco no gráfico — ela deixa o preço médio daquele ativo errado, e só um novo extrato completo corrige isso.",

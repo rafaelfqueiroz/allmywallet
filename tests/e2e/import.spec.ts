@@ -167,7 +167,7 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
   // config read reached production returning 500 on every authenticated page:
   // signed out, that read never happens. This is the only place in the suite
   // where a report renders with a session and with data behind it.
-  for (const route of ['/reports', '/reports/patrimonio', '/reports/performance'] as const) {
+  for (const route of ['/reports', '/reports/performance', '/reports/earnings'] as const) {
     await page.goto(route);
     await expect(page.getByRole('heading', { level: 1 }), `${route} should render`).toBeVisible();
     // A Next error boundary renders its own document; this is what tells a

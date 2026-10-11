@@ -26,9 +26,8 @@ import { DrizzleReportDataPort } from '@/app/(app)/reports/data';
  * folded by SPEC-015's `buildCompositionReport`, exactly as before.
  *
  * Composition drift over time (BR-015-04) needs a period, so it moved to
- * Relatórios › Evolução patrimonial (BR-022-03, #209). The baseline it needs is
- * therefore not read here; `buildCompositionReport` reports the drift as
- * unavailable, and no Portfólio page renders it.
+ * Relatórios › Evolução patrimonial (BR-022-03, #209), with the baseline
+ * snapshot it needs; nothing here reads one.
  *
  * AR-31: pages are Server Components and call this, never `db`.
  *
@@ -107,7 +106,6 @@ export async function loadCurrentComposition(
       lastImportAt,
       report: buildCompositionReport({
         query: query.value,
-        opening: null,
         thresholdPct: thresholdPct.value,
         quotedAt: await port.latestQuoteAt(assetIds),
         delayMinutes: delayMinutes.value,

@@ -5,7 +5,8 @@ import { seedHoldings } from './support/holdings';
 
 /**
  * SPEC-011 AC-011-05 / BR-011-02 — **choosing a wallet in Escopo actually
- * scopes the report.**
+ * scopes the report.** Escopo is the header's scope selector since SPEC-022
+ * BR-022-17 (#209); the filter bar carries its choice as a hidden field.
  *
  * This exists because reading the code missed the defect for an entire
  * milestone. `Controls.tsx` submitted a hidden `scope` field derived from the
@@ -38,28 +39,29 @@ async function seedWallet(userId: string, name: string): Promise<string> {
   }
 }
 
-test('selecting a wallet in Escopo scopes the report to it', async ({ signedIn }) => {
+test('selecting a wallet in Escopo scopes the report, and Aplicar keeps it', async ({
+  signedIn,
+}) => {
   const { page, userId } = signedIn;
   const walletId = await seedWallet(userId, 'Aposentadoria');
   expect(walletId).not.toBe('');
 
   await page.goto('/reports');
 
-  // The scope control is one `<select>` — "portfolio or which wallet" is one
-  // question to a user, even though it was two values in the URL.
-  const scope = page.getByLabel(/escopo/i);
-  await expect(scope).toBeVisible();
-  await scope.selectOption(walletId);
+  const scope = page.locator('[data-slot="scope-selector"]');
+  await scope.click();
+  await page.getByRole('menuitemradio', { name: 'Aposentadoria' }).click();
+  await expect(page).toHaveURL(new RegExp(`wallet=${walletId}`));
 
+  // The old defect's shape: a submit of the filter bar dropping or
+  // contradicting the scope. After Aplicar, the URL still names the wallet.
   await page.getByRole('button', { name: /aplicar/i }).click();
-
-  // The whole defect in one assertion: after Aplicar, the URL names the wallet.
   await expect(page).toHaveURL(new RegExp(`wallet=${walletId}`));
 
   // And the page came back scoped rather than falling back to the portfolio —
-  // the select still holds the wallet, which it only can if the server parsed
-  // the scope it was sent.
-  await expect(page.getByLabel(/escopo/i)).toHaveValue(walletId);
+  // the selector names the wallet, which it only can if the server parsed the
+  // scope it was sent.
+  await expect(page.locator('[data-slot="scope-selector"]')).toContainText('Aposentadoria');
 
   // A wallet scope is a real screen, not an error page (SPEC-013: the
   // snapshot-derived figures are withheld, everything else still renders).
@@ -82,7 +84,7 @@ test('selecting a wallet in Escopo scopes the report to it', async ({ signedIn }
  * silently taking — is what exposed that, and a test that can pass without
  * reaching its subject is worse than none.
  *
- * This asserts the *route*. That the control on `/reports` carries the page's
+ * This asserts the *route*. That the control in the filter bar carries the page's
  * own period, scope and grouping into the URL is the other half, and it needed
  * a tenant with holdings — it is the last test in this file.
  */
@@ -104,43 +106,6 @@ test('the grouped report exports as CSV over HTTP', async ({ signedIn }) => {
 });
 
 /**
- * SPEC-011 BR-011-07 / AC-9 — **"a group row drills down to its constituent
- * assets without leaving the report."**
- *
- * The last word is the assertion that matters. `GroupRow` uses `<details>`
- * precisely so the constituents travel with the group and need no second
- * query, and the failure this guards against is someone replacing it with a
- * link to a filtered view: the user would still see the assets, the criterion
- * would look satisfied, and the drill-down would have become a navigation.
- *
- * Seeded, because a group has to exist to expand. An empty tenant renders the
- * empty state and this test would pass by asserting nothing.
- */
-test('expanding a group reveals its assets in place, without leaving the report', async ({
-  signedIn,
-}) => {
-  const { page, userId } = signedIn;
-  const [first] = await seedHoldings(userId, [
-    { code: 'PETRD', quantity: '100', averageCost: '30', price: '40' },
-  ]);
-  expect(first).toBeDefined();
-
-  await page.goto('/reports');
-  const url = page.url();
-
-  // The default grouping at portfolio scope is asset class (BR-011-04), so the
-  // seeded stock lands in one group and the ticker is its constituent.
-  const constituent = page.getByText(String(first), { exact: false });
-  await expect(constituent).toBeHidden();
-
-  await page.locator('details summary').first().click();
-
-  await expect(constituent.first()).toBeVisible();
-  // In place: same URL, no navigation, nothing re-fetched.
-  expect(page.url()).toBe(url);
-});
-
-/**
  * SPEC-011 BR-011-12 / AC-11, the half the CSV test above names as uncovered:
  * **the control carries the page's own period, scope and grouping into the
  * export.**
@@ -156,6 +121,11 @@ test('the export control carries the view on screen into the download', async ({
   await seedHoldings(userId, [{ code: 'ITSAD', quantity: '100', averageCost: '10', price: '10' }]);
 
   await page.goto('/reports');
+
+  // Exportar CSV sits in the filter bar (#209), beside the controls it exports.
+  await expect(
+    page.getByRole('form', { name: 'Relatórios' }).getByRole('link', { name: 'Exportar CSV' }),
+  ).toBeVisible();
 
   await page.getByLabel(/agrupar por/i).selectOption('institution');
   await page.getByRole('button', { name: /aplicar/i }).click();

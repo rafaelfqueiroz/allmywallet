@@ -219,3 +219,46 @@ test('is reachable from the Portfólio tabs, and no longer from Relatórios', as
     page.getByRole('navigation', { name: 'Relatórios' }).getByRole('link', { name: 'Composição' }),
   ).toHaveCount(0);
 });
+
+/**
+ * SPEC-011 BR-011-07 / AC-9 — **"a group row drills down to its constituent
+ * assets without leaving the report."**
+ *
+ * It lived on Relatórios' Visão geral until that tab left (SPEC-022 BR-022-03,
+ * #209); the grouped view is Portfólio › Composição's groups table now.
+ *
+ * The last word is the assertion that matters. `GroupsTable` uses `<details>`
+ * precisely so the constituents travel with the group and need no second
+ * query, and the failure this guards against is someone replacing it with a
+ * link to a filtered view: the user would still see the assets, the criterion
+ * would look satisfied, and the drill-down would have become a navigation.
+ *
+ * Seeded, because a group has to exist to expand. An empty tenant renders the
+ * empty state and this test would pass by asserting nothing.
+ */
+test('expanding a group reveals its assets in place, without leaving the report', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+  const [first] = await seedHoldings(userId, [
+    { code: 'PETRD', quantity: '100', averageCost: '30', price: '40' },
+  ]);
+  expect(first).toBeDefined();
+
+  await page.goto('/portfolio/composition');
+  const url = page.url();
+  // Scoped to the groups table: the holdings table below lists every asset
+  // on its own, so the page as a whole always shows the ticker.
+  const groups = page.getByRole('table', { name: 'Participação de cada grupo no valor total' });
+
+  // The default grouping at portfolio scope is asset class (BR-011-04), so the
+  // seeded stock lands in one group and the ticker is its constituent.
+  const constituent = groups.getByText(String(first), { exact: false });
+  await expect(constituent).toBeHidden();
+
+  await groups.locator('details summary').first().click();
+
+  await expect(constituent.first()).toBeVisible();
+  // In place: same URL, no navigation, nothing re-fetched.
+  expect(page.url()).toBe(url);
+});

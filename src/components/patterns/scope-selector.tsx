@@ -40,7 +40,7 @@ import {
  * wallet is gone (`reports.scope.walletNotFound`), and this control must not
  * invent a name for it.
  *
- * Rendered nowhere yet: destinations adopt it as their issues land.
+ * Rendered in Portfólio's and Relatórios' headers (#208, #209).
  */
 export type ScopeWallet = { readonly walletId: string; readonly name: string };
 

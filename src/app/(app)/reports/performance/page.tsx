@@ -14,7 +14,7 @@ import {
 import { fromSearchParams, withParam } from '@/lib/report-url-state';
 import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
-import { ReportNav } from '@/app/(app)/reports/_components/ReportNav';
+import { ReportsFrame } from '@/app/(app)/reports/_components/ReportsFrame';
 import { tryUserId } from '@/lib/session';
 import { comparisonSeries } from '@/core/reporting/performance/comparison-series';
 import { loadPerformance } from '@/app/(app)/reports/performance/data';
@@ -86,7 +86,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
 
   if (userId === undefined) {
     return (
-      <PageShell title={tr('title')}>
+      <PageShell title={t('title')}>
         <EmptyState title={t('signedOut')} />
       </PageShell>
     );
@@ -113,15 +113,15 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   const { wallets, report } = await loadPerformance(userId, { ...state, treatment });
 
   return (
-    <PageShell title={tr('title')} description={tr('description')}>
-      <ReportNav />
-
+    <ReportsFrame
+      wallets={wallets.map((wallet) => ({ walletId: wallet.walletId, name: wallet.name }))}
+      description={tr('description')}
+    >
       <Controls
         action="/reports/performance"
         period={state.period}
         scope={state.scope}
         grouping={state.grouping}
-        wallets={wallets.map((wallet) => ({ walletId: wallet.walletId, name: wallet.name }))}
         // #63: without this, changing the period reverts "sem proventos" to
         // "com proventos" — the control below would set a value the very next
         // submit threw away. Omitted at the default so URLs stay clean.
@@ -422,7 +422,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
           </Section>
         </Stack>
       )}
-    </PageShell>
+    </ReportsFrame>
   );
 }
 
