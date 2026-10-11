@@ -226,5 +226,11 @@ test.describe('Configurações › Importar', () => {
     await pager.getByRole('link', { name: 'Próxima' }).click();
     await expect(page).toHaveURL(/[?&]atencao=2#attention$/);
     await expect(attention.locator('tbody tr')).toHaveCount(10);
+
+    // Back to page 1 keeps the table's parameter (#230 review): Ignoradas is
+    // opened by it, and a page-1 link that dropped it would collapse the rows.
+    await pager.getByRole('link', { name: 'Anterior' }).click();
+    await expect(page).toHaveURL(/[?&]atencao=1#attention$/);
+    await expect(attention.locator('tbody tr')).toHaveCount(50);
   });
 });

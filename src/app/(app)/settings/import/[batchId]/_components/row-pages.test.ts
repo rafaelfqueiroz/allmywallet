@@ -27,8 +27,17 @@ describe('rowPageHref', () => {
     expect(rowPageHref('/settings/import/b', { ignored: 3 }, 'attention', 2)).toBe(
       '/settings/import/b?atencao=2&ignoradas=3#attention',
     );
-    expect(rowPageHref('/settings/import/b', { attention: 2 }, 'attention', 1)).toBe(
-      '/settings/import/b#attention',
+    expect(rowPageHref('/settings/import/b', { attention: 2, summary: 1 }, 'attention', 1)).toBe(
+      '/settings/import/b?atencao=1#attention',
     );
+  });
+
+  it('keeps the paged table on the URL at page 1, so Ignoradas stays open going back', () => {
+    const back = new URL(
+      rowPageHref('/settings/import/b', { ignored: 2 }, 'ignored', 1),
+      'http://localhost',
+    );
+    expect(back.searchParams.get('ignoradas')).toBe('1');
+    expect(back.hash).toBe('#ignored');
   });
 });

@@ -45,7 +45,14 @@ export function rowPage<T>(
   return { page, rows: items.slice((page - 1) * size, page * size), total: items.length };
 }
 
-/** The batch page's URL with one table moved to `page`, the others kept. */
+/**
+ * The batch page's URL with one table moved to `page`, the others kept.
+ *
+ * The table being paged keeps its parameter even on page 1: its presence is
+ * what says the user is working in that table — Ignoradas renders open on it
+ * (a closed disclosure would swallow the rows and the pager the user just
+ * clicked). The other tables drop a page-1 parameter, their default.
+ */
 export function rowPageHref(
   basePath: string,
   current: Readonly<Partial<Record<RowTable, number>>>,
@@ -55,7 +62,8 @@ export function rowPageHref(
   const params = new URLSearchParams();
   for (const key of Object.keys(ROW_PAGE_PARAMS) as RowTable[]) {
     const value = key === table ? page : current[key];
-    if (value !== undefined && value > 1) params.set(ROW_PAGE_PARAMS[key], String(value));
+    if (value === undefined || (key !== table && value <= 1)) continue;
+    params.set(ROW_PAGE_PARAMS[key], String(value));
   }
   const query = params.toString();
   return `${basePath}${query === '' ? '' : `?${query}`}#${table}`;
