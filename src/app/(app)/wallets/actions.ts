@@ -1,13 +1,14 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { revalidatePortfolio } from '@/app/(app)/portfolio/revalidate';
+import { revalidateWalletSettings, walletSettingsPath } from '@/app/(app)/settings/wallets/revalidate';
 import { z } from 'zod';
 import { AssetId, WalletId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
 import { normalizeDecimalInput } from '@/lib/decimal-input';
 import { isErr } from '@/core/shared/result';
-import { IDLE, INVALID_INPUT, failure, type ActionState } from '@/lib/action-state';
+import { IDLE, INVALID_INPUT, SAVED, failure, type ActionState } from '@/lib/action-state';
 import { allocateToWallet } from '@/core/wallets/allocate';
 import { createWallet } from '@/core/wallets/create-wallet';
 import { deleteWallet } from '@/core/wallets/delete-wallet';
@@ -43,8 +44,15 @@ const optionalText = z
   .optional()
   .transform((value) => (value === undefined || value.trim() === '' ? null : value));
 
+/**
+ * `name` accepts the empty string on purpose (BR-022-21): the wallet's own rule
+ * — a blank name is `INVALID_NAME` — is `createWallet`'s, and refusing it here
+ * would turn it into a generic "verifique os dados" banner instead of the
+ * message under the Nome field. The input keeps `required`, which is the
+ * convenience; this is the enforcement, and it is the use case's.
+ */
 const CreateWalletSchema = z.object({
-  name: z.string().min(1),
+  name: z.string(),
   description: optionalText,
   goal: optionalText,
   color: optionalText,
@@ -61,12 +69,16 @@ export async function createWalletAction(
   const result = await withWalletDeps(userId, (deps) => createWallet(deps, userId, parsed.data));
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  return IDLE;
+  revalidateWalletSettings(result.value.id);
+  // SPEC-022 BR-022-05: a created wallet lands on its own page, where the next
+  // step — assigning assets to it — is. `redirect` throws, so it stays last.
+  redirect(walletSettingsPath(result.value.id));
 }
 
 const UpdateWalletSchema = z.object({
   walletId: z.string(),
-  name: z.string().min(1).optional(),
+  // As on create: a blank name is refused by `updateWallet` with `INVALID_NAME`.
+  name: z.string().optional(),
   description: optionalText,
   goal: optionalText,
   color: optionalText,
@@ -86,8 +98,8 @@ export async function updateWalletAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  revalidatePath(`/wallets/${walletId}`);
-  return IDLE;
+  revalidateWalletSettings(walletId);
+  return SAVED;
 }
 
 const WalletIdSchema = z.object({ walletId: z.string() });
@@ -104,7 +116,9 @@ export async function deleteWalletAction(
   const result = await withWalletDeps(userId, (deps) => deleteWallet(deps, userId, walletId));
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  return IDLE;
+  revalidateWalletSettings(walletId);
+  // The wallet's own page no longer exists: back to the list.
+  redirect('/settings/wallets');
 }
 
 /**
@@ -151,7 +165,7 @@ export async function allocateAction(
   // names the held quantity, so the user can see what the ceiling actually is.
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  revalidatePath(`/wallets/${parsed.data.walletId}`);
+  revalidateWalletSettings(parsed.data.walletId);
   return IDLE;
 }
 
@@ -175,6 +189,7 @@ export async function setStandingRuleAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
+  revalidateWalletSettings(parsed.data.walletId);
   return IDLE;
 }
 
@@ -193,6 +208,9 @@ export async function clearStandingRuleAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
+  // A rule is shown on the page of the wallet it points at, which this action
+  // does not know: every wallet page is refreshed.
+  revalidateWalletSettings();
   return IDLE;
 }
 
@@ -253,6 +271,6 @@ export async function setWalletTargetsAction(
   if (isErr(result)) return failure(result.error);
 
   revalidatePortfolio();
-  revalidatePath(`/wallets/${walletId}`);
+  revalidateWalletSettings(walletId);
   return IDLE;
 }
