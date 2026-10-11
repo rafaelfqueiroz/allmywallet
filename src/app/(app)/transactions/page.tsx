@@ -5,8 +5,7 @@ import { listTransactions } from '@/core/ledger/list-transactions';
 import type { TransactionListItem } from '@/core/ledger/ports';
 import { formatBusinessDate } from '@/i18n/format';
 import {
-  PAGE_SIZE,
-  PAGE_SIZE_OPTIONS,
+  LEDGER_TABLE_URL_OPTIONS,
   PARAM,
   fromSearchParams,
   hasActiveFilters,
@@ -65,6 +64,8 @@ import { importBatchPath } from '@/app/(app)/import/paths';
  * and `(app)/wallets`).
  */
 export const dynamic = 'force-dynamic';
+
+const DEFAULT_SORT = LEDGER_TABLE_URL_OPTIONS.defaults.sort ?? { id: 'tradeDate', desc: true };
 
 interface PageProps {
   readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -166,8 +167,10 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
           <LedgerTable
             rows={await Promise.all(result.value.items.map(ledgerRow))}
             total={result.value.total}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-            defaultPageSize={PAGE_SIZE}
+            // One set of options, so the table writes what this page parses.
+            pageSizeOptions={LEDGER_TABLE_URL_OPTIONS.pageSizeOptions}
+            defaultPageSize={LEDGER_TABLE_URL_OPTIONS.defaults.pageSize}
+            defaultSort={DEFAULT_SORT}
             toolbar={
               <Controls
                 from={params.get(PARAM.from) ?? ''}

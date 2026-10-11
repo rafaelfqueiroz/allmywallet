@@ -697,6 +697,26 @@ test.describe('the ledger table', () => {
     await expect(page.getByLabel('Itens por página')).toHaveValue('25');
   });
 
+  /**
+   * #214 review F1 — a sort or a page keeps the ledger mounted. A tick belongs
+   * to its transaction, so it must not reappear on whichever row now sits in
+   * the same place: "Excluir selecionadas" deletes without asking again.
+   */
+  test('a ticked row does not follow its position to the next page', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedThirty(userId);
+
+    await page.goto('/transactions?size=25');
+    await ledgerRows(page).nth(2).getByRole('checkbox').check();
+    await page
+      .getByRole('navigation', { name: 'Paginação' })
+      .getByRole('link', { name: 'Página 2' })
+      .click();
+    await expect(page).toHaveURL(/[?&]page=2(&|$)/);
+    await expect(ledgerRows(page)).toHaveCount(5);
+    await expect(page.locator('input[name="selected"]:checked')).toHaveCount(0);
+  });
+
   test('a page past the end of the ledger shows its last page', async ({ signedIn }) => {
     const { page, userId } = signedIn;
     await seedThirty(userId);

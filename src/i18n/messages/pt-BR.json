@@ -1003,7 +1003,9 @@
       "submitCreate": "Registrar transação",
       "submitEdit": "Salvar alterações",
       "submitting": "Salvando…",
-      "cancel": "Cancelar"
+      "cancel": "Cancelar",
+      "invalidDecimal": "Informe um número, como 32,15.",
+      "invalidDate": "Informe uma data válida."
     },
     "delete": {
       "title": "Excluir transação",

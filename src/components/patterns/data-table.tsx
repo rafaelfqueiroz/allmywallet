@@ -188,7 +188,16 @@ export type DataTableProps<TData> = {
    * by the server, and `total` is how many rows match in all. `filter` does
    * not apply — the search belongs to the query, so it lives in `toolbar`.
    */
-  server?: { readonly total: number };
+  server?: {
+    readonly total: number;
+    /**
+     * A row's stable identity. Required here: a sort or a page is a
+     * navigation that keeps this component mounted, so rows keyed by position
+     * would hand a ticked checkbox in row 3 to whatever transaction is row 3
+     * next (#214 review F1).
+     */
+    readonly rowId: (row: TData) => string;
+  };
   className?: string;
 };
 
@@ -336,7 +345,10 @@ function ServerDataTable<TData>({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const state = parseTableUrlState(searchParams, options);
+  const parsed = parseTableUrlState(searchParams, options);
+  // A server-paged list is always in some order — its query's default — so a
+  // cleared sort (`sort=`) shows that default rather than no indicator.
+  const state = parsed.sort === null ? { ...parsed, sort: options.defaults.sort } : parsed;
 
   const hrefFor: HrefFor = (next) => {
     const query = writeTableUrlState(searchParams.toString(), next, options);
@@ -424,6 +436,7 @@ function DataTableView<TData>({
      * guard.
      */
     autoResetAll: false,
+    ...(server ? { getRowId: server.rowId } : {}),
     // Server mode: the rows arrive in the order the query chose, and the
     // sort state only drives the headers' indicators.
     manualSorting: server !== undefined,

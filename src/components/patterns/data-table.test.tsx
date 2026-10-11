@@ -583,7 +583,7 @@ describe('DataTable — server-paged', () => {
       <DataTable
         columns={entryColumns}
         data={data}
-        server={{ total }}
+        server={{ total, rowId: (row) => row.id }}
         caption="Transações"
         sortable
         initialSorting={[{ id: 'code', desc: true }]}
@@ -688,6 +688,57 @@ describe('DataTable — server-paged', () => {
     expect(screen.getByText('barra de filtros')).toBeInTheDocument();
     expect(screen.getByText('Nada com esses filtros')).toBeInTheDocument();
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  /** #214 review F1 — a navigation keeps this mounted; a tick must not move rows. */
+  it('does not carry a ticked row onto the transaction that takes its place', async () => {
+    const user = userEvent.setup();
+    const withBox: ColumnDef<Entry, unknown>[] = [
+      {
+        id: 'select',
+        header: 'Selecionar',
+        cell: ({ row }) => (
+          <input
+            type="checkbox"
+            name="selected"
+            value={row.original.id}
+            aria-label={row.original.code}
+          />
+        ),
+      },
+      ...entryColumns,
+    ];
+    const table = (data: Entry[]) => (
+      <DataTable
+        columns={withBox}
+        data={data}
+        server={{ total: 4, rowId: (row) => row.id }}
+        caption="Transações"
+        pageSizeOptions={[2]}
+        defaultPageSize={2}
+      />
+    );
+    const { rerender } = render(table(page2));
+    await user.click(within(screen.getByRole('table')).getByRole('checkbox', { name: 'ABEV3' }));
+
+    rerender(
+      table([
+        { id: 'c', code: 'ITSA4', total: '5' },
+        { id: 'd', code: 'WEGE3', total: '1' },
+      ]),
+    );
+    const ticked = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[name="selected"]:checked'),
+    ).map((box) => box.value);
+    expect(ticked).toEqual([]);
+  });
+
+  it('shows the default order when the sort was cleared, since the query has one', () => {
+    nav.search = 'sort=';
+    render(<Ledger />);
+    expect(
+      within(screen.getByRole('table')).getByRole('columnheader', { name: 'Ordenar por Ativo' }),
+    ).toHaveAttribute('aria-sort', 'descending');
   });
 
   it('has no axe violations', async () => {

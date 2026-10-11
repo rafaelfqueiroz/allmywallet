@@ -68,6 +68,8 @@ export interface LedgerTableProps {
   readonly total: number;
   readonly pageSizeOptions: readonly number[];
   readonly defaultPageSize: number;
+  /** The order the query opens on — the server's, so the arrow cannot disagree with it. */
+  readonly defaultSort: { readonly id: string; readonly desc: boolean };
   /** The filter bar (BR-006-08/09). Stays visible when nothing matches. */
   readonly toolbar: ReactNode;
   /** An empty ledger, before any filter. Replaces the table and the toolbar. */
@@ -81,6 +83,7 @@ export function LedgerTable({
   total,
   pageSizeOptions,
   defaultPageSize,
+  defaultSort,
   toolbar,
   empty,
   noResults,
@@ -109,10 +112,10 @@ export function LedgerTable({
       columns={columns}
       // TanStack wants a mutable array; the rows are never mutated.
       data={rows as LedgerRow[]}
-      server={{ total }}
+      server={{ total, rowId: (row) => row.id }}
       caption={t('table.caption')}
       sortable
-      initialSorting={[{ id: 'tradeDate', desc: true }]}
+      initialSorting={[defaultSort]}
       sortLabel={(column) => t('table.sortBy', { column })}
       sortControlLabels={{
         field: t('table.sortField'),

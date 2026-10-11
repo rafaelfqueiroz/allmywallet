@@ -3,7 +3,7 @@ import { USER_EDITABLE_TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { LedgerErrorCode } from '@/core/ledger/errors';
 import { IDLE, failure, type ActionState } from '@/lib/action-state';
 import { domainError } from '@/core/shared/domain-error';
-import { audit, render, screen, userEvent } from '@/components/test-utils';
+import { audit, render, screen, userEvent, waitFor } from '@/components/test-utils';
 import { TransactionForm, type TransactionFormProps } from './TransactionForm';
 
 const props: TransactionFormProps = {
@@ -77,6 +77,27 @@ describe('TransactionForm', () => {
     expect(container.querySelector('[data-slot="error-state"]')).toBeNull();
     expect(screen.getByLabelText('Quantidade')).toHaveValue('10');
     expect(screen.getByLabelText('Preço unitário')).toHaveValue('32,15');
+  });
+
+  it('puts an unreadable value under its field, and moves focus there', async () => {
+    const user = userEvent.setup();
+    const refuse = async (): Promise<ActionState> => ({
+      status: 'error',
+      code: 'VALIDATION_FAILED',
+      context: { field: 'quantity' },
+    });
+    render(<TransactionForm {...props} action={refuse} />);
+
+    await user.type(screen.getByLabelText('Data da operação'), '2026-04-01');
+    await user.type(screen.getByLabelText('Quantidade'), '1,2,3');
+    await user.type(screen.getByLabelText('Preço unitário'), '1');
+    await user.click(screen.getByRole('button', { name: 'Registrar transação' }));
+
+    const quantity = await screen.findByLabelText('Quantidade');
+    await waitFor(() => expect(quantity).toHaveFocus());
+    expect(quantity).toHaveAttribute('aria-invalid', 'true');
+    expect(quantity).toHaveAccessibleDescription('Informe um número, como 32,15.');
+    expect(quantity).toHaveValue('1,2,3');
   });
 
   it('keeps a refusal about the whole transaction in the banner', async () => {

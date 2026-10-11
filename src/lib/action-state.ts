@@ -85,6 +85,23 @@ export const INVALID_INPUT: ActionState = {
  * two components that render an `ActionState` reading the same way — and a
  * `null` renders as an empty span rather than the literal text `null`.
  */
+/**
+ * SPEC-022 BR-022-21 — input the action could not read, naming the field it
+ * came from (the first issue's path), so the form can put the refusal under
+ * that field instead of in a banner that names nothing. `field` is empty when
+ * the issue has no path; the form then falls back to the banner.
+ */
+export function invalidField(error: {
+  readonly issues: readonly { readonly path: readonly PropertyKey[] }[];
+}): ActionState {
+  const first = error.issues[0]?.path[0];
+  return {
+    status: 'error',
+    code: SharedErrorCode.VALIDATION_FAILED,
+    context: { field: typeof first === 'string' ? first : '' },
+  };
+}
+
 export function messageValues(
   context: Readonly<Record<string, ErrorContextValue>>,
 ): Record<string, string | number> {

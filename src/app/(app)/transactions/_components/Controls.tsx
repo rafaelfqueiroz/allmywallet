@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import { TRANSACTION_STATUSES, TRANSACTION_TYPES } from '@/core/ledger/transaction';
 import { PARAM } from '@/lib/transactions-url-state';
-import { tableParamNames } from '@/lib/table-url-state';
+import { MAX_QUERY_LENGTH, tableParamNames } from '@/lib/table-url-state';
 import {
   ASSET_CLASSES,
   type AssetOption,
@@ -104,6 +104,9 @@ export async function Controls({
             type="search"
             name={PARAM.q}
             defaultValue={search}
+            // The table rewrites `q` at this length into its sort and page
+            // links; a longer search would widen on page 2.
+            maxLength={MAX_QUERY_LENGTH}
             placeholder={t('filters.searchPlaceholder')}
           />
         </Field>
