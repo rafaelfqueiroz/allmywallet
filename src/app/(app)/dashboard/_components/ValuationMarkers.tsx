@@ -26,9 +26,10 @@ import { InfoTip } from '@/components/patterns/info-tip';
  * It used to be the badge's `title`, which a phone never shows and a keyboard
  * never reaches — so the one sentence that reconciles "Preço mais antigo"
  * with the freshest quote in the page header was out of reach for exactly the
- * users most likely to read both. The explanation is also the badge's
+ * users most likely to read both. The explanation is also the icon's
  * accessible description (`aria-describedby` on a `hidden` copy), so a screen
- * reader hears it with the badge rather than only when the tip is opened.
+ * reader hears it on reaching the icon rather than only when the tip opens —
+ * on the badge it would sit on plain text, which browse mode does not read.
  */
 export async function ValuationMarkers({ markers }: { readonly markers: Markers }) {
   const t = await getTranslations('dashboard.markers');
@@ -65,10 +66,11 @@ export async function ValuationMarkers({ markers }: { readonly markers: Markers 
 
   if (markers.carriedForward && markers.oldestPriceDate !== null) {
     // BR-008-24 — "never shown as current when it is not". The date is the
-    // *oldest* behind the total, because the quote instant in the page header
-    // is already the freshest and the two together are what make the gap
-    // visible. Worded as "mais antigo" so it reads as the other end of a
-    // range rather than as a contradiction of the header (#213).
+    // *oldest* behind the total, because the intraday quote instant in the
+    // page header is the freshest and the two together are what make the gap
+    // visible. Worded as "mais antigo" so it reads as the other end of a range
+    // rather than as a contradiction of the header (#213); the explanation
+    // does not point at the header, which may name no quote at all.
     const date = formatBusinessDate(markers.oldestPriceDate);
     badges.push(
       <Marker
@@ -104,10 +106,10 @@ function Marker({
 }) {
   return (
     <Cluster gap="xs" align="center" data-slot="valuation-marker">
-      <Badge id={`${id}-badge`} variant={variant} aria-describedby={`${id}-explanation`}>
+      <Badge id={`${id}-badge`} variant={variant}>
         {label}
       </Badge>
-      <InfoTip id={id} label={label} labelledBy={`${id}-badge`}>
+      <InfoTip id={id} label={label} labelledBy={`${id}-badge`} describedBy={`${id}-explanation`}>
         {explanation}
       </InfoTip>
       <span id={`${id}-explanation`} hidden>

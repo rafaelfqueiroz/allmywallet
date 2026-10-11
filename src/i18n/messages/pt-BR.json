@@ -126,7 +126,6 @@
   },
   "dashboard": {
     "title": "Painel",
-    "description": "Quanto você tem, o que precisa da sua atenção e de quando são os dados.",
     "signedOut": "Entre na sua conta para ver seu painel.",
     "value": {
       "label": "Patrimônio",
@@ -143,12 +142,12 @@
       },
       "carried": {
         "badge": "Preço mais antigo: {date}",
-        "explanation": "Os valores são de hoje, e a cotação no topo da página é a mais recente que temos. Parte dos preços, porém, é o fechamento de um pregão anterior — o mais antigo deles é de {date}: fim de semana, feriado, negociação suspensa, ou uma cotação que o orçamento do provedor não pôde atualizar. São preços reais e observados; só não são os de hoje."
+        "explanation": "Os valores são de hoje, mas parte dos preços é o fechamento de um pregão anterior — o mais antigo deles é de {date}: fim de semana, feriado, negociação suspensa, ou uma cotação que o orçamento do provedor não pôde atualizar. São preços reais e observados; só não são os de hoje."
       }
     },
     "freshness": {
       "valuation": "Valores de {date}",
-      "quotedAt": "Cotação mais recente: {timestamp}",
+      "quotedAt": "Cotação intradiária mais recente: {timestamp}",
       "noQuote": "Nenhuma cotação de mercado por trás destes valores",
       "delay": "Atraso de até {minutes} minutos — nunca em tempo real",
       "lastImport": "Última importação: {date}",

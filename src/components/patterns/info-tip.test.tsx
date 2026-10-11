@@ -46,6 +46,23 @@ describe('InfoTip', () => {
     expect(screen.getByRole('button')).toHaveAccessibleName(/Instruções sobre.*Tolerância/);
   });
 
+  // #213 — a tip beside something that is not a control describes the icon.
+  it('takes an accessible description when given one', () => {
+    render(
+      <>
+        <InfoTip id="m" label="Preço mais antigo" labelledBy="m-badge" describedBy="m-text">
+          {TEXT}
+        </InfoTip>
+        <span id="m-text" hidden>
+          {TEXT}
+        </span>
+      </>,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Instruções sobre Preço mais antigo' }),
+    ).toHaveAccessibleDescription(TEXT);
+  });
+
   it('is closed until asked', () => {
     render(<Example />);
     expect(screen.queryByText(TEXT)).not.toBeInTheDocument();

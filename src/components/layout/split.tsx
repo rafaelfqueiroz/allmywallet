@@ -41,8 +41,10 @@ const splitVariants = cva('grid grid-cols-1 items-start', {
        * own — the Painel's "Precisa da sua atenção" beside the B3 and watch
        * cards (#213, the prototype's 3:2). `end`'s fixed 20rem is a form's
        * width; a list row with a figure, a badge and a link needs more.
+       * `@3xl` (48rem of content) splits from a ~1070px viewport beside the
+       * sidebar, so a laptop at 125% zoom still gets two columns.
        */
-      aside: '@4xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]',
+      aside: '@3xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]',
     },
     gap: {
       md: 'gap-4',

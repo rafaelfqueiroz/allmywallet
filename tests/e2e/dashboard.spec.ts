@@ -452,15 +452,58 @@ test.describe('the dashboard', () => {
 
     await page.goto('/dashboard');
 
-    await expect(page.getByText(/Cotação mais recente: \d{2}\/\d{2}\/\d{4}/)).toBeVisible();
+    await expect(
+      page.getByText(/Cotação intradiária mais recente: \d{2}\/\d{2}\/\d{4}/),
+    ).toBeVisible();
     const marker = page.getByText(/^Preço mais antigo: \d{2}\/\d{2}\/\d{4}$/);
     await expect(marker).toBeVisible();
 
     const tip = page.getByRole('button', { name: /^Instruções sobre Preço mais antigo/ });
+    // Read on reaching the icon, not only once the tip is open (#213 review).
+    await expect(tip).toHaveAccessibleDescription(/o mais antigo deles é de/);
     await tip.focus();
-    await expect(page.getByRole('note')).toContainText(
-      'a cotação no topo da página é a mais recente',
-    );
+    await expect(page.getByRole('note')).toContainText('o mais antigo deles é de');
+  });
+
+  /**
+   * #213 — on the owner's screen the links sat indented off their headings'
+   * left edge and every section stacked on one long page. Measured, not
+   * inferred from class names: a card's link starts where its heading starts,
+   * and from a desktop width the queue and the B3 card share a row.
+   */
+  test('links start at their heading’s edge, and the cards sit in two columns', async ({
+    signedIn,
+    viewport,
+  }) => {
+    const { page, userId } = signedIn;
+    await seedHoldings(userId, [
+      { code: 'LAY', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedCommittedPosicaoBatch(userId, []);
+
+    await page.goto('/dashboard');
+
+    const left = async (locator: ReturnType<typeof page.locator>) =>
+      (await locator.boundingBox())?.x ?? Number.NaN;
+
+    const stat = page
+      .locator('[data-slot="stat-card"]')
+      .filter({ has: page.locator('dt').getByText('Patrimônio', { exact: true }) });
+    expect(await left(stat.getByRole('link'))).toBeCloseTo(await left(stat.locator('dt')), 0);
+
+    const b3 = page
+      .locator('[data-slot="summary-card"]')
+      .filter({ has: page.getByRole('heading', { name: 'Conferência com a B3' }) });
+    expect(await left(b3.getByRole('link'))).toBeCloseTo(await left(b3.getByRole('heading')), 0);
+
+    if ((viewport?.width ?? 0) >= 1100) {
+      const queue = page
+        .locator('[data-slot="summary-card"]')
+        .filter({ has: page.getByRole('heading', { name: 'Precisa da sua atenção' }) });
+      const [queueBox, b3Box] = await Promise.all([queue.boundingBox(), b3.boundingBox()]);
+      expect(queueBox?.y).toBeCloseTo(b3Box?.y ?? Number.NaN, 0);
+      expect(b3Box?.x ?? 0).toBeGreaterThan((queueBox?.x ?? 0) + (queueBox?.width ?? 0) - 1);
+    }
   });
 
   /** TS-27 / BR-016-15 — axe on the populated page, in a real browser. */

@@ -30,18 +30,32 @@ describe('SummaryCard', () => {
         link={{
           href: '/portfolio',
           label: 'Ver no Portfólio',
-          ariaLabel: 'Patrimônio no Portfólio',
+          ariaLabel: 'Ver no Portfólio: patrimônio',
         }}
       >
         conteúdo
       </SummaryCard>,
     );
-    const link = screen.getByRole('link', { name: 'Patrimônio no Portfólio' });
+    const link = screen.getByRole('link', { name: 'Ver no Portfólio: patrimônio' });
     expect(link).toHaveAttribute('href', '/portfolio');
     expect(link).toHaveTextContent('Ver no Portfólio');
-    // The indent the owner saw came from `Button`'s padding; a card link has none.
-    expect(link.className).not.toMatch(/\bpx-/);
-    expect(container.querySelector('[data-slot="card-link"]')).not.toBeNull();
+    // The indent the owner saw came from `Button`'s padding; neither the link
+    // nor its row has any. The rendered edge is measured in the E2E.
+    const row = container.querySelector('[data-slot="card-link"]');
+    expect(row).not.toBeNull();
+    for (const className of [link.className, row?.className ?? '']) {
+      expect(className).not.toMatch(/\b(p|px|pl|ps|m|mx|ml|ms)-/);
+    }
+  });
+
+  // WCAG 2.5.3 — a name that does not begin with the visible text is dropped.
+  it('keeps the visible label as the name when an aria-label would hide it', () => {
+    render(
+      <SummaryCard title="T" link={{ href: '/x', label: 'Ver', ariaLabel: 'Outra coisa' }}>
+        x
+      </SummaryCard>,
+    );
+    expect(screen.getByRole('link', { name: 'Ver' })).not.toHaveAttribute('aria-label');
   });
 
   it('renders no footer row without a link', () => {

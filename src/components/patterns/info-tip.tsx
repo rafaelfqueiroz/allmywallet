@@ -32,6 +32,14 @@ export interface InfoTipProps {
   readonly label: ReactNode;
   /** Id of the element holding `label`; used only when `label` is not a string. */
   readonly labelledBy: string;
+  /**
+   * Id of an element holding the same text as the tip, as the icon's
+   * accessible description. A `Field` describes its control instead; a tip
+   * explaining something that is not a control (a Painel marker badge, #213)
+   * has nowhere else to put it, and a description on plain text is not read
+   * by NVDA or JAWS in browse mode.
+   */
+  readonly describedBy?: string;
   readonly className?: string;
 }
 
@@ -60,7 +68,7 @@ export interface InfoTipProps {
  * and the icon is not what carries the information to a screen reader
  * (BR-016-16 spirit).
  */
-export function InfoTip({ children, id, label, labelledBy, className }: InfoTipProps) {
+export function InfoTip({ children, id, label, labelledBy, describedBy, className }: InfoTipProps) {
   const t = useTranslations('field');
   const [open, setOpen] = useState(false);
   const pinned = useRef(false);
@@ -110,6 +118,7 @@ export function InfoTip({ children, id, label, labelledBy, className }: InfoTipP
                 'aria-label': t('instructions', { label: '' }).trim(),
                 'aria-labelledby': `${id} ${labelledBy}`,
               })}
+          {...(describedBy ? { 'aria-describedby': describedBy } : {})}
           data-slot="info-tip"
           onPointerEnter={(event: PointerEvent) => {
             if (event.pointerType === 'touch') return;

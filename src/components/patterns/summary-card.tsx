@@ -10,6 +10,9 @@ import { Card } from '@/components/ui/card';
  * `ariaLabel` names the destination when the visible label alone would be
  * ambiguous among several cards — two cards reading "Ver no Portfólio" are two
  * links with one name, which a screen reader's link list cannot tell apart.
+ * It must **begin with the visible label** (WCAG 2.5.3, label in name), or a
+ * voice-control user saying what they see matches nothing; one that does not
+ * is dropped and the visible label stays the name (`accessibleName`).
  */
 export interface CardLinkTarget {
   readonly href: string;
@@ -27,12 +30,16 @@ export interface CardLinkTarget {
  * off the left edge of the heading above it (#213). A link that is a row has
  * no padding of its own; the card's content padding is the only inset.
  */
+function accessibleName(label: string, ariaLabel: string | undefined) {
+  return ariaLabel?.startsWith(label) ? { 'aria-label': ariaLabel } : {};
+}
+
 export function CardLink({ href, label, ariaLabel }: CardLinkTarget) {
   return (
     <div data-slot="card-link" className="border-t pt-3">
       <Link
         href={href}
-        {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
+        {...accessibleName(label, ariaLabel)}
         className="flex items-center justify-between gap-2 rounded-sm text-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
       >
         <span>{label}</span>
@@ -50,7 +57,7 @@ export function CardHeaderLink({ href, label, ariaLabel }: CardLinkTarget) {
   return (
     <Link
       href={href}
-      {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
+      {...accessibleName(label, ariaLabel)}
       className="rounded-sm text-sm font-medium text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
     >
       {label}
