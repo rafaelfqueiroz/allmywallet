@@ -72,7 +72,8 @@ export function WalletForm({
         name: String(formData.get('name') ?? ''),
         description: String(formData.get('description') ?? ''),
         goal: String(formData.get('goal') ?? ''),
-        color: String(formData.get('color') ?? '') || null,
+        color:
+          formData.get('noColor') === 'on' ? null : String(formData.get('color') ?? '') || null,
       });
       return action(previous, formData);
     },
@@ -109,7 +110,7 @@ export function WalletForm({
           <Input name="goal" defaultValue={draft.goal} />
         </Field>
         <Field id={`${idPrefix}-color`} label={t('colorLabel')} width="full">
-          <ColorInput name="color" defaultValue={draft.color} />
+          <ColorInput name="color" defaultValue={draft.color} noneLabel={t('colorNone')} />
         </Field>
 
         <Cluster gap="sm" justify="end">

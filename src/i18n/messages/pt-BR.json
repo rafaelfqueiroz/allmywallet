@@ -552,7 +552,8 @@
     "deleteTitle": "Excluir carteira",
     "deleteDescription": "As atribuições desta carteira voltam para Não atribuído e as regras permanentes que apontam para ela são removidas. Nenhuma transação é excluída.",
     "standingRuleClearFor": "Remover regra de {asset}",
-    "rulesOptionMoves": "{asset} (regra atual: {wallet})"
+    "rulesOptionMoves": "{asset} (regra atual: {wallet})",
+    "colorNone": "Sem cor"
   },
   "import": {
     "title": "Importar extratos B3",

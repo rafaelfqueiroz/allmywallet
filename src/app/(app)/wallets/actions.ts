@@ -20,6 +20,7 @@ import { clearStandingRule, setStandingRule } from '@/core/wallets/standing-rule
 import { TARGET_MODES, setWalletTargets, type WalletTarget } from '@/core/wallets/targets';
 import { TARGET_FIELD_PREFIX } from '@/app/(app)/wallets/target-fields';
 import { updateWallet } from '@/core/wallets/update-wallet';
+import { CreateWalletSchema, UpdateWalletSchema } from '@/app/(app)/wallets/wallet-input';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
 import { requireUserId } from '@/lib/session';
 
@@ -43,25 +44,6 @@ import { requireUserId } from '@/lib/session';
  * (AR-37/AR-38).
  */
 
-const optionalText = z
-  .string()
-  .optional()
-  .transform((value) => (value === undefined || value.trim() === '' ? null : value));
-
-/**
- * `name` accepts the empty string on purpose (BR-022-21): the wallet's own rule
- * — a blank name is `INVALID_NAME` — is `createWallet`'s, and refusing it here
- * would turn it into a generic "verifique os dados" banner instead of the
- * message under the Nome field. The input keeps `required`, which is the
- * convenience; this is the enforcement, and it is the use case's.
- */
-const CreateWalletSchema = z.object({
-  name: z.string(),
-  description: optionalText,
-  goal: optionalText,
-  color: optionalText,
-});
-
 export async function createWalletAction(
   _state: ActionState,
   formData: FormData,
@@ -78,15 +60,6 @@ export async function createWalletAction(
   // step — assigning assets to it — is. `redirect` throws, so it stays last.
   redirect(walletSettingsPath(result.value.id));
 }
-
-const UpdateWalletSchema = z.object({
-  walletId: z.string(),
-  // As on create: a blank name is refused by `updateWallet` with `INVALID_NAME`.
-  name: z.string().optional(),
-  description: optionalText,
-  goal: optionalText,
-  color: optionalText,
-});
 
 export async function updateWalletAction(
   _state: ActionState,

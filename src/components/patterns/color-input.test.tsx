@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ColorInput } from '@/components/patterns/color-input';
 import { ColorSwatch } from '@/components/patterns/color-swatch';
 import { Field } from '@/components/patterns/field';
-import { audit, fireEvent, render, screen } from '@/components/test-utils';
+import { audit, fireEvent, render, screen, userEvent } from '@/components/test-utils';
 
 describe('ColorInput', () => {
   it('is the native colour control at Input’s height, with the boundary token', () => {
@@ -48,6 +48,46 @@ describe('ColorInput', () => {
         <ColorInput name="color" />
       </Field>,
     );
+    expect(await audit(container)).toHaveNoViolations();
+  });
+});
+
+describe('ColorInput — Sem cor', () => {
+  const field = (defaultValue?: string | null) => (
+    <Field id="c" label="Cor">
+      <ColorInput name="color" noneLabel="Sem cor" defaultValue={defaultValue} />
+    </Field>
+  );
+
+  it('is checked for no colour, and hides the hex it would otherwise show', () => {
+    render(field(null));
+    expect(screen.getByRole('checkbox', { name: 'Sem cor' })).toBeChecked();
+    expect(screen.queryByText('#000000')).not.toBeInTheDocument();
+  });
+
+  it('is unchecked for a stored colour', () => {
+    render(field('#336699'));
+    expect(screen.getByRole('checkbox', { name: 'Sem cor' })).not.toBeChecked();
+    expect(screen.getByText('#336699')).toBeInTheDocument();
+  });
+
+  it('posts noColor only while checked, and picking a colour unchecks it', async () => {
+    const { container } = render(<form>{field(null)}</form>);
+    const form = container.querySelector('form') as HTMLFormElement;
+    expect(new FormData(form).get('noColor')).toBe('on');
+
+    fireEvent.change(screen.getByLabelText('Cor'), { target: { value: '#ff0000' } });
+    expect(new FormData(form).get('noColor')).toBeNull();
+    expect(new FormData(form).get('color')).toBe('#ff0000');
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Sem cor' }));
+    expect(new FormData(form).get('noColor')).toBe('on');
+  });
+
+  it('keeps the control at Input’s height with the boundary token, and has no axe violations', async () => {
+    const { container } = render(field(null));
+    expect(screen.getByLabelText('Cor').className).toMatch(/(^|\s)h-8(\s|$)/);
+    expect(screen.getByLabelText('Cor').className).toContain('border-input');
     expect(await audit(container)).toHaveNoViolations();
   });
 });

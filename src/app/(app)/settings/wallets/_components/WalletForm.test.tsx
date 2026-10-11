@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { WalletErrorCode } from '@/core/wallets/errors';
 import { failure, IDLE, SAVED, type ActionState } from '@/lib/action-state';
 import { WalletForm } from '@/app/(app)/settings/wallets/_components/WalletForm';
-import { audit, render, screen, userEvent, waitFor } from '@/components/test-utils';
+import { audit, fireEvent, render, screen, userEvent, waitFor } from '@/components/test-utils';
 
 /**
  * SPEC-022 BR-022-20/21 — instructions behind the icon, one height per field,
@@ -47,10 +47,18 @@ describe('WalletForm — fields (BR-022-20)', () => {
     expect(document.querySelectorAll('[data-slot="field"] p')).toHaveLength(0);
   });
 
-  it('shows the colour as text as well as a swatch, and in a control that is not a bare input', () => {
+  it('starts a new wallet on "Sem cor", with no hex shown, in a control with the boundary token', () => {
     render(<CreateForm />);
-    expect(screen.getByText('#000000')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Sem cor' })).toBeChecked();
+    expect(screen.queryByText('#000000')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Cor').className).toContain('border-input');
+  });
+
+  it('unchecks "Sem cor" when a colour is picked, and shows it as text', () => {
+    render(<CreateForm />);
+    fireEvent.change(screen.getByLabelText('Cor'), { target: { value: '#ff0000' } });
+    expect(screen.getByRole('checkbox', { name: 'Sem cor' })).not.toBeChecked();
+    expect(screen.getByText('#FF0000')).toBeInTheDocument();
   });
 
   it('offers Cancelar back to the list and Criar carteira', () => {
@@ -65,6 +73,70 @@ describe('WalletForm — fields (BR-022-20)', () => {
   it('marks Nome as required', () => {
     render(<CreateForm />);
     expect(screen.getByLabelText('Nome')).toBeRequired();
+  });
+});
+
+/** What the form posts, as the action would receive it. */
+async function submitted(ui: React.ReactElement, change?: () => void) {
+  const seen: FormData[] = [];
+  const records = async (_: ActionState, formData: FormData) => {
+    seen.push(formData);
+    return IDLE;
+  };
+  render(ui.type === WalletForm ? <WalletForm {...ui.props} action={records} /> : ui);
+  change?.();
+  await userEvent.click(screen.getByRole('button', { name: /Criar carteira|Salvar alterações/ }));
+  await waitFor(() => expect(seen).toHaveLength(1));
+  return seen[0]!;
+}
+
+describe('WalletForm — Sem cor submit mapping', () => {
+  const create = <WalletForm action={vi.fn()} idPrefix="new-wallet" submitLabel="Criar carteira" />;
+
+  it('posts noColor=on for a new wallet left on its default', async () => {
+    const data = await submitted(create, () => {
+      fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Reserva' } });
+    });
+    expect(data.get('noColor')).toBe('on');
+  });
+
+  it('posts the colour and no noColor once a colour is picked', async () => {
+    const data = await submitted(create, () => {
+      fireEvent.change(screen.getByLabelText('Nome'), { target: { value: 'Reserva' } });
+      fireEvent.change(screen.getByLabelText('Cor'), { target: { value: '#ff0000' } });
+    });
+    expect(data.get('noColor')).toBeNull();
+    expect(data.get('color')).toBe('#ff0000');
+  });
+
+  it('starts an edit of a NULL colour checked, and keeps it NULL unless changed', async () => {
+    const edit = (color: string | null) => (
+      <WalletForm
+        action={vi.fn()}
+        idPrefix="wallet"
+        submitLabel="Salvar alterações"
+        walletId="w1"
+        values={{ name: 'Reserva', description: '', goal: '', color }}
+      />
+    );
+    const data = await submitted(edit(null));
+    expect(screen.getByRole('checkbox', { name: 'Sem cor' })).toBeChecked();
+    expect(data.get('noColor')).toBe('on');
+  });
+
+  it('starts an edit of a stored colour unchecked, and posts that colour', async () => {
+    const data = await submitted(
+      <WalletForm
+        action={vi.fn()}
+        idPrefix="wallet"
+        submitLabel="Salvar alterações"
+        walletId="w1"
+        values={{ name: 'Reserva', description: '', goal: '', color: '#336699' }}
+      />,
+    );
+    expect(screen.getByRole('checkbox', { name: 'Sem cor' })).not.toBeChecked();
+    expect(data.get('noColor')).toBeNull();
+    expect(data.get('color')).toBe('#336699');
   });
 });
 
