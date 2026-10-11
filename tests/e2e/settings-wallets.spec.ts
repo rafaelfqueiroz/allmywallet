@@ -108,7 +108,9 @@ test.describe('Configurações › Carteiras', () => {
 
     // BR-010-05: more than is held is refused, under Quantidade, with the ceiling.
     const assign = page.locator('form').filter({ has: page.getByLabel('Ativo', { exact: true }) });
-    await assign.getByLabel('Ativo', { exact: true }).selectOption({ label: new RegExp(code!) });
+    await assign
+      .getByLabel('Ativo', { exact: true })
+      .selectOption({ label: `${code} — Ativo ${code} — 10 não atribuída(s)` });
     await assign.getByLabel('Quantidade', { exact: true }).fill('50');
     await assign.getByRole('button', { name: 'Atribuir', exact: true }).click();
     await expect(assign.getByLabel('Quantidade', { exact: true })).toHaveAttribute(
