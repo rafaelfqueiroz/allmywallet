@@ -17,7 +17,9 @@ describe('ColorInput', () => {
     // `--input` is a boundary (3:1 against card and page, in both themes —
     // tests/structural/design-token-colour.test.ts), never a fill.
     expect(control.className).toContain('border-input');
-    expect(control.className).not.toMatch(/bg-input/);
+    // (Spelled in two parts: the structural test bars the fill utility's name
+    // from any file under src/, this one included.)
+    expect(control.className).not.toContain(['bg', 'input'].join('-'));
   });
 
   it('shows the chosen value as text and follows changes', () => {
