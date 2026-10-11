@@ -11,6 +11,7 @@ import { isErr } from '@/core/shared/result';
 import { IDLE, INVALID_INPUT, SAVED, failure, type ActionState } from '@/lib/action-state';
 import { allocateToWallet } from '@/core/wallets/allocate';
 import { createWallet } from '@/core/wallets/create-wallet';
+import { WalletErrorCode, walletError } from '@/core/wallets/errors';
 import { deleteWallet } from '@/core/wallets/delete-wallet';
 import { clearStandingRule, setStandingRule } from '@/core/wallets/standing-rule';
 import { TARGET_MODES, setWalletTargets, type WalletTarget } from '@/core/wallets/targets';
@@ -134,10 +135,7 @@ export async function deleteWalletAction(
 const AllocateSchema = z.object({
   walletId: z.string(),
   assetId: z.string(),
-  quantity: z
-    .string()
-    .optional()
-    .transform((value) => (value === undefined || value.trim() === '' ? undefined : value)),
+  quantity: z.string().optional(),
 });
 
 export async function allocateAction(
@@ -148,8 +146,24 @@ export async function allocateAction(
   const parsed = AllocateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return INVALID_INPUT;
 
+  // A blank quantity is "everything not yet assigned" (BR-010-03). A filled one
+  // is read the way a pt-BR keyboard writes it (AR-06: a string handed to
+  // `Quantity`'s own parser, never a float) — and one that is not a number is
+  // refused as the invalid quantity it is, so it reaches the field under which
+  // the form shows it rather than throwing out of the parser.
+  const raw = parsed.data.quantity?.trim() ?? '';
+  const quantity = raw === '' ? undefined : normalizeDecimalInput(raw);
+  if (quantity === null) {
+    return failure(
+      walletError(WalletErrorCode.INVALID_ALLOCATION_QUANTITY, {
+        assetId: parsed.data.assetId,
+        quantity: raw,
+      }),
+    );
+  }
+
   const result = await withWalletDeps(userId, (deps) =>
-    parsed.data.quantity === undefined
+    quantity === undefined
       ? allocateToWallet(deps, userId, {
           walletId: WalletId.of(parsed.data.walletId),
           assetId: AssetId.of(parsed.data.assetId),
@@ -158,7 +172,7 @@ export async function allocateAction(
           walletId: WalletId.of(parsed.data.walletId),
           assetId: AssetId.of(parsed.data.assetId),
           mode: 'add',
-          quantity: Quantity.fromString(parsed.data.quantity),
+          quantity: Quantity.fromString(quantity),
         }),
   );
   // BR-010-05 / AC-010-04: the sum invariant refused this write. The message

@@ -567,7 +567,8 @@
     "rulesChooseAsset": "Escolha um ativo",
     "rulesNothing": "Você não tem ativos para criar uma regra.",
     "deleteTitle": "Excluir carteira",
-    "deleteDescription": "As atribuições desta carteira voltam para Não atribuído e as regras permanentes que apontam para ela são removidas. Nenhuma transação é excluída."
+    "deleteDescription": "As atribuições desta carteira voltam para Não atribuído e as regras permanentes que apontam para ela são removidas. Nenhuma transação é excluída.",
+    "standingRuleClearFor": "Remover regra de {asset}"
   },
   "import": {
     "title": "Importar extratos B3",
