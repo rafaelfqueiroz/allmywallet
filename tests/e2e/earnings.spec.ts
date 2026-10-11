@@ -134,7 +134,8 @@ test('reports proventos by type, and reaches the report from the shared nav', as
 
   await page.goto(`/reports?${TWELVE_MONTHS}`);
   await page.getByRole('link', { name: 'Proventos' }).click();
-  await expect(page).toHaveURL(/\/reports\/earnings$/);
+  // SPEC-022 BR-022-03 / BR-011-11 (#209) — the tab carries the period.
+  await expect(page).toHaveURL(/\/reports\/earnings\?period=12m$/);
 
   await expect(page.locator('#__next_error__')).toHaveCount(0);
 

@@ -1,6 +1,12 @@
 import { getTranslations } from 'next-intl/server';
 import { defaultGroupingFor, type GroupNames } from '@/core/reporting/grouping';
-import { GROUPINGS, type GroupKey, type Grouping } from '@/core/reporting/ports';
+import {
+  GROUPINGS,
+  NOT_CLASSIFIED_GROUP_ID,
+  type GroupKey,
+  type Grouping,
+  type ReportGroup,
+} from '@/core/reporting/ports';
 import { Money as MoneyValue } from '@/core/shared/money';
 import type { CompositionReport } from '@/core/reporting/composition/ports';
 import { assetClassColor, chartColorAt } from '@/components/charts/palette';
@@ -9,6 +15,7 @@ import { fromSearchParams, PARAM } from '@/lib/report-url-state';
 import { hasFixedIncome } from '@/lib/fixed-income';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
+import { HoldingMarkers } from '@/app/(app)/reports/_components/HoldingMarkers';
 import { tryUserId } from '@/lib/session';
 import { loadCurrentComposition } from '@/app/(app)/portfolio/data';
 import { loadWatchStates } from '@/app/(app)/watch/data';
@@ -163,7 +170,12 @@ export default async function CompositionPage({ searchParams }: PageProps) {
           <Section title={tc('groups.title')} description={tc('groups.description')}>
             <Stack gap="md">
               <ChartOfShares report={report} names={query.value.groupNames} labelOf={labelOf} />
-              <GroupsTable report={report} names={query.value.groupNames} labelOf={labelOf} />
+              <GroupsTable
+                report={report}
+                groups={query.value.report.groups}
+                names={query.value.groupNames}
+                labelOf={labelOf}
+              />
             </Stack>
           </Section>
 
@@ -337,13 +349,23 @@ async function ChartOfShares({
  * The chart's own figures as a table — BR-016-16's "every chart is available
  * as text or a table", and the drill-down DS-11 asks for when the ring
  * gathers its tail.
+ *
+ * SPEC-011 BR-011-07 — **a group row drills down to its constituent assets
+ * without leaving the report.** It lived on Relatórios' Visão geral until
+ * that tab left (SPEC-022 BR-022-03, #209); this is the grouped view now.
+ * `<details>` rather than client state: the constituents already travel with
+ * the group (`ReportGroup.holdings`), so expanding needs no second query —
+ * a drill-down that re-queried could show figures derived differently from
+ * the row it expands.
  */
 async function GroupsTable({
   report,
+  groups,
   names,
   labelOf,
 }: {
   readonly report: CompositionReport;
+  readonly groups: readonly ReportGroup[];
   readonly names: GroupNames;
   readonly labelOf: (key: GroupKey, names: GroupNames) => string;
 }) {
@@ -365,8 +387,33 @@ async function GroupsTable({
       </TableHeader>
       <TableBody>
         {report.breakdown.map((slice) => (
-          <TableRow key={slice.key.id}>
-            <TableCell className="py-row">{labelOf(slice.key, names)}</TableCell>
+          <TableRow key={slice.key.id} className="align-top">
+            <TableCell className="py-row">
+              <details>
+                <summary className="cursor-pointer">{labelOf(slice.key, names)}</summary>
+                <List gap="none">
+                  {(
+                    groups.find(
+                      (group) =>
+                        group.key.dimension === slice.key.dimension &&
+                        group.key.id === slice.key.id,
+                    )?.holdings ?? []
+                  ).map((holding, index) => (
+                    <ListItem
+                      key={`${holding.assetId}-${holding.institutionId ?? NOT_CLASSIFIED_GROUP_ID}-${index}`}
+                    >
+                      <Cluster gap="sm" align="baseline">
+                        <Text as="span" size="xs" tone="muted">
+                          {holding.assetCode} · <Money value={holding.quantity} kind="quantity" /> ·{' '}
+                          <Money value={holding.value} />
+                        </Text>
+                        <HoldingMarkers holding={holding} />
+                      </Cluster>
+                    </ListItem>
+                  ))}
+                </List>
+              </details>
+            </TableCell>
             <TableCell className="py-row text-right">
               <Money value={slice.totals.value} />
             </TableCell>

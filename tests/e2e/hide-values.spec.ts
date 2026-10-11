@@ -72,7 +72,6 @@ const PAGES_WITH_AMOUNTS = [
   '/reports/performance',
   '/portfolio/composition',
   '/reports/earnings',
-  '/reports/patrimonio',
   '/transactions',
   '/watch',
 ] as const;
@@ -200,7 +199,6 @@ function pages(seeded: Seeded): readonly string[] {
     `/portfolio/wallets?wallet=${seeded.walletId}`,
     `/portfolio/goals?wallet=${seeded.walletId}`,
     '/reports',
-    '/reports/patrimonio',
     '/reports/performance',
     '/reports/earnings',
     '/portfolio/composition',
@@ -253,7 +251,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const unmasked = await html(page, '/portfolio/composition');
   expect(amountsIn(unmasked)).toContain('4.000,00');
   expect(unmasked).toMatch(RING_COORDINATE);
-  expect(await html(page, '/reports/patrimonio')).toMatch(LINE_COORDINATE);
+  expect(await html(page, '/reports')).toMatch(LINE_COORDINATE);
   const goals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(amountsIn(goals)).toContain('9.000,00');
   expect(goals).toMatch(GOAL_INPUT);
@@ -266,7 +264,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   // The ring's coordinates rode to the browser rescaled, not as the 4000 they
   // were: the RSC payload is HTML too.
   expect(await html(page, '/portfolio/composition')).not.toMatch(RING_COORDINATE);
-  expect(await html(page, '/reports/patrimonio')).not.toMatch(LINE_COORDINATE);
+  expect(await html(page, '/reports')).not.toMatch(LINE_COORDINATE);
   // Edit forms round-trip stored amounts through their inputs, so they are
   // replaced by "show values to edit" rather than rendered (BR-022-24).
   const maskedGoals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
