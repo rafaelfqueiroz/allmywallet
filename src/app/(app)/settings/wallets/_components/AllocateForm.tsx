@@ -88,7 +88,14 @@ export function AllocateForm({
         <input type="hidden" name={fixed.name} value={fixed.value} />
         <Cluster gap="sm" align="start">
           <Field id={`${idPrefix}-choice`} label={choice.label} width="md">
-            <NativeSelect name={choice.name} required defaultValue={draft.choice}>
+            {/* `key`: a native select does not follow a changed `defaultValue`, so the
+                choice is remounted with the one that was submitted. */}
+            <NativeSelect
+              key={draft.choice}
+              name={choice.name}
+              required
+              defaultValue={draft.choice}
+            >
               <option value="">{choice.placeholder}</option>
               {choice.options.map((option) => (
                 <option key={option.value} value={option.value}>

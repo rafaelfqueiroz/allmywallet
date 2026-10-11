@@ -126,9 +126,25 @@ describe('every amount goes through the masking (BR-022-24)', () => {
    * would leave the eye contradicting it.
    */
   it('renders every signed-in page in the shell that reports its masking', () => {
+    const reportsMasking = (text: string) =>
+      text.includes("import { PageShell } from '@/app/page-shell'");
+    // A destination's layout may hold the shell for all its pages (Configurações),
+    // and a page that only redirects renders nothing to report on.
+    const layoutReports = (path: string) =>
+      sources.some(
+        ({ path: other, text }) =>
+          other.endsWith('/layout.tsx') &&
+          path.startsWith(other.slice(0, -'layout.tsx'.length)) &&
+          reportsMasking(text),
+      );
+    const onlyRedirects = (text: string) =>
+      /export default (async )?function \w+\([^)]*\)(: never)? \{\s*redirect\(/.test(text);
+
     const offenders = sources
       .filter(({ path }) => /^src\/app\/\((app|settings)\)\/.*page\.tsx$/.test(path))
-      .filter(({ text }) => !text.includes("import { PageShell } from '@/app/page-shell'"))
+      .filter(
+        ({ path, text }) => !reportsMasking(text) && !layoutReports(path) && !onlyRedirects(text),
+      )
       .map(({ path }) => path);
 
     expect(offenders).toEqual([]);
