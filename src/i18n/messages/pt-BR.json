@@ -188,7 +188,6 @@
     },
     "attention": {
       "title": "Precisa da sua atenção",
-      "description": "Tudo o que está esperando uma decisão sua, em um lugar só.",
       "empty": "Nada esperando por você.",
       "more": "{count, plural, one {mais # compra a distribuir em Carteiras} other {mais # compras a distribuir em Carteiras}}",
       "importRows": {
