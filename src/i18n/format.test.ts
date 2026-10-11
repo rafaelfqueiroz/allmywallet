@@ -4,6 +4,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import {
   formatBusinessDate,
   formatCurrency,
+  formatDate,
   formatDateTime,
   formatPercent,
   formatQuantity,
@@ -81,5 +82,12 @@ describe('formatDateTime', () => {
     // 2026-03-16T13:30Z is 10:30 in São Paulo.
     expect(formatDateTime(new Date('2026-03-16T13:30:00Z'))).toContain('10:30');
     expect(formatDateTime(new Date('2026-03-16T13:30:00Z'))).toContain('16/03/2026');
+  });
+});
+
+describe('formatDate', () => {
+  it('renders an instant as dd/mm/yyyy in São Paulo time, not UTC', () => {
+    // 2026-03-17T01:00Z is still the 16th in São Paulo.
+    expect(formatDate(new Date('2026-03-17T01:00:00Z'))).toBe('16/03/2026');
   });
 });

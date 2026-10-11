@@ -29,7 +29,10 @@ const ROUTES = [
   '/portfolio',
   '/portfolio/composition',
   '/portfolio/wallets',
-  '/portfolio/wallets/setup',
+  '/settings/wallets',
+  '/settings/wallets/new',
+  '/settings/wallets/assign',
+  '/settings/wallets/parameters',
   '/portfolio/goals',
   // SPEC-006 #9 — added when the ledger got a surface. Both render their
   // signed-out state here, which is the state this suite runs in.

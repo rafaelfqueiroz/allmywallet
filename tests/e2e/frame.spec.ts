@@ -86,7 +86,8 @@ test.describe('the application frame', () => {
     // which must not turn into a ring or a different fill.
     for (const item of NAV_ITEMS) {
       await sidebar.locator(`a[href="${item.href}"]`).click();
-      await expect(page).toHaveURL(new RegExp(`${item.href}$`));
+      // Configurações has no page of its own: its item lands on its first section.
+      await expect(page).toHaveURL(new RegExp(`${item.href}(/.*)?$`));
       expect(await look(), `${item.href} after a click`).toBe(resting);
     }
 

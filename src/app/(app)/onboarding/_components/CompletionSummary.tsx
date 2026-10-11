@@ -38,7 +38,7 @@ export async function CompletionSummary({ steps }: { readonly steps: OnboardingS
         </Button>
         {!steps.firstWallet && (
           <Button asChild variant="link">
-            <Link href="/portfolio/wallets/setup">{t('walletLink')}</Link>
+            <Link href="/settings/wallets/new">{t('walletLink')}</Link>
           </Button>
         )}
       </Cluster>

@@ -338,7 +338,7 @@ test.describe('transaction management', () => {
     await expect(page.getByRole('status')).toContainText('1');
     await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
 
-    await page.goto(`/wallets/${walletId}`);
+    await page.goto(`/settings/wallets/${walletId}`);
     await expect(page.getByRole('table')).toContainText('ITSA4');
     await expect(page.getByRole('table')).toContainText('100');
   });
@@ -383,7 +383,7 @@ test.describe('transaction management', () => {
       ['Aposentadoria', '60'],
       ['Trading', '40'],
     ] as const) {
-      await page.goto('/portfolio/wallets/setup');
+      await page.goto('/settings/wallets/assign');
       await page.getByLabel('Quantidade').first().fill(quantity);
       await page.getByLabel('Atribuir a').first().selectOption({ label: walletName });
       await page.getByRole('button', { name: 'Atribuir', exact: true }).first().click();
@@ -406,11 +406,11 @@ test.describe('transaction management', () => {
     await page.getByRole('button', { name: 'Registrar transação' }).click();
     await expect(page).toHaveURL(/\/transactions$/);
 
-    await page.goto(`/wallets/${trading}`);
+    await page.goto(`/settings/wallets/${trading}`);
     await expect(page.getByRole('table')).toContainText('20');
 
     // The assertion the proportional default would fail: untouched at 60.
-    await page.goto(`/wallets/${retirement}`);
+    await page.goto(`/settings/wallets/${retirement}`);
     await expect(page.getByRole('table')).toContainText('60');
   });
 

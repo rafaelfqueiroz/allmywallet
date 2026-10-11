@@ -110,3 +110,24 @@ export function Field({ id, label, hint, error, width, className, children }: Fi
     </div>
   );
 }
+
+/**
+ * A control that sits in a row of fields — a submit button — aligned with
+ * their **inputs**, not their labels.
+ *
+ * Fields in a row line up from the top (`align="start"`), because an error
+ * under one of them makes that field taller, and bottom alignment would then
+ * drag every neighbour down to sit beside the error text. The cost is that a
+ * button has no label row of its own, so it would sit level with its
+ * neighbours' labels. This gives it the same one-line label row, empty, and the
+ * same gap, so the button's top edge is the inputs' (BR-022-20: one height per
+ * row).
+ */
+export function FieldAction({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div data-slot="field-action" className={cn('flex flex-col gap-1', className)}>
+      <div aria-hidden="true" className="min-h-5" />
+      {children}
+    </div>
+  );
+}

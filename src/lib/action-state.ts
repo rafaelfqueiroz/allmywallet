@@ -48,6 +48,8 @@ import { SharedErrorCode } from '@/core/shared/domain-error';
  */
 export type ActionState =
   | { readonly status: 'idle' }
+  /** A save that succeeded and stays on the page — the form says so, rather than re-rendering unchanged. */
+  | { readonly status: 'saved' }
   | { readonly status: 'assigned'; readonly assigned: number; readonly skipped: number }
   | { readonly status: 'deleted'; readonly deleted: number }
   | {
@@ -57,6 +59,7 @@ export type ActionState =
     };
 
 export const IDLE: ActionState = { status: 'idle' };
+export const SAVED: ActionState = { status: 'saved' };
 
 export function failure(error: DomainError): ActionState {
   return { status: 'error', code: error.code, context: error.context };

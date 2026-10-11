@@ -240,11 +240,6 @@
       "byAsset": "Por ativo"
     },
     "wallets": {
-      "tabs": {
-        "label": "Carteiras",
-        "comparison": "Comparação",
-        "setup": "Configurar"
-      },
       "comparisonTitle": "Comparação entre carteiras",
       "comparisonDescription": "Valor, custo, resultado e participação de cada carteira no portfólio, pela última cotação. Não atribuído é o que nenhuma carteira tem.",
       "columnWallet": "Carteira",
@@ -468,9 +463,16 @@
       }
     }
   },
+  "settings": {
+    "title": "Configurações",
+    "description": "Carteiras, importação de extratos e regras de observação de preços",
+    "navLabel": "Seções de Configurações",
+    "sections": {
+      "wallets": "Carteiras"
+    },
+    "signedOut": "Entre na sua conta para acessar as configurações."
+  },
   "wallets": {
-    "title": "Carteiras",
-    "description": "Agrupe seus ativos por objetivo — a aposentadoria separada do resto, sem depender de nenhuma corretora.",
     "signedOut": "Entre na sua conta para gerenciar suas carteiras.",
     "createTitle": "Nova carteira",
     "nameLabel": "Nome",
@@ -480,7 +482,6 @@
     "goalHint": "O propósito desta carteira, em suas palavras. Metas com valor e progresso ficam em Portfólio › Metas.",
     "colorLabel": "Cor",
     "create": "Criar carteira",
-    "yourWallets": "Suas carteiras",
     "empty": "Você ainda não criou nenhuma carteira.",
     "delete": "Excluir carteira",
     "needsAttentionTitle": "Precisa de atenção",
@@ -489,11 +490,9 @@
     "reasonNoWallet": "Ativo novo, nunca atribuído",
     "reasonAmbiguousSplit": "Este ativo está dividido entre carteiras",
     "resolveAssign": "Atribuir a",
-    "resolveQuantity": "Quantidade",
     "resolveSubmit": "Atribuir",
     "chooseWallet": "Escolha uma carteira",
     "columnQuantity": "Quantidade",
-    "columnCostBasis": "Custo",
     "columnAsset": "Ativo",
     "standingRuleTitle": "Regra permanente",
     "standingRuleDescription": "Direciona automaticamente as próximas compras deste ativo para uma carteira escolhida, mesmo com a posição dividida. Desativada por padrão.",
@@ -501,21 +500,60 @@
     "standingRuleSet": "Definir regra",
     "standingRuleClear": "Remover regra",
     "walletDetailBack": "Voltar às carteiras",
-    "allocationsTitle": "Ativos alocados",
+    "allocationsTitle": "Ativos atribuídos",
     "allocationsEmpty": "Nenhum ativo atribuído a esta carteira ainda.",
-    "costBasisUnknown": "Custo não registrado",
-    "editTitle": "Editar carteira",
     "save": "Salvar alterações",
     "balanceLink": "Balanceamento",
     "goalsLink": "Metas",
     "needsAttentionOutOfBalance": "{wallet}: ao menos um ativo passou da tolerância que você definiu.",
     "needsAttentionNeedsReview": "{wallet}: as metas não somam 100%.",
     "needsAttentionBalanceOpen": "Ver balanceamento",
-    "markers": {
-      "costEstimated": {
-        "explanation": "O custo desta carteira inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
-      }
-    }
+    "sectionTitle": "Carteiras",
+    "newWallet": "Nova carteira",
+    "tabs": {
+      "label": "Tarefas de Carteiras",
+      "mine": "Minhas carteiras",
+      "assign": "Atribuir ativos",
+      "parameters": "Parâmetros"
+    },
+    "list": {
+      "caption": "Minhas carteiras, com objetivo, quantidade de ativos e data da última alteração",
+      "noun": "carteiras",
+      "search": "Buscar carteira",
+      "columnWallet": "Carteira",
+      "columnGoal": "Objetivo",
+      "columnAssets": "Ativos",
+      "columnUpdated": "Atualizada em",
+      "noGoal": "—",
+      "sortBy": "Ordenar por {column}",
+      "sortField": "Ordenar por",
+      "sortAscending": "Ordem crescente",
+      "sortDescending": "Ordem decrescente",
+      "emptyBody": "Crie a primeira em Nova carteira para agrupar seus ativos por objetivo."
+    },
+    "dataTitle": "Dados",
+    "cancel": "Cancelar",
+    "saved": "Alterações salvas.",
+    "assignTitle": "Atribuir ativo",
+    "assignDescription": "Traga para esta carteira a quantidade de um ativo que você tem e que ainda não está atribuída a nenhuma carteira. Sem quantidade, vai toda a quantidade não atribuída.",
+    "assignAsset": "Ativo",
+    "assignChooseAsset": "Escolha um ativo",
+    "assignOption": "{asset} — {quantity} não atribuída(s)",
+    "assignQuantity": "Quantidade",
+    "assignQuantityHint": "Opcional. Em branco, atribui toda a quantidade que ainda não está em nenhuma carteira.",
+    "assignSubmit": "Atribuir",
+    "assignNothing": "Nada para atribuir",
+    "assignNothingBody": "Todos os seus ativos já estão atribuídos a carteiras.",
+    "rulesTitle": "Regras permanentes",
+    "rulesEmpty": "Nenhuma regra permanente aponta para esta carteira.",
+    "rulesAsset": "Ativo da regra",
+    "rulesChooseAsset": "Escolha um ativo",
+    "rulesNothing": "Você não tem ativos para criar uma regra.",
+    "deleteTitle": "Excluir carteira",
+    "deleteDescription": "As atribuições desta carteira voltam para Não atribuído e as regras permanentes que apontam para ela são removidas. Nenhuma transação é excluída.",
+    "standingRuleClearFor": "Remover regra de {asset}",
+    "rulesOptionMoves": "{asset} (regra atual: {wallet})",
+    "colorNone": "Sem cor"
   },
   "import": {
     "title": "Importar extratos B3",
@@ -1340,7 +1378,7 @@
     "title": "Metas e desvio",
     "description": "O que você declarou para esta carteira, e a distância entre isso e o que ela tem hoje. Todo número aqui parte de uma meta que você mesmo informou.",
     "signedOut": "Entre na sua conta para ver as metas desta carteira.",
-    "back": "Voltar à carteira",
+    "back": "Configurações da carteira",
     "modeTitle": "Modo das metas",
     "modeLabel": "Modo",
     "modeNone": "Sem metas",

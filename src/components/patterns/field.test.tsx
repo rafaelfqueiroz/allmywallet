@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Field } from '@/components/patterns/field';
+import { Field, FieldAction } from '@/components/patterns/field';
 import { Input } from '@/components/ui/input';
 import { audit, render, screen, userEvent } from '@/components/test-utils';
 
@@ -109,5 +109,26 @@ describe('Field — errors (BR-022-21)', () => {
       </Field>,
     );
     expect(await audit(container)).toHaveNoViolations();
+  });
+});
+
+describe('FieldAction', () => {
+  it('reserves the same label row a field has, so a button lines up with the inputs beside it', () => {
+    const { container } = render(
+      <>
+        <Field id="a" label="Quantidade">
+          <Input name="a" />
+        </Field>
+        <FieldAction>
+          <button type="submit">Atribuir</button>
+        </FieldAction>
+      </>,
+    );
+    const row = container.querySelector('[data-slot="field-label-row"]') as HTMLElement;
+    const spacer = container.querySelector('[data-slot="field-action"] > div') as HTMLElement;
+    expect(spacer.className).toContain('min-h-5');
+    expect(row.className).toContain('min-h-5');
+    expect(spacer).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('button', { name: 'Atribuir' })).toBeInTheDocument();
   });
 });

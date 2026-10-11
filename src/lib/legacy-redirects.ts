@@ -33,7 +33,7 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
    * #208 — Portfólio (BR-022-02). Wallet analysis, balancing and goals are
    * Portfólio tabs, with the wallet carried as the shared scope parameter
    * (BR-022-17); Composição is current state, so it leaves Relatórios.
-   * `/wallets/:walletId` itself is wallet setup and stays until #210.
+   * `/wallets/:walletId` itself is wallet setup and moved with #210, below.
    */
   {
     source: '/wallets',
@@ -83,6 +83,27 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
       from: '/reports/patrimonio?period=12m',
       to: '/reports?period=12m',
     },
+  },
+  /*
+   * #210 — Configurações › Carteiras (BR-022-05). A wallet's setup page is
+   * `/settings/wallets/:walletId`; the assignment queue, which #208 had put
+   * under Portfólio › Carteiras › Configurar, is its "Atribuir ativos" tab.
+   * E-mails and the Painel's "Distribuir" items linked to both.
+   */
+  {
+    source: '/wallets/:walletId',
+    destination: '/settings/wallets/:walletId',
+    issue: 210,
+    example: {
+      from: '/wallets/7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10',
+      to: '/settings/wallets/7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10',
+    },
+  },
+  {
+    source: '/portfolio/wallets/setup',
+    destination: '/settings/wallets/assign',
+    issue: 210,
+    example: { from: '/portfolio/wallets/setup', to: '/settings/wallets/assign' },
   },
 ];
 

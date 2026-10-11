@@ -65,7 +65,7 @@ test('a signed-in user sees their stored preferences and a saved change survives
  */
 const FEATURE_PARAMETERS = [
   { label: 'Dias sem importar até avisar', screen: '/import' },
-  { label: 'Tolerância de desvio (p.p.)', screen: '/portfolio/wallets/setup' },
+  { label: 'Tolerância de desvio (p.p.)', screen: '/settings/wallets/parameters' },
   { label: 'Intervalo mínimo entre e-mails (horas)', screen: '/watch' },
 ] as const;
 
@@ -94,7 +94,7 @@ test('a feature parameter saved on its screen survives a reload', async ({ signe
   const { page } = signedIn;
   const label = 'Tolerância de desvio (p.p.)';
 
-  await page.goto('/portfolio/wallets/setup');
+  await page.goto('/settings/wallets/parameters');
   const field = page.getByLabel(label, { exact: true });
   await field.fill('2.5');
   const form = page.locator('form').filter({ has: field });

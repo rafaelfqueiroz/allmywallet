@@ -83,6 +83,18 @@ export function formatBusinessDate(date: BusinessDate): string {
   return `${day}/${month}/${year}`;
 }
 
+/**
+ * An instant as `dd/mm/yyyy` in the business time zone — for "Atualizada em",
+ * where the day matters and the hour does not. Never `toLocaleDateString`
+ * inline (AR-47).
+ */
+export function formatDate(instant: Date): string {
+  return new Intl.DateTimeFormat(DEFAULT_LOCALE, {
+    dateStyle: 'short',
+    timeZone: 'America/Sao_Paulo',
+  }).format(instant);
+}
+
 export function formatDateTime(instant: Date): string {
   return new Intl.DateTimeFormat(DEFAULT_LOCALE, {
     dateStyle: 'short',

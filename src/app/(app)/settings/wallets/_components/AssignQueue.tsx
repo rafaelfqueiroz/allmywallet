@@ -2,38 +2,37 @@ import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import {
   allocateAction,
-  createWalletAction,
-  deleteWalletAction,
   clearStandingRuleAction,
   setStandingRuleAction,
 } from '@/app/(app)/wallets/actions';
 import { labelFor, type loadWalletsPageData } from '@/app/(app)/wallets/data';
+import { AllocateForm } from '@/app/(app)/settings/wallets/_components/AllocateForm';
 import { Money } from '@/app/money';
 import { ActionForm } from '@/components/patterns/action-form';
-import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Field } from '@/components/patterns/field';
-import { Stack } from '@/components/layout/stack';
+import { Field, FieldAction } from '@/components/patterns/field';
+import { Section } from '@/components/patterns/section';
 import { Cluster } from '@/components/layout/cluster';
 import { List, ListItem } from '@/components/layout/list';
+import { Stack } from '@/components/layout/stack';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
-
-// ---------------------------------------------------------------------------
-// Setup, until Configurações › Carteiras (#210)
-// ---------------------------------------------------------------------------
 
 type WalletsPageData = Awaited<ReturnType<typeof loadWalletsPageData>>;
 
 /**
- * SPEC-010 — create, assign, standing rules and delete:
- * today's `/wallets` setup, moved unchanged to Portfólio › Carteiras ›
- * Configurar so `/wallets` can redirect. #210 moves all of it to Configurações ›
- * Carteiras (BR-022-05), and this component goes with it.
+ * SPEC-010 BR-010-12/13/14 — Configurações › Carteiras › **Atribuir ativos**:
+ * the "Precisa de atenção" queue with its resolve forms, and the standing rules
+ * with the way to remove each. This is where the Painel's "Distribuir" items
+ * land (SPEC-020 BR-020-18).
+ *
+ * It lists **names, links and allocated quantities** — setup data. The
+ * out-of-balance wallets (SPEC-017 BR-017-17) are here as a name and a link to
+ * their balancing in Portfólio; the figures that make them out of balance are
+ * there, not here (BR-022-05).
  */
-export async function WalletSetup({
+export async function AssignQueue({
   walletChoices,
   pending,
   standingRules,
@@ -48,11 +47,7 @@ export async function WalletSetup({
 }) {
   const t = await getTranslations('wallets');
 
-  const walletOptions = walletChoices.map((wallet) => (
-    <option key={wallet.id} value={wallet.id}>
-      {wallet.name}
-    </option>
-  ));
+  const walletOptions = walletChoices.map((wallet) => ({ value: wallet.id, label: wallet.name }));
 
   return (
     <>
@@ -62,7 +57,7 @@ export async function WalletSetup({
           queue rather than a new one. SPEC-010 BR-010-12 already established
           one place to look for "is there anything for me to do?", and a second
           surface splits the answer across two screens. Each links to the
-          wallet's balancing, which is this tab scoped to it.
+          wallet's balancing in Portfólio.
         */}
         {unbalanced.length > 0 && (
           <List gap="sm">
@@ -103,39 +98,26 @@ export async function WalletSetup({
                     <Text as="span" size="xs" tone="muted">
                       {t(item.reason === 'no_wallet' ? 'reasonNoWallet' : 'reasonAmbiguousSplit')}
                     </Text>
-                    <Cluster gap="lg" align="end">
-                      <ActionForm action={allocateAction}>
-                        <input type="hidden" name="assetId" value={item.assetId} />
-                        <Cluster gap="sm" align="end">
-                          <Field
-                            id={`allocate-wallet-${item.assetId}`}
-                            label={t('resolveAssign')}
-                            width="md"
-                          >
-                            <NativeSelect name="walletId" required>
-                              <option value="">{t('chooseWallet')}</option>
-                              {walletOptions}
-                            </NativeSelect>
-                          </Field>
-                          <Field
-                            id={`allocate-quantity-${item.assetId}`}
-                            label={t('resolveQuantity')}
-                            width="sm"
-                          >
-                            <Input
-                              name="quantity"
-                              defaultValue={item.unassignedQuantity.toString()}
-                            />
-                          </Field>
-                          <Button type="submit" size="sm">
-                            {t('resolveSubmit')}
-                          </Button>
-                        </Cluster>
-                      </ActionForm>
+                    <Cluster gap="lg" align="start">
+                      {/* BR-010-13: one action, quantity pre-filled with the unassigned remainder. */}
+                      <AllocateForm
+                        action={allocateAction}
+                        idPrefix={`allocate-${item.assetId}`}
+                        fixed={{ name: 'assetId', value: item.assetId }}
+                        choice={{
+                          name: 'walletId',
+                          label: t('resolveAssign'),
+                          placeholder: t('chooseWallet'),
+                          options: walletOptions,
+                        }}
+                        defaultQuantity={item.unassignedQuantity.toString()}
+                        submitLabel={t('resolveSubmit')}
+                      />
 
+                      {/* BR-010-14: the escape hatch — a standing rule for this asset. */}
                       <ActionForm action={setStandingRuleAction}>
                         <input type="hidden" name="assetId" value={item.assetId} />
-                        <Cluster gap="sm" align="end">
+                        <Cluster gap="sm" align="start">
                           <Field
                             id={`standing-rule-${item.assetId}`}
                             label={t('standingRuleTitle')}
@@ -143,12 +125,18 @@ export async function WalletSetup({
                           >
                             <NativeSelect name="walletId" required>
                               <option value="">{t('chooseWallet')}</option>
-                              {walletOptions}
+                              {walletOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
                             </NativeSelect>
                           </Field>
-                          <Button type="submit" size="sm" variant="outline">
-                            {t('standingRuleSet')}
-                          </Button>
+                          <FieldAction>
+                            <Button type="submit" variant="outline">
+                              {t('standingRuleSet')}
+                            </Button>
+                          </FieldAction>
                         </Cluster>
                       </ActionForm>
                     </Cluster>
@@ -188,7 +176,12 @@ export async function WalletSetup({
                     </span>
                     <ActionForm action={clearStandingRuleAction}>
                       <input type="hidden" name="assetId" value={rule.assetId} />
-                      <Button type="submit" size="sm" variant="outline">
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="outline"
+                        aria-label={t('standingRuleClearFor', { asset: label.code })}
+                      >
                         {t('standingRuleClear')}
                       </Button>
                     </ActionForm>
@@ -199,50 +192,6 @@ export async function WalletSetup({
           </List>
         </Section>
       )}
-
-      <Section title={t('createTitle')}>
-        <ActionForm action={createWalletAction}>
-          <Cluster gap="md" align="end">
-            <Field id="wallet-name" label={t('nameLabel')} width="lg">
-              <Input name="name" required placeholder={t('namePlaceholder')} />
-            </Field>
-            <Field id="wallet-description" label={t('descriptionLabel')} width="lg">
-              <Input name="description" />
-            </Field>
-            <Field id="wallet-goal" label={t('goalLabel')} hint={t('goalHint')} width="lg">
-              <Input name="goal" />
-            </Field>
-            <Field id="wallet-color" label={t('colorLabel')} width="xs">
-              <Input name="color" type="color" />
-            </Field>
-            <Button type="submit">{t('create')}</Button>
-          </Cluster>
-        </ActionForm>
-      </Section>
-
-      <Section title={t('yourWallets')}>
-        {walletChoices.length === 0 ? (
-          <EmptyState title={t('empty')} />
-        ) : (
-          <List gap="sm">
-            {walletChoices.map((wallet) => (
-              <ListItem key={wallet.id} separated>
-                <Cluster justify="between" gap="sm">
-                  <Button asChild variant="link">
-                    <Link href={`/wallets/${wallet.id}`}>{wallet.name}</Link>
-                  </Button>
-                  <ActionForm action={deleteWalletAction}>
-                    <input type="hidden" name="walletId" value={wallet.id} />
-                    <Button type="submit" variant="destructive" size="sm">
-                      {t('delete')}
-                    </Button>
-                  </ActionForm>
-                </Cluster>
-              </ListItem>
-            ))}
-          </List>
-        )}
-      </Section>
     </>
   );
 }

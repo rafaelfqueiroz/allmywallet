@@ -260,35 +260,24 @@ test('an old wallet link lands on the right tab with the wallet selected', async
 });
 
 /**
- * The owner's decision on #208: wallet setup stays inside Carteiras, as its
- * **last** sub-tab, never on the analysis page (BR-022-15). #210 moves it to
- * Configurações › Carteiras.
+ * SPEC-022 BR-022-05/15 (#210) — wallet setup left Portfólio: creating,
+ * editing, assigning and deleting are Configurações › Carteiras, so
+ * Portfólio › Carteiras is the analysis alone, with no sub-tabs and no form. A
+ * wallet's balancing links to its setup page.
  */
-test('wallet setup is the last Carteiras sub-tab, apart from the comparison', async ({
-  signedIn,
-}) => {
+test('wallet setup is not on Portfólio › Carteiras, which links to it', async ({ signedIn }) => {
   const { page, userId } = signedIn;
-  await seedPortfolio(userId);
+  const { walletId } = await seedPortfolio(userId);
 
   await page.goto('/portfolio/wallets');
-  const tabs = page.getByRole('navigation', { name: 'Carteiras', exact: true }).getByRole('link');
-  await expect(tabs).toHaveText(['Comparação', 'Configurar']);
-  await expect(tabs.first()).toHaveAttribute('aria-current', 'page');
+  await expect(page.getByRole('navigation', { name: 'Carteiras', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Nova carteira' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Comparação entre carteiras' })).toBeVisible();
 
-  await tabs.last().click();
-  await expect(page).toHaveURL(/\/portfolio\/wallets\/setup$/);
-  await expect(page.getByRole('heading', { name: 'Nova carteira' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Comparação entre carteiras' })).toHaveCount(0);
-  // Portfólio's own tab bar still says where this is.
-  await expect(
-    page.getByRole('navigation', { name: 'Portfólio' }).getByRole('link', { name: 'Carteiras' }),
-  ).toHaveAttribute('aria-current', 'page');
-
-  // Creating a wallet from here works and lists it.
-  await page.getByLabel('Nome', { exact: true }).fill('Reserva');
-  await page.getByRole('button', { name: 'Criar carteira' }).click();
-  await expect(page.getByRole('link', { name: 'Reserva', exact: true })).toBeVisible();
+  await page.goto(`/portfolio/wallets?wallet=${walletId}`);
+  await page.getByRole('link', { name: 'Configurações da carteira' }).click();
+  await expect(page).toHaveURL(new RegExp(`/settings/wallets/${walletId}$`));
+  await expect(page.getByRole('heading', { level: 2, name: WALLET })).toBeVisible();
 });
 
 /**

@@ -105,18 +105,50 @@ export async function loadWalletsPageData(userId: UserId): Promise<WalletsPageDa
   };
 }
 
+/**
+ * SPEC-022 BR-022-05 — one row of Configurações › Carteiras' list: setup data
+ * only. `assetCount` is how many distinct assets are allocated to the wallet,
+ * a count and never a quantity or a value (Configurações shows no portfolio
+ * figure).
+ */
+export interface WalletListRow {
+  readonly wallet: Wallet;
+  readonly assetCount: number;
+}
+
+export async function loadWalletList(userId: UserId): Promise<readonly WalletListRow[]> {
+  return withWalletDeps(userId, async (deps) => {
+    const [wallets, allocations] = await Promise.all([
+      deps.wallets.list(),
+      deps.allocations.listAll(),
+    ]);
+    const counts = new Map<WalletId, number>();
+    for (const allocation of allocations) {
+      counts.set(allocation.walletId, (counts.get(allocation.walletId) ?? 0) + 1);
+    }
+    return wallets.map((wallet) => ({ wallet, assetCount: counts.get(wallet.id) ?? 0 }));
+  });
+}
+
 export interface WalletDetailData {
   readonly wallet: Wallet;
   readonly allocations: readonly WalletAllocation[];
   readonly labels: ReadonlyMap<AssetId, AssetLabel>;
   /**
-   * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — whether each
-   * allocated asset's *current* position carries an estimated cost. Read
-   * from `PositionQueryPort`, the same seam `compareWallets` reads, so a
-   * wallet's own detail page cannot disagree with the comparison table above
-   * it about which assets are estimated.
+   * BR-010-09 — the assets with a remainder no wallet has claimed, which is
+   * what this wallet's "Atribuir ativo" form offers.
    */
-  readonly costEstimated: ReadonlyMap<AssetId, boolean>;
+  readonly unassigned: readonly UnassignedHolding[];
+  /** BR-010-14 — the standing rules that point at **this** wallet. */
+  readonly standingRules: readonly StandingRule[];
+  /**
+   * BR-010-14 — the standing rules that point at **another** wallet, with its
+   * name. Setting a rule for one of these assets *moves* it, so the screen says
+   * where it points now before the user does.
+   */
+  readonly rulesElsewhere: readonly { readonly assetId: AssetId; readonly walletName: string }[];
+  /** Every asset currently held: what a standing rule can be set for. */
+  readonly held: readonly AssetId[];
 }
 
 export async function loadWalletDetail(
@@ -126,18 +158,33 @@ export async function loadWalletDetail(
   const result = await withWalletDeps(userId, async (deps) => {
     const wallet = await deps.wallets.findById(walletId);
     if (wallet === null) return null;
-    const allocations = await deps.allocations.listForWallet(walletId);
-    const held = await deps.positionQuery.listHeld();
-    const costEstimated = new Map(
-      held.map((position) => [position.assetId, position.costEstimated]),
-    );
-    return { wallet, allocations, costEstimated };
+    const [allocations, unassigned, rules, held, wallets] = await Promise.all([
+      deps.allocations.listForWallet(walletId),
+      computeUnassigned(deps, userId),
+      listStandingRules(deps, userId),
+      deps.positionQuery.listHeld(),
+      deps.wallets.list(),
+    ]);
+    const nameOf = new Map(wallets.map((other) => [other.id, other.name]));
+    return {
+      wallet,
+      allocations,
+      unassigned,
+      standingRules: rules.filter((rule) => rule.walletId === walletId),
+      rulesElsewhere: rules
+        .filter((rule) => rule.walletId !== walletId)
+        .map((rule) => ({ assetId: rule.assetId, walletName: nameOf.get(rule.walletId) ?? '' })),
+      held: held.map((position) => position.assetId),
+    };
   });
   if (result === null) return null;
 
-  const labels = await resolveAssetLabels(
-    result.allocations.map((allocation) => allocation.assetId),
-  );
+  const labels = await resolveAssetLabels([
+    ...result.allocations.map((allocation) => allocation.assetId),
+    ...result.unassigned.map((holding) => holding.assetId),
+    ...result.standingRules.map((rule) => rule.assetId),
+    ...result.held,
+  ]);
   return { ...result, labels };
 }
 

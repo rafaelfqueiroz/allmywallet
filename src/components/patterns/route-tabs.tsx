@@ -44,6 +44,13 @@ export type RouteTab = {
    * stay active under every sibling (DS-27's boundary rule matches sections).
    */
   readonly exact?: boolean;
+  /**
+   * Further paths this tab stays current on, besides its own. For a page that
+   * belongs to a tab's task without being one of the tabs: Carteiras' "Nova
+   * carteira" form is part of "Minhas carteiras", and with no tab lit the
+   * reader would not know where they are (DS-27).
+   */
+  readonly alsoActiveOn?: readonly string[];
 };
 
 export type RouteTabsProps = {
@@ -90,7 +97,9 @@ function TabStrip({
     >
       <ul className="flex min-w-max gap-1">
         {tabs.map((tab) => {
-          const active = isPathActive(pathname, tab.href, tab.exact);
+          const active =
+            isPathActive(pathname, tab.href, tab.exact) ||
+            (tab.alsoActiveOn ?? []).some((path) => isPathActive(pathname, path));
 
           return (
             <li key={tab.href}>

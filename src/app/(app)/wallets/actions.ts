@@ -1,20 +1,26 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import { revalidatePortfolio } from '@/app/(app)/portfolio/revalidate';
+import {
+  revalidateWalletSettings,
+  walletSettingsPath,
+} from '@/app/(app)/settings/wallets/revalidate';
 import { z } from 'zod';
 import { AssetId, WalletId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
 import { normalizeDecimalInput } from '@/lib/decimal-input';
 import { isErr } from '@/core/shared/result';
-import { IDLE, INVALID_INPUT, failure, type ActionState } from '@/lib/action-state';
+import { IDLE, INVALID_INPUT, SAVED, failure, type ActionState } from '@/lib/action-state';
 import { allocateToWallet } from '@/core/wallets/allocate';
 import { createWallet } from '@/core/wallets/create-wallet';
+import { WalletErrorCode, walletError } from '@/core/wallets/errors';
 import { deleteWallet } from '@/core/wallets/delete-wallet';
 import { clearStandingRule, setStandingRule } from '@/core/wallets/standing-rule';
 import { TARGET_MODES, setWalletTargets, type WalletTarget } from '@/core/wallets/targets';
 import { TARGET_FIELD_PREFIX } from '@/app/(app)/wallets/target-fields';
 import { updateWallet } from '@/core/wallets/update-wallet';
+import { CreateWalletSchema, UpdateWalletSchema } from '@/app/(app)/wallets/wallet-input';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
 import { requireUserId } from '@/lib/session';
 
@@ -38,18 +44,6 @@ import { requireUserId } from '@/lib/session';
  * (AR-37/AR-38).
  */
 
-const optionalText = z
-  .string()
-  .optional()
-  .transform((value) => (value === undefined || value.trim() === '' ? null : value));
-
-const CreateWalletSchema = z.object({
-  name: z.string().min(1),
-  description: optionalText,
-  goal: optionalText,
-  color: optionalText,
-});
-
 export async function createWalletAction(
   _state: ActionState,
   formData: FormData,
@@ -59,18 +53,13 @@ export async function createWalletAction(
   if (!parsed.success) return INVALID_INPUT;
 
   const result = await withWalletDeps(userId, (deps) => createWallet(deps, userId, parsed.data));
-  if (isErr(result)) return failure(result.error);
+  if (!result.ok) return failure(result.error);
   revalidatePortfolio();
-  return IDLE;
+  revalidateWalletSettings(result.value.id);
+  // SPEC-022 BR-022-05: a created wallet lands on its own page, where the next
+  // step — assigning assets to it — is. `redirect` throws, so it stays last.
+  redirect(walletSettingsPath(result.value.id));
 }
-
-const UpdateWalletSchema = z.object({
-  walletId: z.string(),
-  name: z.string().min(1).optional(),
-  description: optionalText,
-  goal: optionalText,
-  color: optionalText,
-});
 
 export async function updateWalletAction(
   _state: ActionState,
@@ -86,8 +75,8 @@ export async function updateWalletAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  revalidatePath(`/wallets/${walletId}`);
-  return IDLE;
+  revalidateWalletSettings(walletId);
+  return SAVED;
 }
 
 const WalletIdSchema = z.object({ walletId: z.string() });
@@ -104,7 +93,9 @@ export async function deleteWalletAction(
   const result = await withWalletDeps(userId, (deps) => deleteWallet(deps, userId, walletId));
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  return IDLE;
+  revalidateWalletSettings(walletId);
+  // The wallet's own page no longer exists: back to the list.
+  redirect('/settings/wallets');
 }
 
 /**
@@ -120,10 +111,7 @@ export async function deleteWalletAction(
 const AllocateSchema = z.object({
   walletId: z.string(),
   assetId: z.string(),
-  quantity: z
-    .string()
-    .optional()
-    .transform((value) => (value === undefined || value.trim() === '' ? undefined : value)),
+  quantity: z.string().optional(),
 });
 
 export async function allocateAction(
@@ -134,8 +122,24 @@ export async function allocateAction(
   const parsed = AllocateSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return INVALID_INPUT;
 
+  // A blank quantity is "everything not yet assigned" (BR-010-03). A filled one
+  // is read the way a pt-BR keyboard writes it (AR-06: a string handed to
+  // `Quantity`'s own parser, never a float) — and one that is not a number is
+  // refused as the invalid quantity it is, so it reaches the field under which
+  // the form shows it rather than throwing out of the parser.
+  const raw = parsed.data.quantity?.trim() ?? '';
+  const quantity = raw === '' ? undefined : normalizeDecimalInput(raw);
+  if (quantity === null) {
+    return failure(
+      walletError(WalletErrorCode.INVALID_ALLOCATION_QUANTITY, {
+        assetId: parsed.data.assetId,
+        quantity: raw,
+      }),
+    );
+  }
+
   const result = await withWalletDeps(userId, (deps) =>
-    parsed.data.quantity === undefined
+    quantity === undefined
       ? allocateToWallet(deps, userId, {
           walletId: WalletId.of(parsed.data.walletId),
           assetId: AssetId.of(parsed.data.assetId),
@@ -144,14 +148,14 @@ export async function allocateAction(
           walletId: WalletId.of(parsed.data.walletId),
           assetId: AssetId.of(parsed.data.assetId),
           mode: 'add',
-          quantity: Quantity.fromString(parsed.data.quantity),
+          quantity: Quantity.fromString(quantity),
         }),
   );
   // BR-010-05 / AC-010-04: the sum invariant refused this write. The message
   // names the held quantity, so the user can see what the ceiling actually is.
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
-  revalidatePath(`/wallets/${parsed.data.walletId}`);
+  revalidateWalletSettings(parsed.data.walletId);
   return IDLE;
 }
 
@@ -175,6 +179,9 @@ export async function setStandingRuleAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
+  // Setting a rule *moves* it when the asset already had one, so the wallet it
+  // came from changes too, and this action does not know which that was.
+  revalidateWalletSettings();
   return IDLE;
 }
 
@@ -193,6 +200,9 @@ export async function clearStandingRuleAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePortfolio();
+  // A rule is shown on the page of the wallet it points at, which this action
+  // does not know: every wallet page is refreshed.
+  revalidateWalletSettings();
   return IDLE;
 }
 
@@ -253,6 +263,6 @@ export async function setWalletTargetsAction(
   if (isErr(result)) return failure(result.error);
 
   revalidatePortfolio();
-  revalidatePath(`/wallets/${walletId}`);
+  revalidateWalletSettings(walletId);
   return IDLE;
 }

@@ -45,6 +45,23 @@ const read = (dir: string) =>
 const sources = read(APP).filter(({ path }) => !path.startsWith('src/app/(dev)/'));
 const components = read(join(ROOT, 'src', 'components'));
 
+/**
+ * A page that does nothing but `redirect()` has nothing to put in a shell
+ * (Configurações' `/settings`, which only forwards to its first section). The
+ * exemption is exactly that: the whole module is imports, comments and one
+ * default export whose body is a single `redirect('/…')` — a page that also
+ * renders anything is not exempt, and still needs the shell.
+ */
+export function isRedirectOnly(text: string): boolean {
+  const body = text
+    .replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '')
+    .replace(/^import .*$/gm, '')
+    .trim();
+  return /^export default (async )?function \w+\([^)]*\)(: never)? \{\s*redirect\((['"])[^'"]+\3\);?\s*\}$/.test(
+    body,
+  );
+}
+
 /** Source without its comments, so prose that names a function is not a use of it. */
 const code = (text: string) => text.replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '');
 
@@ -129,9 +146,30 @@ describe('every amount goes through the masking (BR-022-24)', () => {
     const offenders = sources
       .filter(({ path }) => /^src\/app\/\((app|settings)\)\/.*page\.tsx$/.test(path))
       .filter(({ text }) => !text.includes("import { PageShell } from '@/app/page-shell'"))
+      .filter(({ text }) => !isRedirectOnly(text))
       .map(({ path }) => path);
 
     expect(offenders).toEqual([]);
+  });
+
+  it('exempts only a page that does nothing but redirect', () => {
+    const redirectOnly = [
+      "import { redirect } from 'next/navigation';",
+      '/** forwards */',
+      'export default function P(): never {',
+      "  redirect('/settings/wallets');",
+      '}',
+    ].join('\n');
+    expect(isRedirectOnly(redirectOnly)).toBe(true);
+    // A page that renders anything else, or has no shell and no redirect, still fails.
+    expect(
+      isRedirectOnly(
+        "export default function P() {\n  redirect('/x');\n  return <main>conteúdo</main>;\n}",
+      ),
+    ).toBe(false);
+    expect(
+      isRedirectOnly('export default function P() {\n  return <main>sem shell</main>;\n}'),
+    ).toBe(false);
   });
 
   it('hands every money chart coordinates through concealSeries', () => {
