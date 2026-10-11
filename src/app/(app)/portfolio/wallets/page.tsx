@@ -10,7 +10,6 @@ import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { loadCurrentComposition } from '@/app/(app)/portfolio/data';
 import { PortfolioFrame } from '@/app/(app)/portfolio/_components/PortfolioFrame';
 import { WalletBalance } from '@/app/(app)/portfolio/wallets/_components/WalletBalance';
-import { WalletTabs } from '@/app/(app)/portfolio/wallets/_components/WalletTabs';
 import { EstimatedValue } from '@/app/(app)/portfolio/_components/EstimatedValue';
 import { fromSearchParams } from '@/lib/report-url-state';
 import { tryUserId } from '@/lib/session';
@@ -41,7 +40,7 @@ import {
  * (SPEC-010, SPEC-017).
  *
  * - **All wallets** in the scope selector: the comparison and Não atribuído.
- *   The wallets asking for a decision are in the Configurar sub-tab's queue.
+ *   The wallets asking for a decision are in Configurações › Carteiras › Atribuir ativos.
  * - **One wallet**: that wallet's row of the comparison, then its balancing
  *   (SPEC-017), which was `/wallets/[id]/balance` (redirected here,
  *   BR-022-08).
@@ -58,11 +57,9 @@ import {
  * Allocation figures are only as correct as the allocations underneath them;
  * #197 overstates some wallets, and this tab does not change allocation logic.
  *
- * **Wallet setup is this tab's last sub-tab, Configurar** (`setup/page.tsx`),
- * until Configurações › Carteiras exists (#210, BR-022-05). `/wallets`
- * redirects here, and creating, deleting and assigning cannot become
- * unreachable in the meantime (DS-26's reasoning, applied to an action rather
- * than a menu item); a sub-tab keeps it off the analysis (BR-022-15).
+ * **Wallet setup is not here.** Creating, editing, deleting, assigning and the
+ * standing rules are Configurações › Carteiras (#210, BR-022-05); this tab is
+ * the analysis only, so it has no sub-tabs (BR-022-15).
  *
  * Never statically prerendered: one tenant's own holdings and allocations.
  */
@@ -122,7 +119,6 @@ export default async function PortfolioWalletsPage({ searchParams }: PageProps) 
             }
       }
     >
-      <WalletTabs />
       {children}
     </PortfolioFrame>
   );

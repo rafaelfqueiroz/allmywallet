@@ -1393,7 +1393,7 @@
     "title": "Metas e desvio",
     "description": "O que você declarou para esta carteira, e a distância entre isso e o que ela tem hoje. Todo número aqui parte de uma meta que você mesmo informou.",
     "signedOut": "Entre na sua conta para ver as metas desta carteira.",
-    "back": "Voltar à carteira",
+    "back": "Configurações da carteira",
     "modeTitle": "Modo das metas",
     "modeLabel": "Modo",
     "modeNone": "Sem metas",

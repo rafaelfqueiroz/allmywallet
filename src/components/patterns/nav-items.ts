@@ -4,6 +4,7 @@ import {
   ChartLine,
   ChartPie,
   LayoutGrid,
+  SlidersHorizontal,
   Upload,
   type LucideIcon,
 } from 'lucide-react';
@@ -21,9 +22,10 @@ import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
  * 404s is worse than a shorter menu. SPEC-022 BR-022-01's five destinations
  * (Painel, Portfólio, Relatórios, Transações, Configurações) therefore arrive
  * one at a time, each with the issue that makes its route real (#208 Portfólio,
- * #210–#212 Configurações), and the items they absorb leave in the same
- * change. Until then the order already follows BR-022-01: what is held, what
- * it did over time, the ledger, then setup.
+ * #209 Relatórios, #210 Configurações), and the items they absorb leave in the
+ * same change. Importar and Observar preços are Configurações sections that
+ * have not moved yet (#211, #212), so they keep their own items until they do —
+ * and Configurações is last, as BR-022-01 orders it.
  *
  * Preferências and Privacidade left this list with #205: they belong to the
  * person rather than to a feature, so they live in the account menu
@@ -32,7 +34,14 @@ import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
  */
 export type NavItem = {
   readonly href: string;
-  readonly labelKey: 'dashboard' | 'portfolio' | 'transactions' | 'watch' | 'import' | 'reports';
+  readonly labelKey:
+    | 'dashboard'
+    | 'portfolio'
+    | 'transactions'
+    | 'watch'
+    | 'import'
+    | 'reports'
+    | 'settings';
   readonly icon: LucideIcon;
   /**
    * SPEC-022 BR-022-17 — the destination reads the shared scope selector's
@@ -62,6 +71,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
   // SPEC-018. Binoculars rather than an eye: the eye is the masking toggle's
   // (BR-022-24), and one glyph meaning two things in one frame reads as a bug.
   { href: '/watch', labelKey: 'watch', icon: Binoculars },
+  /*
+   * SPEC-022 BR-022-01/05 (#210) — setup, last. `/settings` is the item's
+   * address and redirects to its first section, so the item is current on every
+   * section beneath it (DS-27's path boundary), however many there are.
+   */
+  { href: '/settings', labelKey: 'settings', icon: SlidersHorizontal },
 ];
 
 /**

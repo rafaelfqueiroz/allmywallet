@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NAV_ITEMS, navHref, type NavItem } from '@/components/patterns/nav-items';
+import { isPathActive } from '@/components/patterns/nav-link';
 
 const item = (href: string): NavItem => {
   const found = NAV_ITEMS.find((candidate) => candidate.href === href);
@@ -33,5 +34,24 @@ describe('navHref — SPEC-022 BR-022-17: the scope shared by Portfólio and Rel
   it('writes a plain href when there is no scope to carry', () => {
     expect(navHref(item('/reports'), '/portfolio', params(''))).toBe('/reports');
     expect(navHref(item('/dashboard'), '/portfolio', params('wallet=abc'))).toBe('/dashboard');
+  });
+});
+
+describe('Configurações — SPEC-022 BR-022-01', () => {
+  it('is the last destination in the menu', () => {
+    expect(NAV_ITEMS.at(-1)?.href).toBe('/settings');
+  });
+
+  it('is current on every section beneath it, and on nothing else', () => {
+    const settings = item('/settings');
+    expect(isPathActive('/settings/wallets', settings.href)).toBe(true);
+    expect(isPathActive('/settings/wallets/assign', settings.href)).toBe(true);
+    expect(isPathActive('/settings/wallets/7b0c2c5e', settings.href)).toBe(true);
+    expect(isPathActive('/settings-outro', settings.href)).toBe(false);
+    expect(isPathActive('/portfolio/wallets', settings.href)).toBe(false);
+  });
+
+  it('carries no wallet scope, which Configurações does not read', () => {
+    expect(navHref(item('/settings'), '/portfolio', params('wallet=abc'))).toBe('/settings');
   });
 });

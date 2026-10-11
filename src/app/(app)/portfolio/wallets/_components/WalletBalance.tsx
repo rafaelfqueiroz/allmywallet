@@ -86,10 +86,10 @@ export async function WalletBalance({
         title={tp('wallets.balanceTitle', { wallet: balance.walletName })}
         description={t('description')}
         actions={
-          // Setup stays on the wallet's own page until Configurações ›
-          // Carteiras exists (#210); balancing is read here (BR-022-02).
+          // Setup is the wallet's page in Configurações › Carteiras (#210,
+          // BR-022-05); balancing is read here (BR-022-02).
           <Button asChild variant="link" size="sm">
-            <Link href={`/wallets/${balance.walletId}`}>{t('back')}</Link>
+            <Link href={`/settings/wallets/${balance.walletId}`}>{t('back')}</Link>
           </Button>
         }
       />

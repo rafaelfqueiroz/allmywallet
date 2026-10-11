@@ -68,7 +68,7 @@ export async function createWalletAction(
   if (!parsed.success) return INVALID_INPUT;
 
   const result = await withWalletDeps(userId, (deps) => createWallet(deps, userId, parsed.data));
-  if (isErr(result)) return failure(result.error);
+  if (!result.ok) return failure(result.error);
   revalidatePortfolio();
   revalidateWalletSettings(result.value.id);
   // SPEC-022 BR-022-05: a created wallet lands on its own page, where the next

@@ -18,8 +18,8 @@ import { Text } from '@/components/ui/text';
  *
  * **One queue, not a second one.** DL-017-08 is explicit that a second surface
  * splits the answer to "is there anything for me to do?" across two screens.
- * `/portfolio/wallets/setup` renders pending allocations and SPEC-017's out-of-balance wallets,
- * which live with the wallets they are about; outstanding import rows have
+ * `/settings/wallets/assign` (Configurações › Carteiras › Atribuir ativos) renders pending
+ * allocations and SPEC-017's out-of-balance wallets; outstanding import rows have
  * until now been visible only on `/import/[batchId]`, one batch at a time. This
  * is the first screen on which BR-010-12's "the same queue" is literally one
  * list, and every item links back to the screen that resolves it.
@@ -135,15 +135,15 @@ export async function AttentionQueue({
          * Said, not silently truncated. The ordinary first-week state — a full
          * extract imported and no wallet created yet — produces one item per
          * held asset, which at reference scale is a hundred rows that would
-         * bury everything else on the screen. `/portfolio/wallets/setup` is where the work is
+         * bury everything else on the screen. `/settings/wallets/assign` is where the work is
          * actually done and shows all of them with the forms to resolve each.
          *
          * Only pending allocations are ever hidden (`attentionQueue` never caps
-         * a gate, SPEC-020 BR-020-18), so `/portfolio/wallets/setup` is the right destination
+         * a gate, SPEC-020 BR-020-18), so `/settings/wallets/assign` is the right destination
          * for everything this link counts.
          */
         <Button asChild variant="link" size="sm">
-          <Link href="/portfolio/wallets/setup">{t('more', { count: hidden })}</Link>
+          <Link href="/settings/wallets/assign">{t('more', { count: hidden })}</Link>
         </Button>
       )}
     </Section>
@@ -162,6 +162,6 @@ function gateHref(resolution: GateResolution): string {
     case 'fixed_income_contract':
       return `/fixed-income/${resolution.assetId}`;
     case 'wallets':
-      return '/portfolio/wallets/setup';
+      return '/settings/wallets/assign';
   }
 }
