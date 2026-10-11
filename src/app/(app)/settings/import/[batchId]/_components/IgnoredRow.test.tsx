@@ -4,7 +4,7 @@ import { AssetId, ImportBatchId, ImportRowId, TransactionId } from '@/core/share
 import { Money, Quantity } from '@/core/shared/money';
 import type { ImportRow, NormalizedTransactionRecord } from '@/core/ingestion/ports';
 import { render, screen } from '@/components/test-utils';
-import { List } from '@/components/layout/list';
+import { Table, TableBody } from '@/components/ui/table';
 import { IgnoredRow } from './IgnoredRow';
 
 const exerciseRecord: NormalizedTransactionRecord = {
@@ -42,14 +42,16 @@ const classifyForm = (rowId: string) => <button type="button">{`Classificar ${ro
 describe('IgnoredRow (SPEC-005 BR-005-19/20d, #179)', () => {
   it('keeps a resolved exercise visible without a classify form', () => {
     render(
-      <List>
-        <IgnoredRow
-          row={exercise}
-          committed
-          resolvedExerciseLabel="Exercício resolvido no ativo principal"
-          classifyForm={classifyForm}
-        />
-      </List>,
+      <Table>
+        <TableBody>
+          <IgnoredRow
+            row={exercise}
+            committed
+            resolvedExerciseLabel="Exercício resolvido no ativo principal"
+            classifyForm={classifyForm}
+          />
+        </TableBody>
+      </Table>,
     );
 
     expect(screen.getByText('XXXX12')).toBeInTheDocument();
@@ -71,14 +73,16 @@ describe('IgnoredRow (SPEC-005 BR-005-19/20d, #179)', () => {
     };
 
     render(
-      <List>
-        <IgnoredRow
-          row={mirror}
-          committed
-          resolvedExerciseLabel="Exercício resolvido no ativo principal"
-          classifyForm={classifyForm}
-        />
-      </List>,
+      <Table>
+        <TableBody>
+          <IgnoredRow
+            row={mirror}
+            committed
+            resolvedExerciseLabel="Exercício resolvido no ativo principal"
+            classifyForm={classifyForm}
+          />
+        </TableBody>
+      </Table>,
     );
 
     expect(screen.getByText('XXXX11')).toBeInTheDocument();

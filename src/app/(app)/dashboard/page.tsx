@@ -17,6 +17,7 @@ import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
+import { IMPORT_SEND_PATH } from '@/app/(app)/import/paths';
 
 /**
  * **The authenticated landing screen** (#98).
@@ -137,7 +138,7 @@ export default async function DashboardPage() {
             </Text>
             <div>
               <Button asChild variant="link" size="sm">
-                <Link href="/import">{t('staleness.action')}</Link>
+                <Link href={IMPORT_SEND_PATH}>{t('staleness.action')}</Link>
               </Button>
             </div>
           </Stack>
@@ -175,7 +176,7 @@ export default async function DashboardPage() {
           }
           action={
             <Button asChild>
-              <Link href={firstRun ? '/import' : '/transactions'}>
+              <Link href={firstRun ? IMPORT_SEND_PATH : '/transactions'}>
                 {firstRun ? t('empty.onboarding.action') : t('empty.noHoldings.action')}
               </Link>
             </Button>

@@ -77,7 +77,7 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
   const { page, userId } = signedIn;
 
   // ---- The guide is what a first-run user meets -------------------------
-  await page.goto('/import');
+  await page.goto('/settings/import');
   await expect(page.getByRole('heading', { name: /como exportar/i })).toBeVisible();
 
   // ---- Upload ------------------------------------------------------------
@@ -94,7 +94,7 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
   await page.getByRole('button', { name: /^enviar$/i }).click();
 
   // The action redirects to the batch it created.
-  await expect(page).toHaveURL(/\/import\/[0-9a-f-]{36}$/);
+  await expect(page).toHaveURL(/\/settings\/import\/[0-9a-f-]{36}$/);
   const batchId = page.url().split('/').pop() ?? '';
   expect(batchId).not.toBe('');
 
@@ -156,7 +156,7 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
   // unassigned — which is the case the summary most needs to state, because
   // nothing else on screen would tell the user their new holding is sitting
   // in no purpose at all (BR-010-16: never guessed into one).
-  await page.goto(`/import/${batchId}`);
+  await page.goto(`/settings/import/${batchId}`);
   await expect(page.getByRole('heading', { name: /o que esta importação mudou/i })).toBeVisible();
   await expect(page.getByText('PETR4', { exact: false }).first()).toBeVisible();
 
@@ -205,7 +205,7 @@ test('the three extracts upload together, in whatever order they were picked', a
     },
   ]);
 
-  await page.goto('/import');
+  await page.goto('/settings/import');
   await page.locator(EXTRACT_INPUT).setInputFiles([
     {
       name: 'negociacao.xlsx',
@@ -220,9 +220,9 @@ test('the three extracts upload together, in whatever order they were picked', a
   ]);
   await page.getByRole('button', { name: /^enviar$/i }).click();
 
-  // Several files have no single batch page to land on, so the history list is
-  // where they go — and both must be there.
-  await expect(page).toHaveURL(/\/import$/);
+  // Several files have no single batch page to land on, so Histórico is where
+  // they go — and both must be there.
+  await expect(page).toHaveURL(/\/settings\/import\/history$/);
 
   await expect
     .poll(
@@ -277,7 +277,7 @@ test('the export guide shows a diagram, the ordered steps, and the verification 
 }) => {
   const { page } = signedIn;
 
-  await page.goto('/import');
+  await page.goto('/settings/import');
   await expect(page.getByRole('heading', { name: /como exportar/i })).toBeVisible();
 
   // Decorative diagrams — `ExtractDiagram`'s own `role="img"` marker, one per
@@ -328,7 +328,7 @@ test('the upload posts without JavaScript, and shows no browser-language text', 
     await context.addCookies(await seededPage.context().cookies());
     const page = await context.newPage();
 
-    await page.goto('/import');
+    await page.goto('/settings/import');
 
     // BR-022-23: the zone speaks Portuguese; the browser's own "Choose Files" /
     // "No file chosen" is painted under a transparent input and never read.
@@ -349,7 +349,7 @@ test('the upload posts without JavaScript, and shows no browser-language text', 
 
     // A native multipart POST to the server action, which redirects to the
     // batch it created — the same landing the scripted journey asserts.
-    await expect(page).toHaveURL(/\/import\/[0-9a-f-]{36}$/);
+    await expect(page).toHaveURL(/\/settings\/import\/[0-9a-f-]{36}$/);
     const batchId = page.url().split('/').pop() ?? '';
     const row = await queryOne<{ count: string }>(
       'SELECT count(*)::text AS count FROM import_batches WHERE id = $1 AND user_id = $2',

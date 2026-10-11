@@ -26,18 +26,45 @@ export interface PaginationProps {
   readonly total: number;
   /** Builds the href for a given 1-based page, carrying the active filters. */
   readonly hrefFor: (page: number) => string;
+  /**
+   * The navigation's accessible name, when a page has more than one paged
+   * table (a batch's page, #211): two landmarks with one name cannot be told
+   * apart. Translated text.
+   */
+  readonly label?: string;
+  /** The summary line, when the rows are not transactions. Translated text. */
+  readonly summaryFor?: (counts: {
+    readonly page: number;
+    readonly pages: number;
+    readonly total: number;
+  }) => string;
 }
 
-export async function Pagination({ page, pageSize, total, hrefFor }: PaginationProps) {
+export async function Pagination({
+  page,
+  pageSize,
+  total,
+  hrefFor,
+  label,
+  summaryFor,
+}: PaginationProps) {
   const t = await getTranslations('transactions.pagination');
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const hasPrevious = page > 1;
   const hasNext = page < pageCount;
 
   return (
-    <Cluster justify="between" align="center" gap="md" role="navigation" aria-label={t('label')}>
+    <Cluster
+      justify="between"
+      align="center"
+      gap="md"
+      role="navigation"
+      aria-label={label ?? t('label')}
+    >
       <Text tone="muted" size="sm">
-        {t('summary', { page, pages: pageCount, total })}
+        {summaryFor
+          ? summaryFor({ page, pages: pageCount, total })
+          : t('summary', { page, pages: pageCount, total })}
       </Text>
       <Cluster gap="sm">
         {hasPrevious ? (

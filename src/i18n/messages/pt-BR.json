@@ -84,7 +84,6 @@
     "portfolio": "Portfólio",
     "transactions": "Transações",
     "watch": "Observar preços",
-    "import": "Importar",
     "reports": "Relatórios",
     "settings": "Configurações",
     "appName": "AllMyWallet",
@@ -468,7 +467,8 @@
     "description": "Carteiras, importação de extratos e regras de observação de preços",
     "navLabel": "Seções de Configurações",
     "sections": {
-      "wallets": "Carteiras"
+      "wallets": "Carteiras",
+      "import": "Importar"
     },
     "signedOut": "Entre na sua conta para acessar as configurações."
   },
@@ -556,8 +556,6 @@
     "colorNone": "Sem cor"
   },
   "import": {
-    "title": "Importar extratos B3",
-    "description": "Envie os extratos exportados da Área do Investidor da B3 — Movimentação, Negociação e Posição — para atualizar seu portfólio.",
     "signedOut": "Entre na sua conta para importar extratos.",
     "guide": {
       "title": "Como exportar seus extratos da B3",
@@ -576,9 +574,6 @@
     "dropTitle": "Arraste o extrato da B3 aqui",
     "acceptHint": ".xlsx ou .xls",
     "upload": "Enviar",
-    "historyTitle": "Importações anteriores",
-    "historyEmpty": "Nenhum arquivo importado ainda.",
-    "viewDetails": "Ver detalhes",
     "uploadedAt": "Enviado em {date}",
     "commit": "Confirmar importação",
     "cancel": "Cancelar importação",
@@ -730,10 +725,56 @@
       "assign": "Atribuir a",
       "chooseWallet": "Escolha uma carteira",
       "quantity": "Quantidade",
-      "resolve": "Atribuir"
+      "resolve": "Atribuir",
+      "columnAsset": "Ativo",
+      "columnImported": "Quantidade importada",
+      "columnWallets": "Carteiras",
+      "columnAssign": "Atribuir",
+      "pageSummary": "Página {page} de {pages} · {total} ativo(s)"
     },
     "fileHint": "Você pode enviar os três extratos de uma vez, ou um de cada vez — a ordem não importa.",
-    "uploading": "Enviando…"
+    "uploading": "Enviando…",
+    "sectionTitle": "Importar",
+    "tabs": {
+      "label": "Tarefas de Importar",
+      "send": "Enviar",
+      "history": "Histórico",
+      "parameters": "Parâmetros"
+    },
+    "extractTypeUnknown": "Não identificado",
+    "detailBack": "Histórico de importações",
+    "history": {
+      "caption": "Histórico de importações, com tipo de extrato, data de envio, situação e linhas lidas",
+      "columnType": "Tipo",
+      "columnSentAt": "Enviado em",
+      "columnStatus": "Situação",
+      "columnRows": "Linhas",
+      "columnAction": "Ação",
+      "noRows": "—",
+      "view": "Ver detalhes",
+      "viewOf": "da importação {type} enviada em {date}",
+      "sortBy": "Ordenar por {column}",
+      "sortField": "Ordenar por",
+      "sortAscending": "Ordem crescente",
+      "sortDescending": "Ordem decrescente",
+      "search": "Buscar por tipo ou situação",
+      "noun": "importações",
+      "empty": "Nenhum arquivo importado ainda.",
+      "emptyBody": "Envie um extrato na aba Enviar para começar."
+    },
+    "rows": {
+      "columnAsset": "Ativo",
+      "columnMovement": "Movimentação",
+      "columnDate": "Data",
+      "columnDetail": "Motivo",
+      "columnAction": "Ação",
+      "pageSummary": "Página {page} de {pages} · {total} linha(s)",
+      "pagination": {
+        "summary": "Paginação de O que esta importação mudou",
+        "attention": "Paginação de Precisa de atenção",
+        "ignored": "Paginação de Ignoradas"
+      }
+    }
   },
   "reports": {
     "title": "Relatórios",

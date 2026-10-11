@@ -38,7 +38,9 @@ const ROUTES = [
   // signed-out state here, which is the state this suite runs in.
   '/transactions',
   '/transactions/new',
-  '/import',
+  '/settings/import',
+  '/settings/import/history',
+  '/settings/import/parameters',
   '/reports',
   '/reports/performance',
   // SPEC-014 #17 — the fourth report.

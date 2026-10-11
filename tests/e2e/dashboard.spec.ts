@@ -228,7 +228,7 @@ test.describe('the dashboard', () => {
     await expect(gate.getByText(/podem estar incorretos, para mais ou para menos/)).toBeVisible();
     await expect(gate.getByRole('link', { name: 'Revisar' })).toHaveAttribute(
       'href',
-      `/import/${batchId}`,
+      `/settings/import/${batchId}`,
     );
   });
 

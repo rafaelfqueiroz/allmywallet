@@ -21,18 +21,18 @@ test.describe('application navigation', () => {
       await expect(page.getByRole('dialog')).toBeVisible();
     }
 
-    await page.getByRole('link', { name: 'Importar' }).click();
-    await expect(page).toHaveURL(/\/import$/);
+    await page.getByRole('link', { name: 'Transações' }).click();
+    await expect(page).toHaveURL(/\/transactions$/);
   });
 
   test('marks the current destination for assistive technology', async ({ page, viewport }) => {
-    await page.goto('/import');
+    await page.goto('/transactions');
 
     if (viewport && isMobile(viewport.width)) {
       await page.getByRole('button', { name: 'Abrir menu' }).click();
     }
 
-    await expect(page.getByRole('link', { name: 'Importar' })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: 'Transações' })).toHaveAttribute(
       'aria-current',
       'page',
     );

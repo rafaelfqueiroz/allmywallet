@@ -19,7 +19,7 @@ import { Section } from '@/components/patterns/section';
  * (`src/components/onboarding/`) is the one copy of the steps, the diagrams,
  * the earliest-date advice and the verification stamp — SPEC-020 owns this
  * content now, and `/onboarding` renders the exact same component. This file
- * is left holding only the `Section` framing (`/import`'s own title and lead,
+ * is left holding only the `Section` framing (Importar › Enviar's own title and lead,
  * which differ by whether this is a first or a returning run).
  *
  * **No screenshots of investidor.b3.com.br** (BR-020-23, DL-020-06). The guide

@@ -105,6 +105,27 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
     issue: 210,
     example: { from: '/portfolio/wallets/setup', to: '/settings/wallets/assign' },
   },
+  /*
+   * #211 — Configurações › Importar (BR-022-05/16). `/import` was upload and
+   * history on one page; it lands on Enviar, the tab that answers "import a
+   * file", which links to Histórico. A batch keeps its id. The Painel, the
+   * onboarding guide and Transações' provenance link pointed at both.
+   */
+  {
+    source: '/import',
+    destination: '/settings/import',
+    issue: 211,
+    example: { from: '/import', to: '/settings/import' },
+  },
+  {
+    source: '/import/:batchId',
+    destination: '/settings/import/:batchId',
+    issue: 211,
+    example: {
+      from: '/import/7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10',
+      to: '/settings/import/7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10',
+    },
+  },
 ];
 
 /** The shape `next.config.ts`'s `redirects()` returns. */

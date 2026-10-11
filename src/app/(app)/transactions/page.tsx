@@ -42,6 +42,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { importBatchPath } from '@/app/(app)/import/paths';
 
 /**
  * SPEC-006 BR-006-07/08/09/10/02/03 — the transaction ledger's own surface.
@@ -284,7 +285,7 @@ async function TransactionRow({ item }: { readonly item: TransactionListItem }) 
             <Badge variant="secondary">{t('provenance.manual')}</Badge>
           ) : (
             <Badge variant="secondary" asChild>
-              <Link href={`/import/${tx.importBatchId}`}>{t('provenance.imported')}</Link>
+              <Link href={importBatchPath(tx.importBatchId)}>{t('provenance.imported')}</Link>
             </Badge>
           )}
           {/* BR-006-16: a human corrected this row since it was imported. */}

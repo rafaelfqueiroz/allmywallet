@@ -28,6 +28,7 @@ import { enqueue } from '@/lib/queue';
 import { requestSnapshotRebuild } from '@/lib/snapshot-rebuild';
 import { QUEUE } from '@/worker/queues';
 import { ClassifySchema } from '@/app/(app)/import/classify-schema';
+import { IMPORT_HISTORY_PATH, IMPORT_SEND_PATH, importBatchPath } from '@/app/(app)/import/paths';
 
 /**
  * AR-32: each action validates input with Zod at the boundary (DV-07),
@@ -125,12 +126,16 @@ export async function uploadExtractAction(
     await enqueue(QUEUE.IMPORT_STAGE, { batchId: upload.batchId, userId });
   }
 
-  revalidatePath('/import');
+  revalidateImportPages();
   // One file lands on its own batch, as before. Several have no single detail
-  // page to show, so the history list — where all of them are visibly staging
-  // — is the honest destination.
+  // page to show, so Histórico — where all of them are visibly staging — is
+  // the honest destination.
   const first = uploads[0];
-  redirect(uploads.length === 1 && first !== undefined ? `/import/${first.batchId}` : '/import');
+  redirect(
+    uploads.length === 1 && first !== undefined
+      ? importBatchPath(first.batchId)
+      : IMPORT_HISTORY_PATH,
+  );
 }
 
 function uploadFailure(
@@ -183,7 +188,7 @@ export async function commitBatchAction(formData: FormData): Promise<void> {
     { batchId, userId, ...(asOf === undefined ? {} : { asOf }) },
     { id: batchId },
   );
-  revalidatePath(`/import/${batchId}`);
+  revalidatePath(importBatchPath(batchId));
 }
 
 export async function cancelBatchAction(formData: FormData): Promise<void> {
@@ -195,8 +200,8 @@ export async function cancelBatchAction(formData: FormData): Promise<void> {
   // BR-005-12: synchronous, not a queue — cancel never pays commit's parse
   // cost, so there is no 60s budget to protect against here.
   await handleImportCancel({ batchId, userId });
-  revalidatePath('/import');
-  redirect('/import');
+  revalidateImportPages();
+  redirect(IMPORT_HISTORY_PATH);
 }
 
 export async function classifyRowAction(
@@ -235,7 +240,7 @@ export async function classifyRowAction(
   // created row) or edited a stored one (an unclassified row's own date, or
   // earlier for carried legs re-derived) — stale from the earliest scope.
   await requestSnapshotRebuild(userId, earliestFromDate(result.value.recalculations));
-  revalidatePath('/import');
+  revalidateImportPages();
   return IDLE;
 }
 
@@ -285,7 +290,7 @@ export async function resolveSubscriptionOfferAction(
   // SPEC-009 BR-009-18: the credit's re-typed price moves cost from its date,
   // and every carried leg re-derived downstream of it is in `recalculations`.
   await requestSnapshotRebuild(userId, earliestFromDate(result.value.recalculations));
-  revalidatePath('/import');
+  revalidateImportPages();
   return IDLE;
 }
 
@@ -330,7 +335,7 @@ export async function keepSubscriptionClassificationAction(
   if (result.value.rederived.length > 0) {
     await requestSnapshotRebuild(userId, earliestFromDate(result.value.recalculations));
   }
-  revalidatePath('/import');
+  revalidateImportPages();
   return IDLE;
 }
 
@@ -378,7 +383,7 @@ export async function acceptAdjustmentAction(
   // SPEC-009 BR-009-18: the adjustment is dated at the reconciliation's
   // `asOf`, which is usually in the past — the snapshots since are stale.
   await requestSnapshotRebuild(userId, earliestFromDate([result.value.result.recalculation]));
-  revalidatePath(`/import/${batchId}`);
+  revalidatePath(importBatchPath(batchId));
   return IDLE;
 }
 
@@ -386,4 +391,14 @@ function affectedAssets(
   recalculations: readonly { readonly scope: { readonly assetId: AssetId } }[],
 ): ReadonlySet<AssetId> {
   return new Set(recalculations.map((recalculation) => recalculation.scope.assetId));
+}
+
+/**
+ * SPEC-022 BR-022-16 (#211) — what `/import` alone used to cover is two tabs
+ * now: Enviar (its staleness prompt reads the last commit) and Histórico (the
+ * statuses).
+ */
+function revalidateImportPages(): void {
+  revalidatePath(IMPORT_SEND_PATH);
+  revalidatePath(IMPORT_HISTORY_PATH);
 }

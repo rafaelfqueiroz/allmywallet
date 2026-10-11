@@ -8,6 +8,7 @@ import { Cluster } from '@/components/layout/cluster';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
+import { IMPORT_SEND_PATH, importBatchPath } from '@/app/(app)/import/paths';
 
 /**
  * SPEC-005 BR-005-26 — "portfolio reconciliation status (`reconciled` /
@@ -81,14 +82,14 @@ export async function ReconciliationStatus({
         <div>
           {batchId === null ? (
             <Button asChild variant="link" size="sm">
-              <Link href="/import">{t('importPosicao')}</Link>
+              <Link href={IMPORT_SEND_PATH}>{t('importPosicao')}</Link>
             </Button>
           ) : (
             // BR-005-23's per-asset table lives on the batch, which is also
             // where BR-005-25's "accept B3's figure" action is. One link, to the
             // one screen that resolves it.
             <Button asChild variant="link" size="sm">
-              <Link href={`/import/${batchId}`}>{t('open')}</Link>
+              <Link href={importBatchPath(batchId)}>{t('open')}</Link>
             </Button>
           )}
         </div>

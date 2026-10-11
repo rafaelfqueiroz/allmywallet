@@ -118,7 +118,7 @@ test.describe('the guided onboarding flow', () => {
     await expect(signedIn.page.locator('input[type="file"][name="file"]')).toBeVisible();
     await expect(
       signedIn.page.getByRole('link', { name: 'Revisar e confirmar importação' }),
-    ).toHaveAttribute('href', `/import/${batchId}`);
+    ).toHaveAttribute('href', `/settings/import/${batchId}`);
 
     // BR-020-11 — dismissible at any step, not only the first.
     await signedIn.page.getByRole('button', { name: 'Dispensar o guia' }).click();

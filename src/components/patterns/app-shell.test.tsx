@@ -33,7 +33,7 @@ describe('AppShell', () => {
     render(<AppShell>conteúdo</AppShell>);
 
     expect(screen.getByRole('link', { name: 'Portfólio' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Importar' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Transações' })).not.toHaveAttribute('aria-current');
   });
 
   it('keeps a nested route marked against its section', () => {
@@ -44,10 +44,10 @@ describe('AppShell', () => {
   });
 
   it('does not mark a section whose href is merely a string prefix', () => {
-    pathname.current = '/importar-outro';
+    pathname.current = '/transactions-outro';
     render(<AppShell>conteúdo</AppShell>);
 
-    expect(screen.getByRole('link', { name: 'Importar' })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('link', { name: 'Transações' })).not.toHaveAttribute('aria-current');
   });
 
   it('offers a skip link so a keyboard user reaches content without the whole menu', () => {
@@ -94,7 +94,7 @@ describe('AppShell', () => {
     await user.click(screen.getByRole('button', { name: 'Abrir menu' }));
     const dialog = await screen.findByRole('dialog');
 
-    await user.click(within(dialog).getByRole('link', { name: 'Importar' }));
+    await user.click(within(dialog).getByRole('link', { name: 'Transações' }));
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });

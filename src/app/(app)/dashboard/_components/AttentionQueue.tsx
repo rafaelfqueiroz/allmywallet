@@ -10,6 +10,7 @@ import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
+import { importBatchPath } from '@/app/(app)/import/paths';
 
 /**
  * SPEC-010 BR-010-12 — "purchases awaiting allocation appear in the same
@@ -158,7 +159,7 @@ export async function AttentionQueue({
 function gateHref(resolution: GateResolution): string {
   switch (resolution.screen) {
     case 'import_batch':
-      return `/import/${resolution.batchId}`;
+      return importBatchPath(resolution.batchId);
     case 'fixed_income_contract':
       return `/fixed-income/${resolution.assetId}`;
     case 'wallets':

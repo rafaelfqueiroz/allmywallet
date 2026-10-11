@@ -3,6 +3,7 @@ import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
+import { IMPORT_GUIDE_ANCHOR } from '@/app/(app)/import/paths';
 
 /**
  * SPEC-005 BR-005-28 — the refresh prompt, when the last custody import is
@@ -41,7 +42,7 @@ export async function StalenessPrompt({
         </Text>
         <div>
           <Button asChild variant="link" size="sm">
-            <a href="#import-guide">{t('seeSteps')}</a>
+            <a href={`#${IMPORT_GUIDE_ANCHOR}`}>{t('seeSteps')}</a>
           </Button>
         </div>
       </Stack>

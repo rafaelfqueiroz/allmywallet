@@ -28,6 +28,12 @@ describe('Split', () => {
     expect(start.container.querySelector('[data-slot="split"]')?.className).toContain(
       '14rem_minmax(0,1fr)',
     );
+    start.unmount();
+
+    const even = render(<Split side="even">x</Split>);
+    expect(even.container.querySelector('[data-slot="split"]')?.className).toContain(
+      '@2xl:grid-cols-2',
+    );
   });
 
   it('has no axe violations', async () => {

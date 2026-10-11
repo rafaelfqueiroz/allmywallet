@@ -16,8 +16,8 @@ import { Text } from '@/components/ui/text';
  * and Posição from investidor.b3.com.br (BR-020-20), which date range to ask
  * for (BR-020-21), and that only these three files are accepted (BR-020-26).
  *
- * **One guide, two surfaces.** `/import` (`ExportGuide.tsx`) and `/onboarding`
- * both need this exact content, and DL-020-01's whole argument against a
+ * **One guide, two surfaces.** Configurações › Importar › Enviar
+ * (`ExportGuide.tsx`) and `/onboarding` both need this exact content, and DL-020-01's whole argument against a
  * second copy of anything SPEC-020 does not own applies just as much to a copy
  * SPEC-020 *does* own — two guides drift, and the second one to be edited
  * becomes the wrong one. This component is the one copy; each surface supplies
