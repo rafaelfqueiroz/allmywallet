@@ -64,7 +64,7 @@ test('a signed-in user sees their stored preferences and a saved change survives
  * (`parameters.keys.*`), which is what a person reads.
  */
 const FEATURE_PARAMETERS = [
-  { label: 'Dias sem importar até avisar', screen: '/import' },
+  { label: 'Dias sem importar até avisar', screen: '/settings/import/parameters' },
   { label: 'Tolerância de desvio (p.p.)', screen: '/settings/wallets/parameters' },
   { label: 'Intervalo mínimo entre e-mails (horas)', screen: '/watch' },
 ] as const;
@@ -114,7 +114,7 @@ test('a refused parameter says why, under the field', async ({ signedIn }) => {
   const { page } = signedIn;
   const label = 'Dias sem importar até avisar';
 
-  await page.goto('/import');
+  await page.goto('/settings/import/parameters');
   const field = page.getByLabel(label, { exact: true });
   await field.fill('400');
   const form = page.locator('form').filter({ has: field });

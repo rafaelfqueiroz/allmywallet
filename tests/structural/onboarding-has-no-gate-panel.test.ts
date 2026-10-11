@@ -107,7 +107,7 @@ describe('the onboarding surface has no gate panel (SPEC-020 BR-020-15, DL-020-0
     for (const source of [
       `import type { OnboardingStatus } from '@/core/onboarding/status';`,
       `import { loadOnboardingStatus } from '@/app/(app)/onboarding/data';`,
-      `import { UploadForm } from '@/app/(app)/import/_components/UploadForm';`,
+      `import { UploadForm } from '@/app/(app)/settings/import/_components/UploadForm';`,
       // A doc comment naming the forbidden imports while explaining their
       // absence must not fail the build — this file's own module comment
       // does exactly this.

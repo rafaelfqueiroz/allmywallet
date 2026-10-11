@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { OnboardingStatus } from '@/core/onboarding/status';
 import { uploadExtractAction } from '@/app/(app)/import/actions';
-import { UploadForm } from '@/app/(app)/import/_components/UploadForm';
+import { UploadForm } from '@/app/(app)/settings/import/_components/UploadForm';
 import { ExportGuideContent } from '@/components/onboarding/export-guide-content';
 import { Section } from '@/components/patterns/section';
 import { List, ListItem } from '@/components/layout/list';
@@ -10,6 +10,7 @@ import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
+import { importBatchPath } from '@/app/(app)/import/paths';
 
 /**
  * SPEC-020 BR-020-04 — "the guided sequence is: export the three extracts →
@@ -72,7 +73,7 @@ export async function GuidedSteps({ status }: { readonly status: OnboardingStatu
             ) : (
               <Cluster>
                 <Button asChild variant="link" size="sm">
-                  <Link href={`/import/${status.stagedBatchId}`}>
+                  <Link href={importBatchPath(status.stagedBatchId)}>
                     {status.stage === 'processing'
                       ? t('steps.review.processingLink')
                       : t('steps.review.reviewLink')}
