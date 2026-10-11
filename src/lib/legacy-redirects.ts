@@ -126,6 +126,17 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
       to: '/settings/import/7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10',
     },
   },
+  /*
+   * #212 — Configurações › Observar preços (BR-022-05). `/watch` was the rules
+   * and the e-mail cooldown on one page; it lands on Regras, and the cooldown
+   * is the section's Parâmetros tab. Bookmarks and the sidebar pointed here.
+   */
+  {
+    source: '/watch',
+    destination: '/settings/watch',
+    issue: 212,
+    example: { from: '/watch', to: '/settings/watch' },
+  },
 ];
 
 /** The shape `next.config.ts`'s `redirects()` returns. */

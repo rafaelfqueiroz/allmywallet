@@ -91,7 +91,7 @@ export interface HoldingRow {
    */
   readonly costEstimated: boolean;
   /**
-   * SPEC-018 BR-018-19 — the same buy/hold/sell/unknown state `/watch` shows,
+   * SPEC-018 BR-018-19 — the same buy/hold/sell/unknown state the rules screen shows,
    * `null` only when this asset carries no opportunity rule at all (most
    * holdings). A rule's `unknown` state (BR-018-16 — no usable quote) still
    * renders, deliberately, as the muted `StateBadge` rather than being

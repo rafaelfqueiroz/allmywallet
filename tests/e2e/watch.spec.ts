@@ -1,10 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
+import { dismissOnboarding } from './support/onboarding';
 
 /**
- * SPEC-018 — Observar preços, over the real stack.
+ * SPEC-018 — Observar preços, over the real stack: Configurações › Observar
+ * preços (SPEC-022 BR-022-05, #212), and the Painel's watch-state card
+ * (BR-022-07).
  *
  * ---------------------------------------------------------------------------
  * WHY THIS MOVES THE QUOTE RATHER THAN THE RULE
@@ -49,6 +53,31 @@ async function movePrice(code: string, price: string): Promise<void> {
   }
 }
 
+/** A rule written straight to the table, as `hide-values.spec.ts` seeds one. */
+async function seedRule(
+  code: string,
+  lowerBound: string,
+  lowerState: 'buy' | 'sell',
+): Promise<string> {
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    const { rows } = await pool.query<{ id: string; user_id: string }>(
+      `SELECT a.id, p.user_id FROM assets a JOIN positions p ON p.asset_id = a.id WHERE a.code = $1`,
+      [code],
+    );
+    const held = rows[0];
+    if (held === undefined) throw new Error(`no holding for ${code}`);
+    await pool.query(
+      `INSERT INTO opportunity_rules (id, user_id, asset_id, lower_bound, lower_state, default_state)
+       VALUES ($1, $2, $3, $4, $5, 'hold')`,
+      [randomUUID(), held.user_id, held.id, lowerBound, lowerState],
+    );
+    return held.id;
+  } finally {
+    await pool.end();
+  }
+}
+
 test.describe('SPEC-018 — Observar preços', () => {
   test('a rule the user writes, and a price that crosses it', async ({ signedIn }) => {
     const { page, userId } = signedIn;
@@ -59,7 +88,7 @@ test.describe('SPEC-018 — Observar preços', () => {
     ]);
     if (stockCode === undefined) throw new Error('seedHoldings returned no code');
 
-    await page.goto('/watch');
+    await page.goto('/settings/watch');
 
     // BR-018-15 — the delay disclosure is on the screen where rules are
     // configured, not buried in a help page. This is its own acceptance
@@ -146,7 +175,7 @@ test.describe('SPEC-018 — Observar preços', () => {
       await pool.end();
     }
 
-    await page.goto('/watch');
+    await page.goto('/settings/watch');
 
     const row = page.getByRole('listitem').filter({ hasText: code });
     await expect(row.getByText(/não tem preço de mercado/i)).toBeVisible();
@@ -162,7 +191,7 @@ test.describe('SPEC-018 — Observar preços', () => {
     await seedHoldings(userId, [
       { code: 'VALE', quantity: '50', averageCost: '60.00', price: '65.00' },
     ]);
-    await page.goto('/watch');
+    await page.goto('/settings/watch');
     await expect(page.getByRole('heading', { name: 'Observar preços' })).toBeVisible();
 
     // TS-27 / SPEC-016 BR-016-15 — and DL-018-06 specifically: the states are
@@ -172,5 +201,60 @@ test.describe('SPEC-018 — Observar preços', () => {
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .analyze();
     expect(results.violations).toEqual([]);
+  });
+
+  /**
+   * SPEC-022 BR-022-07 — the Painel lists held assets in a buy or sell state,
+   * each linking to its rule. Two holdings: one under its buy bound, and one
+   * whose rule reads hold, which the card must leave out.
+   */
+  test('a rule in a buy state is on the Painel, and links to its rule', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const [buyCode, holdCode] = await seedHoldings(userId, [
+      { code: 'ITSA', quantity: '100', averageCost: '9.00', price: '10.86' },
+      { code: 'WEGE', quantity: '10', averageCost: '40.00', price: '52.17' },
+    ]);
+    if (buyCode === undefined || holdCode === undefined) {
+      throw new Error('seedHoldings returned no code');
+    }
+    const assetId = await seedRule(buyCode, '11.00', 'buy');
+    await seedRule(holdCode, '30.00', 'sell');
+    await dismissOnboarding(userId);
+
+    await page.goto('/dashboard');
+    const card = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Em zona de compra ou venda' }) });
+    const line = card.getByRole('listitem').filter({ hasText: buyCode });
+    // DL-018-06 — the state is a label, not only a colour.
+    await expect(line.locator('[data-slot="state-badge"]')).toHaveText('compra');
+    await expect(line).toContainText('seu limite de compra de');
+    await expect(card.getByRole('listitem').filter({ hasText: holdCode })).toHaveCount(0);
+
+    await card.getByRole('link', { name: `Ver regra de ${buyCode}` }).click();
+    await expect(page).toHaveURL(new RegExp(`/settings/watch#regra-${assetId}$`));
+    await expect(page.locator(`[id="regra-${assetId}"]`)).toContainText(buyCode);
+  });
+
+  test('Configurações lists Observar preços in its sub-navigation, and the sidebar no longer does', async ({
+    signedIn,
+    viewport,
+  }) => {
+    const { page } = signedIn;
+    await page.goto('/settings/watch/parameters');
+
+    // BR-022-13 — the e-mail cooldown is the section's Parâmetros tab.
+    await expect(
+      page.getByLabel('Intervalo mínimo entre e-mails (horas)', { exact: true }),
+    ).toBeVisible();
+    const subNav = page.getByRole('navigation', { name: 'Seções de Configurações' });
+    await expect(subNav.getByRole('link', { name: 'Observar preços' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    if ((viewport?.width ?? 0) >= 768) {
+      const sidebar = page.getByRole('navigation', { name: 'Navegação' });
+      await expect(sidebar.getByRole('link', { name: 'Observar preços' })).toHaveCount(0);
+    }
   });
 });

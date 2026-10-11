@@ -1,6 +1,5 @@
 import {
   ArrowDownUp,
-  Binoculars,
   ChartLine,
   ChartPie,
   LayoutGrid,
@@ -22,9 +21,8 @@ import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
  * (Painel, Portfólio, Relatórios, Transações, Configurações) therefore arrive
  * one at a time, each with the issue that makes its route real (#208 Portfólio,
  * #209 Relatórios, #210 Configurações), and the items they absorb leave in the
- * same change. Importar moved under Configurações with #211; Observar preços
- * is a Configurações section that has not moved yet (#212), so it keeps its own
- * item until it does — and Configurações is last, as BR-022-01 orders it.
+ * same change. Importar and Observar preços moved under Configurações with
+ * #211 and #212, which leaves exactly BR-022-01's five, Configurações last.
  *
  * Preferências and Privacidade left this list with #205: they belong to the
  * person rather than to a feature, so they live in the account menu
@@ -33,7 +31,7 @@ import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
  */
 export type NavItem = {
   readonly href: string;
-  readonly labelKey: 'dashboard' | 'portfolio' | 'transactions' | 'watch' | 'reports' | 'settings';
+  readonly labelKey: 'dashboard' | 'portfolio' | 'transactions' | 'reports' | 'settings';
   readonly icon: LucideIcon;
   /**
    * SPEC-022 BR-022-17 — the destination reads the shared scope selector's
@@ -59,9 +57,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
   // patrimonial, so the item needs no redirect hop.
   { href: '/reports', labelKey: 'reports', icon: ChartLine, sharesScope: true },
   { href: '/transactions', labelKey: 'transactions', icon: ArrowDownUp },
-  // SPEC-018. Binoculars rather than an eye: the eye is the masking toggle's
-  // (BR-022-24), and one glyph meaning two things in one frame reads as a bug.
-  { href: '/watch', labelKey: 'watch', icon: Binoculars },
   /*
    * SPEC-022 BR-022-01/05 (#210) — setup, last. `/settings` is the item's
    * address and redirects to its first section, so the item is current on every

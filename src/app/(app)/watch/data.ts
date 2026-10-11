@@ -1,19 +1,20 @@
 import { resolveConfig } from '@/config/resolve';
-import { SystemClock } from '@/core/shared/clock';
+import { SystemClock, type Clock } from '@/core/shared/clock';
 import type { AssetId, OpportunityRuleId, UserId } from '@/core/shared/ids';
 import type { Money } from '@/core/shared/money';
-import { evaluateRule } from '@/core/opportunity/evaluate';
+import { evaluateRule, type EvaluatedResult } from '@/core/opportunity/evaluate';
 import type { EvaluatedState, OpportunityBound, OpportunityState } from '@/core/opportunity/ports';
+
 import { canCarryRule } from '@/core/opportunity/rule';
 import type { AssetClass } from '@/core/quotes/ports';
 import { previousTradingDay } from '@/core/quotes/staleness';
 import { B3TradingCalendar } from '@/adapters/calendar/b3-calendar';
 import { buildWatchDeps } from '@/app/(app)/watch/composition';
-import { db } from '@/db/client';
+import { db, type Database } from '@/db/client';
 import { withTenant } from '@/db/tenant';
 
 /**
- * SPEC-018 — the read model behind `/watch`, in the shape of
+ * SPEC-018 — the read model behind the watch rules (`/settings/watch`) and the Painel card, in the shape of
  * `src/app/(app)/wallets/data.ts`. AR-31: the page (a Server Component) calls
  * `loadWatchView` directly; nothing here decides anything `core/opportunity`
  * hasn't already decided — `evaluateRule` and `canCarryRule` are called, not
@@ -218,24 +219,29 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
 }
 
 /**
- * SPEC-018 BR-018-19 — the same states `/watch` shows, keyed by asset, for the
- * badge in the Composição holdings list.
+ * Every rule on an asset the user holds now, evaluated (BR-018-12/16) — the
+ * one read behind both the Composição badge and the Painel's watch-state card.
  *
- * A second, narrower read rather than a call to `loadWatchView` above: that
- * function also builds the "available" and "ineligible" lists, resolves
- * consent and reads the notification log, none of which a badge column needs.
- * It reuses the same `evaluateRule` over the same stored quote and the same
- * `quotes.cadence_minutes`, which is what BR-018-14 requires — the two screens
- * cannot disagree about a state, because neither of them decides one.
+ * Narrower than `loadWatchView` above: that function also builds the
+ * "available" and "ineligible" lists, resolves consent and reads the
+ * notification log, none of which a badge or a card needs. It reuses the same
+ * `evaluateRule` over the same stored quote and the same
+ * `quotes.cadence_minutes`, which is what BR-018-14 requires — no two screens
+ * can disagree about a state, because none of them decides one.
  *
- * Rules whose position has closed are excluded here (BR-018-03: they are
+ * **Reads only.** `latest_quotes` is what `quotes.poll` last wrote; nothing on
+ * this path can reach a provider (BR-018-11), so a render adds nothing to the
+ * request budget (#212's integration test holds the counter to that).
+ *
+ * Rules whose position has closed are excluded (BR-018-03: they are
  * deactivated and retained), so a holding that no longer exists cannot put a
- * badge on a row that no longer exists either.
+ * badge on a row, or a line on the Painel, that no longer exists either.
  */
-export async function loadWatchStates(
+async function evaluateHeldRules(
   userId: UserId,
-): Promise<ReadonlyMap<AssetId, EvaluatedState>> {
-  const clock = new SystemClock();
+  clock: Clock,
+  database: Database,
+): Promise<HeldRuleEvaluations> {
   const calendar = new B3TradingCalendar();
   const now = clock.now();
   const sessionOpen = calendar.isSessionOpen(now);
@@ -257,33 +263,133 @@ export async function loadWatchStates(
        * inside an evaluation pass, and a pass runs only when `quotes.poll`
        * actually writes a quote. So between rebuying an asset and the next
        * cadence window — every evening, every weekend — a rule was `active:
-       * false` on a position the user genuinely holds. `/watch` rendered its
-       * state (it filters on the holding) and this badge rendered nothing,
-       * which is exactly the "two screens disagreeing about one asset" that
-       * rule exists to forbid. Both now ask the same question of the same
-       * data, so neither can wait on a job to agree with the other.
+       * false` on a position the user genuinely holds. The rules screen
+       * rendered its state (it filters on the holding) and the badge rendered
+       * nothing, which is exactly the "two screens disagreeing about one
+       * asset" that rule exists to forbid. Every reader now asks the same
+       * question of the same data, so none can wait on a job to agree.
        */
       const heldAssetIds = new Set(
         held.filter((row) => !row.quantity.isZero()).map((row) => row.assetId),
       );
       const active = rules.filter((rule) => heldAssetIds.has(rule.assetId));
-      if (active.length === 0) return new Map<AssetId, EvaluatedState>();
+      if (active.length === 0) return { ruleCount: rules.length, rows: [] };
 
       const assetIds = active.map((rule) => rule.assetId);
-      const quotesByAsset = await deps.quotes.latestFor(assetIds);
+      const [quotesByAsset, assets] = await Promise.all([
+        deps.quotes.latestFor(assetIds),
+        deps.catalog.findByIds(assetIds),
+      ]);
+      const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
 
-      const states = new Map<AssetId, EvaluatedState>();
-      for (const rule of active) {
-        const evaluated = evaluateRule(rule, quotesByAsset.get(rule.assetId) ?? null, {
-          sessionOpen,
-          cadenceMinutes: cadenceCfg.value,
-          now,
-          dailyQuoteFloor,
-        });
-        states.set(rule.assetId, evaluated.state);
-      }
-      return states;
+      const rows = active.map((rule) => {
+        const quote = quotesByAsset.get(rule.assetId) ?? null;
+        const asset = assetsById.get(rule.assetId);
+        return {
+          assetId: rule.assetId,
+          code: asset?.code ?? '—',
+          name: asset?.name ?? '—',
+          evaluated: evaluateRule(rule, quote, {
+            sessionOpen,
+            cadenceMinutes: cadenceCfg.value,
+            now,
+            dailyQuoteFloor,
+          }),
+        };
+      });
+      return { ruleCount: rules.length, rows };
     },
-    db,
+    database,
   );
+}
+
+interface HeldRuleEvaluations {
+  /** Every rule the user has, retained ones included (BR-018-03). */
+  readonly ruleCount: number;
+  readonly rows: readonly HeldRuleEvaluation[];
+}
+
+interface HeldRuleEvaluation {
+  readonly assetId: AssetId;
+  readonly code: string;
+  readonly name: string;
+  readonly evaluated: EvaluatedResult;
+}
+
+/**
+ * SPEC-018 BR-018-19 — the same states the rules screen shows, keyed by asset,
+ * for the badge in the Composição holdings list.
+ */
+export async function loadWatchStates(
+  userId: UserId,
+  clock: Clock = new SystemClock(),
+): Promise<ReadonlyMap<AssetId, EvaluatedState>> {
+  const { rows } = await evaluateHeldRules(userId, clock, db);
+  return new Map(rows.map((row) => [row.assetId, row.evaluated.state]));
+}
+
+/** One line of the Painel's watch-state card: a held asset in a buy or sell state. */
+export interface WatchOpportunity {
+  readonly assetId: AssetId;
+  readonly code: string;
+  readonly name: string;
+  readonly state: 'buy' | 'sell';
+  /** Which band matched — the card names the user's own bound (BR-018-18). */
+  readonly matched: 'lower' | 'upper' | 'default';
+  /** `null` exactly when the default band matched. */
+  readonly threshold: Money | null;
+  /** The stored quote the state was read from (BR-018-14). */
+  readonly price: Money;
+}
+
+export interface WatchOpportunities {
+  /**
+   * Whether the user has any rule at all, a retained one included — "you have
+   * no rules" is false for someone whose only rule is paused (BR-018-03).
+   */
+  readonly hasRules: boolean;
+  /** BR-022-07 — buy and sell only, by asset code. Hold is not news. */
+  readonly items: readonly WatchOpportunity[];
+  /**
+   * BR-018-16 — held rules with no usable quote. They are not listed, but the
+   * card says how many there are: "nothing is in buy or sell" is not a claim
+   * a missing price can support.
+   */
+  readonly unknownCount: number;
+}
+
+/**
+ * SPEC-022 BR-022-07 — the Painel's card listing held assets currently in a
+ * buy or sell state (SPEC-018). It reads the existing evaluation and adds
+ * nothing to it: no state is decided here, and no quote is requested.
+ */
+export async function loadWatchOpportunities(
+  userId: UserId,
+  clock: Clock = new SystemClock(),
+  // Injected by the integration test, so its reads hit the seeded container
+  // rather than the app's `DATABASE_URL` (TESTING.md §2).
+  database: Database = db,
+): Promise<WatchOpportunities> {
+  const { ruleCount, rows } = await evaluateHeldRules(userId, clock, database);
+  const items: WatchOpportunity[] = [];
+  let unknownCount = 0;
+  for (const row of rows) {
+    const { evaluated } = row;
+    if (evaluated.state === 'unknown') {
+      unknownCount += 1;
+      continue;
+    }
+    if (evaluated.state === 'hold') continue;
+    items.push({
+      assetId: row.assetId,
+      code: row.code,
+      name: row.name,
+      state: evaluated.state,
+      matched: evaluated.matched,
+      threshold: evaluated.threshold,
+      price: evaluated.quote.price,
+    });
+  }
+  items.sort((a, b) => a.code.localeCompare(b.code, 'pt-BR'));
+  return { hasRules: ruleCount > 0, items, unknownCount };
 }

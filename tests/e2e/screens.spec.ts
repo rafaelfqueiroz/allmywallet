@@ -41,6 +41,8 @@ const ROUTES = [
   '/settings/import',
   '/settings/import/history',
   '/settings/import/parameters',
+  '/settings/watch',
+  '/settings/watch/parameters',
   '/reports',
   '/reports/performance',
   // SPEC-014 #17 — the fourth report.

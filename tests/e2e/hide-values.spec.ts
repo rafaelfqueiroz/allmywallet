@@ -73,7 +73,7 @@ const PAGES_WITH_AMOUNTS = [
   '/portfolio/composition',
   '/reports/earnings',
   '/transactions',
-  '/watch',
+  '/settings/watch',
 ] as const;
 
 interface Seeded {
@@ -155,10 +155,12 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
     }
 
     // SPEC-018 — a rule with a threshold, so the watch row's bound and the
-    // edit form's input both carry an amount.
+    // edit form's input both carry an amount. Above the R$ 40 price, so the
+    // rule reads buy and the Painel's watch-state card shows both amounts too
+    // (SPEC-022 BR-022-07, #212).
     await pool.query(
       `INSERT INTO opportunity_rules (id, user_id, asset_id, lower_bound, lower_state, default_state)
-       VALUES ($1, $2, $3, 35, 'buy', 'hold')`,
+       VALUES ($1, $2, $3, 45, 'buy', 'hold')`,
       [randomUUID(), userId, assetId],
     );
 
@@ -183,7 +185,7 @@ const LINE_COORDINATE = /value\\?":4100\b/;
 const GOAL_INPUT =
   /<input[^>]*name="amount"[^>]*value="9000"|<input[^>]*value="9000"[^>]*name="amount"/;
 const RULE_INPUT =
-  /<input[^>]*name="lowerPrice"[^>]*value="35"|<input[^>]*value="35"[^>]*name="lowerPrice"/;
+  /<input[^>]*name="lowerPrice"[^>]*value="45"|<input[^>]*value="45"[^>]*name="lowerPrice"/;
 const PRICE_INPUT = /<input[^>]*name="(unitPrice|fees)"/;
 
 /** Every signed-in page, with the seeded ids filled in. */
@@ -214,7 +216,7 @@ function pages(seeded: Seeded): readonly string[] {
     '/settings/import/history',
     `/settings/import/${seeded.batchId}`,
     `/fixed-income/${seeded.fixedIncomeId}`,
-    '/watch',
+    '/settings/watch',
     '/account',
     '/preferences',
     '/privacy',
@@ -259,7 +261,9 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const goals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(amountsIn(goals)).toContain('9.000,00');
   expect(goals).toMatch(GOAL_INPUT);
-  expect(await html(page, '/watch')).toMatch(RULE_INPUT);
+  expect(await html(page, '/settings/watch')).toMatch(RULE_INPUT);
+  // The Painel's watch-state card: the rule's threshold, beside its quote.
+  expect(amountsIn(await html(page, '/dashboard'))).toContain('45,00');
   expect(await html(page, `/transactions/${seeded.transactionId}/edit`)).toMatch(PRICE_INPUT);
 
   await turnMaskingOn(page);
@@ -274,7 +278,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const maskedGoals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(maskedGoals).not.toMatch(GOAL_INPUT);
   expect(maskedGoals).toContain('Mostrar valores');
-  expect(await html(page, '/watch')).not.toMatch(RULE_INPUT);
+  expect(await html(page, '/settings/watch')).not.toMatch(RULE_INPUT);
   const maskedEdit = await html(page, `/transactions/${seeded.transactionId}/edit`);
   expect(maskedEdit).not.toMatch(PRICE_INPUT);
   expect(maskedEdit).toContain('Mostrar valores');

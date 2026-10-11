@@ -83,7 +83,6 @@
     "dashboard": "Painel",
     "portfolio": "Portfólio",
     "transactions": "Transações",
-    "watch": "Observar preços",
     "reports": "Relatórios",
     "settings": "Configurações",
     "appName": "AllMyWallet",
@@ -212,6 +211,21 @@
         "position_not_imported": "Sem a taxa contratada, este contrato não pode ser avaliado — e a aplicação ainda não aparece nas suas posições. Informe a taxa e importe a Movimentação que contém a aplicação para que ela entre no patrimônio.",
         "allocation_missing": "O valor já está no total acima; falta decidir de qual carteira ele faz parte."
       }
+    },
+    "opportunities": {
+      "title": "Em zona de compra ou venda",
+      "rulesLink": "Regras",
+      "rulesLinkLabel": "Regras de observação de preços",
+      "price": "cotação",
+      "bound": "{boundSide, select, lower {no ou abaixo do} other {no ou acima do}} seu limite de {stateLabel} de",
+      "between": "entre os seus limites, na faixa que você definiu como \"{stateLabel}\"",
+      "ruleLink": "Ver regra",
+      "ruleLinkLabel": "Ver regra de {assetCode}",
+      "emptyNoRules": "Você ainda não tem regras de observação de preços.",
+      "empty": "Nenhum ativo observado está em compra ou venda pelas suas regras agora.",
+      "emptyWithUnknown": "Nenhum ativo observado com cotação válida está em compra ou venda pelas suas regras agora.",
+      "unknown": "{count, plural, one {# regra sem cotação válida não pôde ser avaliada agora.} other {# regras sem cotação válida não puderam ser avaliadas agora.}}",
+      "notAdvice": "Cada estado vem de uma regra sua; a AllMyWallet não recomenda comprar nem vender."
     }
   },
   "portfolio": {
@@ -468,7 +482,8 @@
     "navLabel": "Seções de Configurações",
     "sections": {
       "wallets": "Carteiras",
-      "import": "Importar"
+      "import": "Importar",
+      "watch": "Observar preços"
     },
     "signedOut": "Entre na sua conta para acessar as configurações."
   },
@@ -1552,6 +1567,7 @@
       "quoteMeta": "Cotação de {quotedAt}, via {source}.",
       "delayDisclosure": "As cotações têm um atraso de cerca de {minutes} minutos e só são atualizadas durante o pregão da B3 — uma oscilação que reverte dentro desse intervalo pode não ter sido observada.",
       "notAdvice": "Esta mensagem informa apenas qual das suas próprias regras está valendo agora. A AllMyWallet não recomenda comprar, vender ou manter nenhum ativo.",
+      "ruleLinkText": "Ver a sua regra para este ativo",
       "unsubscribeLinkText": "Cancelar todos os avisos de oportunidade"
     },
     "unsubscribePage": {
@@ -1565,8 +1581,12 @@
   },
   "watch": {
     "title": "Observar preços",
-    "description": "Regras que comparam um preço já exibido a limites que você mesmo definiu, e avisam quando o resultado muda. A AllMyWallet não recomenda comprar, vender ou manter nada — cada regra é sua.",
     "signedOut": "Entre na sua conta para ver suas regras de observação.",
+    "tabs": {
+      "label": "Tarefas de Observar preços",
+      "rules": "Regras",
+      "parameters": "Parâmetros"
+    },
     "delayDisclosure": "As cotações têm um atraso de cerca de {minutes} minutos e só são atualizadas durante o pregão da B3. Uma oscilação que sobe e desce dentro desse intervalo pode não ter sido observada — o estado abaixo reflete a última cotação registrada, não o preço deste instante.",
     "notAdvice": "Cada estado abaixo mostra apenas qual das suas próprias regras está valendo agora, sobre um preço já exibido em outras telas. A AllMyWallet não recomenda comprar, vender ou manter nenhum ativo.",
     "addNotOpenNote": "Uma regra só existe em um ativo que você já possui — o estado \"compra\" aqui sempre significa aumentar uma posição que você já tem, nunca abrir uma posição nova.",

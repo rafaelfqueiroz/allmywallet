@@ -4,7 +4,7 @@ import type { OpportunityAlert, OpportunityNotifier } from '@/core/opportunity/p
 import { hashUserId, logger } from '@/lib/logger';
 import { signUnsubscribeToken } from '@/lib/unsubscribe-token';
 import { renderOpportunityEmail } from '@/adapters/email/opportunity-email';
-import { appOrigin } from '@/adapters/email/app-origin';
+import { appOrigin, opportunityRuleUrl } from '@/adapters/email/app-origin';
 
 /**
  * SPEC-018 BR-018-25/DL-018-07 — the interim implementation, in the exact
@@ -35,7 +35,11 @@ export class LogEmailSender implements OpportunityNotifier {
   async sendStateChange(userId: UserId, alert: OpportunityAlert): Promise<void> {
     const token = signUnsubscribeToken(userId, this.clock.now());
     const unsubscribeUrl = `${appOrigin()}/unsubscribe?token=${encodeURIComponent(token)}`;
-    const rendered = renderOpportunityEmail(alert, unsubscribeUrl);
+    const rendered = renderOpportunityEmail(
+      alert,
+      unsubscribeUrl,
+      opportunityRuleUrl(alert.assetId),
+    );
 
     /*
      * AR-49/BR-004-04 — deliberately **not** the asset code, and not the

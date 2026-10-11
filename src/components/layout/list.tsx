@@ -32,8 +32,19 @@ const listItemVariants = cva('', {
       true: 'border-b pb-4 last:border-0 last:pb-0',
       false: '',
     },
+    /**
+     * An item a link elsewhere points at (`#id`) — the Painel's "Ver regra",
+     * an e-mail's link to a rule (#212). It clears the top bar when scrolled
+     * to. The ring follows CSS `:target`, which a full page load sets (the
+     * e-mail) and a client-side navigation does not (the Painel's `Link`, whose
+     * `pushState` leaves `:target` alone): there the scroll alone shows it.
+     */
+    linkTarget: {
+      true: 'scroll-mt-20 rounded-md target:ring-2 target:ring-ring target:ring-offset-4 target:ring-offset-background',
+      false: '',
+    },
   },
-  defaultVariants: { separated: false },
+  defaultVariants: { separated: false, linkTarget: false },
 });
 
 export type ListProps = Omit<React.ComponentProps<'ul'>, 'ref'> &
@@ -58,11 +69,11 @@ export function List({ className, gap, as: Component = 'ul', ...props }: ListPro
 
 export type ListItemProps = React.ComponentProps<'li'> & VariantProps<typeof listItemVariants>;
 
-export function ListItem({ className, separated, ...props }: ListItemProps) {
+export function ListItem({ className, separated, linkTarget, ...props }: ListItemProps) {
   return (
     <li
       data-slot="list-item"
-      className={cn(listItemVariants({ separated }), className)}
+      className={cn(listItemVariants({ separated, linkTarget }), className)}
       {...props}
     />
   );
