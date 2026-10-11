@@ -54,6 +54,10 @@ test('every Relatórios tab shows a period, and no tab is current state', async 
     // BR-022-17 — the scope is the header's selector, not a field of the bar.
     await expect(page.locator('[data-slot="scope-selector"]')).toBeVisible();
     await expect(page.locator('form select[name="wallet"]')).toHaveCount(0);
+    // The CSV is holdings by grouping — Evolução patrimonial's subject only.
+    if (tab.path !== '/reports') {
+      await expect(page.getByRole('link', { name: 'Exportar CSV' })).toHaveCount(0);
+    }
   }
 
   // Visão geral and Composição left with #208.
@@ -149,6 +153,10 @@ test('Evolução patrimonial shows the composition drift over the period', async
   });
   await expect(drift).toBeVisible();
   const fii = drift.getByRole('row', { name: /FII/ });
-  await expect(fii).toContainText('50,00');
-  await expect(fii).toContainText('0,00');
+  // Opening, closing, change — each cell on its own, so 50,00 cannot also
+  // satisfy the closing column.
+  const cells = fii.getByRole('cell');
+  await expect(cells.nth(0)).toHaveText(/^50,00\s*%$/);
+  await expect(cells.nth(1)).toHaveText(/^0,00\s*%$/);
+  await expect(cells.nth(2)).toHaveText(/^[-−]50,00\s*%$/);
 });

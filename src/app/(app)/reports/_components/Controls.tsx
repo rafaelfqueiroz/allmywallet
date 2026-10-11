@@ -40,6 +40,8 @@ import { NativeSelect } from '@/components/ui/native-select';
  *
  * **Exportar CSV sits in the bar** (#209): the file is the grouped view for
  * the period, scope and grouping this bar applied, so it belongs beside them.
+ * Only a tab whose subject is that file passes `exportHref` — Evolução
+ * patrimonial (see `api/reports/export/route.ts`).
  *
  * AR-44: every string comes from `next-intl`; there is not one literal below.
  * AR-46 keeps the market vocabulary Portuguese — *patrimônio*, never "net

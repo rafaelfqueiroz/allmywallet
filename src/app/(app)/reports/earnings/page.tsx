@@ -4,7 +4,7 @@ import type { GroupKey } from '@/core/reporting/ports';
 import type { Money as MoneyValue } from '@/core/shared/money';
 import type { AssetIncome, EarningsReport, MonthlyIncome } from '@/core/reporting/earnings/ports';
 import { fromSearchParams } from '@/lib/report-url-state';
-import { Controls, reportExportHref } from '@/app/(app)/reports/_components/Controls';
+import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportsFrame } from '@/app/(app)/reports/_components/ReportsFrame';
 import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
@@ -79,8 +79,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
   // Parsed twice: the default grouping depends on the resolved scope
   // (BR-011-04), and the scope is itself one of the parsed values.
   const provisional = fromSearchParams(params, 'asset_class');
-  const defaultGrouping = defaultGroupingFor(provisional.scope, undefined);
-  const state = fromSearchParams(params, defaultGrouping);
+  const state = fromSearchParams(params, defaultGroupingFor(provisional.scope, undefined));
 
   const { wallets, query, report } = await loadEarnings(userId, {
     period: state.period,
@@ -98,9 +97,6 @@ export default async function EarningsPage({ searchParams }: PageProps) {
         period={state.period}
         scope={state.scope}
         grouping={state.grouping}
-        exportHref={
-          query.ok && !query.value.empty ? reportExportHref(state, defaultGrouping) : undefined
-        }
       />
 
       {!query.ok ? (

@@ -12,7 +12,7 @@ import {
   type XirrResult,
 } from '@/core/reporting/performance/ports';
 import { fromSearchParams, withParam } from '@/lib/report-url-state';
-import { Controls, reportExportHref } from '@/app/(app)/reports/_components/Controls';
+import { Controls } from '@/app/(app)/reports/_components/Controls';
 import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptyState';
 import { ReportsFrame } from '@/app/(app)/reports/_components/ReportsFrame';
 import { tryUserId } from '@/lib/session';
@@ -101,8 +101,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   };
 
   const provisional = fromSearchParams(params, 'asset_class');
-  const defaultGrouping = defaultGroupingFor(provisional.scope, undefined);
-  const state = fromSearchParams(params, defaultGrouping);
+  const state = fromSearchParams(params, defaultGroupingFor(provisional.scope, undefined));
 
   // BR-012-09: both views exist for every scope, period and grouping. The URL
   // carries it like every other control, so a bookmark reproduces the view.
@@ -123,9 +122,6 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         period={state.period}
         scope={state.scope}
         grouping={state.grouping}
-        exportHref={
-          report.ok && !report.value.empty ? reportExportHref(state, defaultGrouping) : undefined
-        }
         // #63: without this, changing the period reverts "sem proventos" to
         // "com proventos" — the control below would set a value the very next
         // submit threw away. Omitted at the default so URLs stay clean.
