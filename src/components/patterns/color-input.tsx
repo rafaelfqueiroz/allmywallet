@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
  * near-black swatch with no visible edge on a dark card. The control here is
  * the native input — so the platform picker, form posting without JavaScript
  * and keyboard operation are untouched — drawn at `Input`'s own `h-8` with the
- * same `border-input` boundary, which DS-47 pins at 3:1 against both `card` and
+ * same `border-input` boundary, which DS-49 pins at 3:1 against both `card` and
  * `background` in both themes (`tests/structural/design-token-colour.test.ts`).
  * `--input` is a boundary, never a fill (DESIGN.md): the dark fill is `muted`,
  * like every other control.
