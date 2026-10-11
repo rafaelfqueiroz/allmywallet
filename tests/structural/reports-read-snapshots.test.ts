@@ -45,6 +45,9 @@ describe('reports and the dashboard read snapshots, not the ledger (SPEC-016 BR-
     join(process.cwd(), 'src/core/reporting'),
     join(process.cwd(), 'src/core/dashboard'),
     join(process.cwd(), 'src/app/(app)/dashboard'),
+    // SPEC-022 #208 — Portfólio reads the same report the dashboard headline
+    // does, and wires it by hand in `portfolio/data.ts` for the same reason.
+    join(process.cwd(), 'src/app/(app)/portfolio'),
   ];
 
   /**

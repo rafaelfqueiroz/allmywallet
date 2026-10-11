@@ -43,7 +43,7 @@ import { walletAllocationEvents } from '@/db/schema/wallets';
 import { withTenant, type Tx } from '@/db/tenant';
 
 /**
- * SPEC-019 — the read model behind `/wallets/[walletId]/goals`, in the shape
+ * SPEC-019 — the read model behind Portfólio › Metas (`/portfolio/goals`), in the shape
  * of `src/app/(app)/reports/data.ts`. AR-31/AR-33: the page (a Server
  * Component, owned by the UI agent) calls `loadGoalsView` directly; nothing
  * here decides anything `core/goals` hasn't already decided.

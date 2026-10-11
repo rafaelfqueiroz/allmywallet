@@ -1,13 +1,16 @@
-import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import { WalletId } from '@/core/shared/ids';
 import { GROWTH_BASES, EARNINGS_PERIODS } from '@/core/goals/goal';
 import { loadGoalsView } from '@/app/(app)/wallets/goals-data';
 import { createGoalAction } from '@/app/(app)/wallets/goal-actions';
 import { tryUserId } from '@/lib/session';
-import { GrowthGoalCard } from '@/app/(app)/wallets/[walletId]/goals/_components/GrowthGoalCard';
-import { EarningsGoalCard } from '@/app/(app)/wallets/[walletId]/goals/_components/EarningsGoalCard';
+import { fromSearchParams, PARAM } from '@/lib/report-url-state';
+import { loadScopeWallets } from '@/app/(app)/portfolio/data';
+import { PortfolioFrame } from '@/app/(app)/portfolio/_components/PortfolioFrame';
+import { ErrorState } from '@/components/patterns/error-state';
+import { List, ListItem } from '@/components/layout/list';
+import { GrowthGoalCard } from '@/app/(app)/portfolio/goals/_components/GrowthGoalCard';
+import { EarningsGoalCard } from '@/app/(app)/portfolio/goals/_components/EarningsGoalCard';
 import { PageShell } from '@/app/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
@@ -20,12 +23,11 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 
 /**
- * SPEC-019 — Objetivos: a wallet's growth and earnings goals, each charted
+ * SPEC-019 — Metas: a wallet's growth and earnings goals, each charted
  * separately (AC-1).
  *
- * Modelled closely on `[walletId]/balance/page.tsx` — the same `PageShell`,
- * `Section`, `EmptyState`, `ActionForm`, `Field` vocabulary, the same
- * signed-out and `notFound()` handling, the same back-link pattern.
+ * Rendered inside Portfólio's frame, with the wallet as the frame's scope
+ * (BR-022-17) — the same frame and vocabulary as Carteiras' balancing.
  *
  * ---------------------------------------------------------------------------
  * THE YEAR PARAMETER GOVERNS THE EARNINGS CHART ONLY (BR-019-13/22, AC-5/7).
@@ -40,34 +42,74 @@ import { NativeSelect } from '@/components/ui/native-select';
  * growth series by year; that is what keeps AC-7 true.
  * ---------------------------------------------------------------------------
  *
+ * SPEC-022 BR-022-02 / #208 — Portfólio › **Metas**. It was
+ * `/wallets/[id]/goals`, which redirects here with the wallet as the scope
+ * (BR-022-08); the `year` parameter rides along on the redirect.
+ *
  * Never statically prerendered: this renders one tenant's own goals and
  * progress, so a cached copy built once would be served to every visitor.
  */
 export const dynamic = 'force-dynamic';
 
-export default async function WalletGoalsPage({
-  params,
+export default async function PortfolioGoalsPage({
   searchParams,
 }: {
-  params: Promise<{ walletId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const { walletId: rawWalletId } = await params;
   const t = await getTranslations('objetivos');
+  const tp = await getTranslations('portfolio');
+  const tr = await getTranslations('reports');
   const userId = await tryUserId();
 
   if (userId === undefined) {
     return (
-      <PageShell title={t('title')}>
-        <EmptyState title={t('signedOut')} />
+      <PageShell title={tp('title')}>
+        <EmptyState title={tp('signedOut')} />
       </PageShell>
     );
   }
 
-  if (!/^[0-9a-f-]{36}$/i.test(rawWalletId)) notFound();
-  const walletId = WalletId.of(rawWalletId);
-
   const raw = await searchParams;
+  const { scope } = fromSearchParams(
+    {
+      get: (name: string) => {
+        const value = raw[name];
+        return typeof value === 'string' ? value : null;
+      },
+    },
+    'asset_class',
+  );
+  const wallets = await loadScopeWallets(userId);
+
+  /*
+   * SPEC-019 — a goal belongs to one wallet, so "all wallets" has no goals of
+   * its own to show. It lists the wallets instead, each opening this tab
+   * scoped to it — the same URL the scope selector writes (BR-022-17).
+   */
+  if (scope.kind === 'portfolio') {
+    return (
+      <PortfolioFrame wallets={wallets}>
+        <Section title={tp('goals.chooseTitle')} description={tp('goals.chooseDescription')}>
+          {wallets.length === 0 ? (
+            <EmptyState title={tp('wallets.empty')} />
+          ) : (
+            <List gap="sm">
+              {wallets.map((wallet) => (
+                <ListItem key={wallet.walletId} separated>
+                  <Button asChild variant="link">
+                    <Link href={`/portfolio/goals?${PARAM.wallet}=${wallet.walletId}`}>
+                      {wallet.name}
+                    </Link>
+                  </Button>
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Section>
+      </PortfolioFrame>
+    );
+  }
+
   const rawYear = raw.year;
   const yearParam = typeof rawYear === 'string' ? rawYear : undefined;
   // BR-019-22 / AC-7: only a plain four-digit year is even attempted: an
@@ -75,22 +117,26 @@ export default async function WalletGoalsPage({
   // default rather than being trusted from the URL.
   const year = yearParam !== undefined && /^\d{4}$/.test(yearParam) ? Number(yearParam) : null;
 
-  const view = await loadGoalsView(userId, walletId, year);
-  if (view === null) notFound();
+  const view = await loadGoalsView(userId, scope.walletId, year);
+  if (view === null) {
+    // A wallet deleted since the link was made (BR-011-16).
+    return (
+      <PortfolioFrame wallets={wallets}>
+        <ErrorState title={tr('scope.walletNotFound')} />
+      </PortfolioFrame>
+    );
+  }
 
   const growthGoals = view.goals.filter((goalView) => goalView.goal.kind === 'growth');
   const earningsGoals = view.goals.filter((goalView) => goalView.goal.kind === 'earnings');
 
   return (
-    <PageShell
-      title={`${t('title')} · ${view.wallet.name}`}
-      description={t('description')}
-      actions={
-        <Button asChild variant="ghost" size="sm">
-          <Link href={`/wallets/${view.wallet.id}`}>{t('back')}</Link>
-        </Button>
-      }
-    >
+    <PortfolioFrame wallets={wallets}>
+      <Section
+        title={tp('goals.title', { wallet: view.wallet.name })}
+        description={t('description')}
+      />
+
       {view.goals.length === 0 && <EmptyState title={t('empty')} />}
 
       {/*
@@ -99,7 +145,8 @@ export default async function WalletGoalsPage({
         alone, and showing it anyway would suggest the growth chart moves too.
       */}
       {earningsGoals.length > 0 && (
-        <form method="get" action={`/wallets/${view.wallet.id}/goals`} aria-label={t('yearLabel')}>
+        <form method="get" action="/portfolio/goals" aria-label={t('yearLabel')}>
+          <input type="hidden" name={PARAM.wallet} value={view.wallet.id} />
           <Cluster gap="sm" align="end">
             <Field id="goals-year" label={t('yearLabel')} width="sm">
               <NativeSelect name="year" defaultValue={String(view.selectedYear)}>
@@ -187,6 +234,6 @@ export default async function WalletGoalsPage({
           </Stack>
         </ActionForm>
       </Section>
-    </PageShell>
+    </PortfolioFrame>
   );
 }

@@ -11,7 +11,7 @@ import { db } from '@/db/client';
 import { withTenant, type Tx } from '@/db/tenant';
 
 /**
- * SPEC-019 — the composition root for `/wallets/[walletId]/goals` (AR-02): the
+ * SPEC-019 — the composition root for Portfólio › Metas (`/portfolio/goals`) (AR-02): the
  * one place that wires `core/goals`' ports to their adapters, in the shape of
  * `src/app/(app)/wallets/composition.ts`.
  */

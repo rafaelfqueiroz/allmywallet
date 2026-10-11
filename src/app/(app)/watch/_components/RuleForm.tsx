@@ -11,7 +11,7 @@ import { Text } from '@/components/ui/text';
 
 /**
  * SPEC-018 BR-018-05..10 — the one form shared by "create a rule" and "edit a
- * rule", identical to how `wallets/[walletId]/goals/_components/GoalEditDeleteForms.tsx`
+ * rule", identical to how `portfolio/goals/_components/GoalEditDeleteForms.tsx`
  * reuses one shape for both. A Server Component: the only client-side
  * behaviour a plain `<form action={serverAction}>` needs is none — the
  * submit posts, the action validates and calls `createRule`/`updateRule`

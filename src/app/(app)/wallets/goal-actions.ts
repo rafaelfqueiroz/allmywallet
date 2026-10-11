@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { revalidatePortfolio } from '@/app/(app)/portfolio/revalidate';
 import { z } from 'zod';
 import { WalletGoalId, WalletId } from '@/core/shared/ids';
 import { Money } from '@/core/shared/money';
@@ -86,7 +87,7 @@ export async function createGoalAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePath(`/wallets/${walletId}`);
-  revalidatePath(`/wallets/${walletId}/goals`);
+  revalidatePortfolio();
   return IDLE;
 }
 
@@ -130,7 +131,7 @@ export async function updateGoalAction(
   );
   if (isErr(result)) return failure(result.error);
   revalidatePath(`/wallets/${walletId}`);
-  revalidatePath(`/wallets/${walletId}/goals`);
+  revalidatePortfolio();
   return IDLE;
 }
 
@@ -163,6 +164,6 @@ export async function deleteGoalAction(
   });
   if (isErr(result)) return failure(result.error);
   revalidatePath(`/wallets/${walletId}`);
-  revalidatePath(`/wallets/${walletId}/goals`);
+  revalidatePortfolio();
   return IDLE;
 }

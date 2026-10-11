@@ -66,10 +66,11 @@ function amountsIn(document: string): string[] {
 /** Pages that, unmasked, must show a seeded amount — so masked, the check means something. */
 const PAGES_WITH_AMOUNTS = [
   '/dashboard',
-  '/wallets',
+  '/portfolio',
+  '/portfolio/wallets',
   '/reports',
   '/reports/performance',
-  '/reports/composition',
+  '/portfolio/composition',
   '/reports/earnings',
   '/reports/patrimonio',
   '/transactions',
@@ -138,6 +139,10 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
 
     // SPEC-013 — two daily snapshots, so Patrimônio draws its value line and
     // the masking of a real chart's coordinates is exercised end to end.
+    // Dated by São Paulo's calendar, the app's own (`SAO_PAULO_TIME_ZONE`).
+    // Postgres' `CURRENT_DATE` is UTC's, which from 21:00 BRT is already
+    // tomorrow — so "yesterday" landed on the app's today, the live valuation
+    // replaced it, and the 4100 point this journey looks for was never drawn.
     for (const [offset, total] of [
       [2, 4000],
       [1, 4100],
@@ -145,7 +150,7 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
       await pool.query(
         `INSERT INTO daily_valuation_snapshots
            (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
-         VALUES ($1, CURRENT_DATE - $2::int, $3, 3000, 150, $4)`,
+         VALUES ($1, (now() AT TIME ZONE 'America/Sao_Paulo')::date - $2::int, $3, 3000, 150, $4)`,
         [userId, offset, total, JSON.stringify({ stock: String(total) })],
       );
     }
@@ -187,15 +192,18 @@ function pages(seeded: Seeded): readonly string[] {
   return [
     '/dashboard',
     '/onboarding',
-    '/wallets',
+    '/portfolio',
+    '/portfolio/wallets',
+    '/portfolio/wallets/setup',
+    '/portfolio/goals',
     `/wallets/${seeded.walletId}`,
-    `/wallets/${seeded.walletId}/balance`,
-    `/wallets/${seeded.walletId}/goals`,
+    `/portfolio/wallets?wallet=${seeded.walletId}`,
+    `/portfolio/goals?wallet=${seeded.walletId}`,
     '/reports',
     '/reports/patrimonio',
     '/reports/performance',
     '/reports/earnings',
-    '/reports/composition',
+    '/portfolio/composition',
     '/transactions',
     '/transactions/new',
     '/transactions/conversions/new',
@@ -242,11 +250,11 @@ test('with masking on, no page sends an amount, and the choice follows the accou
     if (amountsIn(await html(page, path)).length > 0) shown.push(path);
   }
   expect(shown).toEqual(expect.arrayContaining([...PAGES_WITH_AMOUNTS]));
-  const unmasked = await html(page, '/reports/composition');
+  const unmasked = await html(page, '/portfolio/composition');
   expect(amountsIn(unmasked)).toContain('4.000,00');
   expect(unmasked).toMatch(RING_COORDINATE);
   expect(await html(page, '/reports/patrimonio')).toMatch(LINE_COORDINATE);
-  const goals = await html(page, `/wallets/${seeded.walletId}/goals`);
+  const goals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(amountsIn(goals)).toContain('9.000,00');
   expect(goals).toMatch(GOAL_INPUT);
   expect(await html(page, '/watch')).toMatch(RULE_INPUT);
@@ -257,11 +265,11 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   // BR-022-24/25 — every page, as the server sends it.
   // The ring's coordinates rode to the browser rescaled, not as the 4000 they
   // were: the RSC payload is HTML too.
-  expect(await html(page, '/reports/composition')).not.toMatch(RING_COORDINATE);
+  expect(await html(page, '/portfolio/composition')).not.toMatch(RING_COORDINATE);
   expect(await html(page, '/reports/patrimonio')).not.toMatch(LINE_COORDINATE);
   // Edit forms round-trip stored amounts through their inputs, so they are
   // replaced by "show values to edit" rather than rendered (BR-022-24).
-  const maskedGoals = await html(page, `/wallets/${seeded.walletId}/goals`);
+  const maskedGoals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(maskedGoals).not.toMatch(GOAL_INPUT);
   expect(maskedGoals).toContain('Mostrar valores');
   expect(await html(page, '/watch')).not.toMatch(RULE_INPUT);
@@ -277,7 +285,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   expect(leaking).toEqual({});
 
   // BR-022-26 — what is painted instead, and what a screen reader hears.
-  await page.goto('/reports/composition');
+  await page.goto('/portfolio/composition');
   await expect(page.getByText('Valor oculto').first()).toBeAttached();
   await expect(page.getByText('R$ ••••••').filter({ visible: true }).first()).toBeVisible();
   // DL-022-07 — quantities and percentages stay.
@@ -302,7 +310,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
     await expect(
       other.getByRole('button', { name: 'Ocultar valores', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
-    expect(amountsIn(await html(other, '/reports/composition'))).toEqual([]);
+    expect(amountsIn(await html(other, '/portfolio/composition'))).toEqual([]);
   } finally {
     await elsewhere.close();
   }
@@ -314,7 +322,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
     'aria-pressed',
     'false',
   );
-  expect(amountsIn(await html(page, '/reports/composition'))).toContain('4.000,00');
+  expect(amountsIn(await html(page, '/portfolio/composition'))).toContain('4.000,00');
 });
 
 /**

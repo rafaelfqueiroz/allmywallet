@@ -13,7 +13,7 @@ const isMobile = (viewportWidth: number) => viewportWidth < 768;
 
 test.describe('application navigation', () => {
   test('reaches every destination from the shell', async ({ page, viewport }) => {
-    await page.goto('/wallets');
+    await page.goto('/portfolio');
 
     if (viewport && isMobile(viewport.width)) {
       // Below md the sidebar is not rendered; the drawer is the only way.
@@ -39,7 +39,7 @@ test.describe('application navigation', () => {
   });
 
   test('offers a skip link before the navigation', async ({ page }) => {
-    await page.goto('/wallets');
+    await page.goto('/portfolio');
 
     // Visible only on focus, so the first Tab is the assertion.
     await page.keyboard.press('Tab');
@@ -54,7 +54,7 @@ test.describe('application navigation', () => {
    * `requireUserId()`, which would throw for a visitor.
    */
   test('offers no account menu to a visitor with no session', async ({ page }) => {
-    await page.goto('/wallets');
+    await page.goto('/portfolio');
 
     await expect(page.getByRole('banner')).toBeVisible();
     await expect(page.getByRole('button', { name: /Menu da conta/ })).toHaveCount(0);

@@ -116,11 +116,19 @@ export function exportGroupedCsv(
   // BR-011-08 made checkable in the exported artifact: the scope total travels
   // with the rows, so a reader can add the value column up and see it agree
   // without re-opening the report.
+  //
+  // SPEC-022 BR-022-34 — **except the quantity, unless every row is the same
+  // asset.** Units of different assets do not add: 30.500.000 R$ 0,01 CDB
+  // units plus 2.000 shares counts nothing, and a spreadsheet would happily
+  // sum it. The cell is left empty, which every reader takes as "no total".
+  const assets = new Set(
+    report.groups.flatMap((group) => group.holdings.map((holding) => holding.assetId)),
+  );
   rows.push([
     labels.total,
     '',
     '',
-    report.total.quantity.toString(),
+    assets.size <= 1 ? report.total.quantity.toString() : '',
     report.total.value.toString(),
     report.total.costBasis.toString(),
     report.total.costEstimated ? labels.yes : labels.no,

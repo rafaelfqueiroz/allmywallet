@@ -28,7 +28,47 @@ export interface LegacyRedirect {
   readonly example: { readonly from: string; readonly to: string };
 }
 
-export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [];
+export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
+  /*
+   * #208 — Portfólio (BR-022-02). Wallet analysis, balancing and goals are
+   * Portfólio tabs, with the wallet carried as the shared scope parameter
+   * (BR-022-17); Composição is current state, so it leaves Relatórios.
+   * `/wallets/:walletId` itself is wallet setup and stays until #210.
+   */
+  {
+    source: '/wallets',
+    destination: '/portfolio/wallets',
+    issue: 208,
+    example: { from: '/wallets', to: '/portfolio/wallets' },
+  },
+  {
+    source: '/wallets/:walletId/balance',
+    destination: '/portfolio/wallets?wallet=:walletId',
+    issue: 208,
+    example: {
+      from: '/wallets/7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10/balance',
+      to: '/portfolio/wallets?wallet=7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10',
+    },
+  },
+  {
+    source: '/wallets/:walletId/goals',
+    destination: '/portfolio/goals?wallet=:walletId',
+    issue: 208,
+    example: {
+      from: '/wallets/7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10/goals?year=2025',
+      to: '/portfolio/goals?year=2025&wallet=7b0c2c5e-1f1a-4c8e-9a51-3f6d2b8e4a10',
+    },
+  },
+  {
+    source: '/reports/composition',
+    destination: '/portfolio/composition',
+    issue: 208,
+    example: {
+      from: '/reports/composition?grouping=sector',
+      to: '/portfolio/composition?grouping=sector',
+    },
+  },
+];
 
 /** The shape `next.config.ts`'s `redirects()` returns. */
 export interface NextRedirect {

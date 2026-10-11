@@ -135,12 +135,27 @@ export interface HoldingsTableLabels {
   readonly filterPlaceholder: string;
 }
 
+/**
+ * Columns a tab may leave out. SPEC-022 BR-022-02: Patrimônio reads value by
+ * asset, so it drops the two categorical columns Composição keeps — the
+ * sector (a composition dimension) and the watch state (SPEC-018 BR-018-19
+ * places it in Composição's holdings list).
+ */
+export type OptionalHoldingColumn = 'sector' | 'opportunityState';
+
+// One instance, so the default does not change the memoised columns on every
+// render — a new `columns` array re-renders DataTable's model (see its #204
+// Decision log #7 on what an unstable table input does).
+const NONE_HIDDEN: readonly OptionalHoldingColumn[] = [];
+
 export function HoldingsTable({
   rows,
   labels,
+  hiddenColumns = NONE_HIDDEN,
 }: {
   readonly rows: readonly HoldingRow[];
   readonly labels: HoldingsTableLabels;
+  readonly hiddenColumns?: readonly OptionalHoldingColumn[];
 }) {
   const columns = useMemo<ColumnDef<HoldingRow, unknown>[]>(() => {
     const numeric = (
@@ -185,7 +200,7 @@ export function HoldingsTable({
       },
     });
 
-    return [
+    const all: ColumnDef<HoldingRow, unknown>[] = [
       {
         id: 'code',
         header: labels.code,
@@ -284,7 +299,8 @@ export function HoldingsTable({
       numeric('share', labels.share),
       numeric('unrealizedGain', labels.unrealizedGain, { signed: true }),
     ];
-  }, [labels]);
+    return all.filter((column) => !hiddenColumns.includes(column.id as OptionalHoldingColumn));
+  }, [labels, hiddenColumns]);
 
   return (
     <DataTable

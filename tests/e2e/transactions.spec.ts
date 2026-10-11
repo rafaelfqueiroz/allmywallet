@@ -383,7 +383,7 @@ test.describe('transaction management', () => {
       ['Aposentadoria', '60'],
       ['Trading', '40'],
     ] as const) {
-      await page.goto('/wallets');
+      await page.goto('/portfolio/wallets/setup');
       await page.getByLabel('Quantidade').first().fill(quantity);
       await page.getByLabel('Atribuir a').first().selectOption({ label: walletName });
       await page.getByRole('button', { name: 'Atribuir', exact: true }).first().click();

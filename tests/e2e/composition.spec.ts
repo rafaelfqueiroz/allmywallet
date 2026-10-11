@@ -41,7 +41,7 @@ test('composes a real portfolio: shares, totals, the flag and its boundary', asy
   const { page, userId } = signedIn;
   const [big, small] = await seedHoldings(userId, HOLDINGS);
 
-  await page.goto('/reports/composition');
+  await page.goto('/portfolio/composition');
   await expect(page.locator('#__next_error__')).toHaveCount(0);
 
   /*
@@ -104,11 +104,14 @@ test('states the quote timestamp and the delay tier next to the figures', async 
   const { page, userId } = signedIn;
   await seedHoldings(userId, HOLDINGS);
 
-  await page.goto('/reports/composition');
+  await page.goto('/portfolio/composition');
 
-  await expect(page.getByText(/cotação de/i)).toBeVisible();
-  await expect(page.getByText(/atraso de cerca de 30 minutos/i)).toBeVisible();
-  await expect(page.getByText(/não são valores em tempo real/i)).toBeVisible();
+  // Portfólio's freshness line, in the dashboard's words (BR-022-32), with
+  // SPEC-005 BR-005-27's import date beside the quote's.
+  await expect(page.getByText(/cotações de/i)).toBeVisible();
+  await expect(page.getByText(/atraso de até 30 minutos/i)).toBeVisible();
+  await expect(page.getByText(/nunca em tempo real/i)).toBeVisible();
+  await expect(page.getByText(/nenhum extrato importado ainda/i)).toBeVisible();
 });
 
 /**
@@ -131,7 +134,7 @@ test('sorts the holdings by a column header, from md up', async ({ signedIn, vie
   const { page, userId } = signedIn;
   const [big, small] = await seedHoldings(userId, HOLDINGS);
 
-  await page.goto('/reports/composition');
+  await page.goto('/portfolio/composition');
   const table = page.getByRole('table', { name: /ativos do escopo/i });
   await expect(table).toBeVisible();
 
@@ -150,7 +153,7 @@ test('sorts the holdings from the card control, below md', async ({ signedIn, vi
   const { page, userId } = signedIn;
   const [big, small] = await seedHoldings(userId, HOLDINGS);
 
-  await page.goto('/reports/composition');
+  await page.goto('/portfolio/composition');
 
   // The card list carries the same accessible name as the table it replaces —
   // `DataTable` labels it from the same `caption`.
@@ -193,20 +196,26 @@ function stripBadges(text: string): string {
 }
 
 /**
- * BR-011-06 — the fourth report is reachable from the shared report nav, not
- * only by typing its URL. `/reports/composition` existed as a route for a
- * while before it was linked, which is the same "written and referenced by
- * nothing" defect #61 was opened for.
+ * SPEC-022 BR-022-02 — Composição is a Portfólio tab, reachable from the tab
+ * bar rather than only by its URL (the "written and referenced by nothing"
+ * defect #61 was opened for), and gone from Relatórios' tabs.
  */
-test('is reachable from the report navigation', async ({ signedIn }) => {
+test('is reachable from the Portfólio tabs, and no longer from Relatórios', async ({
+  signedIn,
+}) => {
   const { page } = signedIn;
-  await page.goto('/reports');
+  await page.goto('/portfolio');
 
   await page
-    .getByRole('navigation', { name: 'Relatórios' })
+    .getByRole('navigation', { name: 'Portfólio' })
     .getByRole('link', { name: 'Composição' })
     .click();
 
-  await expect(page).toHaveURL(/\/reports\/composition$/);
-  await expect(page.getByRole('heading', { level: 1, name: 'Composição' })).toBeVisible();
+  await expect(page).toHaveURL(/\/portfolio\/composition$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Portfólio' })).toBeVisible();
+
+  await page.goto('/reports');
+  await expect(
+    page.getByRole('navigation', { name: 'Relatórios' }).getByRole('link', { name: 'Composição' }),
+  ).toHaveCount(0);
 });

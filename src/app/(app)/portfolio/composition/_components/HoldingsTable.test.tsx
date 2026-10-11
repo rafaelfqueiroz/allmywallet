@@ -5,7 +5,7 @@ import {
   type Cell,
   type HoldingRow,
   type HoldingsTableLabels,
-} from '@/app/(app)/reports/composition/_components/HoldingsTable';
+} from '@/app/(app)/portfolio/composition/_components/HoldingsTable';
 
 // DataTable mirrors its sort/page state into the URL (SPEC-022 BR-022-18).
 vi.mock('next/navigation', () => ({

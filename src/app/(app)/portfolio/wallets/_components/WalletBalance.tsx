@@ -1,7 +1,6 @@
-import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
-import { WalletId } from '@/core/shared/ids';
+import type { UserId, WalletId } from '@/core/shared/ids';
 import { Quantity } from '@/core/shared/money';
 import { TARGET_MODES } from '@/core/wallets/targets';
 import { DriftUnavailableReason } from '@/core/wallets/drift';
@@ -9,8 +8,6 @@ import { setWalletTargetsAction } from '@/app/(app)/wallets/actions';
 import { TARGET_FIELD_PREFIX } from '@/app/(app)/wallets/target-fields';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletBalance } from '@/app/(app)/wallets/balance-data';
-import { tryUserId } from '@/lib/session';
-import { PageShell } from '@/app/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -59,32 +56,22 @@ import {
  * nothing on this screen can be restated later (BR-017-25).
  * ---------------------------------------------------------------------------
  *
- * Never statically prerendered: this renders one tenant's own holdings and
- * intentions, so a cached copy built once would be served to every visitor.
+ * SPEC-022 BR-022-02 / #208 — rendered as Portfólio › Carteiras when the scope
+ * selector names a wallet. It was `/wallets/[id]/balance`, which redirects
+ * here (BR-022-08).
  */
-export const dynamic = 'force-dynamic';
-
-export default async function WalletBalancePage({
-  params,
+export async function WalletBalance({
+  userId,
+  walletId,
 }: {
-  params: Promise<{ walletId: string }>;
+  readonly userId: UserId;
+  readonly walletId: WalletId;
 }) {
-  const { walletId: rawWalletId } = await params;
   const t = await getTranslations('balanceamento');
-  const userId = await tryUserId();
-
-  if (userId === undefined) {
-    return (
-      <PageShell title={t('title')}>
-        <EmptyState title={t('signedOut')} />
-      </PageShell>
-    );
-  }
-
-  if (!/^[0-9a-f-]{36}$/i.test(rawWalletId)) notFound();
-  const walletId = WalletId.of(rawWalletId);
+  const tp = await getTranslations('portfolio');
   const balance = await loadWalletBalance(userId, walletId);
-  if (balance === null) notFound();
+  // A wallet deleted since the link was made: the tab says so (BR-011-16).
+  if (balance === null) return null;
 
   const labels = await resolveAssetLabels([
     ...balance.rows.map((row) => row.assetId),
@@ -94,15 +81,19 @@ export default async function WalletBalancePage({
     `${labelFor(labels, assetId).code} — ${labelFor(labels, assetId).name}`;
 
   return (
-    <PageShell
-      title={`${t('title')} · ${balance.walletName}`}
-      description={t('description')}
-      actions={
-        <Button asChild variant="ghost" size="sm">
-          <Link href={`/wallets/${balance.walletId}`}>{t('back')}</Link>
-        </Button>
-      }
-    >
+    <Stack gap="lg">
+      <Section
+        title={tp('wallets.balanceTitle', { wallet: balance.walletName })}
+        description={t('description')}
+        actions={
+          // Setup stays on the wallet's own page until Configurações ›
+          // Carteiras exists (#210); balancing is read here (BR-022-02).
+          <Button asChild variant="link" size="sm">
+            <Link href={`/wallets/${balance.walletId}`}>{t('back')}</Link>
+          </Button>
+        }
+      />
+
       {/*
         BR-017-11 / AC-7 — a wallet with nothing targetable in it gets an
         explanation, never an empty form. The explanation is the *reason*
@@ -333,7 +324,7 @@ export default async function WalletBalancePage({
           </Table>
         )}
       </Section>
-    </PageShell>
+    </Stack>
   );
 }
 
