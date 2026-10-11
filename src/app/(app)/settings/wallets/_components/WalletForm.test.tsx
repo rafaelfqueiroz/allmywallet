@@ -77,13 +77,15 @@ describe('WalletForm — fields (BR-022-20)', () => {
 });
 
 /** What the form posts, as the action would receive it. */
-async function submitted(ui: React.ReactElement, change?: () => void) {
+type Action = (state: ActionState, formData: FormData) => Promise<ActionState>;
+
+async function submitted(ui: (action: Action) => React.ReactElement, change?: () => void) {
   const seen: FormData[] = [];
   const records = async (_: ActionState, formData: FormData) => {
     seen.push(formData);
     return IDLE;
   };
-  render(ui.type === WalletForm ? <WalletForm {...ui.props} action={records} /> : ui);
+  render(ui(records));
   change?.();
   await userEvent.click(screen.getByRole('button', { name: /Criar carteira|Salvar alterações/ }));
   await waitFor(() => expect(seen).toHaveLength(1));
@@ -91,7 +93,9 @@ async function submitted(ui: React.ReactElement, change?: () => void) {
 }
 
 describe('WalletForm — Sem cor submit mapping', () => {
-  const create = <WalletForm action={vi.fn()} idPrefix="new-wallet" submitLabel="Criar carteira" />;
+  const create = (action: Action) => (
+    <WalletForm action={action} idPrefix="new-wallet" submitLabel="Criar carteira" />
+  );
 
   it('posts noColor=on for a new wallet left on its default', async () => {
     const data = await submitted(create, () => {
@@ -110,9 +114,9 @@ describe('WalletForm — Sem cor submit mapping', () => {
   });
 
   it('starts an edit of a NULL colour checked, and keeps it NULL unless changed', async () => {
-    const edit = (color: string | null) => (
+    const edit = (color: string | null) => (action: Action) => (
       <WalletForm
-        action={vi.fn()}
+        action={action}
         idPrefix="wallet"
         submitLabel="Salvar alterações"
         walletId="w1"
@@ -125,15 +129,15 @@ describe('WalletForm — Sem cor submit mapping', () => {
   });
 
   it('starts an edit of a stored colour unchecked, and posts that colour', async () => {
-    const data = await submitted(
+    const data = await submitted((action) => (
       <WalletForm
-        action={vi.fn()}
+        action={action}
         idPrefix="wallet"
         submitLabel="Salvar alterações"
         walletId="w1"
         values={{ name: 'Reserva', description: '', goal: '', color: '#336699' }}
-      />,
-    );
+      />
+    ));
     expect(screen.getByRole('checkbox', { name: 'Sem cor' })).not.toBeChecked();
     expect(data.get('noColor')).toBeNull();
     expect(data.get('color')).toBe('#336699');
