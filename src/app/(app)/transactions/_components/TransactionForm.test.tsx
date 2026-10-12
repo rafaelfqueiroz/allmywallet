@@ -6,6 +6,13 @@ import { domainError } from '@/core/shared/domain-error';
 import { audit, render, screen, userEvent, waitFor } from '@/components/test-utils';
 import { TransactionForm, type TransactionFormProps } from './TransactionForm';
 
+/**
+ * A server round trip, roughly. The refusal must be awaited, not assumed: an
+ * assertion made the moment the submit click returns passed locally and lost
+ * the race on CI (main after #234).
+ */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
 const props: TransactionFormProps = {
   action: async () => IDLE,
   mode: 'create',
@@ -60,8 +67,10 @@ describe('TransactionForm', () => {
   /** BR-022-21 — a refusal about one field renders under that field. */
   it('puts a field refusal under its field and keeps what was typed', async () => {
     const user = userEvent.setup();
-    const refuse = async (): Promise<ActionState> =>
-      failure(domainError(LedgerErrorCode.NEGATIVE_FEES, {}));
+    const refuse = async (): Promise<ActionState> => {
+      await settle();
+      return failure(domainError(LedgerErrorCode.NEGATIVE_FEES, {}));
+    };
     const { container } = render(<TransactionForm {...props} action={refuse} />);
 
     // Every `required` field filled: jsdom, like a browser, will not submit otherwise.
@@ -71,7 +80,10 @@ describe('TransactionForm', () => {
     await user.type(screen.getByLabelText('Taxas'), '-1');
     await user.click(screen.getByRole('button', { name: 'Registrar transação' }));
 
-    const fees = await screen.findByLabelText('Taxas');
+    // Wait for the refusal itself, then query afresh: the fields re-mount on
+    // submit, so an element found before the action settles is a stale copy.
+    await screen.findByText('As taxas não podem ser negativas.');
+    const fees = screen.getByLabelText('Taxas');
     expect(fees).toHaveAttribute('aria-invalid', 'true');
     expect(fees).toHaveAccessibleDescription('As taxas não podem ser negativas.');
     expect(container.querySelector('[data-slot="error-state"]')).toBeNull();
@@ -81,11 +93,10 @@ describe('TransactionForm', () => {
 
   it('puts an unreadable value under its field, and moves focus there', async () => {
     const user = userEvent.setup();
-    const refuse = async (): Promise<ActionState> => ({
-      status: 'error',
-      code: 'VALIDATION_FAILED',
-      context: { field: 'quantity' },
-    });
+    const refuse = async (): Promise<ActionState> => {
+      await settle();
+      return { status: 'error', code: 'VALIDATION_FAILED', context: { field: 'quantity' } };
+    };
     render(<TransactionForm {...props} action={refuse} />);
 
     await user.type(screen.getByLabelText('Data da operação'), '2026-04-01');
@@ -93,7 +104,8 @@ describe('TransactionForm', () => {
     await user.type(screen.getByLabelText('Preço unitário'), '1');
     await user.click(screen.getByRole('button', { name: 'Registrar transação' }));
 
-    const quantity = await screen.findByLabelText('Quantidade');
+    await screen.findByText('Informe um número, como 32,15.');
+    const quantity = screen.getByLabelText('Quantidade');
     await waitFor(() => expect(quantity).toHaveFocus());
     expect(quantity).toHaveAttribute('aria-invalid', 'true');
     expect(quantity).toHaveAccessibleDescription('Informe um número, como 32,15.');
