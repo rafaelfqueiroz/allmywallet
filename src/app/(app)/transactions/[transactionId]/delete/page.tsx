@@ -22,6 +22,8 @@ import { Money } from '@/app/money';
 import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
+import { Grid } from '@/components/layout/grid';
+import { Card, CardContent } from '@/components/ui/card';
 import { Text } from '@/components/ui/text';
 import {
   Table,
@@ -45,6 +47,12 @@ import {
  * linked to, and that the destructive click is never one keystroke away from
  * an ordinary one.
  *
+ * SPEC-022: the page names the transaction it deletes before anything else —
+ * date, asset, type and amounts, as the ledger row showed them — so the
+ * confirmation is about a row the user can see, not an id in the URL. The
+ * comparison tables sit in cards, and the confirmation row ends with the
+ * destructive action, after Voltar, as every form in the product does.
+ *
  * The impact call can itself fail, and that failure is the most important
  * thing this page says: deleting the buy a later sale drew on leaves a ledger
  * that cannot be replayed, so the user is told *before* confirming rather than
@@ -59,6 +67,7 @@ interface PageProps {
 export default async function DeleteTransactionPage({ params }: PageProps) {
   const t = await getTranslations('transactions.delete');
   const tTable = await getTranslations('transactions.table');
+  const tType = await getTranslations('import.transactionType');
   const tSignedOut = await getTranslations('transactions');
   const tErrors = await getTranslations('errors');
   // SPEC-007 BR-007-06 / DL-007-12 — the position-level marker reuses
@@ -90,9 +99,12 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
         target?.conversionGroupId === null || target === null
           ? await describeDeletionImpact(deps.ledger, id)
           : null;
-      // #144 N3: the downstream positions are named by asset code.
-      const downstreamAssets =
-        impact === null || !impact.ok ? [] : impact.value.downstream.map((row) => row.assetId);
+      // #144 N3: the downstream positions are named by asset code, and so is
+      // the transaction being deleted.
+      const downstreamAssets = [
+        ...(target === null ? [] : [target.assetId]),
+        ...(impact === null || !impact.ok ? [] : impact.value.downstream.map((row) => row.assetId)),
+      ];
       return {
         target,
         conversionGroup:
@@ -112,6 +124,32 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
 
   if (target === null) notFound();
 
+  const summary = (
+    <Card size="sm">
+      <CardContent>
+        <Grid cols={3}>
+          {[
+            [tTable('date'), formatBusinessDate(target.tradeDate)],
+            [tTable('asset'), assetCodes.get(target.assetId) ?? target.assetId],
+            [tTable('type'), tType(target.type)],
+            [tTable('quantity'), <Money key="q" value={target.quantity} kind="quantity" />],
+            [tTable('unitPrice'), <Money key="p" value={target.unitPrice} />],
+            [tTable('total'), <Money key="t" value={target.totalValue} />],
+          ].map(([label, value], index) => (
+            <Stack key={index} gap="none">
+              <Text as="span" size="xs" tone="muted">
+                {label}
+              </Text>
+              <Text as="span" weight="medium">
+                {value}
+              </Text>
+            </Stack>
+          ))}
+        </Grid>
+      </CardContent>
+    </Card>
+  );
+
   if (target.conversionGroupId !== null) {
     const earliest = conversionGroup.reduce(
       (date, leg) => (leg.tradeDate < date ? leg.tradeDate : date),
@@ -120,6 +158,7 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
     return (
       <PageShell title={t('title')} description={t('description')}>
         <Stack gap="lg">
+          {summary}
           <Section title={t('impactTitle')}>
             <Stack gap="sm">
               <Text>{t('conversionGroup', { count: conversionGroup.length })}</Text>
@@ -172,6 +211,7 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
         />
       ) : (
         <Stack gap="lg">
+          {summary}
           <Section title={t('impactTitle')}>
             <Stack gap="sm">
               {/* DL-006-03: forward from the transaction's own date, not today. */}
@@ -180,72 +220,76 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
                 {t('impactSubsequent', { count: impact.value.subsequentTransactionCount })}
               </Text>
             </Stack>
-          </Section>
 
-          {/*
+            {/*
             "Your position will change" without saying what to is the kind of
             disclosure that satisfies a checklist and nobody reading it. Both
             columns are real replays — the current one from the ledger as it
             stands, the projected one from the ledger without this row.
           */}
-          <Table>
-            <TableCaption className="sr-only">{t('impactPosition')}</TableCaption>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">{t('impactPosition')}</TableHead>
-                <TableHead scope="col" className="text-right">
-                  {t('impactCurrent')}
-                </TableHead>
-                <TableHead scope="col" className="text-right">
-                  {t('impactProjected')}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow>
-                <TableCell className="py-row">{t('impactQuantity')}</TableCell>
-                <TableCell className="py-row text-right">
-                  <Money value={impact.value.currentPosition.quantity} kind="quantity" />
-                </TableCell>
-                <TableCell className="py-row text-right">
-                  <Money value={impact.value.projectedPosition.quantity} kind="quantity" />
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
-                <TableCell className="py-row text-right">
-                  <Cluster gap="sm" justify="end" align="baseline">
-                    <Money value={impact.value.currentPosition.averageCost} />
-                    {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
-                    <CostEstimateMarker
-                      shown={impact.value.currentCostEstimated}
-                      label={tCommon('estimated')}
-                      title={tReports('markers.costEstimated.explanation')}
-                    />
-                  </Cluster>
-                </TableCell>
-                <TableCell className="py-row text-right">
-                  <Cluster gap="sm" justify="end" align="baseline">
-                    <Money value={impact.value.projectedPosition.averageCost} />
-                    <CostEstimateMarker
-                      shown={impact.value.projectedCostEstimated}
-                      label={tCommon('estimated')}
-                      title={tReports('markers.costEstimated.explanation')}
-                    />
-                  </Cluster>
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell className="py-row">{tTable('total')}</TableCell>
-                <TableCell className="py-row text-right">
-                  <Money value={impact.value.currentPosition.totalCost} />
-                </TableCell>
-                <TableCell className="py-row text-right">
-                  <Money value={impact.value.projectedPosition.totalCost} />
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+            <Card size="sm">
+              <CardContent>
+                <Table>
+                  <TableCaption className="sr-only">{t('impactPosition')}</TableCaption>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead scope="col">{t('impactPosition')}</TableHead>
+                      <TableHead scope="col" className="text-right">
+                        {t('impactCurrent')}
+                      </TableHead>
+                      <TableHead scope="col" className="text-right">
+                        {t('impactProjected')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell className="py-row">{t('impactQuantity')}</TableCell>
+                      <TableCell className="py-row text-right">
+                        <Money value={impact.value.currentPosition.quantity} kind="quantity" />
+                      </TableCell>
+                      <TableCell className="py-row text-right">
+                        <Money value={impact.value.projectedPosition.quantity} kind="quantity" />
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
+                      <TableCell className="py-row text-right">
+                        <Cluster gap="sm" justify="end" align="baseline">
+                          <Money value={impact.value.currentPosition.averageCost} />
+                          {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
+                          <CostEstimateMarker
+                            shown={impact.value.currentCostEstimated}
+                            label={tCommon('estimated')}
+                            title={tReports('markers.costEstimated.explanation')}
+                          />
+                        </Cluster>
+                      </TableCell>
+                      <TableCell className="py-row text-right">
+                        <Cluster gap="sm" justify="end" align="baseline">
+                          <Money value={impact.value.projectedPosition.averageCost} />
+                          <CostEstimateMarker
+                            shown={impact.value.projectedCostEstimated}
+                            label={tCommon('estimated')}
+                            title={tReports('markers.costEstimated.explanation')}
+                          />
+                        </Cluster>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell className="py-row">{tTable('total')}</TableCell>
+                      <TableCell className="py-row text-right">
+                        <Money value={impact.value.currentPosition.totalCost} />
+                      </TableCell>
+                      <TableCell className="py-row text-right">
+                        <Money value={impact.value.projectedPosition.totalCost} />
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </Section>
 
           <DeletionDownstreamImpact rows={downstreamRows} />
 

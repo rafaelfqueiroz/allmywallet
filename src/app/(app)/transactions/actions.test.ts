@@ -98,6 +98,24 @@ describe('transaction actions — grouped conversion boundary', () => {
     vi.mocked(reconcileAllocationsToHoldings).mockResolvedValue({ ok: true, value: [] });
   });
 
+  /** SPEC-022 BR-022-21 — unreadable input names its field, for the form to show under it. */
+  it.each([
+    ['quantity', '1,2,3'],
+    ['fees', 'abc'],
+    ['ratio', 'dois'],
+    ['tradeDate', '18/09/2026'],
+  ])(
+    'refuses an unreadable %s and names it, before opening write dependencies',
+    async (field, value) => {
+      const data = transactionForm('buy');
+      data.set(field, value);
+      const result = await createTransactionAction({ status: 'idle' }, data);
+
+      expect(result).toEqual({ status: 'error', code: 'VALIDATION_FAILED', context: { field } });
+      expect(withTransactionWriteDeps).not.toHaveBeenCalled();
+    },
+  );
+
   it('refuses standalone conversion creation before opening write dependencies', async () => {
     const result = await createTransactionAction(
       { status: 'idle' },

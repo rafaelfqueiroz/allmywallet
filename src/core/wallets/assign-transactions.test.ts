@@ -67,6 +67,22 @@ describe('the selection is read as the quantity it brought in', () => {
     expect(allocations).toHaveLength(2);
   });
 
+  it('reads a row named twice as one row, not twice its shares', async () => {
+    const petrBuy = aTransaction().buy().of('PETR4').quantity('10').build();
+    const { deps } = build([petrBuy]);
+    deps.positionQuery.set(PETR4, Quantity.fromString('100'), Money.fromString('30'));
+    const wallet = await walletFor(deps, 'Aposentadoria');
+
+    const result = await assignTransactionsToWallet(deps, TEST_USER_ID, {
+      walletId: wallet.id,
+      transactionIds: [petrBuy.id, petrBuy.id],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.assigned.map((a) => a.quantity.toString())).toEqual(['10']);
+  });
+
   /**
    * The reason this nets rather than summing the acquiring rows: a selection
    * spanning a buy and a later partial sale brought in the difference, and

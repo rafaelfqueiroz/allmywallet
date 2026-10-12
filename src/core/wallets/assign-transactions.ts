@@ -102,7 +102,10 @@ export async function assignTransactionsToWallet(
   }
 
   const targets: Transaction[] = [];
-  for (const id of input.transactionIds) {
+  // A selection is a set: the same row named twice (a checkbox rendered in
+  // both the table and its card, #214 review F3) is one row, not twice its
+  // shares. `bulkDeleteTransactions` makes the same reading.
+  for (const id of new Set(input.transactionIds)) {
     const found = await deps.transactions.findById(id);
     if (found === null) {
       return err(ledgerError(LedgerErrorCode.TRANSACTION_NOT_FOUND, { transactionId: id }));

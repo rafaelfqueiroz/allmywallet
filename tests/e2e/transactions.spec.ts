@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import type { Page } from '@playwright/test';
 import { expect, test } from './support/authenticated';
 
 /**
@@ -16,6 +17,34 @@ import { expect, test } from './support/authenticated';
  * filtered view" is the SPEC-011 lesson (`reports-scope.spec.ts`'s own
  * header) applied to this surface.
  */
+
+/**
+ * SPEC-022 BR-022-18 / DS-28 — the ledger is a `DataTable`: a table from `md`
+ * up, the same rows as cards below it. The suite runs at both widths, so a
+ * journey reads whichever rendering is on screen; the cards are a list named
+ * by the same caption.
+ */
+const isMobile = (page: Page) => (page.viewportSize()?.width ?? 1280) < 768;
+
+function ledger(page: Page) {
+  return isMobile(page)
+    ? page.getByRole('list', { name: 'Transações' })
+    : page.getByRole('table', { name: 'Transações' });
+}
+
+/** One transaction — a table row, or its card. */
+function ledgerRow(page: Page, text: string) {
+  return ledger(page)
+    .getByRole(isMobile(page) ? 'listitem' : 'row')
+    .filter({ hasText: text });
+}
+
+/** Every transaction on the current page of the ledger, header excluded. */
+function ledgerRows(page: Page) {
+  return isMobile(page)
+    ? ledger(page).getByRole('listitem')
+    : ledger(page).locator('tbody').getByRole('row');
+}
 
 const MIGRATION_URL =
   process.env.DATABASE_MIGRATION_URL ??
@@ -201,7 +230,7 @@ test.describe('transaction management', () => {
     await page.getByRole('button', { name: 'Registrar transação' }).click();
 
     await expect(page).toHaveURL(/\/transactions$/);
-    const table = page.getByRole('table', { name: 'Transações' });
+    const table = ledger(page);
     await expect(table.getByText('CDB-BANCO-X-2030')).toHaveCount(1);
     await expect(table.getByText('Manual')).toHaveCount(1);
   });
@@ -212,15 +241,17 @@ test.describe('transaction management', () => {
 
     await page.goto('/transactions');
     // The manual HGLG11 buy: 10 quotas. Only that row's Editar is wanted.
-    const row = page.getByRole('row').filter({ hasText: 'HGLG11' });
+    const row = ledgerRow(page, 'HGLG11');
     await row.getByRole('link', { name: 'Editar' }).click();
 
+    // The ledger has a "Quantidade" column of its own; read the form once it is there.
+    await expect(page).toHaveURL(/\/edit$/);
     await expect(page.getByLabel('Quantidade')).toHaveValue('10');
     await page.getByLabel('Quantidade').fill('25');
     await page.getByRole('button', { name: 'Salvar alterações' }).click();
 
     await expect(page).toHaveURL(/\/transactions$/);
-    const updated = page.getByRole('row').filter({ hasText: 'HGLG11' });
+    const updated = ledgerRow(page, 'HGLG11');
     await expect(updated).toContainText('25');
     // BR-006-16: a human decided this value, and a re-import must not revert it.
     await expect(updated.getByText('Editada')).toBeVisible();
@@ -275,7 +306,7 @@ test.describe('transaction management', () => {
     await seedLedger(userId);
 
     await page.goto('/transactions');
-    const row = page.getByRole('row').filter({ hasText: 'HGLG11' });
+    const row = ledgerRow(page, 'HGLG11');
     await row.getByRole('link', { name: 'Excluir' }).click();
 
     await expect(page.getByRole('heading', { name: 'Excluir transação' })).toBeVisible();
@@ -287,9 +318,7 @@ test.describe('transaction management', () => {
     await page.getByRole('button', { name: 'Confirmar exclusão' }).click();
 
     await expect(page).toHaveURL(/\/transactions$/);
-    await expect(page.getByRole('table', { name: 'Transações' }).getByText('HGLG11')).toHaveCount(
-      0,
-    );
+    await expect(ledger(page).getByText('HGLG11')).toHaveCount(0);
   });
 
   /**
@@ -322,7 +351,7 @@ test.describe('transaction management', () => {
     await expect(page).toHaveURL(/\/transactions$/);
     // BR-010-11 refuses to guess a wallet, so the shares arrive unallocated —
     // which is exactly the state this operation exists to resolve, in bulk.
-    await page.getByRole('row').filter({ hasText: 'ITSA4' }).getByRole('checkbox').check();
+    await ledgerRow(page, 'ITSA4').getByRole('checkbox').check();
     // "Carteira de destino", not "Carteira": the filter bar has a wallet
     // control of its own now, and the two ask different questions.
     await page.getByLabel('Carteira de destino').selectOption({ label: 'Aposentadoria' });
@@ -419,10 +448,10 @@ test.describe('transaction management', () => {
     await seedLedger(userId);
 
     await page.goto('/transactions');
-    const table = page.getByRole('table', { name: 'Transações' });
+    const table = ledger(page);
     await expect(table.getByText('PETR4')).toHaveCount(2);
 
-    for (const row of await page.getByRole('row').filter({ hasText: 'PETR4' }).all()) {
+    for (const row of await ledgerRow(page, 'PETR4').all()) {
       await row.getByRole('checkbox').check();
     }
     await page.getByRole('button', { name: 'Excluir selecionadas' }).click();
@@ -430,10 +459,8 @@ test.describe('transaction management', () => {
     // Both rows in one operation — the buy and the sale that drew on it, which
     // is legal together and illegal one at a time.
     await expect(page.getByRole('status')).toContainText('2');
-    await expect(page.getByRole('table', { name: 'Transações' }).getByText('PETR4')).toHaveCount(0);
-    await expect(page.getByRole('table', { name: 'Transações' }).getByText('HGLG11')).toHaveCount(
-      1,
-    );
+    await expect(ledger(page).getByText('PETR4')).toHaveCount(0);
+    await expect(ledger(page).getByText('HGLG11')).toHaveCount(1);
   });
 });
 
@@ -445,7 +472,7 @@ test.describe('transaction ledger', () => {
     await page.goto('/transactions');
 
     await expect(page.getByRole('heading', { level: 1, name: 'Transações' })).toBeVisible();
-    const table = page.getByRole('table', { name: 'Transações' });
+    const table = ledger(page);
     await expect(table).toBeVisible();
 
     // BR-006-07: all assets and institutions in one chronological list.
@@ -466,7 +493,7 @@ test.describe('transaction ledger', () => {
     await seedLedger(userId);
 
     await page.goto('/transactions');
-    const table = page.getByRole('table', { name: 'Transações' });
+    const table = ledger(page);
     await expect(table.getByText('PETR4')).toHaveCount(2);
 
     // BR-006-08 — a plain GET form, so this is a real navigation.
@@ -515,12 +542,12 @@ test.describe('transaction ledger', () => {
     await page.getByLabel('Preço unitário', { exact: true }).fill('40,00');
     await page.getByRole('button', { name: 'Registrar transação' }).click();
 
-    const table = page.getByRole('table', { name: 'Transações' });
+    const table = ledger(page);
     await expect(table.getByText('ITSA4')).toHaveCount(1);
     await expect(table.getByText('WEGE3')).toHaveCount(1);
 
     // Only ITSA4 goes into the wallet.
-    await page.getByRole('row').filter({ hasText: 'ITSA4' }).getByRole('checkbox').check();
+    await ledgerRow(page, 'ITSA4').getByRole('checkbox').check();
     await page.getByLabel('Carteira de destino').selectOption({ label: 'Aposentadoria' });
     await page.getByRole('button', { name: 'Atribuir à carteira' }).click();
     await expect(page.getByRole('status')).toContainText('1');
@@ -553,5 +580,197 @@ test.describe('transaction ledger', () => {
     await expect(page).toHaveURL(/q=zzzz/);
     await expect(page.getByRole('status')).toBeVisible();
     await expect(page.getByRole('table')).toHaveCount(0);
+
+    // The filter bar stays, and the way back is one link (SPEC-022 BR-022-18).
+    await expect(page.getByLabel('Buscar')).toHaveValue('zzzz-no-such-asset');
+    await page.getByRole('link', { name: 'Limpar filtros' }).first().click();
+    await expect(page).toHaveURL(/\/transactions$/);
+    await expect(ledger(page).getByText('HGLG11')).toHaveCount(1);
+  });
+});
+
+/**
+ * Thirty BBAS3 buys of one share each, priced R$ 10, R$ 20 … R$ 300 on
+ * consecutive days, so every row's total is distinct and the list spans two
+ * pages of 25. Rows only: nothing here needs a position.
+ */
+async function seedThirty(userId: string): Promise<void> {
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    const bbas3 = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO assets (id, code, name, class) VALUES ($1, 'BBAS3', 'Banco do Brasil ON', 'stock')
+         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [randomUUID()],
+      )
+    ).rows[0]!.id;
+    for (let i = 1; i <= 30; i++) {
+      const price = (i * 10).toFixed(2);
+      await pool.query(
+        `INSERT INTO transactions
+           (id, user_id, asset_id, institution_id, type, status, trade_date,
+            quantity, unit_price, fees, total_value, natural_key, occurrence,
+            import_batch_id, is_manual)
+         VALUES ($1, $2, $3, NULL, 'buy', 'active', $4::date, 1, $5, 0, $5, $6, 1, NULL, true)`,
+        [
+          randomUUID(),
+          userId,
+          bbas3,
+          `2025-01-${String(i).padStart(2, '0')}`,
+          price,
+          `e2e-bbas3-${i}`,
+        ],
+      );
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
+ * SPEC-022 BR-022-18 over SPEC-006 BR-006-07/08 — the ledger is sorted and
+ * paged by its query, so every one of these is a server round trip whose state
+ * has to be in the URL: a reload, a bookmark or a shared link must reproduce
+ * the same page of the same order under the same filters.
+ */
+test.describe('the ledger table', () => {
+  test('sorts, paginates and filters, with its state in the URL', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedThirty(userId);
+    await seedLedger(userId);
+
+    await page.goto('/transactions');
+    // BR-006-07: newest first — the HGLG11 buy of 2026-03-01 leads.
+    await expect(ledgerRows(page).first()).toContainText('HGLG11');
+    await expect(ledgerRows(page)).toHaveCount(33);
+
+    // A selectable page size (BR-022-18).
+    await page.getByLabel('Itens por página').selectOption('25');
+    await expect(page).toHaveURL(/[?&]size=25(&|$)/);
+    await expect(ledgerRows(page)).toHaveCount(25);
+    await expect(page.getByText('Mostrando 1–25 de 33 transações')).toBeVisible();
+
+    // Paging is a link to the next page of the query, not a slice of this one.
+    await page
+      .getByRole('navigation', { name: 'Paginação' })
+      .getByRole('link', { name: 'Página 2' })
+      .click();
+    await expect(page).toHaveURL(/[?&]page=2(&|$)/);
+    await expect(ledgerRows(page)).toHaveCount(8);
+    // The oldest BBAS3 buy, 2025-01-01 at R$ 10, is last of all.
+    await expect(ledgerRows(page).last()).toContainText(/R\$\s10,00/);
+
+    // Sorting re-queries the whole ledger and starts again from page 1.
+    if (isMobile(page)) {
+      // By role, which skips the hidden table's header links of the same name.
+      await page.getByRole('combobox', { name: /^Ordenar por/ }).selectOption({ label: 'Total' });
+      await expect(page).toHaveURL(/[?&]sort=totalValue%3Adesc(&|$)/);
+      // The PETR4 buy, 100 × R$ 32,15, is the largest total of all.
+      await expect(ledgerRows(page).first()).toContainText('PETR4');
+    } else {
+      await ledger(page).getByRole('link', { name: 'Ordenar por Total' }).click();
+      await expect(page).toHaveURL(/[?&]sort=totalValue%3Aasc(&|$)/);
+      await expect(ledgerRows(page).first()).toContainText(/R\$\s10,00/);
+      await expect(
+        ledger(page).getByRole('columnheader', { name: 'Ordenar por Total' }),
+      ).toHaveAttribute('aria-sort', 'ascending');
+    }
+    await expect(page).not.toHaveURL(/[?&]page=/);
+
+    // A filter keeps the table's sort and page size, and drops the page.
+    await page.getByLabel('Buscar').fill('BBAS3');
+    await page.getByRole('button', { name: 'Aplicar' }).click();
+    await expect(page).toHaveURL(/[?&]q=BBAS3(&|$)/);
+    await expect(page).toHaveURL(/[?&]size=25(&|$)/);
+    await expect(page).toHaveURL(/[?&]sort=totalValue/);
+    await expect(ledgerRows(page)).toHaveCount(25);
+    await expect(page.getByText('Mostrando 1–25 de 30 transações')).toBeVisible();
+    await expect(ledger(page).getByText('HGLG11')).toHaveCount(0);
+
+    // The URL is the whole state: a reload reproduces it.
+    const url = page.url();
+    await page.reload();
+    expect(page.url()).toBe(url);
+    await expect(ledgerRows(page)).toHaveCount(25);
+    await expect(page.getByLabel('Buscar')).toHaveValue('BBAS3');
+    await expect(page.getByLabel('Itens por página')).toHaveValue('25');
+  });
+
+  /**
+   * #214 review F1 — a sort or a page keeps the ledger mounted. A tick belongs
+   * to its transaction, so it must not reappear on whichever row now sits in
+   * the same place: "Excluir selecionadas" deletes without asking again.
+   */
+  test('a ticked row does not follow its position to the next page', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedThirty(userId);
+
+    await page.goto('/transactions?size=25');
+    await ledgerRows(page).nth(2).getByRole('checkbox').check();
+    await page
+      .getByRole('navigation', { name: 'Paginação' })
+      .getByRole('link', { name: 'Página 2' })
+      .click();
+    await expect(page).toHaveURL(/[?&]page=2(&|$)/);
+    await expect(ledgerRows(page)).toHaveCount(5);
+    await expect(page.locator('input[name="selected"]:checked')).toHaveCount(0);
+  });
+
+  /**
+   * PR #234 review P1 — the table and the cards each carry a row's checkbox.
+   * A tick made at one width is the tick shown at the other, and a row
+   * unticked on its card does not post from the hidden table.
+   */
+  test('a selection is the same in the table and the cards', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    test.skip(isMobile(page), 'starts at desktop width and narrows');
+    await seedLedger(userId);
+
+    await page.goto('/transactions');
+    await ledgerRow(page, 'HGLG11').getByRole('checkbox').check();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const card = ledgerRow(page, 'HGLG11');
+    await expect(card.getByRole('checkbox')).toBeChecked();
+
+    await card.getByRole('checkbox').uncheck();
+    const posted = await page.evaluate(() =>
+      new FormData(document.getElementById('transactions-bulk') as HTMLFormElement).getAll(
+        'selected',
+      ),
+    );
+    expect(posted).toEqual([]);
+  });
+
+  /**
+   * PR #234 review P2 — "Limpar filtros" is a client navigation, and a
+   * mounted uncontrolled select ignores a new default: Tipo kept showing the
+   * cleared filter, and Aplicar re-applied it.
+   */
+  test('clearing filters resets the filter bar too', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedLedger(userId);
+
+    await page.goto('/transactions?type=sell');
+    await expect(page.getByLabel('Tipo')).toHaveValue('sell');
+    await page.getByRole('link', { name: 'Limpar filtros' }).first().click();
+    await expect(page).toHaveURL(/\/transactions$/);
+    await expect(page.getByLabel('Tipo')).toHaveValue('');
+
+    await page.getByRole('button', { name: 'Aplicar' }).click();
+    // A GET form posts its blank fields too (`type=`); what must not come back is the value.
+    await expect(page).toHaveURL(/[?&]type=(&|$)/);
+    await expect(ledger(page).getByText('HGLG11')).toHaveCount(1);
+  });
+
+  test('a page past the end of the ledger shows its last page', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedThirty(userId);
+
+    await page.goto('/transactions?size=25&page=9');
+    await expect(ledgerRows(page)).toHaveCount(5);
+    await expect(
+      page.getByRole('navigation', { name: 'Paginação' }).getByRole('link', { name: 'Página 2' }),
+    ).toHaveAttribute('aria-current', 'page');
   });
 });

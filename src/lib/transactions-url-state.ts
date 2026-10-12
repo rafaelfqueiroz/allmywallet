@@ -6,8 +6,16 @@ import {
   type TransactionStatus,
   type TransactionType,
 } from '@/core/ledger/transaction';
-import type { Pagination, TransactionFilter } from '@/core/ledger/ports';
+import {
+  DEFAULT_TRANSACTION_SORT,
+  TRANSACTION_SORT_KEYS,
+  type Pagination,
+  type TransactionFilter,
+  type TransactionSort,
+  type TransactionSortKey,
+} from '@/core/ledger/ports';
 import { ASSET_CLASSES, type AssetClass } from '@/db/schema/assets';
+import { parseTableUrlState, type TableUrlOptions } from '@/lib/table-url-state';
 
 /**
  * SPEC-006 BR-006-07/08/09/10 — the transaction history's filters and
@@ -40,15 +48,69 @@ export const PARAM = {
   status: 'status',
   wallet: 'wallet',
   q: 'q',
-  page: 'page',
 } as const;
 
 /**
  * BR-006-07: the list has to work over 10.000+ rows within budget.
  * `core/ledger/list-transactions.ts`'s `MAX_PAGE_SIZE` (200) is the ceiling a
- * caller may request; this is the page size the UI actually asks for.
+ * caller may request; this is the page size the list opens on.
  */
 export const PAGE_SIZE = 50;
+
+/** SPEC-022 BR-022-18's selectable page size. The largest is `MAX_PAGE_SIZE`. */
+export const PAGE_SIZE_OPTIONS: readonly number[] = [25, 50, 100, 200];
+
+/**
+ * SPEC-022 BR-022-18 — the ledger's sort, page and page size, in the
+ * parameters `DataTable` reads and writes (`lib/table-url-state.ts`): `sort`,
+ * `page`, `size`. The table's `q` **is** BR-006-09's search, the filter bar's
+ * field, so the two can never disagree about what was searched (#204 Decision
+ * log #11). The server parses with these options and the table writes with
+ * them, so the page a link asks for is the page the query fetches.
+ *
+ * The column ids are `TransactionSortKey`s, so a sort the URL can name is a
+ * sort the repository can run.
+ */
+export const LEDGER_TABLE_URL_OPTIONS: TableUrlOptions = {
+  pageSizeOptions: PAGE_SIZE_OPTIONS,
+  sortableIds: TRANSACTION_SORT_KEYS,
+  defaults: {
+    sort: { id: DEFAULT_TRANSACTION_SORT.key, desc: DEFAULT_TRANSACTION_SORT.desc },
+    pageSize: PAGE_SIZE,
+  },
+};
+
+export interface LedgerView {
+  readonly sort: TransactionSort;
+  /** 1-based, as requested — the page clamps it once the total is known. */
+  readonly page: number;
+  readonly pageSize: number;
+}
+
+function isSortKey(value: string): value is TransactionSortKey {
+  return (TRANSACTION_SORT_KEYS as readonly string[]).includes(value);
+}
+
+/**
+ * The ledger's view parameters. An explicitly cleared sort (`sort=`) is still
+ * BR-006-07's chronological order: a ledger has no "unsorted".
+ */
+export function ledgerViewFrom(params: ReadableParams): LedgerView {
+  const state = parseTableUrlState(params, LEDGER_TABLE_URL_OPTIONS);
+  return {
+    sort:
+      state.sort !== null && isSortKey(state.sort.id)
+        ? { key: state.sort.id, desc: state.sort.desc }
+        : DEFAULT_TRANSACTION_SORT,
+    page: state.page,
+    pageSize: state.pageSize,
+  };
+}
+
+/** The last page a list of `total` rows has, at `pageSize`. Never less than 1. */
+export function lastPage(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
 
 /**
  * A read-only view of the query string. `URLSearchParams` and Next's
@@ -61,8 +123,6 @@ export interface ReadableParams {
 
 export interface TransactionsUrlState {
   readonly filter: TransactionFilter;
-  /** 1-based. Never less than 1 — an out-of-range or malformed value falls back to 1. */
-  readonly page: number;
 }
 
 function isAssetClass(value: string): value is AssetClass {
@@ -138,13 +198,6 @@ function parseSearch(raw: string | null): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-function parsePage(raw: string | null): number {
-  if (raw === null) return 1;
-  const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) return 1;
-  return value;
-}
-
 export function fromSearchParams(params: ReadableParams): TransactionsUrlState {
   return {
     filter: {
@@ -158,33 +211,26 @@ export function fromSearchParams(params: ReadableParams): TransactionsUrlState {
       walletId: parseWallet(params.get(PARAM.wallet)),
       search: parseSearch(params.get(PARAM.q)),
     },
-    page: parsePage(params.get(PARAM.page)),
   };
 }
 
 /** `listTransactions`'s `Pagination` for a given 1-based page. */
-export function paginationFor(page: number): Pagination {
-  return { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE };
+export function paginationFor(page: number, pageSize: number = PAGE_SIZE): Pagination {
+  return { limit: pageSize, offset: (page - 1) * pageSize };
 }
 
 /**
- * BR-006-10 / AR-33 — the same filter parameters, as a query string, for
- * pagination links and the CSV export route. `page` is included only when
- * asked for and greater than 1, so the common "first page" link stays short
- * (mirrors `report-url-state.ts#toSearchParams`'s "only non-default values").
- *
- * The export route reads this **without** a page, which is what makes
- * "export what I am looking at" mean the whole filtered set rather than the
- * one page currently on screen.
+ * BR-006-10 / AR-33 — the filter parameters, as a query string, for the CSV
+ * export route. Sort, page and page size are not filters and are left out,
+ * which is what makes "export what I am looking at" mean the whole filtered
+ * set rather than the one page currently on screen.
  */
-export function toQueryString(params: ReadableParams, page?: number): string {
+export function toQueryString(params: ReadableParams): string {
   const usp = new URLSearchParams();
   for (const key of Object.values(PARAM)) {
-    if (key === PARAM.page) continue;
     const value = params.get(key);
     if (value !== null && value.trim() !== '') usp.set(key, value);
   }
-  if (page !== undefined && page > 1) usp.set(PARAM.page, String(page));
   const query = usp.toString();
   return query === '' ? '' : `?${query}`;
 }

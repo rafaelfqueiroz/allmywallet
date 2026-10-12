@@ -1,11 +1,13 @@
 import type { DomainError } from '@/core/shared/domain-error';
 import { type Result, err, ok } from '@/core/shared/result';
 import { LedgerErrorCode, ledgerError } from '@/core/ledger/errors';
-import type {
-  Pagination,
-  TransactionFilter,
-  TransactionPage,
-  TransactionRepository,
+import {
+  DEFAULT_TRANSACTION_SORT,
+  type Pagination,
+  type TransactionFilter,
+  type TransactionPage,
+  type TransactionRepository,
+  type TransactionSort,
 } from '@/core/ledger/ports';
 
 /**
@@ -25,6 +27,7 @@ export async function listTransactions(
   transactions: TransactionRepository,
   filter: TransactionFilter,
   pagination: Pagination,
+  sort: TransactionSort = DEFAULT_TRANSACTION_SORT,
 ): Promise<Result<TransactionPage, DomainError>> {
   // Integer-valued, positive, bounded. `Number.isInteger` rather than a
   // truncation, so a caller sending 10.5 is told rather than quietly served
@@ -45,5 +48,5 @@ export async function listTransactions(
     return err(ledgerError(LedgerErrorCode.INVALID_PAGINATION, { offset: pagination.offset }));
   }
 
-  return ok(await transactions.search(filter, pagination));
+  return ok(await transactions.search(filter, pagination, sort));
 }

@@ -30,7 +30,7 @@ import { earliestFromDate } from '@/core/ledger/recalculate-from';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { assignTransactionsToWallet } from '@/core/wallets/assign-transactions';
 import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
-import { IDLE, INVALID_INPUT, failure, type ActionState } from '@/lib/action-state';
+import { IDLE, INVALID_INPUT, failure, invalidField, type ActionState } from '@/lib/action-state';
 import {
   withTransactionWriteDeps,
   type TransactionWriteDeps,
@@ -71,11 +71,23 @@ const decimal = z
   .transform((value) => normalizeDecimalInput(value))
   .refine((value): value is string => value !== null, 'not a decimal literal');
 
-/** Optional decimal: an empty field is "not supplied", not "zero". */
+/**
+ * Optional decimal: an empty field is "not supplied", not "zero". Anything
+ * else must read as a number — "abc" in Taxas is a mistake to refuse, not a
+ * blank to save as R$ 0,00 (#214 review F4).
+ */
 const optionalDecimal = z
   .string()
   .optional()
-  .transform((value) => (value === undefined ? null : normalizeDecimalInput(value)));
+  .transform((value, ctx) => {
+    if (value === undefined || value.trim() === '') return null;
+    const normalized = normalizeDecimalInput(value);
+    if (normalized === null) {
+      ctx.addIssue({ code: 'custom', message: 'not a decimal literal' });
+      return z.NEVER;
+    }
+    return normalized;
+  });
 
 const optionalId = z
   .string()
@@ -141,7 +153,7 @@ export async function createTransactionAction(
 ): Promise<ActionState> {
   const userId = await requireUserId();
   const parsed = CreateSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return INVALID_INPUT;
+  if (!parsed.success) return invalidField(parsed.error);
   const input = parsed.data;
 
   let rebuildFrom: BusinessDate | null = null;
@@ -270,7 +282,7 @@ export async function editTransactionAction(
 ): Promise<ActionState> {
   const userId = await requireUserId();
   const parsed = EditSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return INVALID_INPUT;
+  if (!parsed.success) return invalidField(parsed.error);
   const input = parsed.data;
 
   let rebuildFrom: BusinessDate | null = null;
@@ -436,10 +448,13 @@ export async function bulkTransactionsAction(
   const parsed = BulkSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return INVALID_INPUT;
 
-  const ids = formData
-    .getAll('selected')
-    .filter((value): value is string => typeof value === 'string')
-    .map((value) => TransactionId.of(value));
+  // A Set: every row's checkbox exists twice, in the table and in its card
+  // (DS-28), and a selection names each transaction once.
+  const ids = [
+    ...new Set(
+      formData.getAll('selected').filter((value): value is string => typeof value === 'string'),
+    ),
+  ].map((value) => TransactionId.of(value));
 
   let rebuildFrom: BusinessDate | null = null;
   const outcome = await withTransactionWriteDeps(userId, async (deps) => {
