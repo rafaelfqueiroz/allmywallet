@@ -5,6 +5,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import { TRANSACTION_SORT_KEYS } from '@/core/ledger/ports';
 import { DataTable } from '@/components/patterns/data-table';
+import { LedgerSelection } from '@/app/(app)/transactions/_components/LedgerSelection';
 
 /**
  * SPEC-022 BR-022-18 / SPEC-006 BR-006-07 — the ledger as a `DataTable` in
@@ -108,26 +109,30 @@ export function LedgerTable({
   );
 
   return (
-    <DataTable
-      columns={columns}
-      // TanStack wants a mutable array; the rows are never mutated.
-      data={rows as LedgerRow[]}
-      server={{ total, rowId: (row) => row.id }}
-      caption={t('table.caption')}
-      sortable
-      initialSorting={[defaultSort]}
-      sortLabel={(column) => t('table.sortBy', { column })}
-      sortControlLabels={{
-        field: t('table.sortField'),
-        ascending: t('table.sortAscending'),
-        descending: t('table.sortDescending'),
-      }}
-      pageSizeOptions={pageSizeOptions}
-      defaultPageSize={defaultPageSize}
-      itemNoun={t('table.noun')}
-      toolbar={toolbar}
-      empty={empty}
-      noResults={noResults}
-    />
+    // A new page of rows is a new selection: ticks the reader can no longer
+    // see must not stay selected (see `LedgerSelection`).
+    <LedgerSelection key={rows.map((row) => row.id).join(',')}>
+      <DataTable
+        columns={columns}
+        // TanStack wants a mutable array; the rows are never mutated.
+        data={rows as LedgerRow[]}
+        server={{ total, rowId: (row) => row.id }}
+        caption={t('table.caption')}
+        sortable
+        initialSorting={[defaultSort]}
+        sortLabel={(column) => t('table.sortBy', { column })}
+        sortControlLabels={{
+          field: t('table.sortField'),
+          ascending: t('table.sortAscending'),
+          descending: t('table.sortDescending'),
+        }}
+        pageSizeOptions={pageSizeOptions}
+        defaultPageSize={defaultPageSize}
+        itemNoun={t('table.noun')}
+        toolbar={toolbar}
+        empty={empty}
+        noResults={noResults}
+      />
+    </LedgerSelection>
   );
 }

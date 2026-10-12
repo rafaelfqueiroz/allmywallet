@@ -717,6 +717,52 @@ test.describe('the ledger table', () => {
     await expect(page.locator('input[name="selected"]:checked')).toHaveCount(0);
   });
 
+  /**
+   * PR #234 review P1 — the table and the cards each carry a row's checkbox.
+   * A tick made at one width is the tick shown at the other, and a row
+   * unticked on its card does not post from the hidden table.
+   */
+  test('a selection is the same in the table and the cards', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    test.skip(isMobile(page), 'starts at desktop width and narrows');
+    await seedLedger(userId);
+
+    await page.goto('/transactions');
+    await ledgerRow(page, 'HGLG11').getByRole('checkbox').check();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const card = ledgerRow(page, 'HGLG11');
+    await expect(card.getByRole('checkbox')).toBeChecked();
+
+    await card.getByRole('checkbox').uncheck();
+    const posted = await page.evaluate(() =>
+      new FormData(document.getElementById('transactions-bulk') as HTMLFormElement).getAll(
+        'selected',
+      ),
+    );
+    expect(posted).toEqual([]);
+  });
+
+  /**
+   * PR #234 review P2 — "Limpar filtros" is a client navigation, and a
+   * mounted uncontrolled select ignores a new default: Tipo kept showing the
+   * cleared filter, and Aplicar re-applied it.
+   */
+  test('clearing filters resets the filter bar too', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedLedger(userId);
+
+    await page.goto('/transactions?type=sell');
+    await expect(page.getByLabel('Tipo')).toHaveValue('sell');
+    await page.getByRole('link', { name: 'Limpar filtros' }).first().click();
+    await expect(page).toHaveURL(/\/transactions$/);
+    await expect(page.getByLabel('Tipo')).toHaveValue('');
+
+    await page.getByRole('button', { name: 'Aplicar' }).click();
+    // A GET form posts its blank fields too (`type=`); what must not come back is the value.
+    await expect(page).toHaveURL(/[?&]type=(&|$)/);
+    await expect(ledger(page).getByText('HGLG11')).toHaveCount(1);
+  });
+
   test('a page past the end of the ledger shows its last page', async ({ signedIn }) => {
     const { page, userId } = signedIn;
     await seedThirty(userId);

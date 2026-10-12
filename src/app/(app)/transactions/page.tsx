@@ -16,7 +16,8 @@ import {
 } from '@/lib/transactions-url-state';
 import { tableParamNames } from '@/lib/table-url-state';
 import { bulkTransactionsAction } from '@/app/(app)/transactions/actions';
-import { BULK_FORM_ID, BulkBar } from '@/app/(app)/transactions/_components/BulkBar';
+import { BulkBar } from '@/app/(app)/transactions/_components/BulkBar';
+import { RowSelect } from '@/app/(app)/transactions/_components/LedgerSelection';
 import { Controls } from '@/app/(app)/transactions/_components/Controls';
 import { LedgerTable, type LedgerRow } from '@/app/(app)/transactions/_components/LedgerTable';
 import { TransactionCostEstimateMarker } from '@/app/(app)/transactions/_components/TransactionCostEstimateMarker';
@@ -36,7 +37,6 @@ import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { importBatchPath } from '@/app/(app)/import/paths';
 
 /**
@@ -173,6 +173,14 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
             defaultSort={DEFAULT_SORT}
             toolbar={
               <Controls
+                /*
+                  Keyed on the applied filters (PR #234 review P2): a client
+                  navigation — "Limpar filtros", a sort link — keeps this
+                  uncontrolled form mounted, and a changed `defaultValue`
+                  does not move a mounted select. Without the key, clearing
+                  `type=buy` left Tipo showing Compra, and Aplicar put it back.
+                */
+                key={`${toQueryString(params)}|${sort}|${size}`}
                 from={params.get(PARAM.from) ?? ''}
                 to={params.get(PARAM.to) ?? ''}
                 asset={params.get(PARAM.asset) ?? ''}
@@ -244,9 +252,8 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
   return {
     id: tx.id,
     cells: {
-      select: (
-        <Checkbox form={BULK_FORM_ID} name="selected" value={tx.id} aria-label={t('bulk.select')} />
-      ),
+      // One selection across the table and the card copy (PR #234 review P1).
+      select: <RowSelect id={tx.id} label={t('bulk.select')} />,
       tradeDate: <span className="whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</span>,
       asset: (
         <Stack gap="none">
