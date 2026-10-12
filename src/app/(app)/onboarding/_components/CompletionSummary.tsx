@@ -1,10 +1,9 @@
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { OnboardingSteps } from '@/core/onboarding/status';
-import { Stack } from '@/components/layout/stack';
+import { Section } from '@/components/patterns/section';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
-import { Text } from '@/components/ui/text';
 
 /**
  * SPEC-020 BR-020-04 — "creating a first wallet is offered afterwards and is
@@ -25,13 +24,8 @@ export async function CompletionSummary({ steps }: { readonly steps: OnboardingS
   const t = await getTranslations('onboarding.done');
 
   return (
-    <Stack gap="sm">
-      <Text as="p" weight="medium">
-        {t('title')}
-      </Text>
-      <Text as="p" size="sm" tone="muted">
-        {t('description')}
-      </Text>
+    // SPEC-022 BR-022-36 — a panel, with the outcome as its title.
+    <Section title={t('title')} description={t('description')}>
       <Cluster gap="sm">
         <Button asChild>
           <Link href="/dashboard">{t('dashboardLink')}</Link>
@@ -42,6 +36,6 @@ export async function CompletionSummary({ steps }: { readonly steps: OnboardingS
           </Button>
         )}
       </Cluster>
-    </Stack>
+    </Section>
   );
 }

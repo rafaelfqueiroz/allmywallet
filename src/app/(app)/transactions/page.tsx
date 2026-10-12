@@ -30,6 +30,7 @@ import { withTransactionsDeps } from '@/app/(app)/transactions/composition';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { Section } from '@/components/patterns/section';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Money } from '@/app/money';
 import { Stack } from '@/components/layout/stack';
@@ -163,7 +164,20 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         // this branch exists for defence, not the common case.
         <ErrorState title={tErrors(result.error.code)} />
       ) : (
-        <Stack gap="md">
+        <Section
+          title={t('table.title', { count: result.value.total })}
+          // BR-006-17: the selection lives in the DOM. The row checkboxes name
+          // this form with their `form` attribute, so the browser collects the
+          // selection natively on submit — no client state that can disagree
+          // with what is ticked — without the bulk form having to wrap the
+          // table and, with it, the filter bar's own GET form.
+          // SPEC-022 BR-022-36 — it is the panel's footer.
+          footer={
+            result.value.total > 0 ? (
+              <BulkBar action={bulkTransactionsAction} wallets={wallets} />
+            ) : undefined
+          }
+        >
           <LedgerTable
             rows={await Promise.all(result.value.items.map(ledgerRow))}
             total={result.value.total}
@@ -220,16 +234,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
               />
             }
           />
-
-          {/*
-            BR-006-17: the selection lives in the DOM. The row checkboxes name
-            this form with their `form` attribute, so the browser collects the
-            selection natively on submit — no client state that can disagree
-            with what is ticked — without the bulk form having to wrap the
-            table and, with it, the filter bar's own GET form.
-          */}
-          {result.value.total > 0 && <BulkBar action={bulkTransactionsAction} wallets={wallets} />}
-        </Stack>
+        </Section>
       )}
     </PageShell>
   );

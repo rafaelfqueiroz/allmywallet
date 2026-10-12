@@ -70,7 +70,8 @@ export default async function UnsubscribePage({ searchParams }: PageProps) {
 
   return (
     <AuthShell title={t('title')}>
-      <Section title={t('confirmTitle')}>
+      {/* AuthShell is already a card; a panel inside it would be nested (BR-022-36). */}
+      <Section variant="plain" title={t('confirmTitle')}>
         <Stack gap="md">
           <Text tone="muted">{t('confirmBody')}</Text>
           <form action={confirmUnsubscribeAction}>

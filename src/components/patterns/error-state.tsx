@@ -29,7 +29,7 @@ export function ErrorState({ title, description, action, className, ...props }: 
       className={cn(
         // SPEC-022 BR-022-31 — a failure is the `danger` status, not the
         // `destructive` action colour (DS-05).
-        'rounded-xl border border-danger/30 bg-danger-surface px-6 py-8 text-center',
+        'rounded-lg border border-danger/30 bg-danger-surface px-6 py-8 text-center',
         className,
       )}
       {...props}

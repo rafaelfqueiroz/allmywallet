@@ -184,6 +184,12 @@ export default async function CompositionPage({ searchParams }: PageProps) {
               rows={holdingRows(report.rows, watchStates, t, tc, tw, masked)}
               labels={holdingsTableLabels(report, t, tc, tCommon)}
             />
+            {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
+                this product deducts tax, and the figures must say so where
+                they are read: in the panel that lists them (BR-022-36). */}
+            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
+              <Note>{t('grossOfTax')}</Note>
+            )}
           </Section>
 
           {/*
@@ -218,13 +224,6 @@ export default async function CompositionPage({ searchParams }: PageProps) {
               </List>
             )}
           </Section>
-
-          {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
-              this product deducts tax, and the figure above must say so where
-              it is read. */}
-          {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
-            <Note>{t('grossOfTax')}</Note>
-          )}
         </Stack>
       )}
     </PortfolioFrame>

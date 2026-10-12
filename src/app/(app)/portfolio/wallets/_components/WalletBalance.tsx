@@ -106,45 +106,6 @@ export async function WalletBalance({
         </Section>
       ) : (
         <>
-          {/* BR-017-10 / AC-6 — what the targets actually cover, stated. */}
-          <Note>
-            {balance.targetedSharePct === null
-              ? t('coverageUnknown')
-              : balance.untargeted.length === 0
-                ? t('coverageAll')
-                : // AR-09: both percentages go through the single formatter, so
-                  // "60,00%" beside "40,00%" cannot disagree about precision the
-                  // way a hand-written one would.
-                  t('coverage', {
-                    covered: formatPercentPoints(balance.targetedSharePct),
-                    rest: formatPercentPoints(
-                      Quantity.fromString('100').minus(balance.targetedSharePct),
-                    ),
-                  })}
-          </Note>
-
-          {/* BR-017-07: the wallet is asking for a decision, and says which. */}
-          {balance.needsReview && (
-            <Note>
-              {t('needsReview', {
-                total: formatPercentPoints(
-                  balance.rows.reduce((sum, row) => sum.plus(row.targetPct), Quantity.zero()),
-                ),
-              })}
-            </Note>
-          )}
-
-          {/* BR-017-21 / AC-13 — an absence, stated, rather than a computed figure. */}
-          {balance.unavailableReason !== null && (
-            <Note>
-              {balance.unavailableReason === DriftUnavailableReason.PRICE_UNUSABLE
-                ? t('unavailablePrice', {
-                    assets: balance.unpricedAssetIds.map(nameOf).join(', '),
-                  })
-                : t('unavailableNoValue')}
-            </Note>
-          )}
-
           <Section
             title={t('tableTitle')}
             description={t('toleranceHint', {
@@ -152,6 +113,45 @@ export async function WalletBalance({
             })}
           >
             <Stack gap="md">
+              {/* SPEC-022 BR-022-36 — the notes qualify this table, so they sit in
+                  its panel. BR-017-10 / AC-6 — what the targets actually cover, stated. */}
+              <Note>
+                {balance.targetedSharePct === null
+                  ? t('coverageUnknown')
+                  : balance.untargeted.length === 0
+                    ? t('coverageAll')
+                    : // AR-09: both percentages go through the single formatter, so
+                      // "60,00%" beside "40,00%" cannot disagree about precision the
+                      // way a hand-written one would.
+                      t('coverage', {
+                        covered: formatPercentPoints(balance.targetedSharePct),
+                        rest: formatPercentPoints(
+                          Quantity.fromString('100').minus(balance.targetedSharePct),
+                        ),
+                      })}
+              </Note>
+
+              {/* BR-017-07: the wallet is asking for a decision, and says which. */}
+              {balance.needsReview && (
+                <Note>
+                  {t('needsReview', {
+                    total: formatPercentPoints(
+                      balance.rows.reduce((sum, row) => sum.plus(row.targetPct), Quantity.zero()),
+                    ),
+                  })}
+                </Note>
+              )}
+
+              {/* BR-017-21 / AC-13 — an absence, stated, rather than a computed figure. */}
+              {balance.unavailableReason !== null && (
+                <Note>
+                  {balance.unavailableReason === DriftUnavailableReason.PRICE_UNUSABLE
+                    ? t('unavailablePrice', {
+                        assets: balance.unpricedAssetIds.map(nameOf).join(', '),
+                      })
+                    : t('unavailableNoValue')}
+                </Note>
+              )}
               <Table>
                 <TableCaption className="sr-only">{t('tableCaption')}</TableCaption>
                 <TableHeader>

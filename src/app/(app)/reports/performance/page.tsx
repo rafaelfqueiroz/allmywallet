@@ -175,87 +175,15 @@ export default async function PerformancePage({ searchParams }: PageProps) {
             />
           </Grid>
 
-          {/* SPEC-011 BR-011-02 / SPEC-012 AC-16 — **why four of the figures
-              above say *indisponível*.**
-
-              `daily_valuation_snapshots` is portfolio grain (ADR-002), so a
-              wallet has no daily value series and no daily flow series behind
-              it. TWR, XIRR, "% do CDI" and the real return therefore have no
-              wallet-scoped answer, and neither does BR-012-12's shadow
-              portfolio — it is defined as *the user's own contributions at the
-              index's rate*, and the only contributions on hand are the whole
-              portfolio's. Rendered before the benchmark table rather than after
-              it, because the reader meets the blanks first.
-
-              Keyed off the **resolved** scope rather than the parsed URL, for
-              the reason `scope.ts` gives for carrying it: the note must
-              describe the scope the figures were actually computed at, not one
-              held in client state beside them. */}
-          {report.value.scope.scope.kind === 'wallet' && (
-            <Note>{tr('walletScope.explanation')}</Note>
-          )}
-
-          {/* BR-012-04 / DL-012-02 — the explanation is the feature. */}
-          {report.value.explainDivergence && <Note>{tr('divergence.explanation')}</Note>}
-
-          {/* BR-012-02 / DL-012-06 — disclosed, never a silent substitution. */}
-          {report.value.twr.ok && report.value.twr.value.dietzPeriods.length > 0 && (
-            <Note>
-              {tr('dietz.disclosure', { count: report.value.twr.value.dietzPeriods.length })}
-            </Note>
-          )}
-
-          {/*
-            BR-012-09 / #63 — the two views, actually selectable.
-
-            What stood here was a single `Badge` naming the *current* view, and
-            the only reader of `?earnings=without` was the parser above. No
-            control emitted the parameter and the shared GET form dropped it, so
-            "sem proventos" was reachable only by hand-typing a URL and was lost
-            on the next submit. BR-012-09 asks for both views at every scope,
-            period and grouping; only the domain was delivering that.
-
-            Links rather than a second form: this is navigation between two
-            views of the same report, the state belongs in the URL so a bookmark
-            reproduces it, and every other control on the page already lives
-            there.
-          */}
-          <nav aria-label={tr('treatment.label')}>
-            <Cluster gap="sm" align="baseline">
-              {(
-                [
-                  [EarningsTreatment.WITH_EARNINGS, 'treatment.withEarnings'],
-                  [EarningsTreatment.WITHOUT_EARNINGS, 'treatment.withoutEarnings'],
-                ] as const
-              ).map(([option, key]) => {
-                const current = option === treatment;
-                return (
-                  <Button key={option} asChild size="sm" variant={current ? 'secondary' : 'ghost'}>
-                    <Link
-                      href={withParam(
-                        '/reports/performance',
-                        raw,
-                        'earnings',
-                        option === EarningsTreatment.WITHOUT_EARNINGS ? 'without' : null,
-                      )}
-                      aria-current={current ? 'true' : undefined}
-                    >
-                      {tr(key)}
-                    </Link>
-                  </Button>
-                );
-              })}
-              <Text tone="muted" size="xs">
-                {tr('treatment.hint')}
-              </Text>
-            </Cluster>
-          </nav>
-
           {/* BR-012-12 / DL-012-04 — the comparison, drawn. Everything on it
               is also in the table below, which is what BR-016-16 asks for:
               the chart carries the shape, the table carries the figures. */}
           {report.value.twr.ok && (
-            <Section title={tr('chart.title')} description={tr('chart.description')}>
+            <Section
+              title={tr('chart.title')}
+              description={tr('chart.description')}
+              actions={<TreatmentNav treatment={treatment} raw={raw} />}
+            >
               <BenchmarkChart
                 title={tr('chart.title')}
                 summary={tr('chart.summary')}
@@ -291,7 +219,42 @@ export default async function PerformancePage({ searchParams }: PageProps) {
 
           {/* BR-012-10..12 — each benchmark, its own return, and what the
               user's own contributions would have been worth at that rate. */}
-          <Section title={tr('benchmarks.title')} description={tr('benchmarks.description')}>
+          <Section
+            title={tr('benchmarks.title')}
+            description={tr('benchmarks.description')}
+            actions={
+              report.value.twr.ok ? undefined : <TreatmentNav treatment={treatment} raw={raw} />
+            }
+          >
+            {/* SPEC-011 BR-011-02 / SPEC-012 AC-16 — **why four of the figures
+                above say *indisponível*.**
+
+                `daily_valuation_snapshots` is portfolio grain (ADR-002), so a
+                wallet has no daily value series and no daily flow series behind
+                it. TWR, XIRR, "% do CDI" and the real return therefore have no
+                wallet-scoped answer, and neither does BR-012-12's shadow
+                portfolio — it is defined as *the user's own contributions at the
+                index's rate*, and the only contributions on hand are the whole
+                portfolio's. Rendered before the benchmark table rather than after
+                it, because the reader meets the blanks first.
+
+                Keyed off the **resolved** scope rather than the parsed URL, for
+                the reason `scope.ts` gives for carrying it: the note must
+                describe the scope the figures were actually computed at, not one
+                held in client state beside them. */}
+            {report.value.scope.scope.kind === 'wallet' && (
+              <Note>{tr('walletScope.explanation')}</Note>
+            )}
+
+            {/* BR-012-04 / DL-012-02 — the explanation is the feature. */}
+            {report.value.explainDivergence && <Note>{tr('divergence.explanation')}</Note>}
+
+            {/* BR-012-02 / DL-012-06 — disclosed, never a silent substitution. */}
+            {report.value.twr.ok && report.value.twr.value.dietzPeriods.length > 0 && (
+              <Note>
+                {tr('dietz.disclosure', { count: report.value.twr.value.dietzPeriods.length })}
+              </Note>
+            )}
             <Table>
               <TableCaption className="sr-only">{tr('benchmarks.title')}</TableCaption>
               <TableHeader>
@@ -423,6 +386,66 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         </Stack>
       )}
     </ReportsFrame>
+  );
+}
+
+/**
+ * BR-012-09 / #63 — the two views, actually selectable.
+ *
+ * What stood here was a single `Badge` naming the *current* view, and
+ * the only reader of `?earnings=without` was the page's parser. No
+ * control emitted the parameter and the shared GET form dropped it, so
+ * "sem proventos" was reachable only by hand-typing a URL and was lost
+ * on the next submit. BR-012-09 asks for both views at every scope,
+ * period and grouping; only the domain was delivering that.
+ *
+ * Links rather than a second form: this is navigation between two
+ * views of the same report, the state belongs in the URL so a bookmark
+ * reproduces it, and every other control on the page already lives
+ * there.
+ *
+ * SPEC-022 BR-022-36 — it sits in the header of the first panel it
+ * switches, as that panel's action, rather than loose on the page.
+ */
+async function TreatmentNav({
+  treatment,
+  raw,
+}: {
+  readonly treatment: EarningsTreatment;
+  readonly raw: Awaited<PageProps['searchParams']>;
+}) {
+  const tr = await getTranslations('rentabilidade');
+  return (
+    <nav aria-label={tr('treatment.label')}>
+      <Cluster gap="sm" align="baseline">
+        {(
+          [
+            [EarningsTreatment.WITH_EARNINGS, 'treatment.withEarnings'],
+            [EarningsTreatment.WITHOUT_EARNINGS, 'treatment.withoutEarnings'],
+          ] as const
+        ).map(([option, key]) => {
+          const current = option === treatment;
+          return (
+            <Button key={option} asChild size="sm" variant={current ? 'secondary' : 'ghost'}>
+              <Link
+                href={withParam(
+                  '/reports/performance',
+                  raw,
+                  'earnings',
+                  option === EarningsTreatment.WITHOUT_EARNINGS ? 'without' : null,
+                )}
+                aria-current={current ? 'true' : undefined}
+              >
+                {tr(key)}
+              </Link>
+            </Button>
+          );
+        })}
+        <Text tone="muted" size="xs">
+          {tr('treatment.hint')}
+        </Text>
+      </Cluster>
+    </nav>
   );
 }
 

@@ -125,7 +125,10 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
         <Stack gap="lg">
           <Headline report={report} />
 
-          <Section title={tp('patrimonio.byClass')}>
+          {/* SPEC-022 BR-022-36 — each class card is a panel, so the group
+              heading sits on the page rather than drawing a panel around
+              panels. */}
+          <Section variant="plain" title={tp('patrimonio.byClass')}>
             <Grid cols={4} gap="md">
               {report.breakdown.map((slice) => (
                 <ClassCard key={slice.key.id} slice={slice} report={report} />
@@ -139,16 +142,15 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
               labels={holdingsTableLabels(report, t, tc, tCommon)}
               hiddenColumns={['sector', 'opportunityState']}
             />
+            {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
+                this product deducts tax, and the figures must say so where
+                they are read: in the panel that lists them (BR-022-36). */}
+            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
+              <Note>{t('grossOfTax')}</Note>
+            )}
           </Section>
 
           <Unpriced holdings={query.value.report.groups.flatMap((group) => group.holdings)} />
-
-          {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
-              this product deducts tax, and the figures above must say so where
-              they are read. */}
-          {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
-            <Note>{t('grossOfTax')}</Note>
-          )}
         </Stack>
       )}
     </PortfolioFrame>

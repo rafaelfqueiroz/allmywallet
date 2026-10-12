@@ -118,7 +118,7 @@ export function FileUpload({
       onDragLeave={onDragLeave}
       onDrop={() => setDragging(false)}
       className={cn(
-        'relative flex min-h-36 w-full items-center justify-center rounded-xl border border-dashed border-input bg-muted p-6 text-center transition-colors',
+        'relative flex min-h-36 w-full items-center justify-center rounded-lg border border-dashed border-input bg-muted p-6 text-center transition-colors',
         'hover:bg-accent has-focus-visible:border-ring has-focus-visible:ring-3 has-focus-visible:ring-ring/50',
         'data-[state=dragging]:border-primary data-[state=dragging]:bg-primary/10',
         'data-[state=error]:border-solid data-[state=error]:border-danger data-[state=error]:bg-danger-surface',
@@ -175,7 +175,7 @@ export function FileUpload({
           </>
         ) : (
           <>
-            <span className="flex size-9 items-center justify-center rounded-lg border bg-card text-primary">
+            <span className="flex size-9 items-center justify-center rounded-md border bg-card text-primary">
               <Upload aria-hidden className="size-4" />
             </span>
             <p className="text-sm font-medium">

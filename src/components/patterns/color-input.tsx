@@ -72,7 +72,7 @@ export function ColorInput({
         }}
         data-slot="color-input-control"
         className={cn(
-          'h-8 w-12 shrink-0 cursor-pointer rounded-lg border border-input bg-transparent p-1 outline-none dark:bg-muted',
+          'h-8 w-12 shrink-0 cursor-pointer rounded-md border border-input bg-transparent p-1 outline-none dark:bg-muted',
           'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
           'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
           className,

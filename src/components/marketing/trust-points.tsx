@@ -32,7 +32,8 @@ export function TrustPoints() {
   const t = useTranslations('marketing.trust');
 
   return (
-    <Section title={t('title')} description={t('description')}>
+    // The landing page is not the application (DS-43): BR-022-36's panels are not its shape.
+    <Section variant="plain" title={t('title')} description={t('description')}>
       <List gap="lg">
         {POINTS.map(({ id, icon: Icon }) => (
           <ListItem key={id} separated>

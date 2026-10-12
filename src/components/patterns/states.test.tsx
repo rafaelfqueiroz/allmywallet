@@ -79,6 +79,18 @@ describe('StatCard', () => {
     expect(await audit(container)).toHaveNoViolations();
   });
 
+  // SPEC-022 BR-022-36 — a figure inside a panel draws no second border.
+  it('drops its own border when inset in a panel', () => {
+    const { container, rerender } = render(<StatCard label="Meta" value="R$ 1,00" />);
+    const card = () => container.querySelector('[data-slot=stat-card]')!;
+    expect(card()).not.toHaveAttribute('data-inset');
+    expect(card()).toHaveClass('ring-1');
+    rerender(<StatCard inset label="Meta" value="R$ 1,00" />);
+    expect(card()).toHaveAttribute('data-inset', 'true');
+    expect(card()).toHaveClass('ring-0', 'bg-muted/50');
+    expect(card()).not.toHaveClass('ring-1');
+  });
+
   // SPEC-022 BR-022-07 — the figure links to the destination that owns it.
   it('links to the destination that owns the figure, outside the description list', async () => {
     const { container } = render(

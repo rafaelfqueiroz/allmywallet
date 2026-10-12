@@ -82,6 +82,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
           <>
             <Grid cols={3} gap="md">
               <StatCard
+                inset
                 label={t('growth.currentLabel')}
                 value={
                   growth.current.kind === 'available' ? (
@@ -93,8 +94,13 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
                   )
                 }
               />
-              <StatCard label={t('growth.goalLabel')} value={<Money value={growth.goalAmount} />} />
               <StatCard
+                inset
+                label={t('growth.goalLabel')}
+                value={<Money value={growth.goalAmount} />}
+              />
+              <StatCard
+                inset
                 label={t('growth.progressLabel')}
                 value={
                   growth.ratio === null ? (

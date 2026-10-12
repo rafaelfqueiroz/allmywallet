@@ -26,7 +26,8 @@ export function FeatureGrid() {
   const t = useTranslations('marketing.features');
 
   return (
-    <Section title={t('title')}>
+    // The landing page is not the application (DS-43): BR-022-36's panels are not its shape.
+    <Section variant="plain" title={t('title')}>
       <Grid cols={2} gap="lg">
         {FEATURES.map(({ id, icon: Icon }) => (
           <Card key={id}>

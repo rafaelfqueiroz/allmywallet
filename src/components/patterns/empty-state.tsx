@@ -32,7 +32,7 @@ export function EmptyState({
     <div
       data-slot="empty-state"
       role="status"
-      className={cn('rounded-xl border border-dashed px-6 py-10 text-center', className)}
+      className={cn('rounded-lg border border-dashed px-6 py-10 text-center', className)}
       {...props}
     >
       <Stack gap="sm" align="center">

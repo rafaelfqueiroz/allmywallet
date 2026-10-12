@@ -3,6 +3,7 @@ import { tryUserId } from '@/lib/session';
 import { ParameterForm } from '@/app/parameter-form';
 import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { Section } from '@/components/patterns/section';
 
 /**
  * SPEC-002 — user-level preferences only (Out of Scope: a deployment-config
@@ -32,7 +33,15 @@ export default async function PreferencesPage() {
 
   return (
     <PageShell title={t('title')} description={t('description')}>
-      {!userId ? <EmptyState title={t('signedOut')} /> : <ParameterForm surface="preferences" />}
+      {!userId ? (
+        <EmptyState title={t('signedOut')} />
+      ) : (
+        // SPEC-022 BR-022-36 — the parameters sit in a panel, like each
+        // Configurações section's (`ParameterSection`).
+        <Section title={t('sectionTitle')}>
+          <ParameterForm surface="preferences" />
+        </Section>
+      )}
     </PageShell>
   );
 }

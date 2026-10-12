@@ -121,7 +121,13 @@ export default async function EarningsPage({ searchParams }: PageProps) {
 
           <Headline report={report} labels={headlineLabels(tp)} />
 
-          <Section title={tp('byType.title')} description={tp('byType.description')}>
+          {/* SPEC-022 BR-022-36 — each type is a figure card, so the group heading
+              sits on the page rather than drawing a panel around panels. */}
+          <Section
+            variant="plain"
+            title={tp('byType.title')}
+            description={tp('byType.description')}
+          >
             <ByTypeBreakdown
               items={report.byType.map((total) => ({
                 type: total.type,
