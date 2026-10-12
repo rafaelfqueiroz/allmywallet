@@ -252,11 +252,11 @@ Every block of content below the tabs sits in a panel: an 8px `card` surface, th
 
 **Never a panel inside a panel.** Three cases, and each is written down where it happens:
 
-- A **group of panels** — Portfólio's class cards, Proventos' figure per type — is a `Section variant="plain"`: a heading on the page above cards that are each the panel.
+- A **group of panels** — Portfólio's class cards, Proventos' figure per type, a wallet's goals or balance, a wallet's settings — is a `Section variant="plain"`: a heading on the page, with its actions, above blocks that are each the panel.
 - A **figure inside a panel** — a goal's three figures, an import's counts — is `StatCard inset`, a muted tile with no border.
 - A **table inside a panel** goes straight in; a `Card` around it is the nested panel.
 
-Three things may still sit between panels, because none is a block of content: a **page-wide `Note`** whose subject is the whole page rather than one panel (Relatórios' gross-of-tax disclosure, Observar preços' disclosures, the Painel's stale-import prompt); an **`EmptyState`/`ErrorState` that replaces the page's content** (signed out, a wallet not found, an empty scope); and **navigation** — a back link, the report controls bar, which is a `Card` already. Pages outside the application frame — the landing page (DS-43), the privacy policy, `AuthShell` (DS-39) — use `variant="plain"`: a legal text reads as one document, and `AuthShell` is already a card.
+Three things may still sit between panels, because none is a block of content: a **page-wide `Note`** whose subject is the whole page rather than one panel (Relatórios' gross-of-tax disclosure, Observar preços' disclosures, the Painel's stale-import prompt); an **`EmptyState`/`ErrorState` that replaces the page's content** (signed out, a wallet not found, an empty scope); and **navigation and filters** — a back link, a controls bar drawn as a `Card` (Relatórios' `Controls`, Composição's grouping), which stays available on an empty scope where no panel exists to carry it. Pages outside the application frame — the landing page (DS-43), the privacy policy, `AuthShell` (DS-39) — use `variant="plain"`: a legal text reads as one document, and `AuthShell` is already a card.
 
 **DS-39 — Pages outside the application frame use `AuthShell`.** Sign-in is a viewport-centred card with no navigation, which is a different shape from `PageShell`'s top-aligned document. Collapsing them would produce a component whose props contradict each other half the time. The public landing page is a third shape again and uses `MarketingShell` (DS-43).
 

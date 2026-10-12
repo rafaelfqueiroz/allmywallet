@@ -82,7 +82,9 @@ export async function WalletBalance({
 
   return (
     <Stack gap="lg">
+      {/* SPEC-022 BR-022-36 — a heading over the panels below, so plain. */}
       <Section
+        variant="plain"
         title={tp('wallets.balanceTitle', { wallet: balance.walletName })}
         description={t('description')}
         actions={

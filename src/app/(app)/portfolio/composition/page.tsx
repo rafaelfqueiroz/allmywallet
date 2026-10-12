@@ -40,6 +40,7 @@ import { Cluster } from '@/components/layout/cluster';
 import { List, ListItem } from '@/components/layout/list';
 import { ChartLegend } from '@/components/charts/chart-legend';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
 import {
@@ -257,18 +258,25 @@ async function GroupingForm({
       key={`${walletId ?? ''}|${grouping}`}
     >
       {walletId !== null && <input type="hidden" name={PARAM.wallet} value={walletId} />}
-      <Cluster gap="sm" align="end">
-        <Field id="composition-grouping" label={t('grouping.label')} width="lg">
-          <NativeSelect name={PARAM.grouping} defaultValue={grouping}>
-            {GROUPINGS.map((dimension) => (
-              <option key={dimension} value={dimension}>
-                {t(`grouping.${dimension}`)}
-              </option>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Button type="submit">{t('apply')}</Button>
-      </Cluster>
+      {/* SPEC-022 BR-022-36 — a controls bar on the card layer, like
+          Relatórios' `Controls`: it stays available on an empty scope, where
+          there is no panel to carry it. */}
+      <Card>
+        <CardContent>
+          <Cluster gap="sm" align="end">
+            <Field id="composition-grouping" label={t('grouping.label')} width="lg">
+              <NativeSelect name={PARAM.grouping} defaultValue={grouping}>
+                {GROUPINGS.map((dimension) => (
+                  <option key={dimension} value={dimension}>
+                    {t(`grouping.${dimension}`)}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Button type="submit">{t('apply')}</Button>
+          </Cluster>
+        </CardContent>
+      </Card>
     </form>
   );
 }
