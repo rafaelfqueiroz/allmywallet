@@ -900,7 +900,14 @@
       }
     },
     "attentionTitle": "Precisam de atenção",
-    "attentionDescription": "Estes ativos aparecem pelo custo de aquisição porque não conseguimos avaliá-los. Os totais acima os incluem por esse valor."
+    "attentionDescription": "Estes ativos aparecem pelo custo de aquisição porque não conseguimos avaliá-los. Os totais acima os incluem por esse valor.",
+    "tables": {
+      "sortBy": "Ordenar por {column}",
+      "sortField": "Ordenar por",
+      "sortAscending": "Ordem crescente",
+      "sortDescending": "Ordem decrescente",
+      "empty": "Nada para mostrar neste período"
+    }
   },
   "transactions": {
     "title": "Transações",
@@ -1273,7 +1280,8 @@
       "value": "Patrimônio",
       "basis": "Origem do valor",
       "observed": "Preço observado",
-      "gap": "Sem cotação de fechamento — valor do último fechamento disponível"
+      "gap": "Sem cotação de fechamento — valor do último fechamento disponível",
+      "noun": "datas"
     },
     "drift": {
       "title": "Variação da composição no período",
@@ -1381,7 +1389,9 @@
       "columnOwnReturn": "Rendimento próprio",
       "columnContribution": "Contribuição",
       "columnGain": "Ganho",
-      "unavailable": "Não há base suficiente no período para decompor a rentabilidade por grupo."
+      "unavailable": "Não há base suficiente no período para decompor a rentabilidade por grupo.",
+      "noun": "grupos",
+      "filterPlaceholder": "Filtrar por grupo"
     },
     "chart": {
       "title": "Seu portfólio x os índices",
@@ -1422,7 +1432,9 @@
       "chartLabel": "Proventos mês a mês",
       "chartSummary": "Total de {total} em {months} meses; média móvel de 12 meses em {average}.",
       "bars": "Recebido no mês",
-      "average": "Média móvel de 12 meses"
+      "average": "Média móvel de 12 meses",
+      "noun": "meses",
+      "chartText": "Proventos recebidos em cada mês e média móvel de 12 meses. Os valores exatos estão na tabela abaixo."
     },
     "breakdown": {
       "title": "De onde vem",
@@ -1430,7 +1442,9 @@
       "columnGroup": "Grupo",
       "columnAmount": "Recebido",
       "columnShare": "Participação",
-      "caption": "Proventos por grupo"
+      "caption": "Proventos por grupo",
+      "noun": "grupos",
+      "filterPlaceholder": "Filtrar por grupo"
     },
     "perAsset": {
       "title": "Por ativo",
@@ -1441,7 +1455,9 @@
       "columnCurrentYield": "Dividend yield (12m)",
       "caption": "Proventos por ativo, com os dois indicadores de rendimento",
       "notHeld": "Não faz mais parte do portfólio",
-      "unavailable": "—"
+      "unavailable": "—",
+      "noun": "ativos",
+      "filterPlaceholder": "Filtrar por ativo"
     },
     "upcoming": {
       "title": "Proventos anunciados",

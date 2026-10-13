@@ -37,6 +37,7 @@ import {
   TableCaption,
   TableCell,
   TableColGroup,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -186,6 +187,19 @@ export type DataTableProps<TData> = {
   filter?: { readonly placeholder: string; readonly label?: string };
   /** Extra filters (a status select, say), rendered beside the text filter. */
   toolbar?: ReactNode;
+  /**
+   * A closing row for the whole collection, not for the page on screen — the
+   * "Total" under a breakdown, which a reader checks the rows against
+   * (SPEC-012 BR-012-16: "the contributions sum to the total"). `label` sits in
+   * the first column; `cells` maps a column id to its figure, and a column it
+   * does not name is left empty. It is shown on every page and is never
+   * filtered: a total that changed with the search box would no longer be the
+   * total. Cells arrive rendered (money never crosses as a number, DS-66).
+   */
+  totals?: {
+    readonly label: ReactNode;
+    readonly cells: Readonly<Record<string, ReactNode>>;
+  };
   /**
    * Prefix for this table's URL parameters, so two tables on one page do not
    * share a page number. Without it: `sort`, `page`, `size`, `q`.
@@ -420,6 +434,7 @@ function DataTableView<TData>({
   itemNoun,
   filter,
   toolbar,
+  totals,
   noResults,
   server,
   className,
@@ -695,6 +710,30 @@ function DataTableView<TData>({
               </TableRow>
             ))}
           </TableBody>
+          {totals && (
+            <TableFooter>
+              <TableRow>
+                {table.getVisibleLeafColumns().map((column, index) =>
+                  index === 0 ? (
+                    <TableHead key={column.id} scope="row" className="py-row text-left">
+                      {totals.label}
+                    </TableHead>
+                  ) : (
+                    <TableCell
+                      key={column.id}
+                      className={cn(
+                        'py-row',
+                        isNumericKind(column.columnDef.meta?.kind ?? 'text') &&
+                          'text-right tabular-nums',
+                      )}
+                    >
+                      {totals.cells[column.id]}
+                    </TableCell>
+                  ),
+                )}
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </div>
 
@@ -790,6 +829,29 @@ function DataTableView<TData>({
               </dl>
             </li>
           ))}
+          {totals && (
+            <li className="py-3">
+              <p className="mb-1 text-sm font-medium">{totals.label}</p>
+              <dl className="flex flex-col gap-1">
+                {table
+                  .getVisibleLeafColumns()
+                  .filter((column) => totals.cells[column.id] !== undefined)
+                  .map((column) => (
+                    <div
+                      key={column.id}
+                      className="flex flex-wrap items-baseline justify-between gap-2"
+                    >
+                      <dt className="text-xs text-muted-foreground">
+                        {headerLabels.get(column.id)}
+                      </dt>
+                      <dd className="min-w-0 text-sm font-medium break-words">
+                        {totals.cells[column.id]}
+                      </dd>
+                    </div>
+                  ))}
+              </dl>
+            </li>
+          )}
         </ul>
       </div>
 

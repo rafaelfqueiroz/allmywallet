@@ -1,10 +1,12 @@
 import { getTranslations } from 'next-intl/server';
 import Link from 'next/link';
 import { defaultGroupingFor } from '@/core/reporting/grouping';
-import { GroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
+import { resolveGroupLabel } from '@/app/(app)/reports/_components/GroupLabel';
+import type { GroupKey } from '@/core/reporting/ports';
 import {
   EarningsTreatment,
   type Benchmark,
+  type ContributionReport,
   type GroupPerformance,
   type PerformanceResult,
   type Rate,
@@ -37,11 +39,19 @@ import {
   TableBody,
   TableCaption,
   TableCell,
-  TableFooter,
+  TableColGroup,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { columnWidth } from '@/components/patterns/data-table-columns';
+import {
+  ReportTable,
+  type ReportColumn,
+  type ReportTableLabels,
+} from '@/app/(app)/reports/_components/ReportTable';
+import { ranksOf } from '@/app/(app)/reports/_components/report-rows';
+import { tableLabels } from '@/app/(app)/reports/_components/table-labels';
 
 /**
  * SPEC-012 — **Rentabilidade**.
@@ -254,8 +264,14 @@ export default async function PerformancePage({ searchParams }: PageProps) {
               <Note>{tr('walletScope.explanation')}</Note>
             )}
 
-            <Table>
+            {/* SPEC-022 BR-022-18: one row per index, at most four, so this one
+                does not paginate. Its columns are sized for their headers, the
+                longest thing in them, and take the standard's fixed layout. */}
+            <Table fixed>
               <TableCaption className="sr-only">{tr('benchmarks.title')}</TableCaption>
+              <TableColGroup
+                widths={[columnWidth('text'), columnWidth('percent', 22), columnWidth('money', 27)]}
+              />
               <TableHeader>
                 <TableRow>
                   <TableHead scope="col">{tr('benchmarks.columnName')}</TableHead>
@@ -273,14 +289,14 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                     <TableCell className="py-row font-medium">
                       {benchmarkLabel(outcome.benchmark)}
                     </TableCell>
-                    <TableCell className="py-row text-right">
+                    <TableCell className="py-row text-right tabular-nums">
                       {outcome.line.ok ? (
                         <Money value={outcome.line.value.returnRate} kind="percent" signed />
                       ) : (
                         tr('unavailable')
                       )}
                     </TableCell>
-                    <TableCell className="py-row text-right">
+                    <TableCell className="py-row text-right tabular-nums">
                       {outcome.shadow ? (
                         <Money value={outcome.shadow.finalValue} />
                       ) : (
@@ -299,92 +315,136 @@ export default async function PerformancePage({ searchParams }: PageProps) {
             {!report.value.contribution.ok ? (
               <Text tone="muted">{tr('contribution.unavailable')}</Text>
             ) : (
-              <Table>
-                <TableCaption className="sr-only">{tr('contribution.title')}</TableCaption>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead scope="col">{t('table.group')}</TableHead>
-                    <TableHead scope="col" className="text-right">
-                      {tr('contribution.columnWeight')}
-                    </TableHead>
-                    <TableHead scope="col" className="text-right">
-                      {tr('contribution.columnOwnReturn')}
-                    </TableHead>
-                    <TableHead scope="col" className="text-right">
-                      {tr('contribution.columnContribution')}
-                    </TableHead>
-                    <TableHead scope="col" className="text-right">
-                      {tr('contribution.columnGain')}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {report.value.contribution.value.groups.map((group: GroupPerformance) => (
-                    <TableRow key={group.key.id}>
-                      <TableCell className="py-row font-medium">
-                        {/* SPEC-011 BR-011-15 / AC-15 — an accrued group is
-                            marked here as it is everywhere else, with the same
-                            badge and the same explanation. A computed gain
-                            printed in the same ink as an observed one claims a
-                            precision this product does not have. */}
-                        <Cluster gap="sm" align="baseline">
-                          <span>
-                            <GroupLabel groupKey={group.key} names={report.value.groupNames} />
-                          </span>
-                          {group.estimated ? (
-                            <Badge variant="outline" title={t('estimate.explanation')}>
-                              {tCommon('estimated')}
-                            </Badge>
-                          ) : null}
-                        </Cluster>
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={group.weight} kind="percent" />
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <RateCell rate={group.ownReturn} />
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={group.contribution} kind="percent" signed />
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={group.gain} signed />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-                <TableFooter>
-                  <TableRow>
-                    <TableHead scope="row" className="py-row text-left">
-                      <Cluster gap="sm" align="baseline">
-                        <span>{t('table.total')}</span>
-                        {report.value.contribution.value.estimated ? (
-                          <Badge variant="outline" title={t('estimate.explanation')}>
-                            {tCommon('estimated')}
-                          </Badge>
-                        ) : null}
-                      </Cluster>
-                    </TableHead>
-                    <TableCell className="py-row" />
-                    <TableCell className="py-row" />
-                    <TableCell className="py-row text-right">
-                      <Money
-                        value={report.value.contribution.value.totalReturn}
-                        kind="percent"
-                        signed
-                      />
-                    </TableCell>
-                    <TableCell className="py-row text-right">
-                      <Money value={report.value.contribution.value.totalGain} signed />
-                    </TableCell>
-                  </TableRow>
-                </TableFooter>
-              </Table>
+              <ContributionTable
+                contribution={report.value.contribution.value}
+                labels={{
+                  group: t('table.group'),
+                  weight: tr('contribution.columnWeight'),
+                  ownReturn: tr('contribution.columnOwnReturn'),
+                  contribution: tr('contribution.columnContribution'),
+                  gain: tr('contribution.columnGain'),
+                  total: t('table.total'),
+                  estimated: tCommon('estimated'),
+                  estimateExplanation: t('estimate.explanation'),
+                }}
+                labelOf={(key) => resolveGroupLabel(key, report.value.groupNames, t)}
+                table={tableLabels(t, {
+                  caption: tr('contribution.title'),
+                  itemNoun: tr('contribution.noun'),
+                  filterPlaceholder: tr('contribution.filterPlaceholder'),
+                })}
+              />
             )}
           </Section>
         </Stack>
       )}
     </ReportsFrame>
+  );
+}
+
+/**
+ * BR-012-15/16 — each group's weight, own return and contribution, and below
+ * them the assertion: the contributions sum to the total return. A reader can
+ * check it by eye, so the total closes the table on every page.
+ *
+ * SPEC-022 BR-022-18: one row per group of the chosen grouping, which by asset
+ * grows with the portfolio — so this is the paginated, sortable, filterable
+ * table (Rentabilidade's "contribuição por ativo").
+ */
+function ContributionTable({
+  contribution,
+  labels,
+  labelOf,
+  table,
+}: {
+  readonly contribution: ContributionReport;
+  readonly labels: Record<
+    | 'group'
+    | 'weight'
+    | 'ownReturn'
+    | 'contribution'
+    | 'gain'
+    | 'total'
+    | 'estimated'
+    | 'estimateExplanation',
+    string
+  >;
+  readonly labelOf: (key: GroupKey) => string;
+  readonly table: ReportTableLabels;
+}) {
+  const columns: ReportColumn[] = [
+    // Room for the group's name and, beside it, the estimate badge.
+    { id: 'group', header: labels.group, kind: 'text', width: 24 },
+    { id: 'weight', header: labels.weight, kind: 'percent' },
+    // Sized for their headers, the longest thing in them.
+    { id: 'ownReturn', header: labels.ownReturn, kind: 'percent', width: 21 },
+    { id: 'contribution', header: labels.contribution, kind: 'percent', width: 15 },
+    { id: 'gain', header: labels.gain, kind: 'money' },
+  ];
+  const { groups } = contribution;
+  const weightRanks = ranksOf(groups.map((group) => group.weight));
+  const ownReturnRanks = ranksOf(groups.map((group) => group.ownReturn));
+  const contributionRanks = ranksOf(groups.map((group) => group.contribution));
+  const gainRanks = ranksOf(groups.map((group) => group.gain));
+
+  return (
+    <ReportTable
+      columns={columns}
+      labels={table}
+      paramPrefix="contribution"
+      initialSort={{ id: 'weight', desc: true }}
+      searchable
+      totals={{
+        label: (
+          <Cluster gap="sm" align="baseline">
+            <span>{labels.total}</span>
+            {contribution.estimated ? (
+              <Badge variant="outline" title={labels.estimateExplanation}>
+                {labels.estimated}
+              </Badge>
+            ) : null}
+          </Cluster>
+        ),
+        cells: {
+          contribution: <Money value={contribution.totalReturn} kind="percent" signed />,
+          gain: <Money value={contribution.totalGain} signed />,
+        },
+      }}
+      rows={groups.map((group: GroupPerformance, index) => {
+        const name = labelOf(group.key);
+        return {
+          cells: {
+            /* SPEC-011 BR-011-15 / AC-15 — an accrued group is marked here as
+               it is everywhere else, with the same badge and the same
+               explanation. A computed gain printed in the same ink as an
+               observed one claims a precision this product does not have. */
+            group: (
+              <Cluster gap="sm" align="baseline">
+                <span className="font-medium">{name}</span>
+                {group.estimated ? (
+                  <Badge variant="outline" title={labels.estimateExplanation}>
+                    {labels.estimated}
+                  </Badge>
+                ) : null}
+              </Cluster>
+            ),
+            weight: <Money value={group.weight} kind="percent" />,
+            ownReturn: <RateCell rate={group.ownReturn} />,
+            contribution: <Money value={group.contribution} kind="percent" signed />,
+            gain: <Money value={group.gain} signed />,
+          },
+          // A group with no return of its own has no rank: last in both
+          // directions, not the smallest return.
+          sort: {
+            group: name,
+            weight: weightRanks[index],
+            ownReturn: ownReturnRanks[index],
+            contribution: contributionRanks[index],
+            gain: gainRanks[index],
+          },
+        };
+      })}
+    />
   );
 }
 
