@@ -44,6 +44,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
+import { TotalsCard } from '@/components/patterns/totals-card';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
 
@@ -444,16 +445,13 @@ async function GroupsTable({
           </TableRow>
         ),
         card: (
-          <dl className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <dt>{tc('groups.total')}</dt>
-              <dd>{total}</dd>
-            </div>
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <dt className="text-xs font-normal text-muted-foreground">{tc('groups.share')}</dt>
-              <dd className="font-normal">{whole}</dd>
-            </div>
-          </dl>
+          <TotalsCard
+            label={tc('groups.total')}
+            figures={[
+              { label: tc('groups.value'), value: total },
+              { label: tc('groups.share'), value: whole },
+            ]}
+          />
         ),
       }}
     />

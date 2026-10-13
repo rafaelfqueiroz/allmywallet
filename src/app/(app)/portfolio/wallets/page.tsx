@@ -22,8 +22,9 @@ import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
+import { TotalsCard } from '@/components/patterns/totals-card';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
-import { ranksOf } from '@/app/(app)/portfolio/_components/ranks';
+import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 
 /**
@@ -296,10 +297,7 @@ async function ComparisonTable({
       keys: {
         wallet: label,
         assets: row.assets,
-        ...rankKey('value', value[index]),
-        ...rankKey('cost', cost[index]),
-        ...rankKey('result', result[index]),
-        ...rankKey('share', share[index]),
+        ...rankKeys({ value, cost, result, share }, index),
       },
       cells: {
         wallet: row.synthetic ? (
@@ -340,7 +338,12 @@ async function ComparisonTable({
             </Cluster>
           ),
         result: totals === null ? dash : <Money value={unrealizedResult(totals).result} signed />,
-        share: row.slice?.share == null ? dash : <Money value={row.slice.share} kind="percent" />,
+        share:
+          row.slice?.share === null || row.slice?.share === undefined ? (
+            dash
+          ) : (
+            <Money value={row.slice.share} kind="percent" />
+          ),
       },
     };
   });
@@ -358,11 +361,6 @@ async function ComparisonTable({
       {...(total === null ? {} : { footer: comparisonFooter(total, tp, t, tCommon) })}
     />
   );
-}
-
-/** A rank belongs in `keys` only where the figure exists. */
-function rankKey(column: string, rank: number | undefined): Record<string, number> {
-  return rank === undefined ? {} : { [column]: rank };
 }
 
 /** The portfolio's share of itself, through the same formatter as every row. */
@@ -413,17 +411,10 @@ function comparisonFooter(total: ReportTotals, tp: Translate, t: Translate, tCom
       </TableRow>
     ),
     card: (
-      <div className="flex flex-col gap-1">
-        <p>{tp('wallets.total')}</p>
-        <dl className="flex flex-col gap-1">
-          {figures.map(([label, node]) => (
-            <div key={label} className="flex flex-wrap items-baseline justify-between gap-2">
-              <dt className="text-xs font-normal text-muted-foreground">{label}</dt>
-              <dd className="text-sm font-normal">{node}</dd>
-            </div>
-          ))}
-        </dl>
-      </div>
+      <TotalsCard
+        label={tp('wallets.total')}
+        figures={figures.map(([label, value]) => ({ label, value }))}
+      />
     ),
   };
 }
