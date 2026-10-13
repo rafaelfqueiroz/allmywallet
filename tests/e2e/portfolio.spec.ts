@@ -4,6 +4,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
 import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
+import { dataTableByCaption, expectPageSizeSurvivesReload } from './support/page-size';
 
 /**
  * SPEC-022 BR-022-02 / #208 — **Portfólio**: Patrimônio, Composição, Carteiras
@@ -312,4 +313,62 @@ test('estimated values are marked beside every total they reach', async ({
   await expect(comparison.getByRole('row', { name: new RegExp(WALLET) })).not.toContainText(
     'Estimado',
   );
+});
+
+/**
+ * SPEC-022 BR-022-18 — Carteiras' two lists page like every list, each under its
+ * own parameter prefix, and each keeps its page size through a reload. The
+ * comparison grows with the wallets and Não atribuído with the holdings, so both
+ * are seeded one past a page of ten.
+ */
+test('the Carteiras tables page, and keep their page size through a reload', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+  await seedHoldings(
+    userId,
+    Array.from({ length: 12 }, (_, index) => ({
+      code: `UNA${String(index + 1).padStart(2, '0')}`,
+      quantity: '10',
+      averageCost: '10',
+      price: '10',
+    })),
+  );
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    // Eleven wallets and Não atribuído: twelve rows.
+    for (let index = 0; index < 11; index += 1) {
+      await pool.query(`INSERT INTO wallets (id, user_id, name) VALUES ($1, $2, $3)`, [
+        randomUUID(),
+        userId,
+        `Carteira ${String(index + 1).padStart(2, '0')}`,
+      ]);
+    }
+  } finally {
+    await pool.end();
+  }
+
+  await page.goto('/portfolio/wallets');
+  await expectPageSizeSurvivesReload(page, 'Comparação entre carteiras', 'wallets', 12);
+  await expectPageSizeSurvivesReload(page, 'Não atribuído', 'unassigned', 12);
+
+  // The total stays under the rows whatever the page: it is the portfolio's.
+  await expect(dataTableByCaption(page, 'Comparação entre carteiras')).toContainText('Total');
+});
+
+/**
+ * Patrimônio's "Precisam de atenção" lists every holding that could not be
+ * valued, and grows with them.
+ */
+test('Patrimônio’s attention list pages, and keeps its page size through a reload', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+  await seedPortfolio(userId);
+  for (let index = 0; index < 12; index += 1) {
+    await seedHeldFixedIncomeWithMissingRate(userId, `CDBP${String(index + 1).padStart(2, '0')}`);
+  }
+
+  await page.goto('/portfolio');
+  await expectPageSizeSurvivesReload(page, 'Precisam de atenção', 'unpriced', 12);
 });
