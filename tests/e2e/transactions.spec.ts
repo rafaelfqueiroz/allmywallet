@@ -780,6 +780,19 @@ test.describe('the ledger table', () => {
     await page.getByRole('button', { name: 'Ocultar valores', exact: true }).click();
     await expect(page.getByText('R$ ••••••').first()).toBeVisible();
     expect(await headerWidths()).toEqual(before);
+
+    // The columns add up to more than a narrow container: the table scrolls
+    // inside its own wrapper, and the page never does (360px, and just above
+    // the table breakpoint).
+    for (const width of [768, 360]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+        `no horizontal page scroll at ${width}px`,
+      ).toBe(true);
+    }
   });
 
   /**
