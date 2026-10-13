@@ -105,6 +105,19 @@ describe('NodeTable', () => {
     expect(codesInTable()).toEqual(['ATV01', 'ATV02', 'ATV03']);
   });
 
+  it('sorts text by pt-BR collation: an accented initial is not after Z', async () => {
+    const named = (code: string): NodeRow => ({
+      id: code,
+      keys: { asset: code },
+      cells: { asset: code, value: 'R$ 1,00', actions: null },
+    });
+    render(<Table rows={['Varejo', 'Água e Saneamento', 'Zeta'].map(named)} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Ativo' }));
+    expect(codesInTable()).toEqual(['Água e Saneamento', 'Varejo', 'Zeta']);
+    await userEvent.click(screen.getByRole('button', { name: 'Ordenar por Ativo' }));
+    expect(codesInTable()).toEqual(['Zeta', 'Varejo', 'Água e Saneamento']);
+  });
+
   it('sorts an absent figure last in both directions: absence is not zero', async () => {
     render(<Table />);
     const button = screen.getByRole('button', { name: 'Ordenar por Valor' });

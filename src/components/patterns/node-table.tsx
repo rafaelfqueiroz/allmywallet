@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import { DataTable } from '@/components/patterns/data-table';
+import { collatedSortingFn } from '@/components/patterns/table-sorting';
 import {
   isNumericKind,
   type ColumnKind,
@@ -118,7 +119,8 @@ export function NodeTable({
             ...(column.width !== undefined ? { width: column.width } : {}),
           },
           accessorFn: (row) => row.keys?.[column.id],
-          sortingFn: numeric ? 'basic' : 'alphanumeric',
+          // pt-BR collation for text (`collatedSortingFn`), not TanStack's code points.
+          sortingFn: numeric ? 'basic' : collatedSortingFn,
           sortUndefined: 'last',
           // The first press on a column of figures shows the largest first, the
           // order somebody pressing "Valor" is asking for (see `HoldingsTable`).

@@ -50,6 +50,7 @@ import {
   type ColumnWidth,
 } from '@/components/patterns/data-table-columns';
 import { TruncatedCell } from '@/components/patterns/truncated-cell';
+import { collatedSortingFn } from '@/components/patterns/table-sorting';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -472,6 +473,8 @@ function DataTableView<TData>({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    // pt-BR collation for every text column that names no function of its own.
+    defaultColumn: { sortingFn: collatedSortingFn<TData> },
     /*
      * Paging is ours (the slice below), so TanStack's own reset must be off.
      * Left on, it queues a page-index reset whenever the row model re-derives,
