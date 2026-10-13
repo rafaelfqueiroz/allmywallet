@@ -10,7 +10,7 @@ import type {
   WatchRuleRow,
 } from '@/app/(app)/watch/data';
 import { deleteRuleAction, setRuleMutedAction } from '@/app/(app)/watch/actions';
-import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
+import { ranksOf, rankKeys } from '@/lib/rank-keys';
 import { watchRuleAnchor } from '@/lib/watch-paths';
 import { ActionForm } from '@/components/patterns/action-form';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';

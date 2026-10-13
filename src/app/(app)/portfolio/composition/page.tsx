@@ -46,7 +46,7 @@ import { Text } from '@/components/ui/text';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { TotalsCard } from '@/components/patterns/totals-card';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
-import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
+import { ranksOf, rankKeys } from '@/lib/rank-keys';
 
 /**
  * SPEC-015 — **Composição**, as Portfólio's second tab (SPEC-022 BR-022-02).

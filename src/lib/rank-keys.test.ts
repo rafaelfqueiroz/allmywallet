@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Money, Quantity } from '@/core/shared/money';
-import { rankKeys, ranksOf } from '@/app/(app)/portfolio/_components/ranks';
+import { rankKeys, ranksOf } from '@/lib/rank-keys';
 
 /**
  * SPEC-022 BR-022-18 — the rank is what lets a Client Component sort a column of
@@ -20,6 +20,31 @@ describe('ranksOf', () => {
   it('keeps ties in their input order', () => {
     const rows = ['2', '1', '2', '1'].map((value) => Quantity.fromString(value));
     expect(ranksOf(rows, (row) => row)).toEqual([2, 0, 3, 1]);
+  });
+
+  it('ranks figures by value, not by how they read as text', () => {
+    // As strings "9" > "10" > "100"; as figures it is the other way round.
+    const rows = ['9', '100', '10'].map((value) => Money.fromString(value));
+    expect(ranksOf(rows, (row) => row)).toEqual([0, 2, 1]);
+  });
+
+  it('puts a negative figure below zero', () => {
+    const rows = ['0', '-5.50', '3'].map((value) => Money.fromString(value));
+    expect(ranksOf(rows, (row) => row)).toEqual([1, 0, 2]);
+  });
+
+  it('gives a figure that is undefined, like a null one, no rank rather than the lowest', () => {
+    const rows = [Money.fromString('-1'), null, Money.fromString('1'), undefined];
+    expect(ranksOf(rows, (row) => row)).toEqual([0, undefined, 1, undefined]);
+  });
+
+  it('keeps the input order between equal figures', () => {
+    const rows = ['5', '5', '5'].map((value) => Money.fromString(value));
+    expect(ranksOf(rows, (row) => row)).toEqual([0, 1, 2]);
+  });
+
+  it('ranks an empty column as empty', () => {
+    expect(ranksOf([], (row: Money) => row)).toEqual([]);
   });
 
   it('compares past what a float can hold', () => {

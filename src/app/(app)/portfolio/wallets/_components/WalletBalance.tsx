@@ -25,7 +25,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
-import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
+import { ranksOf, rankKeys } from '@/lib/rank-keys';
 
 /**
  * SPEC-017 — one wallet's targets, the drift against them, and the distance in

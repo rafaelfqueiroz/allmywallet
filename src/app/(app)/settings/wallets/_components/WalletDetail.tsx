@@ -23,7 +23,7 @@ import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 import { RowForms } from '@/components/patterns/row-forms';
-import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
+import { ranksOf, rankKeys } from '@/lib/rank-keys';
 import { formatQuantity } from '@/i18n/format';
 
 /**

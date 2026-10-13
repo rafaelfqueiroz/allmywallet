@@ -7,7 +7,7 @@ import {
 } from '@/app/(app)/wallets/actions';
 import { labelFor, type loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { AllocateForm } from '@/app/(app)/settings/wallets/_components/AllocateForm';
-import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
+import { ranksOf, rankKeys } from '@/lib/rank-keys';
 import { Money } from '@/app/money';
 import { ActionForm } from '@/components/patterns/action-form';
 import { EmptyState } from '@/components/patterns/empty-state';

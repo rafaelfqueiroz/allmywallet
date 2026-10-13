@@ -24,7 +24,7 @@ import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
 import { TotalsCard } from '@/components/patterns/totals-card';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
-import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
+import { ranksOf, rankKeys } from '@/lib/rank-keys';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 
 /**

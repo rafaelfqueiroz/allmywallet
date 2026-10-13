@@ -30,6 +30,11 @@ import {
  * column with no key is neither sorted nor searched. `undefined` is "no figure
  * here" and sorts last in both directions, as an absence rather than a zero.
  *
+ * One component serves every table over server-rendered cells — Portfólio,
+ * Configurações and Relatórios — so the sort labels come from its own
+ * `cellTable` catalogue namespace and a page brings only what is its own: the
+ * caption, the noun, the filter's placeholder and the empty state (AR-44).
+ *
  * **No form belongs in a cell** (DS-28 renders each cell twice, so a form id
  * or an input name would exist twice). A row control is a link, or a button
  * naming a form outside the table through its `form` attribute.
@@ -47,7 +52,8 @@ export interface NodeColumn {
 }
 
 export interface NodeRow {
-  readonly id: string;
+  /** A stable id for the record, where it has one; the table itself never reads it. */
+  readonly id?: string;
   /** One finished node per column id. */
   readonly cells: Readonly<Record<string, ReactNode>>;
   readonly keys?: Readonly<Record<string, string | number | undefined>>;
@@ -71,8 +77,14 @@ export interface NodeTableProps {
   readonly empty?: ReactNode;
   /** `false` only for a list bounded by construction; say why where it is passed. */
   readonly pagination?: boolean;
-  /** A pinned totals row, see `DataTable`. */
-  readonly footer?: { readonly row: ReactNode; readonly card: ReactNode };
+  /**
+   * The whole collection's closing row, shown on every page and never filtered —
+   * `DataTable`'s `totals`, whose cells arrive rendered like these.
+   */
+  readonly totals?: {
+    readonly label: ReactNode;
+    readonly cells: Readonly<Record<string, ReactNode>>;
+  };
 }
 
 export function NodeTable({
@@ -85,7 +97,7 @@ export function NodeTable({
   paramPrefix,
   empty,
   pagination,
-  footer,
+  totals,
 }: NodeTableProps) {
   const t = useTranslations('cellTable');
   const sortable = columns.some((column) => column.sortable === true);
@@ -133,7 +145,7 @@ export function NodeTable({
       {...(filterPlaceholder !== undefined ? { filter: { placeholder: filterPlaceholder } } : {})}
       {...(paramPrefix !== undefined ? { paramPrefix } : {})}
       {...(pagination !== undefined ? { pagination } : {})}
-      {...(footer !== undefined ? { footer } : {})}
+      {...(totals !== undefined ? { totals } : {})}
       {...(empty !== undefined ? { empty } : {})}
       itemNoun={noun}
       rowAnchor={(row) => row.anchor}
