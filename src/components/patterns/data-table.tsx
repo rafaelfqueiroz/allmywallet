@@ -36,10 +36,19 @@ import {
   TableBody,
   TableCaption,
   TableCell,
+  TableColGroup,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  columnWidth,
+  isNumericKind,
+  truncatesKind,
+  type ColumnKind,
+  type ColumnWidth,
+} from '@/components/patterns/data-table-columns';
+import { TruncatedCell } from '@/components/patterns/truncated-cell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -156,9 +165,9 @@ export type DataTableProps<TData> = {
    * by construction, and say so where it is passed.
    */
   pagination?: boolean;
-  /** The page sizes offered. Default 10 / 25 / 50 / 100. */
+  /** The page sizes offered. Default 10 / 25 / 50 (BR-022-18). */
   pageSizeOptions?: readonly number[];
-  /** The page size a view opens on; must be one of the options. Default 25. */
+  /** The page size a view opens on; must be one of the options. Default 10. */
   defaultPageSize?: number;
   /**
    * The plural noun the summary counts — "importações" gives "Mostrando 1–5 de
@@ -205,16 +214,27 @@ declare module '@tanstack/react-table' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface ColumnMeta<TData extends RowData, TValue> {
     /**
-     * A column of figures reads down its decimal point, so its header and its
-     * cells sit right (DS-13). The card rendering ignores it:
-     * there the label is on the left and the value already on the right.
+     * SPEC-022 BR-022-18 — what the column holds, from which its alignment,
+     * its default width and its truncation follow
+     * (`data-table-columns.ts`). Text, dates and badges sit left; numbers,
+     * amounts and percentages sit right in tabular digits, so a column of
+     * figures reads down its decimal point (DS-13), and the header sits like
+     * its column. Default `text`. The card rendering ignores it: there the
+     * label is on the left and the value already on the right.
      */
-    readonly align?: 'right';
+    readonly kind?: ColumnKind;
+    /**
+     * The column's width, set by the definition and never by the content
+     * (BR-022-18): a number is characters of content, a string a CSS length.
+     * Defaults to the kind's.
+     */
+    readonly width?: ColumnWidth;
   }
 }
 
-const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 25;
+// SPEC-022 BR-022-18: 10, 25 or 50 rows a page, opening on 10.
+const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50];
+const DEFAULT_PAGE_SIZE = 10;
 
 /** A column's id, as TanStack will derive it — needed before the table exists. */
 function columnId<TData>(column: ColumnDef<TData, unknown>): string | undefined {
@@ -570,8 +590,19 @@ function DataTableView<TData>({
     <div data-slot="data-table" className={className}>
       {toolbarRow}
       <div className="hidden md:block">
-        <Table>
+        {/* BR-022-18: widths come from the column definitions, never the cells. */}
+        <Table fixed>
           <TableCaption className="sr-only">{caption}</TableCaption>
+          <TableColGroup
+            widths={table
+              .getVisibleLeafColumns()
+              .map((column) =>
+                columnWidth(
+                  column.columnDef.meta?.kind ?? 'text',
+                  column.columnDef.meta?.width,
+                ),
+              )}
+          />
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
@@ -596,7 +627,8 @@ function DataTableView<TData>({
                       scope="col"
                       className={cn(
                         'py-row',
-                        header.column.columnDef.meta?.align === 'right' && 'text-right',
+                        isNumericKind(header.column.columnDef.meta?.kind ?? 'text') &&
+                          'text-right',
                       )}
                       /*
                        * `aria-sort` belongs on the header cell, not on the
@@ -648,17 +680,20 @@ function DataTableView<TData>({
           <TableBody>
             {rows.map((row) => (
               <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell
-                    key={cell.id}
-                    className={cn(
-                      'py-row',
-                      cell.column.columnDef.meta?.align === 'right' && 'text-right',
-                    )}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
+                {row.getVisibleCells().map((cell) => {
+                  const kind = cell.column.columnDef.meta?.kind ?? 'text';
+                  const content = flexRender(cell.column.columnDef.cell, cell.getContext());
+                  return (
+                    <TableCell
+                      key={cell.id}
+                      className={cn('py-row', isNumericKind(kind) && 'text-right tabular-nums')}
+                    >
+                      {/* BR-022-18: text that does not fit ends in an ellipsis, with
+                          its full text on hover, focus and tap; a number never does. */}
+                      {truncatesKind(kind) ? <TruncatedCell>{content}</TruncatedCell> : content}
+                    </TableCell>
+                  );
+                })}
               </TableRow>
             ))}
           </TableBody>

@@ -258,10 +258,11 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
       tradeDate: <span className="whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</span>,
       asset: (
         <Stack gap="none">
-          <Text as="span" weight="medium">
+          {/* BR-022-18: each line ends in its own ellipsis in a narrow column. */}
+          <Text as="span" weight="medium" className="truncate">
             {item.assetCode}
           </Text>
-          <Text as="span" size="xs" tone="muted">
+          <Text as="span" size="xs" tone="muted" className="truncate">
             {item.assetName}
           </Text>
         </Stack>
