@@ -78,7 +78,7 @@ export function Section({
       data-slot="section"
       data-variant="panel"
       className={cn(
-        'flex w-full min-w-0 flex-col rounded-lg bg-card text-card-foreground ring-1 ring-foreground/10',
+        'group/panel flex w-full min-w-0 flex-col rounded-lg bg-card text-card-foreground ring-1 ring-foreground/10',
         className,
       )}
       {...props}

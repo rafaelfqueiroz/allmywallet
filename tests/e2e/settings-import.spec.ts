@@ -234,3 +234,24 @@ test.describe('Configurações › Importar', () => {
     await expect(attention.locator('tbody tr')).toHaveCount(50);
   });
 });
+
+// SPEC-022 BR-022-36: a table owns one panel, including its pagination band.
+test('history rows stay flat and pagination spans the panel', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  await seedHistory(userId);
+  await page.goto('/settings/import/history');
+  const panel = page
+    .locator('[data-variant="panel"]')
+    .filter({ has: page.locator('[data-slot="data-table"]') });
+  await expect(panel).toHaveCount(1);
+  await expect(panel.locator('[data-slot="card"]')).toHaveCount(0);
+  const footer = panel.locator('[data-slot="table-footer"]');
+  await expect(footer).toBeVisible();
+  const panelBox = await panel.boundingBox();
+  const footerBox = await footer.boundingBox();
+  expect(Math.abs(panelBox!.width - footerBox!.width)).toBeLessThan(2);
+  expect(Math.abs(panelBox!.y + panelBox!.height - footerBox!.y - footerBox!.height)).toBeLessThan(
+    2,
+  );
+  expect(await footer.evaluate((element) => getComputedStyle(element).borderTopWidth)).toBe('1px');
+});

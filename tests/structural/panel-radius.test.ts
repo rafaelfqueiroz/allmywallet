@@ -31,7 +31,7 @@ const sources = [...files(join(ROOT, 'src'))].map((path) => ({
 const OVERSIZED = /(?<![\w-])(rounded(-[trblsexy]{1,2})?|--radius)-[2-9]?xl(?![\w-])/g;
 
 /** A radius written as a literal rather than a step — DS-04. */
-const ARBITRARY = /(?<![\w-])rounded(-[trblsexy]{1,2})?-\[[^\]]*\]/g;
+const ARBITRARY = /(?<![\w-])rounded(-[trblsexy]{1,2})?-(?:\[[^\]]*\]|\([^)]*\))/g;
 
 const read = (path: string) => readFileSync(join(ROOT, path), 'utf8');
 
@@ -78,6 +78,12 @@ describe('panel and control radii (BR-022-36)', () => {
       [...text.matchAll(ARBITRARY)].map((match) => `${path}: ${match[0]}`),
     );
     expect(offenders).toEqual([]);
+  });
+
+  it('rejects arbitrary variable syntax as well as literal radii', () => {
+    for (const sample of ['rounded-(--radius-xl)', 'rounded-t-(--custom)', 'rounded-[12px]']) {
+      expect(sample.match(ARBITRARY), sample).not.toBeNull();
+    }
   });
 
   it('finds the sources to check', () => {

@@ -70,107 +70,106 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
       title={goal.name}
       description={t(goal.basis === 'invested' ? 'basisInvested' : 'basisCurrentValue')}
     >
-      <Stack gap="md">
-        <AchievedMarker achievedOn={goal.achievedOn} currentlyAchieved={growth.achieved} />
+      <AchievedMarker achievedOn={goal.achievedOn} currentlyAchieved={growth.achieved} />
 
-        {growth.current === null ? (
-          // BR-019-09 — no allocation ever recorded for this wallet: there is
-          // no line to draw, which is a different statement from a line at
-          // zero.
-          <EmptyState title={t('growth.noHistory')} />
-        ) : (
-          <>
-            <Grid cols={3} gap="md">
-              <StatCard
-                inset
-                label={t('growth.currentLabel')}
-                value={
-                  growth.current.kind === 'available' ? (
-                    <Money value={growth.current.value} />
-                  ) : (
-                    <Text as="span" tone="muted" size="sm">
-                      {t('growth.unavailable')}
-                    </Text>
-                  )
-                }
-              />
-              <StatCard
-                inset
-                label={t('growth.goalLabel')}
-                value={<Money value={growth.goalAmount} />}
-              />
-              <StatCard
-                inset
-                label={t('growth.progressLabel')}
-                value={
-                  growth.ratio === null ? (
-                    <Text as="span" tone="muted" size="sm">
-                      {t('growth.unavailable')}
-                    </Text>
-                  ) : (
-                    <Money value={growth.ratio} kind="percent" />
-                  )
-                }
-              />
-            </Grid>
+      {growth.current === null ? (
+        // BR-019-09 — no allocation ever recorded for this wallet: there is
+        // no line to draw, which is a different statement from a line at
+        // zero.
+        <EmptyState title={t('growth.noHistory')} />
+      ) : (
+        <>
+          <Grid cols={3} gap="md">
+            <StatCard
+              inset
+              label={t('growth.currentLabel')}
+              value={
+                growth.current.kind === 'available' ? (
+                  <Money value={growth.current.value} />
+                ) : (
+                  <Text as="span" tone="muted" size="sm">
+                    {t('growth.unavailable')}
+                  </Text>
+                )
+              }
+            />
+            <StatCard
+              inset
+              label={t('growth.goalLabel')}
+              value={<Money value={growth.goalAmount} />}
+            />
+            <StatCard
+              inset
+              label={t('growth.progressLabel')}
+              value={
+                growth.ratio === null ? (
+                  <Text as="span" tone="muted" size="sm">
+                    {t('growth.unavailable')}
+                  </Text>
+                ) : (
+                  <Money value={growth.ratio} kind="percent" />
+                )
+              }
+            />
+          </Grid>
 
-            <Stack gap="sm">
-              <GrowthChart
-                masked={masked}
-                points={points}
-                title={t('growth.chartTitle', { name: goal.name })}
-                summary={
-                  <GrowthSummary
-                    series={growth.series}
-                    goalAmount={growth.goalAmount}
-                    labels={{
-                      empty: t('growth.chartSummaryEmpty'),
-                      from: t('growth.chartFrom'),
-                      to: t('growth.chartTo'),
-                      goal: t('growth.chartGoal'),
-                    }}
-                  />
-                }
-                labels={{ value: t('growth.valueLineLabel'), goal: t('growth.goalLineLabel') }}
-              />
-              {hasEstimated && (
-                <Cluster gap="sm">
-                  <Badge variant="outline" title={t('growth.estimatedHint')}>
-                    {t('growth.estimatedBadge')}
-                  </Badge>
-                </Cluster>
-              )}
-            </Stack>
+          <Stack gap="sm">
+            <GrowthChart
+              masked={masked}
+              points={points}
+              title={t('growth.chartTitle', { name: goal.name })}
+              summary={
+                <GrowthSummary
+                  series={growth.series}
+                  goalAmount={growth.goalAmount}
+                  labels={{
+                    empty: t('growth.chartSummaryEmpty'),
+                    from: t('growth.chartFrom'),
+                    to: t('growth.chartTo'),
+                    goal: t('growth.chartGoal'),
+                  }}
+                />
+              }
+              labels={{ value: t('growth.valueLineLabel'), goal: t('growth.goalLineLabel') }}
+            />
+            {hasEstimated && (
+              <Cluster gap="sm">
+                <Badge variant="outline" title={t('growth.estimatedHint')}>
+                  {t('growth.estimatedBadge')}
+                </Badge>
+              </Cluster>
+            )}
+          </Stack>
 
-            {/* SPEC-016 BR-016-16 / AC-18 — the chart's text equivalent. Every
+          {/* SPEC-016 BR-016-16 / AC-18 — the chart's text equivalent. Every
                 point the line draws is also a row here, with its status. */}
-            <Table>
-              <TableCaption className="sr-only">{t('growth.table.caption')}</TableCaption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col">{t('growth.table.date')}</TableHead>
-                  <TableHead scope="col" className="text-right">
-                    {t('growth.table.value')}
+          <Table>
+            <TableCaption className="sr-only">{t('growth.table.caption')}</TableCaption>
+            <TableHeader>
+              <TableRow>
+                <TableHead scope="col">{t('growth.table.date')}</TableHead>
+                <TableHead scope="col" className="text-right">
+                  {t('growth.table.value')}
+                </TableHead>
+                <TableHead scope="col">{t('growth.table.status')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {growth.series.map((point) => (
+                <TableRow key={point.date}>
+                  <TableHead scope="row" className="text-left font-normal">
+                    {formatBusinessDate(point.date)}
                   </TableHead>
-                  <TableHead scope="col">{t('growth.table.status')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {growth.series.map((point) => (
-                  <TableRow key={point.date}>
-                    <TableHead scope="row" className="text-left font-normal">
-                      {formatBusinessDate(point.date)}
-                    </TableHead>
-                    <TableCell className="text-right">
-                      {point.kind === 'available' ? (
-                        <Money value={point.value} />
-                      ) : (
-                        <Text as="span" tone="muted" size="sm">
-                          {t('growth.table.unavailableShort')}
-                        </Text>
-                      )}
-                    </TableCell>
-                    {/*
+                  <TableCell className="text-right">
+                    {point.kind === 'available' ? (
+                      <Money value={point.value} />
+                    ) : (
+                      <Text as="span" tone="muted" size="sm">
+                        {t('growth.table.unavailableShort')}
+                      </Text>
+                    )}
+                  </TableCell>
+                  {/*
                       The two absences are different sentences and are told
                       apart here: a cost that was never recorded, versus a date
                       with neither a price nor a cost to fall back to. One
@@ -178,30 +177,29 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
                       which of the two they are looking at, and only one of
                       them is fixed by recording an allocation's cost.
                     */}
-                    <TableCell>
-                      {point.kind === 'unavailable'
-                        ? point.reason === GrowthUnavailable.PRICE_UNAVAILABLE
-                          ? t('growth.table.priceUnavailable')
-                          : t('growth.table.unavailable')
-                        : point.estimated
-                          ? tCommon('estimated')
-                          : t('growth.table.observed')}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </>
-        )}
+                  <TableCell>
+                    {point.kind === 'unavailable'
+                      ? point.reason === GrowthUnavailable.PRICE_UNAVAILABLE
+                        ? t('growth.table.priceUnavailable')
+                        : t('growth.table.unavailable')
+                      : point.estimated
+                        ? tCommon('estimated')
+                        : t('growth.table.observed')}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </>
+      )}
 
-        <EditDeleteForms
-          goalId={goal.id}
-          walletId={goal.walletId}
-          name={goal.name}
-          amount={goal.amount}
-          t={t}
-        />
-      </Stack>
+      <EditDeleteForms
+        goalId={goal.id}
+        walletId={goal.walletId}
+        name={goal.name}
+        amount={goal.amount}
+        t={t}
+      />
     </Section>
   );
 }

@@ -774,3 +774,18 @@ test.describe('the ledger table', () => {
     ).toHaveAttribute('aria-current', 'page');
   });
 });
+
+// SPEC-022 frame 14: filter controls precede selection actions and ledger rows.
+test('filters precede bulk actions inside the ledger panel', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  await seedLedger(userId);
+  await page.goto('/transactions');
+  const panel = page.locator('[data-variant="panel"]');
+  const filter = panel.locator('form[method="get"]');
+  const bulk = panel.locator('form[id]');
+  await expect(filter).toHaveCount(1);
+  await expect(bulk).toHaveCount(1);
+  const filterBox = await filter.boundingBox();
+  const bulkBox = await bulk.boundingBox();
+  expect(filterBox!.y + filterBox!.height).toBeLessThanOrEqual(bulkBox!.y);
+});

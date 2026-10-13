@@ -144,16 +144,35 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         <ReportEmptyState scoped={state.scope.kind === 'wallet'} />
       ) : (
         <Stack gap="xl">
+          <TreatmentNav treatment={treatment} raw={raw} />
           <Grid cols={4}>
             <StatCard
               label={tr('headline.twr')}
               value={<HeadlineRate result={report.value.twr} pick={(v) => v.returnRate} />}
-              hint={tr('headline.twrHint')}
+              hint={
+                <>
+                  {tr('headline.twrHint')}
+                  {/* SPEC-012 BR-012-02: explain fallback beside the affected rate. */}
+                  {report.value.twr.ok && report.value.twr.value.dietzPeriods.length > 0 && (
+                    <Note>
+                      {tr('dietz.disclosure', {
+                        count: report.value.twr.value.dietzPeriods.length,
+                      })}
+                    </Note>
+                  )}
+                </>
+              }
             />
             <StatCard
               label={tr('headline.xirr')}
               value={<HeadlineRate result={report.value.xirr} pick={(v) => v.rate} />}
-              hint={tr('headline.xirrHint')}
+              hint={
+                <>
+                  {tr('headline.xirrHint')}
+                  {/* SPEC-012 BR-012-04: explain the comparison beside XIRR. */}
+                  {report.value.explainDivergence && <Note>{tr('divergence.explanation')}</Note>}
+                </>
+              }
             />
             <StatCard
               label={tr('headline.percentOfCdi')}
@@ -174,16 +193,11 @@ export default async function PerformancePage({ searchParams }: PageProps) {
               hint={tr('headline.realReturnHint')}
             />
           </Grid>
-
           {/* BR-012-12 / DL-012-04 — the comparison, drawn. Everything on it
               is also in the table below, which is what BR-016-16 asks for:
               the chart carries the shape, the table carries the figures. */}
           {report.value.twr.ok && (
-            <Section
-              title={tr('chart.title')}
-              description={tr('chart.description')}
-              actions={<TreatmentNav treatment={treatment} raw={raw} />}
-            >
+            <Section title={tr('chart.title')} description={tr('chart.description')}>
               <BenchmarkChart
                 title={tr('chart.title')}
                 summary={tr('chart.summary')}
@@ -219,13 +233,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
 
           {/* BR-012-10..12 — each benchmark, its own return, and what the
               user's own contributions would have been worth at that rate. */}
-          <Section
-            title={tr('benchmarks.title')}
-            description={tr('benchmarks.description')}
-            actions={
-              report.value.twr.ok ? undefined : <TreatmentNav treatment={treatment} raw={raw} />
-            }
-          >
+          <Section title={tr('benchmarks.title')} description={tr('benchmarks.description')}>
             {/* SPEC-011 BR-011-02 / SPEC-012 AC-16 — **why four of the figures
                 above say *indisponível*.**
 
@@ -246,15 +254,6 @@ export default async function PerformancePage({ searchParams }: PageProps) {
               <Note>{tr('walletScope.explanation')}</Note>
             )}
 
-            {/* BR-012-04 / DL-012-02 — the explanation is the feature. */}
-            {report.value.explainDivergence && <Note>{tr('divergence.explanation')}</Note>}
-
-            {/* BR-012-02 / DL-012-06 — disclosed, never a silent substitution. */}
-            {report.value.twr.ok && report.value.twr.value.dietzPeriods.length > 0 && (
-              <Note>
-                {tr('dietz.disclosure', { count: report.value.twr.value.dietzPeriods.length })}
-              </Note>
-            )}
             <Table>
               <TableCaption className="sr-only">{tr('benchmarks.title')}</TableCaption>
               <TableHeader>
@@ -404,8 +403,8 @@ export default async function PerformancePage({ searchParams }: PageProps) {
  * reproduces it, and every other control on the page already lives
  * there.
  *
- * SPEC-022 BR-022-36 — it sits in the header of the first panel it
- * switches, as that panel's action, rather than loose on the page.
+ * SPEC-012 BR-012-09 — this switches the entire report, so it precedes
+ * the headline figures and remains in one location regardless of TWR availability.
  */
 async function TreatmentNav({
   treatment,

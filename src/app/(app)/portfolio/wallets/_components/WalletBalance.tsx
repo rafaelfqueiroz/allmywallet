@@ -114,125 +114,123 @@ export async function WalletBalance({
               tolerance: formatPct(balance.tolerancePp),
             })}
           >
-            <Stack gap="md">
-              {/* SPEC-022 BR-022-36 — the notes qualify this table, so they sit in
+            {/* SPEC-022 BR-022-36 — the notes qualify this table, so they sit in
                   its panel. BR-017-10 / AC-6 — what the targets actually cover, stated. */}
+            <Note>
+              {balance.targetedSharePct === null
+                ? t('coverageUnknown')
+                : balance.untargeted.length === 0
+                  ? t('coverageAll')
+                  : // AR-09: both percentages go through the single formatter, so
+                    // "60,00%" beside "40,00%" cannot disagree about precision the
+                    // way a hand-written one would.
+                    t('coverage', {
+                      covered: formatPercentPoints(balance.targetedSharePct),
+                      rest: formatPercentPoints(
+                        Quantity.fromString('100').minus(balance.targetedSharePct),
+                      ),
+                    })}
+            </Note>
+
+            {/* BR-017-07: the wallet is asking for a decision, and says which. */}
+            {balance.needsReview && (
               <Note>
-                {balance.targetedSharePct === null
-                  ? t('coverageUnknown')
-                  : balance.untargeted.length === 0
-                    ? t('coverageAll')
-                    : // AR-09: both percentages go through the single formatter, so
-                      // "60,00%" beside "40,00%" cannot disagree about precision the
-                      // way a hand-written one would.
-                      t('coverage', {
-                        covered: formatPercentPoints(balance.targetedSharePct),
-                        rest: formatPercentPoints(
-                          Quantity.fromString('100').minus(balance.targetedSharePct),
-                        ),
-                      })}
+                {t('needsReview', {
+                  total: formatPercentPoints(
+                    balance.rows.reduce((sum, row) => sum.plus(row.targetPct), Quantity.zero()),
+                  ),
+                })}
               </Note>
+            )}
 
-              {/* BR-017-07: the wallet is asking for a decision, and says which. */}
-              {balance.needsReview && (
-                <Note>
-                  {t('needsReview', {
-                    total: formatPercentPoints(
-                      balance.rows.reduce((sum, row) => sum.plus(row.targetPct), Quantity.zero()),
-                    ),
-                  })}
-                </Note>
-              )}
-
-              {/* BR-017-21 / AC-13 — an absence, stated, rather than a computed figure. */}
-              {balance.unavailableReason !== null && (
-                <Note>
-                  {balance.unavailableReason === DriftUnavailableReason.PRICE_UNUSABLE
-                    ? t('unavailablePrice', {
-                        assets: balance.unpricedAssetIds.map(nameOf).join(', '),
-                      })
-                    : t('unavailableNoValue')}
-                </Note>
-              )}
-              <Table>
-                <TableCaption className="sr-only">{t('tableCaption')}</TableCaption>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead scope="col">{t('columnAsset')}</TableHead>
-                    <TableHead scope="col">{t('columnQuantity')}</TableHead>
-                    <TableHead scope="col">{t('columnValue')}</TableHead>
-                    <TableHead scope="col">{t('columnTarget')}</TableHead>
-                    <TableHead scope="col">{t('columnCurrent')}</TableHead>
-                    <TableHead scope="col">{t('columnDrift')}</TableHead>
-                    <TableHead scope="col">{t('columnGapValue')}</TableHead>
-                    <TableHead scope="col">{t('columnGapShares')}</TableHead>
+            {/* BR-017-21 / AC-13 — an absence, stated, rather than a computed figure. */}
+            {balance.unavailableReason !== null && (
+              <Note>
+                {balance.unavailableReason === DriftUnavailableReason.PRICE_UNUSABLE
+                  ? t('unavailablePrice', {
+                      assets: balance.unpricedAssetIds.map(nameOf).join(', '),
+                    })
+                  : t('unavailableNoValue')}
+              </Note>
+            )}
+            <Table>
+              <TableCaption className="sr-only">{t('tableCaption')}</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">{t('columnAsset')}</TableHead>
+                  <TableHead scope="col">{t('columnQuantity')}</TableHead>
+                  <TableHead scope="col">{t('columnValue')}</TableHead>
+                  <TableHead scope="col">{t('columnTarget')}</TableHead>
+                  <TableHead scope="col">{t('columnCurrent')}</TableHead>
+                  <TableHead scope="col">{t('columnDrift')}</TableHead>
+                  <TableHead scope="col">{t('columnGapValue')}</TableHead>
+                  <TableHead scope="col">{t('columnGapShares')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {balance.rows.map((row) => (
+                  <TableRow key={row.assetId}>
+                    <TableCell className="py-row">
+                      <Stack gap="xs" align="start">
+                        <span>{nameOf(row.assetId)}</span>
+                        {row.outOfTolerance && (
+                          // SPEC-022 BR-022-31 — drift is a warning (DS-05).
+                          <Badge variant="warning">{t('outOfTolerance')}</Badge>
+                        )}
+                      </Stack>
+                    </TableCell>
+                    <TableCell className="py-row">
+                      <Money value={row.quantity} kind="quantity" />
+                    </TableCell>
+                    <TableCell className="py-row">
+                      <Money value={row.value} />
+                    </TableCell>
+                    <TableCell className="py-row">
+                      <Money value={row.targetPct} kind="percentPoints" />
+                    </TableCell>
+                    <TableCell className="py-row">
+                      {row.currentPct === null ? (
+                        <Unavailable label={t('unavailable')} />
+                      ) : (
+                        <Money value={row.currentPct} kind="percentPoints" />
+                      )}
+                    </TableCell>
+                    <TableCell className="py-row">
+                      {row.driftPp === null ? (
+                        <Unavailable label={t('unavailable')} />
+                      ) : (
+                        <Money value={row.driftPp} kind="percentPoints" signed />
+                      )}
+                    </TableCell>
+                    <TableCell className="py-row">
+                      {row.gap === null ? (
+                        <Unavailable label={t('unavailable')} />
+                      ) : (
+                        <Money value={row.gap.gapValue} signed />
+                      )}
+                    </TableCell>
+                    <TableCell className="py-row">
+                      {row.gap === null || row.gap.tradableShares === null ? (
+                        <Unavailable label={t('unavailable')} />
+                      ) : (
+                        // BR-017-20: the count is arithmetic over a delayed
+                        // quote, and says so next to itself rather than in a
+                        // footnote the reader has to go and find.
+                        <Cluster gap="xs" align="baseline">
+                          <Money value={row.gap.tradableShares} kind="quantity" signed />
+                          <Text as="span" size="xs" tone="muted" title={t('approximateHint')}>
+                            {t('approximate')}
+                          </Text>
+                        </Cluster>
+                      )}
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {balance.rows.map((row) => (
-                    <TableRow key={row.assetId}>
-                      <TableCell className="py-row">
-                        <Stack gap="xs" align="start">
-                          <span>{nameOf(row.assetId)}</span>
-                          {row.outOfTolerance && (
-                            // SPEC-022 BR-022-31 — drift is a warning (DS-05).
-                            <Badge variant="warning">{t('outOfTolerance')}</Badge>
-                          )}
-                        </Stack>
-                      </TableCell>
-                      <TableCell className="py-row">
-                        <Money value={row.quantity} kind="quantity" />
-                      </TableCell>
-                      <TableCell className="py-row">
-                        <Money value={row.value} />
-                      </TableCell>
-                      <TableCell className="py-row">
-                        <Money value={row.targetPct} kind="percentPoints" />
-                      </TableCell>
-                      <TableCell className="py-row">
-                        {row.currentPct === null ? (
-                          <Unavailable label={t('unavailable')} />
-                        ) : (
-                          <Money value={row.currentPct} kind="percentPoints" />
-                        )}
-                      </TableCell>
-                      <TableCell className="py-row">
-                        {row.driftPp === null ? (
-                          <Unavailable label={t('unavailable')} />
-                        ) : (
-                          <Money value={row.driftPp} kind="percentPoints" signed />
-                        )}
-                      </TableCell>
-                      <TableCell className="py-row">
-                        {row.gap === null ? (
-                          <Unavailable label={t('unavailable')} />
-                        ) : (
-                          <Money value={row.gap.gapValue} signed />
-                        )}
-                      </TableCell>
-                      <TableCell className="py-row">
-                        {row.gap === null || row.gap.tradableShares === null ? (
-                          <Unavailable label={t('unavailable')} />
-                        ) : (
-                          // BR-017-20: the count is arithmetic over a delayed
-                          // quote, and says so next to itself rather than in a
-                          // footnote the reader has to go and find.
-                          <Cluster gap="xs" align="baseline">
-                            <Money value={row.gap.tradableShares} kind="quantity" signed />
-                            <Text as="span" size="xs" tone="muted" title={t('approximateHint')}>
-                              {t('approximate')}
-                            </Text>
-                          </Cluster>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                ))}
+              </TableBody>
+            </Table>
 
-              {/* BR-017-19 — stated, not implied. */}
-              <Note>{t('noAdviceNote')}</Note>
-            </Stack>
+            {/* BR-017-19 — stated, not implied. */}
+            <Note>{t('noAdviceNote')}</Note>
           </Section>
 
           <Section title={t('targetsTitle')} description={t('modeHint')}>

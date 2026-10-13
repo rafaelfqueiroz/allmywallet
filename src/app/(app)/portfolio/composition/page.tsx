@@ -169,15 +169,17 @@ export default async function CompositionPage({ searchParams }: PageProps) {
       ) : (
         <Stack gap="lg">
           <Section title={tc('groups.title')} description={tc('groups.description')}>
-            <Stack gap="md">
-              <ChartOfShares report={report} names={query.value.groupNames} labelOf={labelOf} />
-              <GroupsTable
-                report={report}
-                groups={query.value.report.groups}
-                names={query.value.groupNames}
-                labelOf={labelOf}
-              />
-            </Stack>
+            <ChartOfShares report={report} names={query.value.groupNames} labelOf={labelOf} />
+            {/* SPEC-009 BR-009-12: grouped values also include gross fixed income. */}
+            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
+              <Note>{t('grossOfTax')}</Note>
+            )}
+            <GroupsTable
+              report={report}
+              groups={query.value.report.groups}
+              names={query.value.groupNames}
+              labelOf={labelOf}
+            />
           </Section>
 
           <Section title={tc('holdings.title')} description={tc('holdings.description')}>
