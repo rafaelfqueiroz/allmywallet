@@ -10,11 +10,16 @@ import {
   Table,
   TableBody,
   TableCaption,
+  TableColGroup,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { columnWidth } from '@/components/patterns/data-table-columns';
+
+/** The position table: a label, then the current and projected figures (DS-67 kinds). */
+const IMPACT_WIDTHS = [columnWidth('text', 24), columnWidth('money'), columnWidth('money')];
 
 /**
  * SPEC-006 BR-006-13 (#144 re-review N3) — "a confirmation stating what will
@@ -74,11 +79,15 @@ export function DeletionDownstreamImpact({ rows }: DeletionDownstreamImpactProps
           return (
             // SPEC-022 BR-022-36 — one table per position, straight in the
             // panel: a card around each would be a panel inside a panel.
-            <Table key={row.key}>
+            <Table fixed key={row.key}>
               <TableCaption className="sr-only">{label}</TableCaption>
+              {/* Fixed widths by kind (DS-67): hiding the amounts moves no column. */}
+              <TableColGroup widths={IMPACT_WIDTHS} />
               <TableHeader>
                 <TableRow>
-                  <TableHead scope="col">{label}</TableHead>
+                  <TableHead scope="col" className="whitespace-normal">
+                    {label}
+                  </TableHead>
                   <TableHead scope="col" className="text-right">
                     {t('impactCurrent')}
                   </TableHead>
@@ -90,22 +99,22 @@ export function DeletionDownstreamImpact({ rows }: DeletionDownstreamImpactProps
               <TableBody>
                 <TableRow>
                   <TableCell className="py-row">{t('impactQuantity')}</TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={row.currentPosition.quantity} kind="quantity" />
                   </TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={row.projectedPosition.quantity} kind="quantity" />
                   </TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Cluster gap="sm" justify="end" align="baseline">
                       <Money value={row.currentPosition.averageCost} />
                       {marker(row.currentCostEstimated)}
                     </Cluster>
                   </TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Cluster gap="sm" justify="end" align="baseline">
                       <Money value={row.projectedPosition.averageCost} />
                       {marker(row.projectedCostEstimated)}
@@ -114,10 +123,10 @@ export function DeletionDownstreamImpact({ rows }: DeletionDownstreamImpactProps
                 </TableRow>
                 <TableRow>
                   <TableCell className="py-row">{tTable('total')}</TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={row.currentPosition.totalCost} />
                   </TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={row.projectedPosition.totalCost} />
                   </TableCell>
                 </TableRow>

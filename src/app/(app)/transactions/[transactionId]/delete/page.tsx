@@ -29,11 +29,16 @@ import {
   Table,
   TableBody,
   TableCaption,
+  TableColGroup,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { columnWidth } from '@/components/patterns/data-table-columns';
+
+/** The position table: a label, then the current and projected figures (DS-67 kinds). */
+const IMPACT_WIDTHS = [columnWidth('text', 24), columnWidth('money'), columnWidth('money')];
 
 /**
  * SPEC-006 BR-006-13 / DL-006-04 — deletion is permitted **with the
@@ -228,8 +233,10 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
             columns are real replays — the current one from the ledger as it
             stands, the projected one from the ledger without this row.
           */}
-            <Table>
+            <Table fixed>
               <TableCaption className="sr-only">{t('impactPosition')}</TableCaption>
+              {/* Fixed widths by kind (DS-67): hiding the amounts moves no column. */}
+              <TableColGroup widths={IMPACT_WIDTHS} />
               <TableHeader>
                 <TableRow>
                   <TableHead scope="col">{t('impactPosition')}</TableHead>
@@ -244,16 +251,16 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
               <TableBody>
                 <TableRow>
                   <TableCell className="py-row">{t('impactQuantity')}</TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={impact.value.currentPosition.quantity} kind="quantity" />
                   </TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={impact.value.projectedPosition.quantity} kind="quantity" />
                   </TableCell>
                 </TableRow>
                 <TableRow>
                   <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Cluster gap="sm" justify="end" align="baseline">
                       <Money value={impact.value.currentPosition.averageCost} />
                       {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
@@ -264,7 +271,7 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
                       />
                     </Cluster>
                   </TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Cluster gap="sm" justify="end" align="baseline">
                       <Money value={impact.value.projectedPosition.averageCost} />
                       <CostEstimateMarker
@@ -277,10 +284,10 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
                 </TableRow>
                 <TableRow>
                   <TableCell className="py-row">{tTable('total')}</TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={impact.value.currentPosition.totalCost} />
                   </TableCell>
-                  <TableCell className="py-row text-right">
+                  <TableCell className="py-row text-right tabular-nums">
                     <Money value={impact.value.projectedPosition.totalCost} />
                   </TableCell>
                 </TableRow>

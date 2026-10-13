@@ -16,8 +16,10 @@ import { concealSeries } from '@/app/chart-series';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
 import { Text } from '@/components/ui/text';
+import { columnWidth } from '@/components/patterns/data-table-columns';
 import {
   Table,
+  TableColGroup,
   TableBody,
   TableCaption,
   TableCell,
@@ -143,8 +145,18 @@ function EarningsBody({
           `not_elapsed` month gets one cell saying so, never three fabricated
           zeros (BR-019-19 also lives here: only the selected year's twelve
           months are ever rows in this table). */}
-      <Table>
+      {/* Twelve rows at most, so unpaged (BR-022-18) — and on fixed widths by
+          kind, so hiding the amounts moves no column (BR-022-24, DS-67). */}
+      <Table fixed>
         <TableCaption className="sr-only">{t('earnings.table.caption')}</TableCaption>
+        <TableColGroup
+          widths={[
+            columnWidth('date'),
+            columnWidth('money'),
+            columnWidth('money'),
+            columnWidth('money'),
+          ]}
+        />
         <TableHeader>
           <TableRow>
             <TableHead scope="col">{t('earnings.table.month')}</TableHead>
@@ -173,13 +185,13 @@ function EarningsBody({
                 </TableCell>
               ) : (
                 <>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right tabular-nums">
                     <Money value={month.amount} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right tabular-nums">
                     <Money value={month.cumulative} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right tabular-nums">
                     <Money value={month.yearToDateAverage} />
                   </TableCell>
                 </>
