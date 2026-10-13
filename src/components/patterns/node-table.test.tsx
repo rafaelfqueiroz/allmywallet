@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { TotalsCard } from '@/components/patterns/totals-card';
 import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { audit, render, screen, userEvent, waitFor, within } from '@/components/test-utils';
 
@@ -167,6 +168,24 @@ describe('NodeTable', () => {
     const table = screen.getByRole('table', { name: 'Regras' });
     expect(within(table).getByRole('rowheader', { name: 'Total' })).toBeInTheDocument();
     expect(screen.getByText('Total da carteira R$ 23,00')).toBeInTheDocument();
+  });
+
+  it('has no axe violations with a pinned total and its card', async () => {
+    const { container } = render(
+      <Table
+        footer={{
+          row: (
+            <TableRow>
+              <TableHead scope="row">Total</TableHead>
+              <TableCell>R$ 1.102,00</TableCell>
+              <TableCell />
+            </TableRow>
+          ),
+          card: <TotalsCard label="Total" figures={[{ label: 'Valor', value: 'R$ 1.102,00' }]} />,
+        }}
+      />,
+    );
+    expect(await audit(container)).toHaveNoViolations();
   });
 
   it('keeps a row control outside any form: the button names its form by attribute', () => {
