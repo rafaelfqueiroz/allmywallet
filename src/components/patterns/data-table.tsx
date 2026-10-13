@@ -37,6 +37,7 @@ import {
   TableCaption,
   TableCell,
   TableColGroup,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
@@ -198,6 +199,24 @@ export type DataTableProps<TData> = {
    * by the server, and `total` is how many rows match in all. `filter` does
    * not apply — the search belongs to the query, so it lives in `toolbar`.
    */
+  /**
+   * A pinned totals row — the whole set's, not the page's — shown under the last
+   * row on every page. `row` is a `<TableRow>` of cells in the columns' order
+   * (the table rendering); `card` is what the same totals read as below `md`,
+   * where there are no columns. Both are the caller's, so a figure is formatted
+   * where every other figure is (SPEC-022 BR-022-18: a total must not be lost
+   * to a page boundary).
+   */
+  footer?: { readonly row: ReactNode; readonly card: ReactNode };
+  /**
+   * The id a link elsewhere points at (`#regra-…`), per row. The table row
+   * carries it, and the card rendering `<id>-card` — a document has one element
+   * per id, and CSS shows only one rendering. Client mode only. On arrival, and
+   * whenever the hash changes, the table pages to the row, scrolls to the
+   * rendering that is visible and marks it (`data-linked`) — a row on page 3 is
+   * where a deep link must land, not on page 1 (SPEC-022 BR-022-07/18).
+   */
+  rowAnchor?: (row: TData) => string | undefined;
   server?: {
     readonly total: number;
     /**
@@ -421,6 +440,8 @@ function DataTableView<TData>({
   filter,
   toolbar,
   noResults,
+  footer,
+  rowAnchor,
   server,
   className,
   state,
@@ -501,6 +522,54 @@ function DataTableView<TData>({
     pagination && !server
       ? matching.slice((page - 1) * state.pageSize, page * state.pageSize)
       : matching;
+
+  /*
+   * SPEC-022 BR-022-07/18 — a deep link to a row (`#regra-<id>`) lands on the
+   * row even when pagination put it on another page: follow the hash to the
+   * page that holds the row, then scroll to whichever rendering is visible
+   * (the table from `md` up, the cards below) and mark it. Run on arrival and
+   * on `hashchange` only — never on a page change, or paging away from the
+   * linked row would pull the reader straight back to it.
+   */
+  const [linked, setLinked] = useState<string | null>(null);
+  const latest = useRef({ matching, page, state, onStateChange });
+  useEffect(() => {
+    latest.current = { matching, page, state, onStateChange };
+  });
+  const pendingScroll = useRef<string | null>(null);
+  useEffect(() => {
+    if (!rowAnchor || server) return;
+    const follow = () => {
+      const hash = decodeHash(window.location.hash);
+      const current = latest.current;
+      const index =
+        hash === '' ? -1 : current.matching.findIndex((row) => rowAnchor(row.original) === hash);
+      if (index < 0) {
+        setLinked(null);
+        return;
+      }
+      setLinked(hash);
+      pendingScroll.current = hash;
+      const target = pagination ? Math.floor(index / current.state.pageSize) + 1 : 1;
+      if (target !== current.page) current.onStateChange({ ...current.state, page: target });
+    };
+    follow();
+    window.addEventListener('hashchange', follow);
+    return () => window.removeEventListener('hashchange', follow);
+    // The row set and the page are read through `latest`: the hash is the input.
+  }, []);
+  useEffect(() => {
+    const hash = pendingScroll.current;
+    if (hash === null) return;
+    const row = document.getElementById(hash);
+    const visible =
+      row !== null && row.getClientRects().length > 0
+        ? row
+        : document.getElementById(`${hash}-card`);
+    if (visible === null) return;
+    pendingScroll.current = null;
+    if (typeof visible.scrollIntoView === 'function') visible.scrollIntoView({ block: 'center' });
+  });
 
   /** Server mode decides sortability from the URL's own list, not TanStack's accessors. */
   const canSortColumn = (id: string, tanstack: boolean): boolean =>
@@ -676,25 +745,38 @@ function DataTableView<TData>({
             ))}
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => {
-                  const kind = cell.column.columnDef.meta?.kind ?? 'text';
-                  const content = flexRender(cell.column.columnDef.cell, cell.getContext());
-                  return (
-                    <TableCell
-                      key={cell.id}
-                      className={cn('py-row', isNumericKind(kind) && 'text-right tabular-nums')}
-                    >
-                      {/* BR-022-18: text that does not fit ends in an ellipsis, with
+            {rows.map((row) => {
+              const anchor = rowAnchor?.(row.original);
+              return (
+                <TableRow
+                  key={row.id}
+                  {...(anchor !== undefined
+                    ? { id: anchor, ...(linked === anchor ? { 'data-linked': true } : {}) }
+                    : {})}
+                  className={cn(
+                    anchor !== undefined &&
+                      'scroll-mt-20 data-linked:outline-2 data-linked:-outline-offset-2 data-linked:outline-ring',
+                  )}
+                >
+                  {row.getVisibleCells().map((cell) => {
+                    const kind = cell.column.columnDef.meta?.kind ?? 'text';
+                    const content = flexRender(cell.column.columnDef.cell, cell.getContext());
+                    return (
+                      <TableCell
+                        key={cell.id}
+                        className={cn('py-row', isNumericKind(kind) && 'text-right tabular-nums')}
+                      >
+                        {/* BR-022-18: text that does not fit ends in an ellipsis, with
                           its full text on hover, focus and tap; a number never does. */}
-                      {truncatesKind(kind) ? <TruncatedCell>{content}</TruncatedCell> : content}
-                    </TableCell>
-                  );
-                })}
-              </TableRow>
-            ))}
+                        {truncatesKind(kind) ? <TruncatedCell>{content}</TruncatedCell> : content}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              );
+            })}
           </TableBody>
+          {footer && <TableFooter>{footer.row}</TableFooter>}
         </Table>
       </div>
 
@@ -763,34 +845,52 @@ function DataTableView<TData>({
           </div>
         )}
         <ul aria-labelledby={captionId} className="flex flex-col divide-y">
-          {rows.map((row) => (
-            <li key={row.id} className="py-3">
-              {/*
-               * Deliberately plain elements rather than Stack/Cluster: HTML
-               * allows a `dt`/`dd` pair to sit inside *one* wrapping div
-               * under the `dl`, and nesting two layout components produces
-               * two — which axe rejects as `dlitem`, correctly, because it
-               * breaks the term/definition association a screen reader
-               * relies on.
-               */}
-              <dl className="flex flex-col gap-1">
-                {row.getVisibleCells().map((cell) => (
-                  <div
-                    key={cell.id}
-                    className="flex flex-wrap items-baseline justify-between gap-2"
-                  >
-                    <dt className="text-xs text-muted-foreground">
-                      {headerLabels.get(cell.column.id)}
-                    </dt>
-                    <dd className="min-w-0 text-sm break-words">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </li>
-          ))}
+          {rows.map((row) => {
+            const anchor = rowAnchor?.(row.original);
+            return (
+              <li
+                key={row.id}
+                {...(anchor !== undefined
+                  ? { id: `${anchor}-card`, ...(linked === anchor ? { 'data-linked': true } : {}) }
+                  : {})}
+                className={cn(
+                  'py-3',
+                  anchor !== undefined &&
+                    'scroll-mt-20 data-linked:outline-2 data-linked:-outline-offset-2 data-linked:outline-ring',
+                )}
+              >
+                {/*
+                 * Deliberately plain elements rather than Stack/Cluster: HTML
+                 * allows a `dt`/`dd` pair to sit inside *one* wrapping div
+                 * under the `dl`, and nesting two layout components produces
+                 * two — which axe rejects as `dlitem`, correctly, because it
+                 * breaks the term/definition association a screen reader
+                 * relies on.
+                 */}
+                <dl className="flex flex-col gap-1">
+                  {row.getVisibleCells().map((cell) => (
+                    <div
+                      key={cell.id}
+                      className="flex flex-wrap items-baseline justify-between gap-2"
+                    >
+                      <dt className="text-xs text-muted-foreground">
+                        {headerLabels.get(cell.column.id)}
+                      </dt>
+                      <dd className="min-w-0 text-sm break-words">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            );
+          })}
         </ul>
+        {footer && (
+          <div data-slot="table-totals" className="border-t py-3 text-sm font-medium">
+            {footer.card}
+          </div>
+        )}
       </div>
 
       {pagination && (
@@ -959,4 +1059,13 @@ function PageLinks({
  */
 function headerText(label: ReactNode): string {
   return typeof label === 'string' ? label : '';
+}
+
+/** `location.hash` without its `#`, decoded; unreadable escapes read as no hash. */
+function decodeHash(hash: string): string {
+  try {
+    return decodeURIComponent(hash.replace(/^#/, ''));
+  } catch {
+    return '';
+  }
 }

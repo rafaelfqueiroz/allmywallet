@@ -280,6 +280,12 @@
       "chooseDescription": "Cada meta pertence a uma carteira. Escolha uma para ver o progresso e criar metas."
     }
   },
+  "cellTable": {
+    "sortBy": "Ordenar por {column}",
+    "sortField": "Ordenar por",
+    "sortAscending": "Ordem crescente",
+    "sortDescending": "Ordem decrescente"
+  },
   "common": {
     "loading": "Carregando…",
     "save": "Salvar",
