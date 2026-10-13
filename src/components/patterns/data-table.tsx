@@ -829,30 +829,32 @@ function DataTableView<TData>({
               </dl>
             </li>
           ))}
-          {totals && (
-            <li className="py-3">
-              <p className="mb-1 text-sm font-medium">{totals.label}</p>
-              <dl className="flex flex-col gap-1">
-                {table
-                  .getVisibleLeafColumns()
-                  .filter((column) => totals.cells[column.id] !== undefined)
-                  .map((column) => (
-                    <div
-                      key={column.id}
-                      className="flex flex-wrap items-baseline justify-between gap-2"
-                    >
-                      <dt className="text-xs text-muted-foreground">
-                        {headerLabels.get(column.id)}
-                      </dt>
-                      <dd className="min-w-0 text-sm font-medium break-words">
-                        {totals.cells[column.id]}
-                      </dd>
-                    </div>
-                  ))}
-              </dl>
-            </li>
-          )}
         </ul>
+        {/*
+         * Outside the list: a total sums the records, it is not one of them, so
+         * it neither counts as an item nor sits among them for a screen reader.
+         */}
+        {totals && (
+          <div className="border-t py-3">
+            <p className="mb-1 text-sm font-medium">{totals.label}</p>
+            <dl className="flex flex-col gap-1">
+              {table
+                .getVisibleLeafColumns()
+                .filter((column) => totals.cells[column.id] !== undefined)
+                .map((column) => (
+                  <div
+                    key={column.id}
+                    className="flex flex-wrap items-baseline justify-between gap-2"
+                  >
+                    <dt className="text-xs text-muted-foreground">{headerLabels.get(column.id)}</dt>
+                    <dd className="min-w-0 text-sm font-medium break-words">
+                      {totals.cells[column.id]}
+                    </dd>
+                  </div>
+                ))}
+            </dl>
+          </div>
+        )}
       </div>
 
       {pagination && (

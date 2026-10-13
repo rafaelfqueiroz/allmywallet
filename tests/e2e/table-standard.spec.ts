@@ -172,7 +172,8 @@ async function setHidden(page: Page, hidden: boolean): Promise<void> {
   await eye.click();
   await expect(eye).toHaveAttribute('aria-pressed', String(hidden));
   const placeholder = page.getByText('R$ ••••••');
-  if (hidden) await expect(placeholder.first()).toBeVisible();
+  // The card list carries the placeholder too, hidden at this width.
+  if (hidden) await expect(placeholder.filter({ visible: true }).first()).toBeVisible();
   else await expect(placeholder).toHaveCount(0);
 }
 

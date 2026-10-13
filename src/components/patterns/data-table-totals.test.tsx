@@ -66,11 +66,15 @@ describe('DataTable totals', () => {
     expect(within(table).getByRole('cell', { name: 'R$ 12,00' })).toBeInTheDocument();
   });
 
-  it('repeats the total in the card list, labelled with the column it belongs to', () => {
+  it('repeats the total under the card list, labelled with its column, not as a record', () => {
     render(<DataTable columns={columns} data={lines} caption="Linhas" totals={totals} />);
     const list = screen.getByRole('list');
-    expect(within(list).getByText('Total')).toBeInTheDocument();
-    expect(within(list).getByText('R$ 12,00')).toBeInTheDocument();
+    // One page of records (10 of 12); the total sums them and is not one of them.
+    expect(within(list).getAllByRole('listitem')).toHaveLength(10);
+    expect(within(list).queryByText('Total')).toBeNull();
+    const card = list.nextElementSibling as HTMLElement;
+    expect(within(card).getByText('Total')).toBeInTheDocument();
+    expect(within(card).getByRole('definition')).toHaveTextContent('R$ 12,00');
   });
 
   it('has no axe violations', async () => {
