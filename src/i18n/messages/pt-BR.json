@@ -1590,7 +1590,8 @@
         "observed": "Observado",
         "unavailable": "Indisponível — custo não registrado",
         "priceUnavailable": "Indisponível — sem preço no dia e sem custo registrado",
-        "unavailableShort": "Indisponível"
+        "unavailableShort": "Indisponível",
+        "noun": "datas"
       }
     },
     "earnings": {

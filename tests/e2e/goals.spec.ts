@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
+import { dataTableByCaption } from './support/page-size';
 
 /**
  * SPEC-019 — Objetivos, over the real stack.
@@ -204,7 +205,13 @@ test('a wallet shows its growth and earnings goals on separate charts (AC-1), re
 
   // AC-18 — the growth chart's own figures are also a visible table, not only
   // pixels in the SVG.
-  await expect(page.getByRole('table', { name: 'Valores do gráfico de evolução' })).toBeVisible();
+  // A paged DataTable (BR-022-18): the table from `md` up, the card list below it.
+  await expect(dataTableByCaption(page, 'Valores do gráfico de evolução')).toBeVisible();
+  await expect(
+    dataTableByCaption(page, 'Valores do gráfico de evolução').getByText(
+      /Mostrando 1–\d+ de \d+ datas/,
+    ),
+  ).toBeVisible();
   await expect(page.getByRole('table', { name: 'Valores do gráfico de proventos' })).toBeVisible();
 
   const results = await new AxeBuilder({ page })

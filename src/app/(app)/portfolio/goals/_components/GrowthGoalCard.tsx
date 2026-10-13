@@ -21,15 +21,8 @@ import { Grid } from '@/components/layout/grid';
 import { Badge } from '@/components/ui/badge';
 import { Text } from '@/components/ui/text';
 import { formatBusinessDate } from '@/i18n/format';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
+import { ranksOf, rankKeys } from '@/lib/rank-keys';
 
 /**
  * SPEC-019 BR-019-09..13 / AC-1, AC-4, AC-14/15 — one growth goal, charted on
@@ -65,10 +58,70 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
   // reason: accrued fixed income is computed, not observed).
   const hasEstimated = growth.series.some((point) => point.kind === 'available' && point.estimated);
 
+  // SPEC-022 BR-022-18 — the series grows with the goal's age (one row a day,
+  // a week or a month), so it is a paged, sortable table on fixed widths: the
+  // eye toggle (BR-022-24) moves none of its columns. The rank is the sort key
+  // of the value column — the amount itself never becomes a number (AR-06–10);
+  // a date with no value has no rank and sorts last in both directions.
+  const valueRanks = ranksOf(growth.series, (point) =>
+    point.kind === 'available' ? point.value : null,
+  );
+  const statusOf = (point: GrowthPoint): string =>
+    // The two absences are different sentences and are told apart here: a cost
+    // that was never recorded, versus a date with neither a price nor a cost
+    // to fall back to. One shared "indisponível" would leave a user unable to
+    // tell which of the two they are looking at, and only one of them is fixed
+    // by recording an allocation's cost.
+    point.kind === 'unavailable'
+      ? point.reason === GrowthUnavailable.PRICE_UNAVAILABLE
+        ? t('growth.table.priceUnavailable')
+        : t('growth.table.unavailable')
+      : point.estimated
+        ? tCommon('estimated')
+        : t('growth.table.observed');
+  const seriesColumns: NodeColumn[] = [
+    { id: 'date', header: t('growth.table.date'), kind: 'date', sortable: true },
+    { id: 'value', header: t('growth.table.value'), kind: 'money', sortable: true },
+    // The longest sentence is "Indisponível — sem preço no dia e sem custo registrado": it
+    // ends in an ellipsis with its full text on demand rather than widening the column.
+    { id: 'status', header: t('growth.table.status'), kind: 'text', width: 30, sortable: true },
+  ];
+  const seriesRows: NodeRow[] = growth.series.map((point, index) => {
+    const status = statusOf(point);
+    return {
+      id: point.date,
+      keys: { date: point.date, status, ...rankKeys({ value: valueRanks }, index) },
+      cells: {
+        date: formatBusinessDate(point.date),
+        value:
+          point.kind === 'available' ? (
+            <Money value={point.value} />
+          ) : (
+            <Text as="span" tone="muted" size="sm">
+              {t('growth.table.unavailableShort')}
+            </Text>
+          ),
+        status,
+      },
+    };
+  });
+
   return (
     <Section
       title={goal.name}
       description={t(goal.basis === 'invested' ? 'basisInvested' : 'basisCurrentValue')}
+      // The goal's own edit and delete are actions that apply to the whole
+      // block, so they are the panel's footer (DS-46) — a table closes its panel
+      // with its pager, and nothing may follow it inside (BR-022-36).
+      footer={
+        <EditDeleteForms
+          goalId={goal.id}
+          walletId={goal.walletId}
+          name={goal.name}
+          amount={goal.amount}
+          t={t}
+        />
+      }
     >
       <AchievedMarker achievedOn={goal.achievedOn} currentlyAchieved={growth.achieved} />
 
@@ -142,64 +195,18 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
           </Stack>
 
           {/* SPEC-016 BR-016-16 / AC-18 — the chart's text equivalent. Every
-                point the line draws is also a row here, with its status. */}
-          <Table>
-            <TableCaption className="sr-only">{t('growth.table.caption')}</TableCaption>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">{t('growth.table.date')}</TableHead>
-                <TableHead scope="col" className="text-right">
-                  {t('growth.table.value')}
-                </TableHead>
-                <TableHead scope="col">{t('growth.table.status')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {growth.series.map((point) => (
-                <TableRow key={point.date}>
-                  <TableHead scope="row" className="text-left font-normal">
-                    {formatBusinessDate(point.date)}
-                  </TableHead>
-                  <TableCell className="text-right">
-                    {point.kind === 'available' ? (
-                      <Money value={point.value} />
-                    ) : (
-                      <Text as="span" tone="muted" size="sm">
-                        {t('growth.table.unavailableShort')}
-                      </Text>
-                    )}
-                  </TableCell>
-                  {/*
-                      The two absences are different sentences and are told
-                      apart here: a cost that was never recorded, versus a date
-                      with neither a price nor a cost to fall back to. One
-                      shared "indisponível" would leave a user unable to tell
-                      which of the two they are looking at, and only one of
-                      them is fixed by recording an allocation's cost.
-                    */}
-                  <TableCell>
-                    {point.kind === 'unavailable'
-                      ? point.reason === GrowthUnavailable.PRICE_UNAVAILABLE
-                        ? t('growth.table.priceUnavailable')
-                        : t('growth.table.unavailable')
-                      : point.estimated
-                        ? tCommon('estimated')
-                        : t('growth.table.observed')}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                point the line draws is also a row here, with its status; the
+                pager reaches the ones past the first page. */}
+          <NodeTable
+            columns={seriesColumns}
+            rows={seriesRows}
+            caption={t('growth.table.caption')}
+            noun={t('growth.table.noun')}
+            sort={{ id: 'date', desc: true }}
+            paramPrefix="growth"
+          />
         </>
       )}
-
-      <EditDeleteForms
-        goalId={goal.id}
-        walletId={goal.walletId}
-        name={goal.name}
-        amount={goal.amount}
-        t={t}
-      />
     </Section>
   );
 }
