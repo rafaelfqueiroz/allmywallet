@@ -87,7 +87,7 @@ describe('ImportHistoryTable', () => {
     render(<ImportHistoryTable rows={rows} />);
     const table = screen.getByRole('table');
 
-    expect(within(table).getAllByRole('row')).toHaveLength(1 + 25);
+    expect(within(table).getAllByRole('row')).toHaveLength(1 + 10);
     expect(screen.getAllByText(/de 300 importações/).length).toBeGreaterThan(0);
   });
 

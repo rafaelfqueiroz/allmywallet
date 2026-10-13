@@ -597,10 +597,7 @@ function DataTableView<TData>({
             widths={table
               .getVisibleLeafColumns()
               .map((column) =>
-                columnWidth(
-                  column.columnDef.meta?.kind ?? 'text',
-                  column.columnDef.meta?.width,
-                ),
+                columnWidth(column.columnDef.meta?.kind ?? 'text', column.columnDef.meta?.width),
               )}
           />
           <TableHeader>
@@ -627,8 +624,7 @@ function DataTableView<TData>({
                       scope="col"
                       className={cn(
                         'py-row',
-                        isNumericKind(header.column.columnDef.meta?.kind ?? 'text') &&
-                          'text-right',
+                        isNumericKind(header.column.columnDef.meta?.kind ?? 'text') && 'text-right',
                       )}
                       /*
                        * `aria-sort` belongs on the header cell, not on the

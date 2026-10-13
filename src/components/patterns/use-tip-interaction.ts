@@ -96,7 +96,11 @@ export function useTipInteraction(contentRef: RefObject<HTMLElement | null>) {
         const next = event.relatedTarget;
         // Moving focus into the content, or between two focusable things inside
         // the trigger itself, is not leaving the tip.
-        if (next instanceof Node && (contentRef.current?.contains(next) || event.currentTarget.contains(next))) return;
+        if (
+          next instanceof Node &&
+          (contentRef.current?.contains(next) || event.currentTarget.contains(next))
+        )
+          return;
         close();
       },
     },
