@@ -320,50 +320,55 @@ export async function AssignQueue({
       */}
       {standingRules.length > 0 && (
         <Section title={t('standingRuleTitle')} description={t('standingRuleDescription')}>
-          <NodeTable
-            columns={[
-              {
-                id: 'asset',
-                header: t('columnAsset'),
-                kind: 'text',
-                width: 28,
-                sortable: true,
-              },
-              {
-                id: 'wallet',
-                header: t('standingRuleCurrent'),
-                kind: 'text',
-                width: 28,
-                sortable: true,
-              },
-              {
-                id: 'actions',
-                header: t('columnActions'),
-                kind: 'control',
-                width: '10rem',
-                srOnlyHeader: true,
-              },
-            ]}
-            rows={ruleRows}
-            caption={t('standingRuleTitle')}
-            noun={t('ruleNoun')}
-            filterPlaceholder={t('filterAssetPlaceholder')}
-            paramPrefix="rules"
-            sort={{ id: 'asset', desc: false }}
-          />
-          {/* DS-28 renders each cell twice, so a form never sits in one: each row's
-              button names its form here, outside the table, by `form`. */}
-          <RowForms>
-            {standingRules.map((rule) => (
-              <ActionForm
-                key={rule.assetId}
-                id={`clear-rule-${rule.assetId}`}
-                action={clearStandingRuleAction}
-              >
-                <input type="hidden" name="assetId" value={rule.assetId} />
-              </ActionForm>
-            ))}
-          </RowForms>
+          {/* `gap="none"`: the panel body is a gapped Stack, and a gap between the
+              table and the zero-height forms would leave a strip of panel under
+              the pager (BR-022-36). */}
+          <Stack gap="none">
+            <NodeTable
+              columns={[
+                {
+                  id: 'asset',
+                  header: t('columnAsset'),
+                  kind: 'text',
+                  width: 28,
+                  sortable: true,
+                },
+                {
+                  id: 'wallet',
+                  header: t('standingRuleCurrent'),
+                  kind: 'text',
+                  width: 28,
+                  sortable: true,
+                },
+                {
+                  id: 'actions',
+                  header: t('columnActions'),
+                  kind: 'control',
+                  width: '10rem',
+                  srOnlyHeader: true,
+                },
+              ]}
+              rows={ruleRows}
+              caption={t('standingRuleTitle')}
+              noun={t('ruleNoun')}
+              filterPlaceholder={t('filterAssetPlaceholder')}
+              paramPrefix="rules"
+              sort={{ id: 'asset', desc: false }}
+            />
+            {/* DS-28 renders each cell twice, so a form never sits in one: each row's
+                button names its form here, outside the table, by `form`. */}
+            <RowForms>
+              {standingRules.map((rule) => (
+                <ActionForm
+                  key={rule.assetId}
+                  id={`clear-rule-${rule.assetId}`}
+                  action={clearStandingRuleAction}
+                >
+                  <input type="hidden" name="assetId" value={rule.assetId} />
+                </ActionForm>
+              ))}
+            </RowForms>
+          </Stack>
         </Section>
       )}
     </>

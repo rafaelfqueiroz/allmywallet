@@ -223,7 +223,10 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
           {standingRules.length === 0 ? (
             <EmptyState title={t('rulesEmpty')} />
           ) : (
-            <>
+            // `gap="none"`: the panel body is a gapped Stack, and a gap between
+            // the table and the (zero-height) forms would leave a strip of
+            // panel under the pager (BR-022-36).
+            <Stack gap="none">
               <NodeTable
                 columns={[
                   {
@@ -261,7 +264,7 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
                   </ActionForm>
                 ))}
               </RowForms>
-            </>
+            </Stack>
           )}
         </Stack>
       </Section>
