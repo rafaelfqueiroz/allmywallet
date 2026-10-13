@@ -3,16 +3,19 @@ import {
   WalletsTable,
   type WalletRow,
 } from '@/app/(app)/settings/wallets/_components/WalletsTable';
+import { getTranslations } from 'next-intl/server';
 import { formatDate } from '@/i18n/format';
-import { Card, CardContent } from '@/components/ui/card';
+import { Section } from '@/components/patterns/section';
 
 /**
- * Minhas carteiras: the table of wallets in its card, with the cells
+ * Minhas carteiras: the table of wallets in its panel, titled with the count
+ * as the frame draws it ("5 carteiras", SPEC-022 BR-022-36), with the cells
  * formatted here so the Client Component receives text (`formatDate` is the one
  * place `dd/mm/yyyy` is decided, AR-47). Shared by the list and by "Nova
  * carteira", which is the same list with the form beside it.
  */
-export function WalletList({ rows }: { readonly rows: readonly WalletListRow[] }) {
+export async function WalletList({ rows }: { readonly rows: readonly WalletListRow[] }) {
+  const t = await getTranslations('wallets.list');
   const tableRows: WalletRow[] = rows.map(({ wallet, assetCount }) => ({
     id: wallet.id,
     name: wallet.name,
@@ -25,10 +28,8 @@ export function WalletList({ rows }: { readonly rows: readonly WalletListRow[] }
   }));
 
   return (
-    <Card>
-      <CardContent>
-        <WalletsTable rows={tableRows} />
-      </CardContent>
-    </Card>
+    <Section title={t('title', { count: rows.length })}>
+      <WalletsTable rows={tableRows} />
+    </Section>
   );
 }

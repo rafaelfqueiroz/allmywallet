@@ -163,7 +163,7 @@ export function ThemeMenuGroup({
       value={value}
       onValueChange={(next) => onValueChange(next as ThemePreference)}
       aria-label={t('label')}
-      className="flex gap-1 rounded-lg bg-muted p-1"
+      className="flex gap-1 rounded-md bg-muted p-1"
     >
       {THEME_OPTIONS.map(({ value: option, icon: Icon }) => (
         <DropdownMenuRadioItem

@@ -49,7 +49,7 @@ The vocabulary is shadcn's, adopted wholesale rather than renamed (DL-02), plus 
 | `opportunity-buy` / `-hold` / `-sell` | **Project addition.** SPEC-018's watch-rule state (DL-018-06). Used only by `StateBadge` |
 | `sidebar-*` | shadcn's sidebar vocabulary, aliased onto `primary`, `nav-active`, `border` and `ring` so the sidebar cannot grow a palette of its own |
 | `--shadow-raised` | **M10.** The shadow of the raised layer — `Select`'s menu and `Dialog`. Used as `shadow-(--shadow-raised)` |
-| `--radius` | `0.625rem`. Every `rounded-*` derives from it |
+| `--radius` / `--radius-*` | **Two radii carry the interface** (SPEC-022 BR-022-36): a panel is `rounded-lg`, 8px (`--radius: 0.5rem`); a control — field, button, menu — is `rounded-md`, 6px. `rounded-sm`, 4px, is an item inside a menu or a tab list; `rounded-full` a pill. The steps are pinned rather than multiplied from `--radius`, because no single multiplier yields both 8 and 6. Nothing above `lg` — `tests/structural/panel-radius.test.ts` |
 
 **An alias is declared once.** A token whose value is `var(--other)` — `ring`, `secondary`, every surface's `-foreground`, every `sidebar-*` — lives on `:root` only and follows its target into each theme. Re-declaring it in the dark blocks would only create a second place for it to drift. The structural test enforces both halves: every non-alias token is in all three blocks, and no alias is overridden.
 
@@ -169,7 +169,8 @@ Two caveats carried forward:
 | `AccountMenu` | The Google name, e-mail and picture; Conta, Preferências, Privacidade, the guide, the theme switch and Sair — DS-58. Every action is a prop. |
 | `EmptyState` | `role="status"`. Explains an absence. |
 | `ErrorState` | `role="alert"`. Explains a failure. |
-| `StatCard` | One headline figure as `dt`/`dd`. Owns framing, never formatting — pass a `<Money>`. `link` adds a footer row to the destination that owns the figure (BR-022-07) — DS-65. |
+| `Section` | A titled region drawn as a **panel**: `h2` and `actions` on a header row, the body, an optional `footer` — DS-38. `variant="plain"` for the exceptions DS-38 lists. |
+| `StatCard` | One headline figure as `dt`/`dd`. Owns framing, never formatting — pass a `<Money>`. `link` adds a footer row to the destination that owns the figure (BR-022-07) — DS-65. `inset` for a figure inside a panel: a muted tile with no border of its own (DS-38). |
 | `SummaryCard` | A card that is a region of the page: `section` with an `h2`, a status badge or action beside the heading, and an optional `CardLink` footer to the owning destination (BR-022-07) — DS-65. `CardHeaderLink` is the link beside a heading. |
 | `DataTable` | A real table from `md`, a labelled card list below it. `caption` is required. Sorts, paginates and filters, with its state in the URL — DS-54. |
 | `Money` | The only place a figure becomes text. Pages import it from `@/app/money`, which applies the account's masking (DS-59). |
@@ -245,7 +246,19 @@ Exports never read the key (BR-022-27). Preferências revalidates the layout on 
 
 **DS-37 — Form controls are native.** `NativeSelect` and `Checkbox` exist alongside the Radix `Select`, and the reason is not taste: every form on these screens is a `<form action={serverAction}>` that posts without JavaScript, and a Radix control contributes nothing to a native submission without a mirrored hidden input. Reach for Radix `Select` when the control drives client state; reach for the native one when it is a form field.
 
-**DS-38 — A titled region within a page is a `Section`.** `h2` under `PageShell`'s `h1`. Nesting deeper is a signal the page is doing too much, not a reason to add a level prop. A region drawn as a card — the Painel's — is a `SummaryCard`, which is the same `section` + `h2` inside a card (DS-65).
+**DS-38 — A titled region within a page is a `Section`, and a `Section` is a panel** (SPEC-022 BR-022-36, #236; amended). `h2` under `PageShell`'s `h1`. Nesting deeper is a signal the page is doing too much, not a reason to add a level prop. A region drawn as a card — the Painel's — is a `SummaryCard`, which is the same `section` + `h2` inside a card (DS-65).
+
+Every block of content below the tabs sits in a panel: an 8px `card` surface, the title and its actions on a header row above a hairline, the body, and an optional `footer` — pagination, a link, the actions that apply to the whole block — under another. Only the page title, its description and the tabs sit outside. A table, a list or a chart is put in a `Section`; a collection's panel is titled with its count, as the frames draw it ("5 carteiras"). What qualifies one block — a note about its figures — goes inside that block's panel.
+
+**Never a panel inside a panel.** Three cases, and each is written down where it happens:
+
+- A **group of panels** — Portfólio's class cards, Proventos' figure per type, a wallet's goals or balance, a wallet's settings — is a `Section variant="plain"`: a heading on the page, with its actions, above blocks that are each the panel.
+- A **figure inside a panel** — a goal's three figures, an import's counts — is `StatCard inset`, a muted tile with no border.
+- A **table inside a panel** goes straight in; a `Card` around it is the nested panel.
+
+Three things may still sit between panels, because none is a block of content: a **page-wide `Note`** whose subject is the whole page rather than one panel (Relatórios' gross-of-tax disclosure, Observar preços' disclosures, the Painel's stale-import prompt); an **`EmptyState`/`ErrorState` that replaces the page's content** (signed out, a wallet not found, an empty scope); and **navigation and filters** — a back link, a controls bar drawn as a `Card` (Relatórios' `Controls`, Composição's grouping), which stays available on an empty scope where no panel exists to carry it. Pages outside the application frame — the landing page (DS-43), the privacy policy, `AuthShell` (DS-39) — use `variant="plain"`: a legal text reads as one document, and `AuthShell` is already a card.
+
+**Panel review amendments (#236):** mobile `DataTable` rows are flat rows separated by hairlines; empty states inside panels have no second border. A table owns its semantic pagination footer and aligns it with the containing panel edges while retaining its own pagination state. Report-wide treatment navigation precedes headline figures; divergence and Dietz disclosures sit inside their respective headline cards. Filter controls precede bulk selection actions.
 
 **DS-39 — Pages outside the application frame use `AuthShell`.** Sign-in is a viewport-centred card with no navigation, which is a different shape from `PageShell`'s top-aligned document. Collapsing them would produce a component whose props contradict each other half the time. The public landing page is a third shape again and uses `MarketingShell` (DS-43).
 

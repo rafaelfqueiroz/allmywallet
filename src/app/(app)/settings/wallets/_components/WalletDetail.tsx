@@ -61,17 +61,21 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
 
   return (
     <Stack gap="lg">
-      <Stack gap="sm">
-        <div>
-          <Button asChild variant="ghost" size="sm">
-            <Link href="/settings/wallets">
-              <ArrowLeft aria-hidden />
-              {t('walletDetailBack')}
-            </Link>
-          </Button>
-        </div>
-        <Cluster justify="between" gap="sm">
-          <h2 className="text-xl font-medium">{wallet.name}</h2>
+      <div>
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/settings/wallets">
+            <ArrowLeft aria-hidden />
+            {t('walletDetailBack')}
+          </Link>
+        </Button>
+      </div>
+
+      {/* SPEC-022 BR-022-36 — the wallet's name heads the panels below it,
+          so it is a plain section with the links as its actions. */}
+      <Section
+        variant="plain"
+        title={wallet.name}
+        actions={
           <Cluster gap="sm">
             {/* SPEC-017 — the wallet's targets and the drift against them. */}
             <Button asChild variant="outline" size="sm">
@@ -82,8 +86,8 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
               <Link href={`/portfolio/goals?wallet=${wallet.id}`}>{t('goalsLink')}</Link>
             </Button>
           </Cluster>
-        </Cluster>
-      </Stack>
+        }
+      />
 
       <Section title={t('dataTitle')}>
         <div className="max-w-prose">

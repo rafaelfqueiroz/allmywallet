@@ -132,35 +132,40 @@ export default async function PortfolioGoalsPage({
 
   return (
     <PortfolioFrame wallets={wallets}>
+      {/*
+        SPEC-022 BR-022-36 — the wallet's heading over its goal panels: a
+        group of panels, so the heading is plain, and the year selector that
+        redraws them is its action.
+      */}
       <Section
+        variant="plain"
         title={tp('goals.title', { wallet: view.wallet.name })}
         description={t('description')}
-      />
-
-      {view.goals.length === 0 && <EmptyState title={t('empty')} />}
-
-      {/*
-        BR-019-22 / AC-7 — only offered when there is an earnings goal to
-        redraw: the selector has nothing to do on a wallet with growth goals
-        alone, and showing it anyway would suggest the growth chart moves too.
-      */}
-      {earningsGoals.length > 0 && (
-        <form method="get" action="/portfolio/goals" aria-label={t('yearLabel')}>
-          <input type="hidden" name={PARAM.wallet} value={view.wallet.id} />
-          <Cluster gap="sm" align="end">
-            <Field id="goals-year" label={t('yearLabel')} width="sm">
-              <NativeSelect name="year" defaultValue={String(view.selectedYear)}>
-                {view.years.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Button type="submit">{t('yearApply')}</Button>
-          </Cluster>
-        </form>
-      )}
+        // BR-019-22 / AC-7 — only offered when there is an earnings goal to
+        // redraw: the selector has nothing to do on a wallet with growth goals
+        // alone, and showing it anyway would suggest the growth chart moves too.
+        actions={
+          earningsGoals.length > 0 ? (
+            <form method="get" action="/portfolio/goals" aria-label={t('yearLabel')}>
+              <input type="hidden" name={PARAM.wallet} value={view.wallet.id} />
+              <Cluster gap="sm" align="end">
+                <Field id="goals-year" label={t('yearLabel')} width="sm">
+                  <NativeSelect name="year" defaultValue={String(view.selectedYear)}>
+                    {view.years.map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <Button type="submit">{t('yearApply')}</Button>
+              </Cluster>
+            </form>
+          ) : undefined
+        }
+      >
+        {view.goals.length === 0 && <EmptyState title={t('empty')} />}
+      </Section>
 
       {growthGoals.map((goalView) => (
         <GrowthGoalCard key={goalView.goal.id} goalView={goalView} />

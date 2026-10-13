@@ -131,7 +131,10 @@ export default async function PortfolioWalletsPage({ searchParams }: PageProps) 
     return frame(
       <Stack gap="lg">
         {comparison !== null && row !== undefined && report !== null && (
-          <ComparisonTable rows={[row]} total={null} />
+          // SPEC-022 BR-022-36 — the selected wallet's row, in a panel.
+          <Section title={row.name}>
+            <ComparisonTable rows={[row]} total={null} />
+          </Section>
         )}
         {balance}
       </Stack>,

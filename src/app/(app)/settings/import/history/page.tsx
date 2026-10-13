@@ -11,6 +11,7 @@ import { ImportSection } from '@/app/(app)/settings/import/_components/ImportSec
 import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { Section } from '@/components/patterns/section';
 
 /**
  * SPEC-005 / SPEC-022 BR-022-16/18 — Configurações › Importar › **Histórico**:
@@ -48,7 +49,10 @@ export default async function ImportHistoryPage() {
   return (
     <SettingsFrame>
       <ImportSection>
-        <ImportHistoryTable rows={rows} />
+        {/* SPEC-022 BR-022-36 — the table in a panel titled with its count. */}
+        <Section title={t('history.title', { count: rows.length })}>
+          <ImportHistoryTable rows={rows} />
+        </Section>
       </ImportSection>
     </SettingsFrame>
   );

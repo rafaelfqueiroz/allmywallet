@@ -96,6 +96,7 @@ function EarningsBody({
     <>
       <Grid cols={3} gap="md">
         <StatCard
+          inset
           label={
             earnings.highlight.kind === 'current_month'
               ? t('earnings.highlightCurrentMonth', { month: earnings.highlight.month })
@@ -103,8 +104,12 @@ function EarningsBody({
           }
           value={<Money value={earnings.highlight.amount} />}
         />
-        <StatCard label={t('earnings.goalLabel')} value={<Money value={earnings.goalAmount} />} />
-        <StatCard label={t('earnings.totalLabel')} value={<Money value={earnings.total} />} />
+        <StatCard
+          inset
+          label={t('earnings.goalLabel')}
+          value={<Money value={earnings.goalAmount} />}
+        />
+        <StatCard inset label={t('earnings.totalLabel')} value={<Money value={earnings.total} />} />
       </Grid>
 
       <EarningsGoalChart

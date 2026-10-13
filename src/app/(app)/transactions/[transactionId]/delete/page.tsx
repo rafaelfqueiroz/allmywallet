@@ -164,8 +164,9 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
               <Text>{t('conversionGroup', { count: conversionGroup.length })}</Text>
               <Text>{t('impactFrom', { date: formatBusinessDate(earliest) })}</Text>
             </Stack>
+            {/* SPEC-022 BR-022-36 — part of the impact, so in its panel. */}
+            <Note>{t('impactAllocations')}</Note>
           </Section>
-          <Note>{t('impactAllocations')}</Note>
           <DeleteConfirm action={deleteTransactionAction} transactionId={transactionId} />
         </Stack>
       </PageShell>
@@ -227,74 +228,70 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
             columns are real replays — the current one from the ledger as it
             stands, the projected one from the ledger without this row.
           */}
-            <Card size="sm">
-              <CardContent>
-                <Table>
-                  <TableCaption className="sr-only">{t('impactPosition')}</TableCaption>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead scope="col">{t('impactPosition')}</TableHead>
-                      <TableHead scope="col" className="text-right">
-                        {t('impactCurrent')}
-                      </TableHead>
-                      <TableHead scope="col" className="text-right">
-                        {t('impactProjected')}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell className="py-row">{t('impactQuantity')}</TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={impact.value.currentPosition.quantity} kind="quantity" />
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={impact.value.projectedPosition.quantity} kind="quantity" />
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
-                      <TableCell className="py-row text-right">
-                        <Cluster gap="sm" justify="end" align="baseline">
-                          <Money value={impact.value.currentPosition.averageCost} />
-                          {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
-                          <CostEstimateMarker
-                            shown={impact.value.currentCostEstimated}
-                            label={tCommon('estimated')}
-                            title={tReports('markers.costEstimated.explanation')}
-                          />
-                        </Cluster>
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Cluster gap="sm" justify="end" align="baseline">
-                          <Money value={impact.value.projectedPosition.averageCost} />
-                          <CostEstimateMarker
-                            shown={impact.value.projectedCostEstimated}
-                            label={tCommon('estimated')}
-                            title={tReports('markers.costEstimated.explanation')}
-                          />
-                        </Cluster>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="py-row">{tTable('total')}</TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={impact.value.currentPosition.totalCost} />
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={impact.value.projectedPosition.totalCost} />
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+            <Table>
+              <TableCaption className="sr-only">{t('impactPosition')}</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">{t('impactPosition')}</TableHead>
+                  <TableHead scope="col" className="text-right">
+                    {t('impactCurrent')}
+                  </TableHead>
+                  <TableHead scope="col" className="text-right">
+                    {t('impactProjected')}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="py-row">{t('impactQuantity')}</TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={impact.value.currentPosition.quantity} kind="quantity" />
+                  </TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={impact.value.projectedPosition.quantity} kind="quantity" />
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
+                  <TableCell className="py-row text-right">
+                    <Cluster gap="sm" justify="end" align="baseline">
+                      <Money value={impact.value.currentPosition.averageCost} />
+                      {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
+                      <CostEstimateMarker
+                        shown={impact.value.currentCostEstimated}
+                        label={tCommon('estimated')}
+                        title={tReports('markers.costEstimated.explanation')}
+                      />
+                    </Cluster>
+                  </TableCell>
+                  <TableCell className="py-row text-right">
+                    <Cluster gap="sm" justify="end" align="baseline">
+                      <Money value={impact.value.projectedPosition.averageCost} />
+                      <CostEstimateMarker
+                        shown={impact.value.projectedCostEstimated}
+                        label={tCommon('estimated')}
+                        title={tReports('markers.costEstimated.explanation')}
+                      />
+                    </Cluster>
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="py-row">{tTable('total')}</TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={impact.value.currentPosition.totalCost} />
+                  </TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={impact.value.projectedPosition.totalCost} />
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+            {/* SPEC-010 BR-010-05 — the other derived thing that moves, stated
+                in the impact's panel (SPEC-022 BR-022-36). */}
+            <Note>{t('impactAllocations')}</Note>
           </Section>
 
           <DeletionDownstreamImpact rows={downstreamRows} />
-
-          {/* SPEC-010 BR-010-05 — the other derived thing that moves. */}
-          <Note>{t('impactAllocations')}</Note>
 
           <DeleteConfirm action={deleteTransactionAction} transactionId={transactionId} />
         </Stack>

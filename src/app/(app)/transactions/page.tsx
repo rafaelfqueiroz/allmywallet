@@ -30,6 +30,7 @@ import { withTransactionsDeps } from '@/app/(app)/transactions/composition';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
+import { Section } from '@/components/patterns/section';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Money } from '@/app/money';
 import { Stack } from '@/components/layout/stack';
@@ -163,7 +164,42 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
         // this branch exists for defence, not the common case.
         <ErrorState title={tErrors(result.error.code)} />
       ) : (
-        <Stack gap="md">
+        <Section title={t('table.title', { count: result.value.total })}>
+          {/*
+            BR-006-17: the selection lives in the DOM. The row checkboxes name
+            this form with their `form` attribute, so the browser collects the
+            selection natively on submit — no client state that can disagree
+            with what is ticked — without the bulk form having to wrap the
+            table and, with it, the filter bar's own GET form.
+            SPEC-022 BR-022-36 / frame 14 — the selection band sits at the top of
+            the panel, above the table, leaving the footer to pagination (#237).
+          */}
+          <Controls
+            /*
+                  Keyed on the applied filters (PR #234 review P2): a client
+                  navigation — "Limpar filtros", a sort link — keeps this
+                  uncontrolled form mounted, and a changed `defaultValue`
+                  does not move a mounted select. Without the key, clearing
+                  `type=buy` left Tipo showing Compra, and Aplicar put it back.
+                */
+            key={`${toQueryString(params)}|${sort}|${size}`}
+            from={params.get(PARAM.from) ?? ''}
+            to={params.get(PARAM.to) ?? ''}
+            asset={params.get(PARAM.asset) ?? ''}
+            assetClass={params.get(PARAM.assetClass) ?? ''}
+            type={params.get(PARAM.type) ?? ''}
+            institution={params.get(PARAM.institution) ?? ''}
+            status={params.get(PARAM.status) ?? ''}
+            wallet={params.get(PARAM.wallet) ?? ''}
+            search={params.get(PARAM.q) ?? ''}
+            sort={sort}
+            size={size}
+            clearHref={filtered ? clearHref : undefined}
+            assetOptions={assetOptions}
+            institutionOptions={institutionOptions}
+            walletOptions={wallets}
+          />
+          {result.value.total > 0 && <BulkBar action={bulkTransactionsAction} wallets={wallets} />}
           <LedgerTable
             rows={await Promise.all(result.value.items.map(ledgerRow))}
             total={result.value.total}
@@ -171,33 +207,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
             pageSizeOptions={LEDGER_TABLE_URL_OPTIONS.pageSizeOptions}
             defaultPageSize={LEDGER_TABLE_URL_OPTIONS.defaults.pageSize}
             defaultSort={DEFAULT_SORT}
-            toolbar={
-              <Controls
-                /*
-                  Keyed on the applied filters (PR #234 review P2): a client
-                  navigation — "Limpar filtros", a sort link — keeps this
-                  uncontrolled form mounted, and a changed `defaultValue`
-                  does not move a mounted select. Without the key, clearing
-                  `type=buy` left Tipo showing Compra, and Aplicar put it back.
-                */
-                key={`${toQueryString(params)}|${sort}|${size}`}
-                from={params.get(PARAM.from) ?? ''}
-                to={params.get(PARAM.to) ?? ''}
-                asset={params.get(PARAM.asset) ?? ''}
-                assetClass={params.get(PARAM.assetClass) ?? ''}
-                type={params.get(PARAM.type) ?? ''}
-                institution={params.get(PARAM.institution) ?? ''}
-                status={params.get(PARAM.status) ?? ''}
-                wallet={params.get(PARAM.wallet) ?? ''}
-                search={params.get(PARAM.q) ?? ''}
-                sort={sort}
-                size={size}
-                clearHref={filtered ? clearHref : undefined}
-                assetOptions={assetOptions}
-                institutionOptions={institutionOptions}
-                walletOptions={wallets}
-              />
-            }
+            toolbar={null}
             {...(filtered
               ? {}
               : {
@@ -220,16 +230,7 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
               />
             }
           />
-
-          {/*
-            BR-006-17: the selection lives in the DOM. The row checkboxes name
-            this form with their `form` attribute, so the browser collects the
-            selection natively on submit — no client state that can disagree
-            with what is ticked — without the bulk form having to wrap the
-            table and, with it, the filter bar's own GET form.
-          */}
-          {result.value.total > 0 && <BulkBar action={bulkTransactionsAction} wallets={wallets} />}
-        </Stack>
+        </Section>
       )}
     </PageShell>
   );

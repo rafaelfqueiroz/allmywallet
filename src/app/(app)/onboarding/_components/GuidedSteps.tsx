@@ -10,6 +10,7 @@ import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
+import { Note } from '@/components/patterns/note';
 import { importBatchPath } from '@/app/(app)/import/paths';
 
 /**
@@ -97,9 +98,7 @@ export async function GuidedSteps({ status }: { readonly status: OnboardingStatu
 
       {/* BR-020-15/DL-020-05 — at most one sentence pointing at the queue that
           already owns data-quality gates; never a second list of them here. */}
-      <Text size="xs" tone="muted">
-        {t('queueNote')}
-      </Text>
+      <Note>{t('queueNote')}</Note>
     </Stack>
   );
 }

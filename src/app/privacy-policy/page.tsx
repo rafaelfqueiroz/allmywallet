@@ -65,13 +65,14 @@ export default async function PrivacyPolicyPage() {
 
   return (
     <PageShell title={t('title')} description={t('description')}>
-      {/* Outside the frame, so BR-022-14 does not bind it; a legal text keeps a reading measure. */}
+      {/* Outside the frame, so BR-022-14 does not bind it; a legal text keeps a reading measure.
+          Nor does BR-022-36: it reads as one document, so its sections are plain. */}
       <Stack gap="xl" className="max-w-3xl">
         <Text tone="muted" size="xs">
           {t('version', { version: CURRENT_PRIVACY_POLICY_VERSION })}
         </Text>
 
-        <Section title={t('controller.title')}>
+        <Section variant="plain" title={t('controller.title')}>
           <Stack gap="sm">
             <Text tone="muted">{t('controller.body')}</Text>
             <Text>
@@ -87,15 +88,19 @@ export default async function PrivacyPolicyPage() {
             sections because they are the two questions a Brazilian investor
             asks first, and because both are enforced in code rather than
             promised in prose. */}
-        <Section title={t('credentials.title')}>
+        <Section variant="plain" title={t('credentials.title')}>
           <Text tone="muted">{t('credentials.body')}</Text>
         </Section>
 
-        <Section title={t('cpf.title')}>
+        <Section variant="plain" title={t('cpf.title')}>
           <Text tone="muted">{t('cpf.body')}</Text>
         </Section>
 
-        <Section title={t('legalBases.title')} description={t('legalBases.description')}>
+        <Section
+          variant="plain"
+          title={t('legalBases.title')}
+          description={t('legalBases.description')}
+        >
           <List gap="md">
             {legalBases.map((id) => (
               <ListItem key={id} separated>
@@ -108,7 +113,11 @@ export default async function PrivacyPolicyPage() {
           </List>
         </Section>
 
-        <Section title={t('retention.title')} description={t('retention.description')}>
+        <Section
+          variant="plain"
+          title={t('retention.title')}
+          description={t('retention.description')}
+        >
           <List gap="sm">
             <ListItem>
               <Text tone="muted">{t('retention.ledger')}</Text>
@@ -130,7 +139,7 @@ export default async function PrivacyPolicyPage() {
           </List>
         </Section>
 
-        <Section title={t('rights.title')}>
+        <Section variant="plain" title={t('rights.title')}>
           <Stack gap="sm">
             <Text tone="muted">{t('rights.body')}</Text>
             {/* Stated here rather than discovered by someone already locked
@@ -151,7 +160,11 @@ export default async function PrivacyPolicyPage() {
             because the international-transfer column is the load-bearing one:
             art. 33 makes each `yes` a disclosure obligation, and a reader has
             to be able to find them at a glance. */}
-        <Section title={t('subprocessors.title')} description={t('subprocessors.description')}>
+        <Section
+          variant="plain"
+          title={t('subprocessors.title')}
+          description={t('subprocessors.description')}
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -176,7 +189,7 @@ export default async function PrivacyPolicyPage() {
           </Table>
         </Section>
 
-        <Section title={t('internationalTransfer.title')}>
+        <Section variant="plain" title={t('internationalTransfer.title')}>
           <Text tone="muted">{t('internationalTransfer.body')}</Text>
         </Section>
       </Stack>

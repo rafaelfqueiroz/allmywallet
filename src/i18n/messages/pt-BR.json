@@ -391,6 +391,7 @@
   "preferences": {
     "title": "Preferências",
     "description": "Ajustes que valem só para a sua conta.",
+    "sectionTitle": "Seus ajustes",
     "signedOut": "Entre na sua conta para ajustar preferências."
   },
   "parameters": {
@@ -538,6 +539,7 @@
     },
     "list": {
       "caption": "Minhas carteiras, com objetivo, quantidade de ativos e data da última alteração",
+      "title": "{count, plural, one {# carteira} other {# carteiras}}",
       "noun": "carteiras",
       "search": "Buscar carteira",
       "columnWallet": "Carteira",
@@ -765,6 +767,7 @@
     "detailBack": "Histórico de importações",
     "history": {
       "caption": "Histórico de importações, com tipo de extrato, data de envio, situação e linhas lidas",
+      "title": "{count, plural, one {# importação} other {# importações}}",
       "columnType": "Tipo",
       "columnSentAt": "Enviado em",
       "columnStatus": "Situação",
@@ -938,6 +941,7 @@
     "modifiedExplanation": "Esta transação foi importada e depois corrigida manualmente. Uma nova importação do mesmo extrato não substitui a correção.",
     "table": {
       "caption": "Transações",
+      "title": "{count, plural, one {# transação} other {# transações}}",
       "date": "Data",
       "asset": "Ativo",
       "type": "Tipo",
@@ -1742,6 +1746,7 @@
     "signedOut": "Entre na sua conta para informar a taxa contratada.",
     "assetLabel": "{code} — {name}",
     "why": "Não conseguimos ler o indexador ou a taxa contratada deste ativo no extrato importado. Até você informar, ele é avaliado pelo custo de aquisição, não por um valor de mercado — até lá, o seu patrimônio aparece subestimado.",
+    "termsTitle": "Indexador e taxa",
     "indexerLabel": "Indexador",
     "indexerOptions": {
       "cdi_percent": "% do CDI",

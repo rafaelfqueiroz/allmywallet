@@ -41,7 +41,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -730,43 +729,42 @@ function DataTableView<TData>({
             </Button>
           </div>
         )}
-        <ul aria-labelledby={captionId} className="flex flex-col gap-2">
+        <ul aria-labelledby={captionId} className="flex flex-col divide-y">
           {rows.map((row) => (
-            <li key={row.id}>
-              <Card size="sm">
-                <CardContent>
-                  {/*
-                   * Deliberately plain elements rather than Stack/Cluster: HTML
-                   * allows a `dt`/`dd` pair to sit inside *one* wrapping div
-                   * under the `dl`, and nesting two layout components produces
-                   * two — which axe rejects as `dlitem`, correctly, because it
-                   * breaks the term/definition association a screen reader
-                   * relies on.
-                   */}
-                  <dl className="flex flex-col gap-1">
-                    {row.getVisibleCells().map((cell) => (
-                      <div
-                        key={cell.id}
-                        className="flex flex-wrap items-baseline justify-between gap-2"
-                      >
-                        <dt className="text-xs text-muted-foreground">
-                          {headerLabels.get(cell.column.id)}
-                        </dt>
-                        <dd className="text-sm">
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                </CardContent>
-              </Card>
+            <li key={row.id} className="py-3">
+              {/*
+               * Deliberately plain elements rather than Stack/Cluster: HTML
+               * allows a `dt`/`dd` pair to sit inside *one* wrapping div
+               * under the `dl`, and nesting two layout components produces
+               * two — which axe rejects as `dlitem`, correctly, because it
+               * breaks the term/definition association a screen reader
+               * relies on.
+               */}
+              <dl className="flex flex-col gap-1">
+                {row.getVisibleCells().map((cell) => (
+                  <div
+                    key={cell.id}
+                    className="flex flex-wrap items-baseline justify-between gap-2"
+                  >
+                    <dt className="text-xs text-muted-foreground">
+                      {headerLabels.get(cell.column.id)}
+                    </dt>
+                    <dd className="text-sm">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
             </li>
           ))}
         </ul>
       </div>
 
       {pagination && (
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm">
+        <footer
+          data-slot="table-footer"
+          className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm group-[[data-variant=panel]]/panel:-mx-4 group-[[data-variant=panel]]/panel:-mb-4 group-[[data-variant=panel]]/panel:border-t group-[[data-variant=panel]]/panel:px-4 group-[[data-variant=panel]]/panel:py-3"
+        >
           <p className="text-muted-foreground">
             {itemNoun
               ? t('summaryWithNoun', { from, to, total, noun: itemNoun })
@@ -851,7 +849,7 @@ function DataTableView<TData>({
               ))}
             </NativeSelect>
           </div>
-        </div>
+        </footer>
       )}
     </div>
   );

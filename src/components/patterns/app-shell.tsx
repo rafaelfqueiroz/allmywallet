@@ -106,7 +106,7 @@ export function AppShell({
                   <Menu />
                 </Button>
               </DialogTrigger>
-              <DialogContent className="inset-y-0 top-0 left-0 flex h-dvh max-w-72 translate-x-0 translate-y-0 flex-col rounded-none rounded-r-xl">
+              <DialogContent className="inset-y-0 top-0 left-0 flex h-dvh max-w-72 translate-x-0 translate-y-0 flex-col rounded-none rounded-r-lg">
                 <DialogTitle className="sr-only">{t('menu')}</DialogTitle>
                 <NavList collapsed={false} onNavigate={() => setDrawerOpen(false)} />
               </DialogContent>

@@ -6,7 +6,6 @@ import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -73,59 +72,57 @@ export function DeletionDownstreamImpact({ rows }: DeletionDownstreamImpactProps
                   institution: row.institutionLabel,
                 });
           return (
-            <Card key={row.key} size="sm">
-              <CardContent>
-                <Table>
-                  <TableCaption className="sr-only">{label}</TableCaption>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead scope="col">{label}</TableHead>
-                      <TableHead scope="col" className="text-right">
-                        {t('impactCurrent')}
-                      </TableHead>
-                      <TableHead scope="col" className="text-right">
-                        {t('impactProjected')}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell className="py-row">{t('impactQuantity')}</TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={row.currentPosition.quantity} kind="quantity" />
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={row.projectedPosition.quantity} kind="quantity" />
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
-                      <TableCell className="py-row text-right">
-                        <Cluster gap="sm" justify="end" align="baseline">
-                          <Money value={row.currentPosition.averageCost} />
-                          {marker(row.currentCostEstimated)}
-                        </Cluster>
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Cluster gap="sm" justify="end" align="baseline">
-                          <Money value={row.projectedPosition.averageCost} />
-                          {marker(row.projectedCostEstimated)}
-                        </Cluster>
-                      </TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell className="py-row">{tTable('total')}</TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={row.currentPosition.totalCost} />
-                      </TableCell>
-                      <TableCell className="py-row text-right">
-                        <Money value={row.projectedPosition.totalCost} />
-                      </TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+            // SPEC-022 BR-022-36 — one table per position, straight in the
+            // panel: a card around each would be a panel inside a panel.
+            <Table key={row.key}>
+              <TableCaption className="sr-only">{label}</TableCaption>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">{label}</TableHead>
+                  <TableHead scope="col" className="text-right">
+                    {t('impactCurrent')}
+                  </TableHead>
+                  <TableHead scope="col" className="text-right">
+                    {t('impactProjected')}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="py-row">{t('impactQuantity')}</TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={row.currentPosition.quantity} kind="quantity" />
+                  </TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={row.projectedPosition.quantity} kind="quantity" />
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="py-row">{t('impactAverageCost')}</TableCell>
+                  <TableCell className="py-row text-right">
+                    <Cluster gap="sm" justify="end" align="baseline">
+                      <Money value={row.currentPosition.averageCost} />
+                      {marker(row.currentCostEstimated)}
+                    </Cluster>
+                  </TableCell>
+                  <TableCell className="py-row text-right">
+                    <Cluster gap="sm" justify="end" align="baseline">
+                      <Money value={row.projectedPosition.averageCost} />
+                      {marker(row.projectedCostEstimated)}
+                    </Cluster>
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="py-row">{tTable('total')}</TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={row.currentPosition.totalCost} />
+                  </TableCell>
+                  <TableCell className="py-row text-right">
+                    <Money value={row.projectedPosition.totalCost} />
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
           );
         })}
       </Stack>

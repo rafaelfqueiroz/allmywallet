@@ -120,9 +120,63 @@ describe('Section', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Carteiras' })).toBeInTheDocument();
   });
 
+  // SPEC-022 BR-022-36: every block of content sits in a panel with a header.
+  it('is a bordered 8px panel whose header holds the title and actions', () => {
+    const { container } = render(
+      <Section title="Carteiras" actions={<button type="button">Nova</button>}>
+        conteúdo
+      </Section>,
+    );
+    const section = container.querySelector('[data-slot=section]')!;
+    expect(section).toHaveAttribute('data-variant', 'panel');
+    expect(section).toHaveClass('rounded-lg', 'bg-card', 'ring-1');
+    const header = section.querySelector('header')!;
+    expect(header).toHaveClass('border-b');
+    expect(header).toContainElement(screen.getByRole('heading', { name: 'Carteiras' }));
+    expect(header).toContainElement(screen.getByRole('button', { name: 'Nova' }));
+  });
+
+  it('renders a footer under a hairline only when given one', () => {
+    const { container, rerender } = render(<Section title="Carteiras">conteúdo</Section>);
+    expect(container.querySelector('[data-slot=section-footer]')).toBeNull();
+    rerender(
+      <Section title="Carteiras" footer={<a href="/x">Ver tudo</a>}>
+        conteúdo
+      </Section>,
+    );
+    const footer = container.querySelector('[data-slot=section-footer]')!;
+    expect(footer).toHaveClass('border-t');
+    expect(footer).toContainElement(screen.getByRole('link', { name: 'Ver tudo' }));
+  });
+
+  it('leaves out the body when every child is conditional and absent', () => {
+    const { container } = render(
+      <Section title="Lote" footer="Rodapé">
+        {false}
+        {null}
+      </Section>,
+    );
+    const section = container.querySelector('[data-slot=section]')!;
+    expect([...section.children].map((child) => child.tagName)).toEqual(['HEADER', 'FOOTER']);
+  });
+
+  it('draws no panel in the plain variant, for a section already inside one', () => {
+    const { container } = render(
+      <Section variant="plain" title="Carteiras" footer="ignorado">
+        conteúdo
+      </Section>,
+    );
+    const section = container.querySelector('[data-slot=section]')!;
+    expect(section).toHaveAttribute('data-variant', 'plain');
+    expect(section).not.toHaveClass('rounded-lg');
+    expect(section).not.toHaveClass('ring-1');
+    expect(section.querySelector('header')).toBeNull();
+    expect(screen.getByRole('heading', { level: 2, name: 'Carteiras' })).toBeInTheDocument();
+  });
+
   it('has no axe violations', async () => {
     const { container } = render(
-      <Section title="Carteiras" description="Agrupe por objetivo.">
+      <Section title="Carteiras" description="Agrupe por objetivo." footer="Rodapé">
         conteúdo
       </Section>,
     );

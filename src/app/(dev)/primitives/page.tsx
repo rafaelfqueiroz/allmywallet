@@ -22,7 +22,6 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { NativeSelect } from '@/components/ui/native-select';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   Select,
   SelectContent,
@@ -242,38 +241,36 @@ export default async function PrimitivesPage() {
         <DemoTable />
       </Section>
 
-      {/* Controls on a card, where their hover fills land on the card layer.
+      {/* Controls in a panel, where their hover fills land on the card layer.
        * tests/e2e/screens.spec.ts hovers each and runs axe on the settled
-       * state — the review of #218 found a placeholder at 4.28:1 only there. */}
+       * state — the review of #218 found a placeholder at 4.28:1 only there.
+       * The panel is the card layer (SPEC-022 BR-022-36), so no card inside. */}
       <Section title={vocabulary('precoMedio')}>
-        <Card>
-          <CardContent>
-            <Cluster gap="md" align="end">
-              <Select>
-                <SelectTrigger aria-label={vocabulary('composicao')} data-hover-subject="">
-                  <SelectValue placeholder={vocabulary('patrimonio')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="patrimonio">{vocabulary('patrimonio')}</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input
-                aria-label={vocabulary('proventos')}
-                placeholder={vocabulary('proventos')}
-                data-hover-subject=""
-              />
-              <NativeSelect aria-label={vocabulary('rentabilidade')} data-hover-subject="">
-                <option>{vocabulary('rentabilidade')}</option>
-              </NativeSelect>
-              <Button variant="outline" data-hover-subject="">
-                {t('save')}
-              </Button>
-            </Cluster>
-          </CardContent>
-        </Card>
+        <Cluster gap="md" align="end">
+          <Select>
+            <SelectTrigger aria-label={vocabulary('composicao')} data-hover-subject="">
+              <SelectValue placeholder={vocabulary('patrimonio')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="patrimonio">{vocabulary('patrimonio')}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            aria-label={vocabulary('proventos')}
+            placeholder={vocabulary('proventos')}
+            data-hover-subject=""
+          />
+          <NativeSelect aria-label={vocabulary('rentabilidade')} data-hover-subject="">
+            <option>{vocabulary('rentabilidade')}</option>
+          </NativeSelect>
+          <Button variant="outline" data-hover-subject="">
+            {t('save')}
+          </Button>
+        </Cluster>
       </Section>
 
-      <Section title={vocabulary('rentabilidade')}>
+      {/* A group of figure cards: each card is the panel, so the heading is plain. */}
+      <Section variant="plain" title={vocabulary('rentabilidade')}>
         <Grid cols={4} gap="md">
           <StatCard
             label={vocabulary('patrimonio')}
@@ -291,7 +288,16 @@ export default async function PrimitivesPage() {
         </Grid>
       </Section>
 
-      <Section title={vocabulary('proventos')}>
+      {/* The panel anatomy (BR-022-36): title and action, body, footer. */}
+      <Section
+        title={vocabulary('proventos')}
+        actions={
+          <Button variant="outline" size="sm">
+            {t('save')}
+          </Button>
+        }
+        footer={t('loading')}
+      >
         <Table>
           <TableCaption className="sr-only">{vocabulary('proventos')}</TableCaption>
           <TableHeader>

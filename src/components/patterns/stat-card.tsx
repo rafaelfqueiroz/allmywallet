@@ -26,11 +26,31 @@ export type StatCardProps = Omit<React.ComponentProps<typeof Card>, 'title'> & {
    * links on one line whatever each hint's length.
    */
   link?: CardLinkTarget;
+  /**
+   * SPEC-022 BR-022-36 — a figure **inside** a panel: a muted tile with no
+   * border of its own, because a card inside a panel is the nested panel the
+   * frames never draw. A goal's three figures are this; the Dashboard's
+   * headline row, which sits on the page, is not.
+   */
+  inset?: boolean;
 };
 
-export function StatCard({ label, value, hint, link, className, ...props }: StatCardProps) {
+export function StatCard({
+  label,
+  value,
+  hint,
+  link,
+  inset = false,
+  className,
+  ...props
+}: StatCardProps) {
   return (
-    <Card data-slot="stat-card" className={cn('h-full', className)} {...props}>
+    <Card
+      data-slot="stat-card"
+      data-inset={inset || undefined}
+      className={cn('h-full', inset && 'bg-muted/50 ring-0', className)}
+      {...props}
+    >
       <CardContent className="flex flex-1 flex-col gap-4">
         <dl className="flex-1">
           <Stack gap="xs">

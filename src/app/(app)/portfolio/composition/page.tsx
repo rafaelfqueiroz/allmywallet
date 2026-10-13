@@ -40,6 +40,7 @@ import { Cluster } from '@/components/layout/cluster';
 import { List, ListItem } from '@/components/layout/list';
 import { ChartLegend } from '@/components/charts/chart-legend';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
 import {
@@ -168,15 +169,17 @@ export default async function CompositionPage({ searchParams }: PageProps) {
       ) : (
         <Stack gap="lg">
           <Section title={tc('groups.title')} description={tc('groups.description')}>
-            <Stack gap="md">
-              <ChartOfShares report={report} names={query.value.groupNames} labelOf={labelOf} />
-              <GroupsTable
-                report={report}
-                groups={query.value.report.groups}
-                names={query.value.groupNames}
-                labelOf={labelOf}
-              />
-            </Stack>
+            <ChartOfShares report={report} names={query.value.groupNames} labelOf={labelOf} />
+            {/* SPEC-009 BR-009-12: grouped values also include gross fixed income. */}
+            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
+              <Note>{t('grossOfTax')}</Note>
+            )}
+            <GroupsTable
+              report={report}
+              groups={query.value.report.groups}
+              names={query.value.groupNames}
+              labelOf={labelOf}
+            />
           </Section>
 
           <Section title={tc('holdings.title')} description={tc('holdings.description')}>
@@ -184,6 +187,12 @@ export default async function CompositionPage({ searchParams }: PageProps) {
               rows={holdingRows(report.rows, watchStates, t, tc, tw, masked)}
               labels={holdingsTableLabels(report, t, tc, tCommon)}
             />
+            {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
+                this product deducts tax, and the figures must say so where
+                they are read: in the panel that lists them (BR-022-36). */}
+            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
+              <Note>{t('grossOfTax')}</Note>
+            )}
           </Section>
 
           {/*
@@ -218,13 +227,6 @@ export default async function CompositionPage({ searchParams }: PageProps) {
               </List>
             )}
           </Section>
-
-          {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
-              this product deducts tax, and the figure above must say so where
-              it is read. */}
-          {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
-            <Note>{t('grossOfTax')}</Note>
-          )}
         </Stack>
       )}
     </PortfolioFrame>
@@ -258,18 +260,25 @@ async function GroupingForm({
       key={`${walletId ?? ''}|${grouping}`}
     >
       {walletId !== null && <input type="hidden" name={PARAM.wallet} value={walletId} />}
-      <Cluster gap="sm" align="end">
-        <Field id="composition-grouping" label={t('grouping.label')} width="lg">
-          <NativeSelect name={PARAM.grouping} defaultValue={grouping}>
-            {GROUPINGS.map((dimension) => (
-              <option key={dimension} value={dimension}>
-                {t(`grouping.${dimension}`)}
-              </option>
-            ))}
-          </NativeSelect>
-        </Field>
-        <Button type="submit">{t('apply')}</Button>
-      </Cluster>
+      {/* SPEC-022 BR-022-36 — a controls bar on the card layer, like
+          Relatórios' `Controls`: it stays available on an empty scope, where
+          there is no panel to carry it. */}
+      <Card>
+        <CardContent>
+          <Cluster gap="sm" align="end">
+            <Field id="composition-grouping" label={t('grouping.label')} width="lg">
+              <NativeSelect name={PARAM.grouping} defaultValue={grouping}>
+                {GROUPINGS.map((dimension) => (
+                  <option key={dimension} value={dimension}>
+                    {t(`grouping.${dimension}`)}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Button type="submit">{t('apply')}</Button>
+          </Cluster>
+        </CardContent>
+      </Card>
     </form>
   );
 }

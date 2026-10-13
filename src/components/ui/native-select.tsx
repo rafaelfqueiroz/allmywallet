@@ -39,7 +39,7 @@ export function NativeSelect({ className, ...props }: React.ComponentProps<'sele
       <select
         data-slot="native-select"
         className={cn(
-          'peer h-8 w-full min-w-0 appearance-none rounded-lg border border-input bg-transparent py-1 pr-8 pl-2.5 text-base leading-5 text-ellipsis outline-none md:text-sm',
+          'peer h-8 w-full min-w-0 appearance-none rounded-md border border-input bg-transparent py-1 pr-8 pl-2.5 text-base leading-5 text-ellipsis outline-none md:text-sm',
           'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
           'disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-50',
           'aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20',

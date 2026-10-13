@@ -6,8 +6,8 @@ import { supplyContractTermsAction } from '@/app/(app)/fixed-income/actions';
 import { ContractTermsForm } from '@/app/(app)/fixed-income/_components/ContractTermsForm';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
+import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Stack } from '@/components/layout/stack';
 import { Text } from '@/components/ui/text';
 
 /**
@@ -56,7 +56,8 @@ export default async function FixedIncomeContractPage({ params }: PageProps) {
       title={t('title')}
       description={t('assetLabel', { code: form.assetCode, name: form.assetName })}
     >
-      <Stack gap="md">
+      {/* SPEC-022 BR-022-36 — the form in a panel. */}
+      <Section title={t('termsTitle')}>
         {/* BR-020-19 — plainly: this contract cannot be valued, so portfolio
             value is understated until the rate is supplied. Said here again,
             not only in the dashboard's queue item, because a user can land on
@@ -71,7 +72,7 @@ export default async function FixedIncomeContractPage({ params }: PageProps) {
           ratePercent={form.ratePercent}
           action={supplyContractTermsAction}
         />
-      </Stack>
+      </Section>
     </PageShell>
   );
 }

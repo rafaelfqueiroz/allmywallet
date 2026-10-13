@@ -304,91 +304,103 @@ export default async function ImportBatchDetailPage({
 
   return (
     <SettingsFrame>
-      <Stack gap="sm">
-        <div>
-          <Button asChild variant="ghost" size="sm">
-            <Link href={IMPORT_HISTORY_PATH}>
-              <ArrowLeft aria-hidden />
-              {t('detailBack')}
-            </Link>
-          </Button>
-        </div>
-        <Cluster justify="between" gap="sm">
-          <h2 className="text-xl font-medium">
-            {typeDetected(batch) ? t(`extractType.${batch.source}`) : t('extractTypeUnknown')}
-          </h2>
-          {/* BR-022-31 — the same semantic badge as Histórico. */}
+      <div>
+        <Button asChild variant="ghost" size="sm">
+          <Link href={IMPORT_HISTORY_PATH}>
+            <ArrowLeft aria-hidden />
+            {t('detailBack')}
+          </Link>
+        </Button>
+      </div>
+
+      {/* SPEC-022 BR-022-36 — the batch itself is a panel: its type as the
+          title, its status beside it, the counts inside, and commit/cancel in
+          the footer. */}
+      <Section
+        title={typeDetected(batch) ? t(`extractType.${batch.source}`) : t('extractTypeUnknown')}
+        description={t('uploadedAt', { date: formatDateTime(batch.uploadedAt) })}
+        // BR-022-31 — the same semantic badge as Histórico.
+        actions={
           <Badge dot variant={BATCH_STATUS_VARIANT[batch.status]}>
             {t(`status.${batch.status}`)}
           </Badge>
-        </Cluster>
-        <Text size="sm" tone="muted">
-          {t('uploadedAt', { date: formatDateTime(batch.uploadedAt) })}
-        </Text>
-      </Stack>
+        }
+        footer={
+          canCommit || canCancel ? (
+            <Cluster gap="sm">
+              {canCommit && (
+                <form action={commitBatchAction}>
+                  <input type="hidden" name="batchId" value={batch.id} />
+                  <Cluster gap="sm" align="end">
+                    {/* SPEC-005 BR-005-22 (amended, #108): B3's Posição states no
+                        reference date, so the user confirms the one reconciliation
+                        compares against. */}
+                    {batch.source === 'b3_posicao' && (
+                      <Field
+                        id="commit-as-of"
+                        label={t('asOf.label')}
+                        hint={t('asOf.hint')}
+                        width="md"
+                      >
+                        <Input type="date" name="asOf" defaultValue={today} max={today} required />
+                      </Field>
+                    )}
+                    <Button type="submit">{t('commit')}</Button>
+                  </Cluster>
+                </form>
+              )}
+              {canCancel && (
+                <form action={cancelBatchAction}>
+                  <input type="hidden" name="batchId" value={batch.id} />
+                  <Button type="submit" variant="destructive">
+                    {t('cancel')}
+                  </Button>
+                </form>
+              )}
+            </Cluster>
+          ) : undefined
+        }
+      >
+        {/* #63 / BR-005-05: a batch that failed to parse names what went wrong
+            — AC-005-05's "specific, actionable error", rendered here instead of
+            leaving the batch looking merely stalled. Reuses `EmptyState`
+            (`role="status"`) rather than inventing a dedicated error pattern. */}
+        {batch.status === 'failed' && (
+          <EmptyState
+            title={t('failure.title')}
+            description={
+              <>
+                {batch.failureCode && t(`failure.reasons.${batch.failureCode}`)}{' '}
+                {t('failure.retry')}
+              </>
+            }
+          />
+        )}
 
-      {/* #63 / BR-005-05: a batch that failed to parse names what went wrong
-          — AC-005-05's "specific, actionable error", rendered here instead of
-          leaving the batch looking merely stalled. Reuses `EmptyState`
-          (`role="status"`) rather than inventing a dedicated error pattern. */}
-      {batch.status === 'failed' && (
-        <EmptyState
-          title={t('failure.title')}
-          description={
-            <>
-              {batch.failureCode && t(`failure.reasons.${batch.failureCode}`)} {t('failure.retry')}
-            </>
-          }
-        />
-      )}
-
-      {batch.rowCounts && (
-        <Grid cols={4} gap="md">
-          <StatCard label={t('countRead')} value={batch.rowCounts.read} />
-          <StatCard label={t('countNew')} value={batch.rowCounts.new} />
-          <StatCard label={t('countDuplicates')} value={batch.rowCounts.duplicates} />
-          <StatCard label={t('countNeedsAttention')} value={batch.rowCounts.needsAttention} />
-          {batch.rowCounts.ignored > 0 && (
-            <StatCard label={t('countIgnored')} value={batch.rowCounts.ignored} />
-          )}
-        </Grid>
-      )}
-      {/* SPEC-005 BR-005-10 (#117): staging classifies without replaying, so
-          the preview says what its counts cannot know yet. */}
-      {batch.rowCounts && canCommit && batch.source !== 'b3_posicao' && (
-        <Text size="xs" tone="muted">
-          {t('preReplayHint')}
-        </Text>
-      )}
-
-      {(canCommit || canCancel) && (
-        <Cluster gap="sm">
-          {canCommit && (
-            <form action={commitBatchAction}>
-              <input type="hidden" name="batchId" value={batch.id} />
-              <Cluster gap="sm" align="end">
-                {/* SPEC-005 BR-005-22 (amended, #108): B3's Posição states no
-                    reference date, so the user confirms the one reconciliation
-                    compares against. */}
-                {batch.source === 'b3_posicao' && (
-                  <Field id="commit-as-of" label={t('asOf.label')} hint={t('asOf.hint')} width="md">
-                    <Input type="date" name="asOf" defaultValue={today} max={today} required />
-                  </Field>
-                )}
-                <Button type="submit">{t('commit')}</Button>
-              </Cluster>
-            </form>
-          )}
-          {canCancel && (
-            <form action={cancelBatchAction}>
-              <input type="hidden" name="batchId" value={batch.id} />
-              <Button type="submit" variant="destructive">
-                {t('cancel')}
-              </Button>
-            </form>
-          )}
-        </Cluster>
-      )}
+        {/* BR-022-36 — figures inside a panel are inset, not nested cards. */}
+        {batch.rowCounts && (
+          <Grid cols={4} gap="md">
+            <StatCard inset label={t('countRead')} value={batch.rowCounts.read} />
+            <StatCard inset label={t('countNew')} value={batch.rowCounts.new} />
+            <StatCard inset label={t('countDuplicates')} value={batch.rowCounts.duplicates} />
+            <StatCard
+              inset
+              label={t('countNeedsAttention')}
+              value={batch.rowCounts.needsAttention}
+            />
+            {batch.rowCounts.ignored > 0 && (
+              <StatCard inset label={t('countIgnored')} value={batch.rowCounts.ignored} />
+            )}
+          </Grid>
+        )}
+        {/* SPEC-005 BR-005-10 (#117): staging classifies without replaying, so
+            the preview says what its counts cannot know yet. */}
+        {batch.rowCounts && canCommit && batch.source !== 'b3_posicao' && (
+          <Text size="xs" tone="muted">
+            {t('preReplayHint')}
+          </Text>
+        )}
+      </Section>
 
       {/* SPEC-010 BR-010-15 — auto-allocation is reported, never silent. */}
       {summary !== null && summary.assets.length > 0 && (
