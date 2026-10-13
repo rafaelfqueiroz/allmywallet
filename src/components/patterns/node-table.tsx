@@ -86,6 +86,20 @@ export interface NodeTableProps {
     readonly label: ReactNode;
     readonly cells: Readonly<Record<string, ReactNode>>;
   };
+  /**
+   * Server-paged (DS-66): `rows` is **one page**, already cut by the server from
+   * the URL's `<prefix>_page`/`<prefix>_size` (`parseTableUrlState`, with this
+   * table's `paramPrefix` and no sortable column), and `total` counts them all.
+   * Page and size links navigate, so the server decides which rows to render —
+   * the way for a list whose rows hold server-rendered forms that must not be
+   * rendered for a page nobody is on. Every row needs an `id`. Sorting is off:
+   * the page's rows come in the order the server holds them.
+   */
+  readonly server?: { readonly total: number };
+  /** `false` for rows that hold forms: see `DataTable`'s `cards`. */
+  readonly cards?: boolean;
+  /** Server mode: the fragment the page links end in. */
+  readonly linkHash?: string;
 }
 
 export function NodeTable({
@@ -99,9 +113,13 @@ export function NodeTable({
   empty,
   pagination,
   totals,
+  server,
+  cards,
+  linkHash,
 }: NodeTableProps) {
   const t = useTranslations('cellTable');
-  const sortable = columns.some((column) => column.sortable === true);
+  // A server-paged page arrives in the server's order; no header re-sorts it.
+  const sortable = server === undefined && columns.some((column) => column.sortable === true);
 
   const defs = useMemo<ColumnDef<NodeRow, unknown>[]>(
     () =>
@@ -113,7 +131,7 @@ export function NodeTable({
           header: column.srOnlyHeader
             ? () => <span className="sr-only">{column.header}</span>
             : column.header,
-          enableSorting: column.sortable === true,
+          enableSorting: server === undefined && column.sortable === true,
           meta: {
             kind: column.kind,
             ...(column.width !== undefined ? { width: column.width } : {}),
@@ -148,6 +166,20 @@ export function NodeTable({
       {...(paramPrefix !== undefined ? { paramPrefix } : {})}
       {...(pagination !== undefined ? { pagination } : {})}
       {...(totals !== undefined ? { totals } : {})}
+      {...(server !== undefined
+        ? {
+            server: {
+              total: server.total,
+              rowId: (row: NodeRow) => {
+                if (row.id === undefined)
+                  throw new Error('A server-paged NodeTable row needs an id');
+                return row.id;
+              },
+            },
+          }
+        : {})}
+      {...(cards !== undefined ? { cards } : {})}
+      {...(linkHash !== undefined ? { linkHash } : {})}
       {...(empty !== undefined ? { empty } : {})}
       itemNoun={noun}
       rowAnchor={(row) => row.anchor}

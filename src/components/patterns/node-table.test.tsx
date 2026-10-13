@@ -257,3 +257,96 @@ describe('NodeTable — deep links to a row (SPEC-022 BR-022-07)', () => {
     expect(container.querySelector('[data-linked]')).toBeNull();
   });
 });
+
+/**
+ * SPEC-022 BR-022-18, DS-66 (#237) — the import batch's row tables: server-paged
+ * pages of rows whose cells hold forms, rendered once.
+ */
+describe('NodeTable — server-paged, without a card copy', () => {
+  const formColumns: NodeColumn[] = [
+    { id: 'asset', header: 'Ativo', kind: 'text' },
+    { id: 'action', header: 'Ação', kind: 'control' },
+  ];
+
+  /** One page of the batch's rows: a form in each, as the page renders them. */
+  function page(from: number, count: number): NodeRow[] {
+    return Array.from({ length: count }, (_, index) => {
+      const code = `ATV${String(from + index).padStart(2, '0')}`;
+      return {
+        id: code,
+        cells: {
+          asset: code,
+          action: (
+            <form>
+              <label htmlFor={`classify-${code}`}>Classificar como</label>
+              <input id={`classify-${code}`} name="type" />
+              <button type="submit">Classificar</button>
+            </form>
+          ),
+        },
+      };
+    });
+  }
+
+  function Server({ size = '10', pageNumber = '2' }: { size?: string; pageNumber?: string }) {
+    nav.search = `atencao_page=${pageNumber}&atencao_size=${size}&resumo_page=3`;
+    return (
+      <NodeTable
+        columns={formColumns}
+        rows={page(11, 10)}
+        caption="Precisa de atenção"
+        noun="linhas"
+        paramPrefix="atencao"
+        server={{ total: 60 }}
+        cards={false}
+        linkHash="attention"
+      />
+    );
+  }
+
+  it('counts the whole batch, not the page it was handed', () => {
+    render(<Server />);
+    expect(screen.getByText('Mostrando 11–20 de 60 linhas')).toBeInTheDocument();
+  });
+
+  it('renders a form once: no hidden copy repeats its ids or its field names', () => {
+    const { container } = render(<Server />);
+    expect(container.querySelectorAll('form')).toHaveLength(10);
+    expect(container.querySelectorAll('[id="classify-ATV11"]')).toHaveLength(1);
+    expect(container.querySelector('[data-slot="data-table"] ul')).toBeNull();
+    // Both the label and its input are reachable by name: the label points at the right input.
+    expect(screen.getAllByLabelText('Classificar como')).toHaveLength(10);
+  });
+
+  it('pages with links that keep this table’s prefix, the other tables’ places, and end at the table', () => {
+    render(<Server />);
+    const pager = screen.getByRole('navigation', { name: 'Paginação' });
+    const next = within(pager).getByRole('link', { name: 'Próxima página' });
+    expect(next).toHaveAttribute('href', '/settings/watch?atencao_page=3&resumo_page=3#attention');
+    // Back to page 1 drops the default, as every table does; the other table stays.
+    const first = within(pager).getByRole('link', { name: 'Página 1' });
+    expect(first).toHaveAttribute('href', '/settings/watch?resumo_page=3#attention');
+  });
+
+  it('offers 10, 25 and 50, and shows the size the URL holds', () => {
+    render(<Server size="25" />);
+    const select = screen.getByLabelText('Itens por página');
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['10', '25', '50']);
+    expect(select).toHaveValue('25');
+  });
+
+  it('has no sort control: the page arrives in the server’s order', () => {
+    render(<Server />);
+    expect(screen.queryByRole('button', { name: /Ordenar por/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Ordenar por/ })).toBeNull();
+  });
+
+  it('has no axe violations with forms in the cells', async () => {
+    const { container } = render(<Server />);
+    expect(await audit(container)).toHaveNoViolations();
+  });
+});

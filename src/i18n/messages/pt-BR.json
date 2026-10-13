@@ -705,6 +705,7 @@
       }
     },
     "reconciliationTitle": "Reconciliação com a posição da B3",
+    "reconciliationNoun": "divergências",
     "reconciliationStatus": {
       "reconciled": "Sem divergências",
       "discrepancies_found": "Divergências encontradas"
@@ -786,7 +787,7 @@
       "columnImported": "Quantidade importada",
       "columnWallets": "Carteiras",
       "columnAssign": "Atribuir",
-      "pageSummary": "Página {page} de {pages} · {total} ativo(s)"
+      "noun": "ativos"
     },
     "fileHint": "Você pode enviar os três extratos de uma vez, ou um de cada vez — a ordem não importa.",
     "uploading": "Enviando…",
@@ -825,12 +826,7 @@
       "columnDate": "Data",
       "columnDetail": "Motivo",
       "columnAction": "Ação",
-      "pageSummary": "Página {page} de {pages} · {total} linha(s)",
-      "pagination": {
-        "summary": "Paginação de O que esta importação mudou",
-        "attention": "Paginação de Precisa de atenção",
-        "ignored": "Paginação de Ignoradas"
-      }
+      "noun": "linhas"
     }
   },
   "reports": {
@@ -994,12 +990,6 @@
       "sortAscending": "Ordem crescente",
       "sortDescending": "Ordem decrescente",
       "noun": "transações"
-    },
-    "pagination": {
-      "label": "Paginação da lista de transações",
-      "summary": "Página {page} de {pages} · {total} transações",
-      "previous": "Anterior",
-      "next": "Próxima"
     },
     "export": {
       "csv": "Exportar CSV"

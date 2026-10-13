@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react';
 import type { ImportRow } from '@/core/ingestion/ports';
 import { isResolvedSubscriptionExercise } from '@/core/ingestion/resolved-subscription-exercise';
-import { RowCells } from '@/app/(app)/settings/import/[batchId]/_components/RowCells';
-import { TableCell, TableRow } from '@/components/ui/table';
+import { rowIdentityCells } from '@/app/(app)/settings/import/[batchId]/_components/RowCells';
+import type { NodeRow } from '@/components/patterns/node-table';
 import { Text } from '@/components/ui/text';
 
 interface IgnoredRowProps {
@@ -14,26 +14,27 @@ interface IgnoredRowProps {
 
 /**
  * SPEC-005 BR-005-19/20d (#179): a consumed exercise remains visible without a
- * classify action. One row of the Ignoradas table (SPEC-022 BR-022-18, #211).
+ * classify action. One row of the Ignoradas table (SPEC-022 BR-022-18, #211),
+ * as the cells of a `NodeTable` row. The classify form is in the cell, once:
+ * the table renders without a card copy (`cards={false}`), so it is not doubled.
  */
-export function IgnoredRow({
+export function ignoredRow({
   row,
   committed,
   resolvedExerciseLabel,
   classifyForm,
-}: IgnoredRowProps) {
-  return (
-    <TableRow>
-      <RowCells row={row} />
-      <TableCell className="py-row align-top whitespace-normal">
-        {isResolvedSubscriptionExercise(row) ? (
-          <Text as="span" size="xs" tone="muted">
-            {resolvedExerciseLabel}
-          </Text>
-        ) : (
-          committed && classifyForm(row.id)
-        )}
-      </TableCell>
-    </TableRow>
-  );
+}: IgnoredRowProps): NodeRow {
+  return {
+    id: row.id,
+    cells: {
+      ...rowIdentityCells(row),
+      action: isResolvedSubscriptionExercise(row) ? (
+        <Text as="span" size="xs" tone="muted">
+          {resolvedExerciseLabel}
+        </Text>
+      ) : (
+        committed && classifyForm(row.id)
+      ),
+    },
+  };
 }

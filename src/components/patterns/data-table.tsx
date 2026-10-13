@@ -218,6 +218,23 @@ export type DataTableProps<TData> = {
    */
   rowAnchor?: (row: TData) => string | undefined;
   /**
+   * Render the table alone, without the card list that replaces it below `md`
+   * (DS-28). Default `true`. **For a table whose cells hold forms**: the two
+   * renderings are both in the DOM, so a form in a cell would exist twice —
+   * the same ids, the same field names — and a control in the hidden copy
+   * would still be submitted with a `form=` attribute. Single-rendered, each
+   * form exists once. The table then scrolls inside its own container on a
+   * phone, as any wide table does (SPEC-022 BR-022-18, #237 review F3: the
+   * import batch's row tables).
+   */
+  cards?: boolean;
+  /**
+   * Server mode: the fragment the page links end in (`#ignoradas`), so paging
+   * and the page-size select land back on this table rather than the top of a
+   * page that has several.
+   */
+  linkHash?: string;
+  /**
    * Server-paged mode: `data` is the current page, already sorted and filtered
    * by the server, and `total` is how many rows match in all. `filter` does
    * not apply — the search belongs to the query, so it lives in `toolbar`.
@@ -397,7 +414,8 @@ function ServerDataTable<TData>({
 
   const hrefFor: HrefFor = (next) => {
     const query = writeTableUrlState(searchParams.toString(), next, options);
-    return query === '' ? pathname : `${pathname}?${query}`;
+    const hash = props.linkHash === undefined ? '' : `#${props.linkHash}`;
+    return `${query === '' ? pathname : `${pathname}?${query}`}${hash}`;
   };
 
   return (
@@ -447,6 +465,7 @@ function DataTableView<TData>({
   totals,
   noResults,
   rowAnchor,
+  cards = true,
   server,
   className,
   state,
@@ -672,7 +691,7 @@ function DataTableView<TData>({
   return (
     <div data-slot="data-table" className={className}>
       {toolbarRow}
-      <div className="hidden md:block">
+      <div className={cards ? 'hidden md:block' : undefined}>
         {/* BR-022-18: widths come from the column definitions, never the cells. */}
         <Table fixed>
           <TableCaption className="sr-only">{caption}</TableCaption>
@@ -815,138 +834,145 @@ function DataTableView<TData>({
         </Table>
       </div>
 
-      <div className="md:hidden">
-        <p id={captionId} className="sr-only">
-          {caption}
-        </p>
+      {cards && (
+        <div className="md:hidden">
+          <p id={captionId} className="sr-only">
+            {caption}
+          </p>
 
-        {/*
-          DL-12 puts the rows in cards below `md`, which removes every column
-          header — and with them the only way to sort. A phone is where a
-          holdings list is *most* likely to be long enough to need it, so the
-          affordance is rebuilt rather than dropped: one native select for the
-          column, one button for the direction.
+          {/*
+            DL-12 puts the rows in cards below `md`, which removes every column
+            header — and with them the only way to sort. A phone is where a
+            holdings list is *most* likely to be long enough to need it, so the
+            affordance is rebuilt rather than dropped: one native select for the
+            column, one button for the direction.
 
-          Native controls on purpose. They are the sort control that works
-          before hydration finishes, with a screen reader, and with the
-          system's own picker on a phone — the same reasoning that makes the
-          report's period and scope a plain GET form.
-        */}
-        {sortable && sortControlLabels && (
-          <div className="mb-2 flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              {sortControlLabels.field}
-              <NativeSelect
-                className="w-auto text-foreground"
-                value={sorting[0]?.id ?? ''}
-                onChange={(event) =>
-                  onStateChange({
-                    ...state,
-                    sort: { id: event.target.value, desc: sorting[0]?.desc ?? true },
-                    page: 1,
-                  })
+            Native controls on purpose. They are the sort control that works
+            before hydration finishes, with a screen reader, and with the
+            system's own picker on a phone — the same reasoning that makes the
+            report's period and scope a plain GET form.
+          */}
+          {sortable && sortControlLabels && (
+            <div className="mb-2 flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                {sortControlLabels.field}
+                <NativeSelect
+                  className="w-auto text-foreground"
+                  value={sorting[0]?.id ?? ''}
+                  onChange={(event) =>
+                    onStateChange({
+                      ...state,
+                      sort: { id: event.target.value, desc: sorting[0]?.desc ?? true },
+                      page: 1,
+                    })
+                  }
+                >
+                  {table
+                    .getAllColumns()
+                    .filter((column) => canSortColumn(column.id, column.getCanSort()))
+                    .map((column) => (
+                      <option key={column.id} value={column.id}>
+                        {headerText(headerLabels.get(column.id))}
+                      </option>
+                    ))}
+                </NativeSelect>
+              </label>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label={
+                  sorting[0]?.desc === false
+                    ? sortControlLabels.ascending
+                    : sortControlLabels.descending
                 }
+                onClick={() => {
+                  const first = sorting[0];
+                  if (first === undefined) return;
+                  onStateChange({ ...state, sort: { id: first.id, desc: !first.desc }, page: 1 });
+                }}
               >
-                {table
-                  .getAllColumns()
-                  .filter((column) => canSortColumn(column.id, column.getCanSort()))
-                  .map((column) => (
-                    <option key={column.id} value={column.id}>
-                      {headerText(headerLabels.get(column.id))}
-                    </option>
-                  ))}
-              </NativeSelect>
-            </label>
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label={
-                sorting[0]?.desc === false
-                  ? sortControlLabels.ascending
-                  : sortControlLabels.descending
-              }
-              onClick={() => {
-                const first = sorting[0];
-                if (first === undefined) return;
-                onStateChange({ ...state, sort: { id: first.id, desc: !first.desc }, page: 1 });
-              }}
-            >
-              {sorting[0]?.desc === false ? (
-                <ArrowUp aria-hidden="true" className="size-3.5" />
-              ) : (
-                <ArrowDown aria-hidden="true" className="size-3.5" />
-              )}
-            </Button>
-          </div>
-        )}
-        <ul aria-labelledby={captionId} className="flex flex-col divide-y">
-          {rows.map((row) => {
-            const anchor = rowAnchor?.(row.original);
-            return (
-              <li
-                key={row.id}
-                {...(anchor !== undefined
-                  ? { id: `${anchor}-card`, ...(linked === anchor ? { 'data-linked': true } : {}) }
-                  : {})}
-                className={cn(
-                  'py-3',
-                  anchor !== undefined &&
-                    'scroll-mt-20 data-linked:outline-2 data-linked:-outline-offset-2 data-linked:outline-ring',
+                {sorting[0]?.desc === false ? (
+                  <ArrowUp aria-hidden="true" className="size-3.5" />
+                ) : (
+                  <ArrowDown aria-hidden="true" className="size-3.5" />
                 )}
-              >
-                {/*
-                 * Deliberately plain elements rather than Stack/Cluster: HTML
-                 * allows a `dt`/`dd` pair to sit inside *one* wrapping div
-                 * under the `dl`, and nesting two layout components produces
-                 * two — which axe rejects as `dlitem`, correctly, because it
-                 * breaks the term/definition association a screen reader
-                 * relies on.
-                 */}
-                <dl className="flex flex-col gap-1">
-                  {row.getVisibleCells().map((cell) => (
+              </Button>
+            </div>
+          )}
+          <ul aria-labelledby={captionId} className="flex flex-col divide-y">
+            {rows.map((row) => {
+              const anchor = rowAnchor?.(row.original);
+              return (
+                <li
+                  key={row.id}
+                  {...(anchor !== undefined
+                    ? {
+                        id: `${anchor}-card`,
+                        ...(linked === anchor ? { 'data-linked': true } : {}),
+                      }
+                    : {})}
+                  className={cn(
+                    'py-3',
+                    anchor !== undefined &&
+                      'scroll-mt-20 data-linked:outline-2 data-linked:-outline-offset-2 data-linked:outline-ring',
+                  )}
+                >
+                  {/*
+                   * Deliberately plain elements rather than Stack/Cluster: HTML
+                   * allows a `dt`/`dd` pair to sit inside *one* wrapping div
+                   * under the `dl`, and nesting two layout components produces
+                   * two — which axe rejects as `dlitem`, correctly, because it
+                   * breaks the term/definition association a screen reader
+                   * relies on.
+                   */}
+                  <dl className="flex flex-col gap-1">
+                    {row.getVisibleCells().map((cell) => (
+                      <div
+                        key={cell.id}
+                        className="flex flex-wrap items-baseline justify-between gap-2"
+                      >
+                        <dt className="text-xs text-muted-foreground">
+                          {headerLabels.get(cell.column.id)}
+                        </dt>
+                        <dd className="min-w-0 text-sm break-words">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </li>
+              );
+            })}
+          </ul>
+          {/*
+           * Outside the list: a total sums the records, it is not one of them, so
+           * it neither counts as an item nor sits among them for a screen reader.
+           */}
+          {totals && (
+            <div className="border-t py-3">
+              <p className="mb-1 text-sm font-medium">{totals.label}</p>
+              <dl className="flex flex-col gap-1">
+                {table
+                  .getVisibleLeafColumns()
+                  .filter((column) => totals.cells[column.id] !== undefined)
+                  .map((column) => (
                     <div
-                      key={cell.id}
+                      key={column.id}
                       className="flex flex-wrap items-baseline justify-between gap-2"
                     >
                       <dt className="text-xs text-muted-foreground">
-                        {headerLabels.get(cell.column.id)}
+                        {headerLabels.get(column.id)}
                       </dt>
-                      <dd className="min-w-0 text-sm break-words">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      <dd className="min-w-0 text-sm font-medium break-words">
+                        {totals.cells[column.id]}
                       </dd>
                     </div>
                   ))}
-                </dl>
-              </li>
-            );
-          })}
-        </ul>
-        {/*
-         * Outside the list: a total sums the records, it is not one of them, so
-         * it neither counts as an item nor sits among them for a screen reader.
-         */}
-        {totals && (
-          <div className="border-t py-3">
-            <p className="mb-1 text-sm font-medium">{totals.label}</p>
-            <dl className="flex flex-col gap-1">
-              {table
-                .getVisibleLeafColumns()
-                .filter((column) => totals.cells[column.id] !== undefined)
-                .map((column) => (
-                  <div
-                    key={column.id}
-                    className="flex flex-wrap items-baseline justify-between gap-2"
-                  >
-                    <dt className="text-xs text-muted-foreground">{headerLabels.get(column.id)}</dt>
-                    <dd className="min-w-0 text-sm font-medium break-words">
-                      {totals.cells[column.id]}
-                    </dd>
-                  </div>
-                ))}
-            </dl>
-          </div>
-        )}
-      </div>
+              </dl>
+            </div>
+          )}
+        </div>
+      )}
 
       {pagination && (
         <footer

@@ -22,9 +22,9 @@ function fullText(element: HTMLElement): string {
 
 /**
  * The elements inside a cell that truncate themselves: a line a cell marks
- * (`CellLabel`) and a badge.
+ * (`CellLabel`), a line carrying `truncate`, and a badge.
  */
-const TRUNCATING_LINES = '[data-cell-line], [data-slot="badge"]';
+const TRUNCATING_LINES = '[data-cell-line], .truncate, [data-slot="badge"]';
 
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]';
 

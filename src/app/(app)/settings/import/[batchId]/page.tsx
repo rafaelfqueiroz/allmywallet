@@ -20,17 +20,17 @@ import {
 } from '@/app/(app)/import/actions';
 import { loadImportBatchDetail } from '@/app/(app)/import/data';
 import { ClassifyForm } from '@/app/(app)/settings/import/[batchId]/_components/ClassifyForm';
-import { IgnoredRow } from '@/app/(app)/settings/import/[batchId]/_components/IgnoredRow';
-import { RowCells } from '@/app/(app)/settings/import/[batchId]/_components/RowCells';
+import { ignoredRow } from '@/app/(app)/settings/import/[batchId]/_components/IgnoredRow';
+import { OpenOnHash } from '@/app/(app)/settings/import/[batchId]/_components/OpenOnHash';
 import {
-  ROW_PAGE_PARAMS,
-  ROW_PAGE_SIZE,
+  rowIdentityCells,
+  rowIdentityColumns,
+} from '@/app/(app)/settings/import/[batchId]/_components/RowCells';
+import {
+  ROW_TABLE_PREFIX,
   rowPage,
-  rowPageHref,
-  type RowPage,
-  type RowTable,
+  rowTableAddressed,
 } from '@/app/(app)/settings/import/[batchId]/_components/row-pages';
-import { Pagination } from '@/app/(app)/transactions/_components/Pagination';
 import {
   SubscriptionOfferPanel,
   type SubscriptionOfferLabels,
@@ -38,7 +38,7 @@ import {
 import { corporateEventRefusalKey } from '@/app/(app)/settings/import/[batchId]/_components/corporate-event-refusal';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletOptions, walletName } from '@/app/(app)/import/wallet-options';
-import { IMPORT_HISTORY_PATH, importBatchPath } from '@/app/(app)/import/paths';
+import { IMPORT_HISTORY_PATH } from '@/app/(app)/import/paths';
 import {
   BATCH_STATUS_VARIANT,
   typeDetected,
@@ -63,15 +63,7 @@ import { MoneyMask } from '@/components/patterns/money-mask';
 import { Badge } from '@/components/ui/badge';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 
 /**
  * SPEC-005 BR-005-10/11/19/20/22..26 — the preview: accurate counts, the
@@ -83,8 +75,15 @@ import {
  * redirects here (BR-022-08). Not a tab, so it has its own header with the way
  * back. Its rows render as tables: a row is an asset, a movement and a date,
  * read across, and the decision about it sits at the end of the same line.
- * Each pages on the server, fifty rows at a time (`row-pages.ts`), so a file
- * of thousands of mirrored settlements is not one page of thousands of forms.
+ * Each is a server-paged `DataTable` (DS-66, through `NodeTable`): 10, 25 or 50
+ * rows a page, kept in the URL under a prefix of its own (`row-pages.ts`), so a
+ * file of thousands of mirrored settlements is not one page of thousands of
+ * forms. They render **without a card copy** (`cards={false}`): their cells hold
+ * the decision about the row — a classify form, an allocation form — and a
+ * second, hidden copy of each would repeat its ids and field names (DS-28). On
+ * a phone they scroll inside their panel, as the plain tables they replace did.
+ * Not sortable: the page holds the batch's rows in file order and there is no
+ * query to order them by.
  */
 export const dynamic = 'force-dynamic';
 
@@ -272,35 +271,166 @@ export default async function ImportBatchDetailPage({
   const canCancel = batch.status === 'pending' || batch.status === 'previewed';
   const today = new SystemClock().today();
 
-  // SPEC-022 BR-022-18 — each table pages on its own URL parameter.
-  const summaryPage = rowPage(summary?.assets ?? [], query[ROW_PAGE_PARAMS.summary]);
-  const attentionPage = rowPage(needsAttention, query[ROW_PAGE_PARAMS.attention]);
-  const ignoredPage = rowPage(ignored, query[ROW_PAGE_PARAMS.ignored]);
-  const currentPages = {
-    summary: summaryPage.page,
-    attention: attentionPage.page,
-    ignored: ignoredPage.page,
-  };
-  const pager = (table: RowTable, page: RowPage<unknown>, summaryKey: string) =>
-    page.total > ROW_PAGE_SIZE && (
-      <Pagination
-        page={page.page}
-        pageSize={ROW_PAGE_SIZE}
-        total={page.total}
-        hrefFor={(next) => rowPageHref(importBatchPath(batch.id), currentPages, table, next)}
-        label={t(`rows.pagination.${table}`)}
-        summaryFor={(counts) => t(summaryKey, counts)}
-      />
-    );
+  // SPEC-022 BR-022-18 — each table pages on its own prefixed URL parameters.
+  const summaryPage = rowPage(summary?.assets ?? [], query, 'summary');
+  const attentionPage = rowPage(needsAttention, query, 'attention');
+  const ignoredPage = rowPage(ignored, query, 'ignored');
+  const identityColumns = rowIdentityColumns({
+    asset: t('rows.columnAsset'),
+    movement: t('rows.columnMovement'),
+    date: t('rows.columnDate'),
+  });
 
-  // SPEC-005 BR-005-11/19: both row tables share their leading columns (`RowCells`).
-  const rowColumns = (
-    <>
-      <TableHead scope="col">{t('rows.columnAsset')}</TableHead>
-      <TableHead scope="col">{t('rows.columnMovement')}</TableHead>
-      <TableHead scope="col">{t('rows.columnDate')}</TableHead>
-    </>
+  const summaryRows: NodeRow[] = summaryPage.rows.map((asset) => {
+    const label = labelFor(labels, asset.assetId);
+    return {
+      id: asset.assetId,
+      cells: {
+        asset: (
+          <Stack gap="none">
+            {/* BR-022-18: each line ends in its own ellipsis in a narrow column. */}
+            <span className="truncate font-medium">{label.code}</span>
+            <Text as="span" size="xs" tone="muted" className="truncate">
+              {label.name}
+            </Text>
+          </Stack>
+        ),
+        imported: <Money value={asset.importedQuantity} kind="quantity" />,
+        wallets: (
+          <Text as="span" size="xs" tone="muted">
+            {asset.destinations.length === 0
+              ? t('summary.unassigned')
+              : asset.destinations
+                  .map(
+                    (destination) =>
+                      `${walletName(walletOptions, destination.walletId)}: ${destination.quantity.toString()}`,
+                  )
+                  .join(' · ')}
+          </Text>
+        ),
+        // BR-010-13: resolvable here, in one action, with the quantity
+        // pre-filled — the same form the wallets screen offers, because it is
+        // the same decision.
+        assign: asset.pending !== null && (
+          <ActionForm action={allocateAction}>
+            <input type="hidden" name="assetId" value={asset.assetId} />
+            <Cluster gap="sm" align="end">
+              <Field id={`summary-wallet-${asset.assetId}`} label={t('summary.assign')} width="lg">
+                <NativeSelect name="walletId" required>
+                  <option value="">{t('summary.chooseWallet')}</option>
+                  {walletOptions.map((wallet) => (
+                    <option key={wallet.id} value={wallet.id}>
+                      {wallet.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <Field
+                id={`summary-quantity-${asset.assetId}`}
+                label={t('summary.quantity')}
+                width="sm"
+              >
+                <Input name="quantity" defaultValue={asset.pending.unassignedQuantity.toString()} />
+              </Field>
+              <Button type="submit" size="sm">
+                {t('summary.resolve')}
+              </Button>
+            </Cluster>
+          </ActionForm>
+        ),
+      },
+    };
+  });
+
+  const attentionRows: NodeRow[] = attentionPage.rows.map((row) => {
+    const corporateEvent = corporateEvents.get(row.id);
+    const subscriptionOffer = subscriptionOffers.get(row.id);
+    return {
+      id: row.id,
+      cells: {
+        ...rowIdentityCells(row),
+        detail: (
+          <Stack gap="xs" className="whitespace-normal">
+            {refusals.has(row.id) && (
+              <Text as="span" size="xs">
+                {refusalText(refusals.get(row.id) as RowRefusal)}
+              </Text>
+            )}
+            {refusals.has(row.id) &&
+              refusalCauseText(refusals.get(row.id) as RowRefusal) !== null && (
+                <Text as="span" size="xs" tone="muted">
+                  {refusalCauseText(refusals.get(row.id) as RowRefusal)}
+                </Text>
+              )}
+            {corporateEvent !== undefined && corporateEventEvidence(corporateEvent)}
+          </Stack>
+        ),
+        // SPEC-005 BR-005-20d (#157): an offered exercise never gets the
+        // generic classify form — classifying it as any type would count its
+        // shares a second time, on top of what its credit already added (#157
+        // description).
+        action:
+          subscriptionOffer !== undefined ? (
+            <SubscriptionOfferPanel
+              rowId={row.id}
+              resolveAction={resolveSubscriptionOfferAction}
+              keepAction={keepSubscriptionClassificationAction}
+              labels={subscriptionOfferLabels(subscriptionOffer)}
+            />
+          ) : (
+            row.classification === 'unclassified' && classifyForm(row.id, corporateEvent)
+          ),
+      },
+    };
+  });
+
+  const ignoredRows: NodeRow[] = ignoredPage.rows.map((row) =>
+    ignoredRow({
+      row,
+      committed: batch.status === 'committed',
+      resolvedExerciseLabel: t('ignored.resolvedExercise'),
+      classifyForm,
+    }),
   );
+
+  // BR-005-25 (#110): no button where accepting would be refused.
+  const discrepancyRows: NodeRow[] = (batch.reconciliation?.discrepancies ?? []).map((d) => {
+    const blocker = acceptBlockers.get(positionKeyString(d));
+    return {
+      id: positionKeyString(d),
+      cells: {
+        asset: <span className="font-medium">{d.assetCode}</span>,
+        computed: d.computedQuantity,
+        b3: d.b3Quantity,
+        difference: d.difference,
+        cause: (
+          <Text as="span" size="xs" tone="muted">
+            {t(`discrepancyCause.${d.cause}`)}
+          </Text>
+        ),
+        action: d.resolved ? (
+          <Text as="span" size="xs" tone="muted">
+            {t('resolved')}
+          </Text>
+        ) : blocker !== undefined ? (
+          <Text as="span" size="xs" tone="muted" className="whitespace-normal">
+            {t(`acceptAdjustmentBlocked.${blocker}`)}
+          </Text>
+        ) : (
+          <ActionForm action={acceptAdjustmentAction}>
+            <input type="hidden" name="batchId" value={batch.id} />
+            <input type="hidden" name="assetId" value={d.assetId} />
+            {d.institutionId && (
+              <input type="hidden" name="institutionId" value={d.institutionId} />
+            )}
+            <Button type="submit" size="xs" variant="outline">
+              {t('acceptAdjustment')}
+            </Button>
+          </ActionForm>
+        ),
+      },
+    };
+  });
 
   return (
     <SettingsFrame>
@@ -409,89 +539,31 @@ export default async function ImportBatchDetailPage({
             title={t('summary.title')}
             description={summary.settled ? t('summary.settled') : t('summary.needsDecisions')}
           >
-            <Table>
-              <TableCaption className="sr-only">{t('summary.title')}</TableCaption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col">{t('summary.columnAsset')}</TableHead>
-                  <TableHead scope="col" className="text-right">
-                    {t('summary.columnImported')}
-                  </TableHead>
-                  <TableHead scope="col">{t('summary.columnWallets')}</TableHead>
-                  <TableHead scope="col">{t('summary.columnAssign')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {summaryPage.rows.map((asset) => {
-                  const label = labelFor(labels, asset.assetId);
-                  return (
-                    <TableRow key={asset.assetId}>
-                      <TableCell className="py-row align-top">
-                        <span className="font-medium">{label.code}</span>
-                        <Text as="span" size="xs" tone="muted" className="block">
-                          {label.name}
-                        </Text>
-                      </TableCell>
-                      <TableCell className="py-row text-right align-top tabular-nums">
-                        <Money value={asset.importedQuantity} kind="quantity" />
-                      </TableCell>
-                      <TableCell className="py-row align-top whitespace-normal">
-                        <Text as="span" size="xs" tone="muted">
-                          {asset.destinations.length === 0
-                            ? t('summary.unassigned')
-                            : asset.destinations
-                                .map(
-                                  (destination) =>
-                                    `${walletName(walletOptions, destination.walletId)}: ${destination.quantity.toString()}`,
-                                )
-                                .join(' · ')}
-                        </Text>
-                      </TableCell>
-                      <TableCell className="py-row align-top">
-                        {/* BR-010-13: resolvable here, in one action, with the
-                        quantity pre-filled — the same form the wallets screen
-                        offers, because it is the same decision. */}
-                        {asset.pending !== null && (
-                          <ActionForm action={allocateAction}>
-                            <input type="hidden" name="assetId" value={asset.assetId} />
-                            <Cluster gap="sm" align="end">
-                              <Field
-                                id={`summary-wallet-${asset.assetId}`}
-                                label={t('summary.assign')}
-                                width="lg"
-                              >
-                                <NativeSelect name="walletId" required>
-                                  <option value="">{t('summary.chooseWallet')}</option>
-                                  {walletOptions.map((wallet) => (
-                                    <option key={wallet.id} value={wallet.id}>
-                                      {wallet.name}
-                                    </option>
-                                  ))}
-                                </NativeSelect>
-                              </Field>
-                              <Field
-                                id={`summary-quantity-${asset.assetId}`}
-                                label={t('summary.quantity')}
-                                width="sm"
-                              >
-                                <Input
-                                  name="quantity"
-                                  defaultValue={asset.pending.unassignedQuantity.toString()}
-                                />
-                              </Field>
-                              <Button type="submit" size="sm">
-                                {t('summary.resolve')}
-                              </Button>
-                            </Cluster>
-                          </ActionForm>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            {pager('summary', summaryPage, 'summary.pageSummary')}
+            <NodeTable
+              columns={[
+                { id: 'asset', header: t('summary.columnAsset'), kind: 'text', width: 20 },
+                {
+                  id: 'imported',
+                  header: t('summary.columnImported'),
+                  kind: 'number',
+                  width: 22,
+                },
+                { id: 'wallets', header: t('summary.columnWallets'), kind: 'text', width: 24 },
+                {
+                  id: 'assign',
+                  header: t('summary.columnAssign'),
+                  kind: 'control',
+                  width: '30rem',
+                },
+              ]}
+              rows={summaryRows}
+              caption={t('summary.title')}
+              noun={t('summary.noun')}
+              paramPrefix={ROW_TABLE_PREFIX.summary}
+              server={{ total: summaryPage.total }}
+              cards={false}
+              linkHash="summary"
+            />
           </Section>
         </div>
       )}
@@ -501,62 +573,21 @@ export default async function ImportBatchDetailPage({
           {needsAttention.length === 0 ? (
             <EmptyState title={t('needsAttentionEmpty')} />
           ) : (
-            <Table>
-              <TableCaption className="sr-only">{t('needsAttentionTitle')}</TableCaption>
-              <TableHeader>
-                <TableRow>
-                  {rowColumns}
-                  <TableHead scope="col">{t('rows.columnDetail')}</TableHead>
-                  <TableHead scope="col">{t('rows.columnAction')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {attentionPage.rows.map((row) => {
-                  const corporateEvent = corporateEvents.get(row.id);
-                  const subscriptionOffer = subscriptionOffers.get(row.id);
-                  return (
-                    <TableRow key={row.id}>
-                      <RowCells row={row} />
-                      <TableCell className="py-row align-top whitespace-normal">
-                        <Stack gap="xs">
-                          {refusals.has(row.id) && (
-                            <Text as="span" size="xs">
-                              {refusalText(refusals.get(row.id) as RowRefusal)}
-                            </Text>
-                          )}
-                          {refusals.has(row.id) &&
-                            refusalCauseText(refusals.get(row.id) as RowRefusal) !== null && (
-                              <Text as="span" size="xs" tone="muted">
-                                {refusalCauseText(refusals.get(row.id) as RowRefusal)}
-                              </Text>
-                            )}
-                          {corporateEvent !== undefined && corporateEventEvidence(corporateEvent)}
-                        </Stack>
-                      </TableCell>
-                      <TableCell className="py-row align-top">
-                        {/* SPEC-005 BR-005-20d (#157): an offered exercise never
-                        gets the generic classify form — classifying it as any
-                        type would count its shares a second time, on top of
-                        what its credit already added (#157 description). */}
-                        {subscriptionOffer !== undefined ? (
-                          <SubscriptionOfferPanel
-                            rowId={row.id}
-                            resolveAction={resolveSubscriptionOfferAction}
-                            keepAction={keepSubscriptionClassificationAction}
-                            labels={subscriptionOfferLabels(subscriptionOffer)}
-                          />
-                        ) : (
-                          row.classification === 'unclassified' &&
-                          classifyForm(row.id, corporateEvent)
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <NodeTable
+              columns={[
+                ...identityColumns,
+                { id: 'detail', header: t('rows.columnDetail'), kind: 'control', width: 40 },
+                { id: 'action', header: t('rows.columnAction'), kind: 'control', width: '34rem' },
+              ]}
+              rows={attentionRows}
+              caption={t('needsAttentionTitle')}
+              noun={t('rows.noun')}
+              paramPrefix={ROW_TABLE_PREFIX.attention}
+              server={{ total: attentionPage.total }}
+              cards={false}
+              linkHash="attention"
+            />
           )}
-          {pager('attention', attentionPage, 'rows.pageSummary')}
         </Section>
       </div>
 
@@ -568,39 +599,37 @@ export default async function ImportBatchDetailPage({
           <Section title={t('ignored.title')} description={t('ignored.description')}>
             {/* Open when the user has paged into it: a link that lands on a
               closed disclosure would look like it did nothing. */}
-            <details open={query[ROW_PAGE_PARAMS.ignored] !== undefined}>
-              <summary className="cursor-pointer text-sm">
-                {t('ignored.show', { count: ignored.length })}
-              </summary>
+            <OpenOnHash
+              id="ignored"
+              openByDefault={rowTableAddressed(query, 'ignored')}
+              summary={t('ignored.show', { count: ignored.length })}
+            >
               <Stack gap="md">
                 {batch.status === 'committed' && (
                   <Text size="xs" tone="muted">
                     {t('ignored.classifyHint')}
                   </Text>
                 )}
-                <Table>
-                  <TableCaption className="sr-only">{t('ignored.title')}</TableCaption>
-                  <TableHeader>
-                    <TableRow>
-                      {rowColumns}
-                      <TableHead scope="col">{t('rows.columnAction')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {ignoredPage.rows.map((row) => (
-                      <IgnoredRow
-                        key={row.id}
-                        row={row}
-                        committed={batch.status === 'committed'}
-                        resolvedExerciseLabel={t('ignored.resolvedExercise')}
-                        classifyForm={classifyForm}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-                {pager('ignored', ignoredPage, 'rows.pageSummary')}
+                <NodeTable
+                  columns={[
+                    ...identityColumns,
+                    {
+                      id: 'action',
+                      header: t('rows.columnAction'),
+                      kind: 'control',
+                      width: '34rem',
+                    },
+                  ]}
+                  rows={ignoredRows}
+                  caption={t('ignored.title')}
+                  noun={t('rows.noun')}
+                  paramPrefix={ROW_TABLE_PREFIX.ignored}
+                  server={{ total: ignoredPage.total }}
+                  cards={false}
+                  linkHash="ignored"
+                />
               </Stack>
-            </details>
+            </OpenOnHash>
           </Section>
         </div>
       )}
@@ -628,62 +657,31 @@ export default async function ImportBatchDetailPage({
           }
         >
           {batch.reconciliation.discrepancies.length > 0 && (
-            <Table>
-              <TableCaption className="sr-only">{t('reconciliationTitle')}</TableCaption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col">{t('columnAsset')}</TableHead>
-                  <TableHead scope="col">{t('columnComputed')}</TableHead>
-                  <TableHead scope="col">{t('columnB3')}</TableHead>
-                  <TableHead scope="col">{t('columnDifference')}</TableHead>
-                  <TableHead scope="col">{t('columnCause')}</TableHead>
-                  <TableHead scope="col">
-                    <span className="sr-only">{t('acceptAdjustment')}</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {batch.reconciliation.discrepancies.map((d) => {
-                  // BR-005-25 (#110): no button where accepting would be refused.
-                  const blocker = acceptBlockers.get(positionKeyString(d));
-                  return (
-                    <TableRow key={positionKeyString(d)}>
-                      <TableCell className="py-row font-medium">{d.assetCode}</TableCell>
-                      <TableCell className="py-row tabular-nums">{d.computedQuantity}</TableCell>
-                      <TableCell className="py-row tabular-nums">{d.b3Quantity}</TableCell>
-                      <TableCell className="py-row tabular-nums">{d.difference}</TableCell>
-                      <TableCell className="py-row">
-                        <Text as="span" size="xs" tone="muted">
-                          {t(`discrepancyCause.${d.cause}`)}
-                        </Text>
-                      </TableCell>
-                      <TableCell className="py-row">
-                        {d.resolved ? (
-                          <Text as="span" size="xs" tone="muted">
-                            {t('resolved')}
-                          </Text>
-                        ) : blocker !== undefined ? (
-                          <Text as="span" size="xs" tone="muted">
-                            {t(`acceptAdjustmentBlocked.${blocker}`)}
-                          </Text>
-                        ) : (
-                          <ActionForm action={acceptAdjustmentAction}>
-                            <input type="hidden" name="batchId" value={batch.id} />
-                            <input type="hidden" name="assetId" value={d.assetId} />
-                            {d.institutionId && (
-                              <input type="hidden" name="institutionId" value={d.institutionId} />
-                            )}
-                            <Button type="submit" size="xs" variant="outline">
-                              {t('acceptAdjustment')}
-                            </Button>
-                          </ActionForm>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            // One row per discrepant position, so it grows with the batch's
+            // assets: a paged table, client mode (the rows are all here). The
+            // quantities are figures — right-aligned, tabular — and the action
+            // is a form, so no card copy.
+            <NodeTable
+              columns={[
+                { id: 'asset', header: t('columnAsset'), kind: 'text', width: 14 },
+                { id: 'computed', header: t('columnComputed'), kind: 'number' },
+                { id: 'b3', header: t('columnB3'), kind: 'number' },
+                { id: 'difference', header: t('columnDifference'), kind: 'number' },
+                { id: 'cause', header: t('columnCause'), kind: 'text', width: 28 },
+                {
+                  id: 'action',
+                  header: t('acceptAdjustment'),
+                  kind: 'control',
+                  width: 24,
+                  srOnlyHeader: true,
+                },
+              ]}
+              rows={discrepancyRows}
+              caption={t('reconciliationTitle')}
+              noun={t('reconciliationNoun')}
+              paramPrefix="reconciliacao"
+              cards={false}
+            />
           )}
         </Section>
       )}
