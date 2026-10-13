@@ -39,10 +39,20 @@ import {
   TableBody,
   TableCaption,
   TableCell,
+  TableColGroup,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { columnWidth } from '@/components/patterns/data-table-columns';
+import { formatBusinessDate } from '@/i18n/format';
+import {
+  ReportTable,
+  type ReportColumn,
+  type ReportTableLabels,
+} from '@/app/(app)/reports/_components/ReportTable';
+import { ranksOf } from '@/app/(app)/reports/_components/report-rows';
+import { tableLabels } from '@/app/(app)/reports/_components/table-labels';
 
 /**
  * SPEC-013 — **Relatórios › Evolução patrimonial** (SPEC-022 BR-022-03), the
@@ -328,6 +338,10 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                       total: tp('table.value'),
                       band: t(`grouping.${report.stacked.grouping}`),
                     }}
+                    table={tableLabels(t, {
+                      caption: tp('stacked.caption'),
+                      itemNoun: tp('table.noun'),
+                    })}
                     nameOf={(key) => t(`assetClass.${key}`)}
                   />
                 </Section>
@@ -386,6 +400,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     estimated: tCommon('estimated'),
                     gap: tp('table.gap'),
                   }}
+                  table={tableLabels(t, { caption: tp('table.title'), itemNoun: tp('table.noun') })}
                 />
               </Section>
             </>
@@ -452,6 +467,12 @@ function ContributionSummary({
   );
 }
 
+/**
+ * SPEC-022 BR-022-18 — five fixed rows (the opening balance, three drivers and
+ * the closing balance), so this table does not paginate. It still takes the
+ * standard's fixed layout and kinds, so hiding the amounts (BR-022-24) moves no
+ * column.
+ */
 function DecompositionTable({
   decomposition,
   labels,
@@ -488,8 +509,9 @@ function DecompositionTable({
   ] as const;
 
   return (
-    <Table>
+    <Table fixed>
       <TableCaption className="sr-only">{labels.caption}</TableCaption>
+      <TableColGroup widths={[columnWidth('text'), columnWidth('money')]} />
       <TableHeader>
         <TableRow>
           <TableHead scope="col">{labels.driver}</TableHead>
@@ -504,7 +526,7 @@ function DecompositionTable({
             <TableHead scope="row" className="text-left font-normal">
               {row.label}
             </TableHead>
-            <TableCell className="text-right">
+            <TableCell className="text-right tabular-nums">
               <Money value={row.value} signed={row.signed} />
             </TableCell>
           </TableRow>
@@ -514,42 +536,53 @@ function DecompositionTable({
   );
 }
 
+/**
+ * SPEC-016 BR-016-16 — the chart's figures, one row per date of the series.
+ *
+ * SPEC-022 BR-022-18: the history grows by a row a day, so it is the paginated,
+ * sortable table, newest first — the date a reader opens it for. The CSV export
+ * (`Controls`) is built from the report's query, not from this table, so it
+ * keeps exporting the whole period whatever page is on screen.
+ */
 function SeriesTable({
   points,
   gapDates,
   labels,
+  table,
 }: {
   points: readonly ValuePoint[];
   gapDates: ReadonlySet<string>;
   labels: Record<'caption' | 'date' | 'value' | 'basis' | 'observed' | 'estimated' | 'gap', string>;
+  table: ReportTableLabels;
 }) {
+  const columns: ReportColumn[] = [
+    { id: 'date', header: labels.date, kind: 'date' },
+    { id: 'value', header: labels.value, kind: 'money' },
+    // The gap day's sentence is the longest cell in the report; it truncates
+    // with its full text on demand (DS-67) rather than widening the column.
+    { id: 'basis', header: labels.basis, kind: 'text', width: 24 },
+  ];
+  const valueRanks = ranksOf(points.map((point) => point.value));
+
   return (
-    <Table>
-      <TableCaption className="sr-only">{labels.caption}</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead scope="col">{labels.date}</TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.value}
-          </TableHead>
-          <TableHead scope="col">{labels.basis}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {points.map((point) => (
-          <TableRow key={point.date}>
-            <TableHead scope="row" className="text-left font-normal">
-              {point.date}
-            </TableHead>
-            <TableCell className="text-right">
-              <Money value={point.value} />
-            </TableCell>
-            {/* SPEC-021 BR-021-31: a carried-forward gap day is never "observed". */}
-            <TableCell>{labels[basisOf(point, gapDates)]}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <ReportTable
+      columns={columns}
+      labels={table}
+      paramPrefix="history"
+      initialSort={{ id: 'date', desc: true }}
+      rows={points.map((point, index) => {
+        // SPEC-021 BR-021-31: a carried-forward gap day is never "observed".
+        const basis = labels[basisOf(point, gapDates)];
+        return {
+          cells: {
+            date: formatBusinessDate(point.date),
+            value: <Money value={point.value} />,
+            basis,
+          },
+          sort: { date: point.date, value: valueRanks[index], basis },
+        };
+      })}
+    />
   );
 }
 
@@ -568,10 +601,12 @@ function SeriesTable({
 function StackedComposition({
   bands,
   labels,
+  table,
   nameOf,
 }: {
   readonly bands: readonly StackedBand[];
   readonly labels: Record<'title' | 'summary' | 'caption' | 'date' | 'total' | 'band', string>;
+  readonly table: ReportTableLabels;
   readonly nameOf: (key: string) => string;
 }) {
   const dates = [
@@ -580,6 +615,13 @@ function StackedComposition({
 
   const valueAt = new Map(
     bands.map((band) => [band.key, new Map(band.points.map((point) => [point.date, point.value]))]),
+  );
+  const bandValue = (key: string, date: (typeof dates)[number]): MoneyValue =>
+    valueAt.get(key)?.get(date) ?? MoneyValue.zero();
+  // Each band's dates in ascending order of value, for the table's sort
+  // (`ReportTable`): exact `comparedTo`, never a float.
+  const bandRanks = new Map(
+    bands.map((band) => [band.key, ranksOf(dates.map((date) => bandValue(band.key, date)))]),
   );
 
   // SPEC-022 BR-022-24 — a synchronous component, so the request-cached read.
@@ -612,36 +654,41 @@ function StackedComposition({
         title={labels.title}
         summary={labels.summary}
       />
-      <Table>
-        <TableCaption className="sr-only">{labels.caption}</TableCaption>
-        <TableHeader>
-          <TableRow>
-            <TableHead scope="col">{labels.date}</TableHead>
-            {legend.map((band) => (
-              <TableHead key={band.key} scope="col" className="text-right">
-                {band.label}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {dates.map((date) => (
-            <TableRow key={date}>
-              <TableHead scope="row" className="text-left font-normal">
-                {date}
-              </TableHead>
-              {bands.map((band) => (
-                <TableCell key={band.key} className="text-right">
-                  {/* Zero rather than an em dash: a class absent from a day's
-                      snapshot was not held that day, which is a figure, not a
-                      gap. It also keeps each row addable to the total. */}
-                  <Money value={valueAt.get(band.key)?.get(date) ?? MoneyValue.zero()} />
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      {/* SPEC-022 BR-022-18: a row a date, a money column a band — the table
+          that grows with the history, so it pages and sorts like the series
+          above. With every asset class held it is wider than the panel and
+          scrolls inside its own container; no figure is squeezed (DS-67). */}
+      <ReportTable
+        columns={[
+          { id: 'date', header: labels.date, kind: 'date' } satisfies ReportColumn,
+          ...legend.map(
+            (band): ReportColumn => ({ id: band.key, header: band.label, kind: 'money' }),
+          ),
+        ]}
+        labels={table}
+        paramPrefix="stacked"
+        initialSort={{ id: 'date', desc: true }}
+        rows={dates.map((date, dateIndex) => ({
+          cells: {
+            date: formatBusinessDate(date),
+            ...Object.fromEntries(
+              bands.map((band) => [
+                band.key,
+                // Zero rather than an em dash: a class absent from a day's
+                // snapshot was not held that day, which is a figure, not a
+                // gap. It also keeps each row addable to the total.
+                <Money value={bandValue(band.key, date)} />,
+              ]),
+            ),
+          },
+          sort: {
+            date,
+            ...Object.fromEntries(
+              bands.map((band) => [band.key, bandRanks.get(band.key)?.[dateIndex]]),
+            ),
+          },
+        }))}
+      />
     </Stack>
   );
 }
@@ -661,8 +708,20 @@ function DriftTable({
   readonly nameOf: (key: string) => string;
 }) {
   return (
-    <Table>
+    // SPEC-022 BR-022-18: one row per asset class — drift is only computed for
+    // that grouping — so this is a bounded table of at most eight rows and does
+    // not paginate. Columns are sized for their header, which is the longest
+    // thing in them.
+    <Table fixed>
       <TableCaption className="sr-only">{labels.caption}</TableCaption>
+      <TableColGroup
+        widths={[
+          columnWidth('text'),
+          columnWidth('percent', 20),
+          columnWidth('percent', 20),
+          columnWidth('percent'),
+        ]}
+      />
       <TableHeader>
         <TableRow>
           <TableHead scope="col">{labels.group}</TableHead>
@@ -683,13 +742,13 @@ function DriftTable({
             <TableHead scope="row" className="text-left font-normal">
               {nameOf(shift.key.id)}
             </TableHead>
-            <TableCell className="text-right">
+            <TableCell className="text-right tabular-nums">
               <Money value={shift.opening} kind="percent" />
             </TableCell>
-            <TableCell className="text-right">
+            <TableCell className="text-right tabular-nums">
               <Money value={shift.closing} kind="percent" />
             </TableCell>
-            <TableCell className="text-right">
+            <TableCell className="text-right tabular-nums">
               <Money value={shift.change} kind="percent" signed />
             </TableCell>
           </TableRow>
