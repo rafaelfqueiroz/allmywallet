@@ -168,6 +168,11 @@ export function HoldingsTable({
     ): ColumnDef<HoldingRow, unknown> => ({
       id,
       header,
+      // SPEC-022 BR-022-18: quantities and percentages are not amounts, so they
+      // do not take the money width. The estimate markers beside *preço médio*
+      // and the value wrap under the figure when the column is full; the column
+      // is sized for the figure.
+      meta: { kind: id === 'quantity' ? 'number' : id === 'share' ? 'percent' : 'money' },
       accessorFn: (row) => row[id].rank,
       sortingFn: 'basic',
       sortUndefined: 'last',
@@ -204,6 +209,7 @@ export function HoldingsTable({
       {
         id: 'code',
         header: labels.code,
+        meta: { kind: 'text', width: 22 },
         accessorFn: (row) => row.code,
         cell: ({ row }) => (
           <Cluster gap="sm" align="baseline">
@@ -221,8 +227,18 @@ export function HoldingsTable({
           </Cluster>
         ),
       },
-      { id: 'assetClass', header: labels.assetClass, accessorFn: (row) => row.assetClass },
-      { id: 'sector', header: labels.sector, accessorFn: (row) => row.sector },
+      {
+        id: 'assetClass',
+        header: labels.assetClass,
+        meta: { kind: 'text', width: 14 },
+        accessorFn: (row) => row.assetClass,
+      },
+      {
+        id: 'sector',
+        header: labels.sector,
+        meta: { kind: 'text', width: 18 },
+        accessorFn: (row) => row.sector,
+      },
       /*
        * SPEC-018 BR-018-19 — the watch state, as a badge in the holdings
        * list. It sits with the categorical columns rather than the figures
@@ -238,6 +254,7 @@ export function HoldingsTable({
       {
         id: 'opportunityState',
         header: labels.state,
+        meta: { kind: 'badge' },
         accessorFn: (row) => row.opportunityStateLabel || undefined,
         sortUndefined: 'last',
         cell: ({ row }) =>

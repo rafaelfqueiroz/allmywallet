@@ -65,10 +65,10 @@ const SORTABLE: ReadonlySet<string> = new Set(TRANSACTION_SORT_KEYS);
 
 /**
  * SPEC-022 BR-022-18 — each column's kind, which decides its alignment and
- * default width, and the widths this table sets itself. The unit price carries
- * the cost-estimate marker beside the figure (BR-007-06), so it is wider than
- * the other amounts by the marker; the row actions are two icon buttons.
- * Restructuring the columns so the ledger fits without scrolling is BR-022-40
+ * default width, and the widths this table sets itself: the row actions are two
+ * icon buttons. The unit price's cost-estimate marker (BR-007-06) sits beside the
+ * figure and wraps under it when the column is full — the column is sized for the
+ * figure, never for the marker. Restructuring the columns so the ledger fits without scrolling is BR-022-40
  * (#242), not this.
  */
 const KINDS: Readonly<Record<LedgerColumn, { kind: ColumnKind; width?: ColumnWidth }>> = {
@@ -78,7 +78,7 @@ const KINDS: Readonly<Record<LedgerColumn, { kind: ColumnKind; width?: ColumnWid
   type: { kind: 'text', width: 14 },
   institution: { kind: 'text', width: 18 },
   quantity: { kind: 'number' },
-  unitPrice: { kind: 'money', width: 30 },
+  unitPrice: { kind: 'money' },
   totalValue: { kind: 'money' },
   status: { kind: 'badge' },
   provenance: { kind: 'badge', width: 20 },
