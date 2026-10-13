@@ -12,6 +12,15 @@ import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 
 /**
+ * SPEC-022 BR-022-18 / DS-65 — a Painel card summarises: it lists at most this
+ * many opportunities (as the attention queue does, `ATTENTION_QUEUE_LIMIT`) and
+ * links to the destination that owns the full list — Configurações › Observar
+ * preços, a paged table — rather than growing with the portfolio. 30 held rules
+ * crossing a bound would otherwise be 30 list items in the card.
+ */
+const OPPORTUNITIES_SHOWN = 5;
+
+/**
  * SPEC-022 BR-022-07 — the Painel's card listing **held assets currently in a
  * buy or sell state** (SPEC-018), each linking to its rule under Configurações
  * › Observar preços. The Painel summarises; the rule, its bounds and its last
@@ -34,7 +43,9 @@ export async function WatchOpportunities({
 }) {
   const t = await getTranslations('dashboard.opportunities');
   const tState = await getTranslations('watch.stateLabel');
-  const { hasRules, items, unknownCount } = opportunities;
+  const { hasRules, items: all, unknownCount } = opportunities;
+  const items = all.slice(0, OPPORTUNITIES_SHOWN);
+  const hidden = all.length - items.length;
   // BR-018-16 — said whether or not anything is listed, so an empty list is
   // never read as "nothing crossed" when the price to tell is missing.
   const unknownNote =
@@ -47,6 +58,15 @@ export async function WatchOpportunities({
   return (
     <SummaryCard
       title={t('title')}
+      {...(hidden > 0
+        ? {
+            link: {
+              href: WATCH_RULES_PATH,
+              label: t('seeAll', { count: all.length }),
+              ariaLabel: t('seeAllLabel', { count: all.length }),
+            },
+          }
+        : {})}
       action={
         <CardHeaderLink
           href={WATCH_RULES_PATH}

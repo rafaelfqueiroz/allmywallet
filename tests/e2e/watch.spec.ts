@@ -263,6 +263,27 @@ test.describe('SPEC-018 — Observar preços', () => {
   });
 
   /**
+   * SPEC-022 BR-022-18 / DS-65 — the Painel's card summarises: five at most,
+   * and a link to Observar preços for the rest, where they page.
+   */
+  test('the Painel card lists five opportunities and links to the full list', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const codes = await seedHoldings(userId, manyHoldings('OPP'));
+    for (const code of codes) await seedRule(code, '30.00', 'buy');
+    await dismissOnboarding(userId);
+
+    await page.goto('/dashboard');
+    const card = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Em zona de compra ou venda' }) });
+    await expect(card.getByRole('listitem')).toHaveCount(5);
+    await card.getByRole('link', { name: /^Ver todos os 12 em Observar preços/ }).click();
+    await expect(page).toHaveURL(/\/settings\/watch$/);
+  });
+
+  /**
    * SPEC-022 BR-018-18 — the rules are a table that pages, with its page size
    * in the URL, and a link to a rule on a later page still lands on it: the
    * Painel's "Ver regra" and an e-mail sent before this table paged carry the
