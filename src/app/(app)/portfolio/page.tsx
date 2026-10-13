@@ -137,17 +137,18 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
           </Section>
 
           <Section title={tp('patrimonio.byAsset')}>
+            {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
+                this product deducts tax, and the figures must say so where
+                they are read: in the panel that lists them (BR-022-36), above
+                the table, which closes it with the pager. */}
+            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
+              <Note>{t('grossOfTax')}</Note>
+            )}
             <HoldingsTable
               rows={holdingRows(report.rows, new Map(), t, tc, tw, masked)}
               labels={holdingsTableLabels(report, t, tc, tCommon)}
               hiddenColumns={['sector', 'opportunityState']}
             />
-            {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
-                this product deducts tax, and the figures must say so where
-                they are read: in the panel that lists them (BR-022-36). */}
-            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
-              <Note>{t('grossOfTax')}</Note>
-            )}
           </Section>
 
           <Unpriced holdings={query.value.report.groups.flatMap((group) => group.holdings)} />

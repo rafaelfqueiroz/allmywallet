@@ -887,6 +887,34 @@ describe('DataTable — column kinds', () => {
 });
 
 /**
+ * SPEC-022 BR-022-18, #237 review F2 — a collection with no rows says so. A
+ * caller that forgets `empty` must not ship headers over nothing and a pager
+ * reading "Mostrando 0–0 de 0".
+ */
+describe('DataTable — empty collection', () => {
+  it('shows the catalogue empty state, not bare headers, when the caller passed none', () => {
+    render(<DataTable columns={columns} data={[]} caption="Posições" />);
+    expect(screen.getByRole('status')).toHaveTextContent('Nenhum registro por aqui');
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByText(/Mostrando/)).toBeNull();
+    expect(document.querySelector('[data-slot="table-pager"]')).toBeNull();
+  });
+
+  it('shows the caller’s own empty state when it passed one', () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={[]}
+        caption="Posições"
+        empty={<EmptyState title="Esta carteira ainda não tem metas" />}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Esta carteira ainda não tem metas');
+    expect(screen.queryByText('Nenhum registro por aqui')).toBeNull();
+  });
+});
+
+/**
  * SPEC-022 BR-022-18 — text that does not fit ends in an ellipsis, and its full
  * text opens on hover, keyboard focus and tap. jsdom has no layout, so which
  * cells overflow is stubbed through `scrollWidth`.

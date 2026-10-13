@@ -254,6 +254,12 @@ export async function WalletBalance({
               filterPlaceholder={t('filterPlaceholder')}
               paramPrefix="balance"
               sort={{ id: 'asset', desc: false }}
+              // A wallet whose target mode is `none` has targetable assets but
+              // no rows (`balance.rows` is empty): say so rather than showing
+              // headers over nothing and "Mostrando 0–0 de 0" (BR-022-18).
+              empty={
+                <EmptyState title={t('balanceEmptyTitle')} description={t('balanceEmptyBody')} />
+              }
             />
           </Section>
 

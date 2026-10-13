@@ -605,8 +605,13 @@ function DataTableView<TData>({
 
   // The caller's empty state wins over everything: with no data there is
   // nothing to filter, and a toolbar over an empty table would only invite a
-  // search that cannot find anything.
-  if (data.length === 0 && empty) return <>{empty}</>;
+  // search that cannot find anything. A client-mode table with no rows and no
+  // `empty` of its own gets the catalogue's, never bare headers over nothing
+  // and a pager reading "Mostrando 0–0 de 0" (BR-022-18, #237 review F2): a
+  // caller names *why* the list is empty by passing its own.
+  if (data.length === 0 && (empty || server === undefined)) {
+    return <>{empty ?? <EmptyState title={t('emptyTitle')} description={t('emptyBody')} />}</>;
+  }
 
   const toolbarRow =
     filter || toolbar ? (

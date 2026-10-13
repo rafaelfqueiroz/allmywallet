@@ -1540,6 +1540,8 @@
     "toleranceHint": "Tolerância atual: {tolerance} ponto(s) percentual(is), ajustável em Preferências.",
     "untargetedTitle": "Fora das metas",
     "untargetedDescription": "Renda fixa não recebe meta e não entra no total contra o qual os percentuais acima são calculados.",
+    "balanceEmptyTitle": "Esta carteira ainda não tem metas",
+    "balanceEmptyBody": "O desvio de cada ativo aparece aqui quando o modo das metas é Peso igual ou Manual.",
     "untargetedEmpty": "Nada nesta carteira fica fora das metas.",
     "targetsTitle": "Definir metas",
     "targetPctLabel": "Meta de {asset} (%)",
@@ -1828,6 +1830,8 @@
     "submit": "Salvar taxa"
   },
   "dataTable": {
+    "emptyTitle": "Nenhum registro por aqui",
+    "emptyBody": "Quando houver itens, eles aparecem nesta tabela.",
     "filterLabel": "Filtrar a tabela",
     "filterPlaceholder": "Filtrar",
     "noResultsTitle": "Nenhum resultado para este filtro",
