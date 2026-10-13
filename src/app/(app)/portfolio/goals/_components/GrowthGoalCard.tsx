@@ -203,7 +203,9 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
             caption={t('growth.table.caption')}
             noun={t('growth.table.noun')}
             sort={{ id: 'date', desc: true }}
-            paramPrefix="growth"
+            // One per goal: a wallet can hold several growth goals, and a shared
+            // prefix would page, sort and size them all together (BR-022-18).
+            paramPrefix={`growth-${goal.id}`}
           />
         </>
       )}

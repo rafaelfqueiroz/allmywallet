@@ -287,3 +287,48 @@ test('switching the year redraws the earnings chart and leaves the growth chart 
   expect(monthCells2020.length).toBeGreaterThan(0);
   for (const month of monthCells2020) expect(month.startsWith(`${OLD_YEAR}-`)).toBe(true);
 });
+
+/**
+ * #246 review — a wallet can hold several growth goals, each with its own
+ * paged series table. A shared URL prefix paged them all together: page 2 on
+ * one moved every other one too (BR-022-18 keeps each table's view its own).
+ */
+test('two growth goals page their series tables independently', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  const [code] = await seedHoldings(userId, [
+    { code: 'OBJEB', quantity: '100', averageCost: '10', price: '40' },
+  ]);
+  const walletId = await seedWallet(userId, 'Duas metas');
+  await seedAllocation(userId, walletId, String(code), {
+    quantity: '100',
+    effectiveOn: OLD_ALLOCATION_DATE,
+    costBasisAfter: '1000.00',
+  });
+  for (const name of ['Meta um', 'Meta dois']) {
+    await seedGoal(userId, walletId, {
+      kind: 'growth',
+      name,
+      amount: '5000.00',
+      basis: 'invested',
+    });
+  }
+
+  await page.goto(`/portfolio/goals?wallet=${walletId}`);
+  const series = (goal: string) =>
+    page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: goal }) })
+      .locator('[data-slot="data-table"]');
+
+  await expect(series('Meta um').getByText(/^Mostrando 1–10 de \d+/)).toBeVisible();
+  await expect(series('Meta dois').getByText(/^Mostrando 1–10 de \d+/)).toBeVisible();
+
+  await series('Meta um').getByRole('button', { name: 'Página 2' }).click();
+  await expect(series('Meta um').getByText(/^Mostrando 11–/)).toBeVisible();
+  await expect(series('Meta dois').getByText(/^Mostrando 1–10 de \d+/)).toBeVisible();
+
+  // And it is the URL that keeps them apart: a reload restores both.
+  await page.reload();
+  await expect(series('Meta um').getByText(/^Mostrando 11–/)).toBeVisible();
+  await expect(series('Meta dois').getByText(/^Mostrando 1–10 de \d+/)).toBeVisible();
+});

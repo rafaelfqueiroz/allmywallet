@@ -358,6 +358,38 @@ test.describe('SPEC-018 — Observar preços', () => {
     ).toBeVisible();
   });
 
+  /**
+   * #246 review — Editar on one rule, then straight to Editar on another,
+   * keeps the editor mounted. Unkeyed, its uncontrolled fields kept the first
+   * rule's limits under the second rule's id, and saving overwrote it.
+   */
+  test('switching the editor from one rule to another shows the second rule’s limits', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const [first, second] = await seedHoldings(userId, [
+      { code: 'EDTA', quantity: '10', averageCost: '20.00', price: '25.00' },
+      { code: 'EDTB', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedRule(first!, '30.00', 'buy');
+    await seedRule(second!, '12.00', 'sell');
+
+    await page.goto('/settings/watch');
+    const lower = page.getByLabel('Limite inferior (R$)');
+    const lowerState = page.getByLabel('Neste limite ou abaixo dele, o preço significa');
+
+    await page.getByRole('link', { name: `Editar regra de ${first}` }).click();
+    await expect(lower).toHaveValue(/^30(\.0+)?$/);
+    await expect(lowerState).toHaveValue('buy');
+
+    await page.getByRole('link', { name: `Editar regra de ${second}` }).click();
+    await expect(
+      page.getByRole('heading', { name: new RegExp(`^Editar regra de ${second}`) }),
+    ).toBeVisible();
+    await expect(lower).toHaveValue(/^12(\.0+)?$/);
+    await expect(lowerState).toHaveValue('sell');
+  });
+
   test('Configurações lists Observar preços in its sub-navigation, and the sidebar no longer does', async ({
     signedIn,
     viewport,

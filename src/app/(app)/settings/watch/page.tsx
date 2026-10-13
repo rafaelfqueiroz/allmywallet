@@ -138,6 +138,11 @@ export default async function WatchPage({ searchParams }: PageProps) {
                 <RevealValuesForm action={saveHideValuesAction} />
               ) : (
                 <RuleForm
+                  // Keyed by the asset: going straight from "Editar" on one rule
+                  // to another keeps this component mounted, and its uncontrolled
+                  // fields would carry the first rule's limits into the second's
+                  // save (#246 review).
+                  key={`edit-${editedRule.assetId}`}
                   action={updateRuleAction}
                   assetId={editedRule.assetId}
                   idPrefix={`edit-${editedRule.assetId}`}
@@ -154,6 +159,7 @@ export default async function WatchPage({ searchParams }: PageProps) {
             ) : (
               newRuleFor !== undefined && (
                 <RuleForm
+                  key={`create-${newRuleFor.assetId}`}
                   action={createRuleAction}
                   assetId={newRuleFor.assetId}
                   idPrefix={`create-${newRuleFor.assetId}`}

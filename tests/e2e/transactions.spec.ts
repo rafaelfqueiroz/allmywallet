@@ -697,7 +697,11 @@ test.describe('the ledger table', () => {
     await expect(ledgerRows(page).first()).toContainText('HGLG11');
     await expect(ledgerRows(page)).toHaveCount(33);
 
-    // A selectable page size (BR-022-18).
+    // A selectable page size (BR-022-18). One control first: while the table
+    // re-suspends (`useSearchParams`), React shows DataTable's fallback — the
+    // same table, at its default state — beside the hidden live one, and a
+    // select on the fallback changes nothing.
+    await expect(page.getByLabel('Itens por página')).toHaveCount(1);
     await page.getByLabel('Itens por página').selectOption('25');
     await expect(page).toHaveURL(/[?&]size=25(&|$)/);
     await expect(ledgerRows(page)).toHaveCount(25);
