@@ -661,9 +661,11 @@ function StackedComposition({
       <ReportTable
         columns={[
           { id: 'date', header: labels.date, kind: 'date' } satisfies ReportColumn,
-          ...legend.map(
-            (band): ReportColumn => ({ id: band.key, header: band.label, kind: 'money' }),
-          ),
+          ...legend.map((band): ReportColumn => ({
+            id: band.key,
+            header: band.label,
+            kind: 'money',
+          })),
         ]}
         labels={table}
         paramPrefix="stacked"

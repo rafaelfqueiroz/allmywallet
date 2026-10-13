@@ -21,7 +21,10 @@ export function ranksOf<T extends { comparedTo(other: T): number }>(
 ): (number | undefined)[] {
   const present = figures
     .map((figure, index) => ({ index, figure }))
-    .filter((entry): entry is { index: number; figure: T } => entry.figure != null)
+    .filter(
+      (entry): entry is { index: number; figure: T } =>
+        entry.figure !== null && entry.figure !== undefined,
+    )
     // `Array.prototype.sort` is stable, which is what keeps the ties in order.
     .sort((a, b) => a.figure.comparedTo(b.figure));
 
