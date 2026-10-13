@@ -71,7 +71,6 @@ function useOverflow(ref: RefObject<HTMLDivElement | null>): Overflow {
     observer.observe(element);
     return () => observer.disconnect();
     // `measure` only reads `ref`; the observer is for the element's lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return state;
