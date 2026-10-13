@@ -22,10 +22,8 @@ import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
-import { TotalsCard } from '@/components/patterns/totals-card';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
 import { ranksOf, rankKeys } from '@/lib/rank-keys';
-import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 
 /**
  * SPEC-022 BR-022-02 — **Portfólio › Carteiras**: how holdings spread across
@@ -358,7 +356,7 @@ async function ComparisonTable({
       sort={{ id: 'value', desc: true }}
       pagination={paginated}
       {...(paginated ? { filterPlaceholder: tp('wallets.filterPlaceholder') } : {})}
-      {...(total === null ? {} : { footer: comparisonFooter(total, tp, t, tCommon) })}
+      {...(total === null ? {} : { totals: comparisonTotals(total, tp, t, tCommon) })}
     />
   );
 }
@@ -374,48 +372,25 @@ type Translate = Awaited<ReturnType<typeof getTranslations>>;
  * and one asset split across two wallets is in both, so a column total would
  * be a sum that is not the portfolio's count.
  */
-function comparisonFooter(total: ReportTotals, tp: Translate, t: Translate, tCommon: Translate) {
+function comparisonTotals(total: ReportTotals, tp: Translate, t: Translate, tCommon: Translate) {
   const { result } = unrealizedResult(total);
-  const value = <EstimatedValue value={total.value} estimated={total.estimated} justify="end" />;
-  const cost = (
-    <Cluster gap="sm" justify="end" align="baseline">
-      <Money value={total.costBasis} />
-      <CostEstimateMarker
-        shown={total.costEstimated}
-        label={tCommon('estimated')}
-        title={t('markers.costEstimated.explanation')}
-      />
-    </Cluster>
-  );
-  const share = <Money value={WHOLE} kind="percent" />;
-  const figures: readonly (readonly [string, ReactNode])[] = [
-    [tp('wallets.columnValue'), value],
-    [tp('wallets.columnCost'), cost],
-    [tp('wallets.columnResult'), <Money key="result" value={result} signed />],
-    [tp('wallets.columnShare'), share],
-  ];
-
   return {
-    row: (
-      <TableRow>
-        <TableHead scope="row" className="py-row text-left">
-          {tp('wallets.total')}
-        </TableHead>
-        <TableCell className="py-row" />
-        <TableCell className="py-row text-right">{value}</TableCell>
-        <TableCell className="py-row text-right">{cost}</TableCell>
-        <TableCell className="py-row text-right">
-          <Money value={result} signed />
-        </TableCell>
-        <TableCell className="py-row text-right tabular-nums">{share}</TableCell>
-      </TableRow>
-    ),
-    card: (
-      <TotalsCard
-        label={tp('wallets.total')}
-        figures={figures.map(([label, value]) => ({ label, value }))}
-      />
-    ),
+    label: tp('wallets.total'),
+    cells: {
+      value: <EstimatedValue value={total.value} estimated={total.estimated} justify="end" />,
+      cost: (
+        <Cluster gap="sm" justify="end" align="baseline">
+          <Money value={total.costBasis} />
+          <CostEstimateMarker
+            shown={total.costEstimated}
+            label={tCommon('estimated')}
+            title={t('markers.costEstimated.explanation')}
+          />
+        </Cluster>
+      ),
+      result: <Money value={result} signed />,
+      share: <Money value={WHOLE} kind="percent" />,
+    },
   };
 }
 

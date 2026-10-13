@@ -43,8 +43,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
-import { TableCell, TableHead, TableRow } from '@/components/ui/table';
-import { TotalsCard } from '@/components/patterns/totals-card';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 import { ranksOf, rankKeys } from '@/lib/rank-keys';
 
@@ -434,25 +432,9 @@ async function GroupsTable({
       filterPlaceholder={tc('groups.filterPlaceholder')}
       paramPrefix="groups"
       sort={{ id: 'value', desc: true }}
-      footer={{
-        row: (
-          <TableRow>
-            <TableHead scope="row" className="py-row text-left">
-              {tc('groups.total')}
-            </TableHead>
-            <TableCell className="py-row text-right">{total}</TableCell>
-            <TableCell className="py-row text-right">{whole}</TableCell>
-          </TableRow>
-        ),
-        card: (
-          <TotalsCard
-            label={tc('groups.total')}
-            figures={[
-              { label: tc('groups.value'), value: total },
-              { label: tc('groups.share'), value: whole },
-            ]}
-          />
-        ),
+      totals={{
+        label: tc('groups.total'),
+        cells: { value: total, share: whole },
       }}
     />
   );

@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { TotalsCard } from '@/components/patterns/totals-card';
-import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 import { audit, render, screen, userEvent, waitFor, within } from '@/components/test-utils';
 
 const nav = vi.hoisted(() => ({ search: '', pathname: '/settings/watch' }));
@@ -153,37 +151,19 @@ describe('NodeTable', () => {
     render(
       <Table
         rows={many(23)}
-        footer={{
-          row: (
-            <TableRow>
-              <TableHead scope="row">Total</TableHead>
-              <TableCell>R$ 23,00</TableCell>
-              <TableCell />
-            </TableRow>
-          ),
-          card: <p>Total da carteira R$ 23,00</p>,
-        }}
+        totals={{ label: 'Total da carteira', cells: { value: 'R$ 23,00' } }}
       />,
     );
     const table = screen.getByRole('table', { name: 'Regras' });
-    expect(within(table).getByRole('rowheader', { name: 'Total' })).toBeInTheDocument();
-    expect(screen.getByText('Total da carteira R$ 23,00')).toBeInTheDocument();
+    expect(within(table).getByRole('rowheader', { name: 'Total da carteira' })).toBeInTheDocument();
+    expect(within(table).getByRole('cell', { name: 'R$ 23,00' })).toBeInTheDocument();
+    // The card under the list names each figure by its column.
+    expect(screen.getByText('Total da carteira', { selector: 'p' })).toBeInTheDocument();
   });
 
   it('has no axe violations with a pinned total and its card', async () => {
     const { container } = render(
-      <Table
-        footer={{
-          row: (
-            <TableRow>
-              <TableHead scope="row">Total</TableHead>
-              <TableCell>R$ 1.102,00</TableCell>
-              <TableCell />
-            </TableRow>
-          ),
-          card: <TotalsCard label="Total" figures={[{ label: 'Valor', value: 'R$ 1.102,00' }]} />,
-        }}
-      />,
+      <Table totals={{ label: 'Total', cells: { value: 'R$ 1.102,00' } }} />,
     );
     expect(await audit(container)).toHaveNoViolations();
   });
