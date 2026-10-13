@@ -607,7 +607,9 @@
     "resolveOpenFor": "Resolver {asset}",
     "resolveTitle": "Resolver {asset}",
     "resolveDescription": "Atribua este ativo a uma carteira ou defina uma regra permanente para as próximas compras dele.",
-    "resolveUnassigned": "Quantidade não atribuída"
+    "resolveUnassigned": "Quantidade não atribuída",
+    "unbalancedTitle": "Metas a revisar",
+    "unbalancedDescription": "Carteiras cujas metas passaram da tolerância que você definiu ou não somam 100%. O balanceamento de cada uma está em Portfólio."
   },
   "import": {
     "signedOut": "Entre na sua conta para importar extratos.",

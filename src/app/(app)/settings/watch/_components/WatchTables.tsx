@@ -15,9 +15,10 @@ import { watchRuleAnchor } from '@/lib/watch-paths';
 import { ActionForm } from '@/components/patterns/action-form';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
 import { QueryLink } from '@/components/patterns/query-link';
+import { RowForms } from '@/components/patterns/row-forms';
 import { StateBadge } from '@/components/patterns/state-badge';
 import { Money } from '@/app/money';
-import { useHideValues } from '@/app/hide-values';
+import { loadHideValues } from '@/app/hide-values';
 import { Cluster } from '@/components/layout/cluster';
 import { Stack } from '@/components/layout/stack';
 import { Badge } from '@/components/ui/badge';
@@ -113,7 +114,7 @@ function stateTitle(row: WatchRuleRow, t: Translate, masked: boolean): string {
 }
 
 /** One-field forms outside the table, named by the rows' buttons through `form`. */
-function RowForms({
+function OneFieldForms({
   assetIds,
   action,
   prefix,
@@ -126,7 +127,7 @@ function RowForms({
   readonly extra?: (assetId: string) => { readonly name: string; readonly value: string };
 }) {
   return (
-    <>
+    <RowForms>
       {assetIds.map((assetId) => {
         const field = extra?.(assetId);
         return (
@@ -136,7 +137,7 @@ function RowForms({
           </ActionForm>
         );
       })}
-    </>
+    </RowForms>
   );
 }
 
@@ -146,7 +147,7 @@ const DELETE_FORM = 'delete-rule';
 /** "Suas regras": every held, eligible asset with a rule. */
 export async function WatchedTable({ rows }: { readonly rows: readonly WatchRuleRow[] }) {
   const t = await getTranslations('watch');
-  const masked = useHideValues();
+  const masked = await loadHideValues();
 
   const ranks = { price: ranksOf(rows, (row) => row.currentPrice) };
 
@@ -261,7 +262,7 @@ export async function WatchedTable({ rows }: { readonly rows: readonly WatchRule
   });
 
   return (
-    <Stack gap="sm">
+    <Stack gap="none">
       <NodeTable
         columns={columns}
         rows={nodes}
@@ -271,7 +272,7 @@ export async function WatchedTable({ rows }: { readonly rows: readonly WatchRule
         paramPrefix="rules"
         sort={{ id: 'asset', desc: false }}
       />
-      <RowForms
+      <OneFieldForms
         assetIds={rows.map((row) => row.assetId)}
         action={setRuleMutedAction}
         prefix={MUTE_FORM}
@@ -281,14 +282,11 @@ export async function WatchedTable({ rows }: { readonly rows: readonly WatchRule
           value: (!(rows.find((row) => row.assetId === assetId)?.muted ?? false)).toString(),
         })}
       />
-      <RowForms
+      <OneFieldForms
         assetIds={rows.map((row) => row.assetId)}
         action={deleteRuleAction}
         prefix={DELETE_FORM}
       />
-      <Text as="span" size="xs" tone="muted">
-        {t('deleteHint')}
-      </Text>
     </Stack>
   );
 }
@@ -347,7 +345,7 @@ export async function RetainedTable({ rules }: { readonly rules: readonly WatchR
   });
 
   return (
-    <Stack gap="sm">
+    <Stack gap="none">
       <NodeTable
         columns={columns}
         rows={nodes}
@@ -357,7 +355,7 @@ export async function RetainedTable({ rules }: { readonly rules: readonly WatchR
         paramPrefix="retained"
         sort={{ id: 'asset', desc: false }}
       />
-      <RowForms
+      <OneFieldForms
         assetIds={rules.map((rule) => rule.assetId)}
         action={deleteRuleAction}
         prefix={DELETE_FORM}

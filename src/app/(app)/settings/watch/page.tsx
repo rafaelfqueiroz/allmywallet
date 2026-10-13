@@ -164,7 +164,11 @@ export default async function WatchPage({ searchParams }: PageProps) {
           </Section>
         )}
 
-        <Section title={t('yourRulesTitle')} description={t('yourRulesDescription')}>
+        <Section
+          title={t('yourRulesTitle')}
+          // The delete control is an icon, so what it does is said here, once.
+          description={`${t('yourRulesDescription')} ${t('deleteHint')}`}
+        >
           {view.watched.length === 0 ? (
             <EmptyState title={t('empty')} />
           ) : (

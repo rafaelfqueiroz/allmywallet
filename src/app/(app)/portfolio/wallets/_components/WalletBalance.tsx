@@ -238,6 +238,8 @@ export async function WalletBalance({
                   : t('unavailableNoValue')}
               </Note>
             )}
+            {/* BR-017-19 — stated, not implied. Above the table, which closes its panel. */}
+            <Note>{t('noAdviceNote')}</Note>
             <NodeTable
               columns={balanceColumns}
               rows={balanceRows}
@@ -247,9 +249,6 @@ export async function WalletBalance({
               paramPrefix="balance"
               sort={{ id: 'asset', desc: false }}
             />
-
-            {/* BR-017-19 — stated, not implied. */}
-            <Note>{t('noAdviceNote')}</Note>
           </Section>
 
           <Section title={t('targetsTitle')} description={t('modeHint')}>

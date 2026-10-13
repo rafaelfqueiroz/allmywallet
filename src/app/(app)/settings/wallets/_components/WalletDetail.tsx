@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
+import { RowForms } from '@/components/patterns/row-forms';
 import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
 import { formatQuantity } from '@/i18n/format';
 
@@ -186,48 +187,6 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
       {/* BR-010-14 — rules that route this asset's future purchases here. */}
       <Section title={t('rulesTitle')} description={t('standingRuleDescription')}>
         <Stack gap="md">
-          {standingRules.length === 0 ? (
-            <EmptyState title={t('rulesEmpty')} />
-          ) : (
-            <>
-              <NodeTable
-                columns={[
-                  {
-                    id: 'asset',
-                    header: t('columnAsset'),
-                    kind: 'text',
-                    width: 40,
-                    sortable: true,
-                  },
-                  {
-                    id: 'actions',
-                    header: t('columnActions'),
-                    kind: 'control',
-                    width: '10rem',
-                    srOnlyHeader: true,
-                  },
-                ]}
-                rows={ruleRows}
-                caption={t('rulesTitle')}
-                noun={t('ruleNoun')}
-                filterPlaceholder={t('filterAssetPlaceholder')}
-                paramPrefix="rules"
-                sort={{ id: 'asset', desc: false }}
-              />
-              {/* DS-28 renders each cell twice, so a form never sits in one: the row's
-                  button names its form here, outside the table, by `form`. */}
-              {standingRules.map((rule) => (
-                <ActionForm
-                  key={rule.assetId}
-                  id={`clear-rule-${rule.assetId}`}
-                  action={clearStandingRuleAction}
-                >
-                  <input type="hidden" name="assetId" value={rule.assetId} />
-                </ActionForm>
-              ))}
-            </>
-          )}
-
           {ruleCandidates.length === 0 ? (
             <Text as="p" size="sm" tone="muted">
               {t('rulesNothing')}
@@ -258,6 +217,51 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
                 </FieldAction>
               </Cluster>
             </ActionForm>
+          )}
+          {/* The table closes the panel: the pager it ends in sits flush against the
+              panel's edge (SPEC-022 BR-022-36), so nothing may follow it. */}
+          {standingRules.length === 0 ? (
+            <EmptyState title={t('rulesEmpty')} />
+          ) : (
+            <>
+              <NodeTable
+                columns={[
+                  {
+                    id: 'asset',
+                    header: t('columnAsset'),
+                    kind: 'text',
+                    width: 40,
+                    sortable: true,
+                  },
+                  {
+                    id: 'actions',
+                    header: t('columnActions'),
+                    kind: 'control',
+                    width: '10rem',
+                    srOnlyHeader: true,
+                  },
+                ]}
+                rows={ruleRows}
+                caption={t('rulesTitle')}
+                noun={t('ruleNoun')}
+                filterPlaceholder={t('filterAssetPlaceholder')}
+                paramPrefix="rules"
+                sort={{ id: 'asset', desc: false }}
+              />
+              {/* DS-28 renders each cell twice, so a form never sits in one: the row's
+                  button names its form here, outside the table, by `form`. */}
+              <RowForms>
+                {standingRules.map((rule) => (
+                  <ActionForm
+                    key={rule.assetId}
+                    id={`clear-rule-${rule.assetId}`}
+                    action={clearStandingRuleAction}
+                  >
+                    <input type="hidden" name="assetId" value={rule.assetId} />
+                  </ActionForm>
+                ))}
+              </RowForms>
+            </>
           )}
         </Stack>
       </Section>

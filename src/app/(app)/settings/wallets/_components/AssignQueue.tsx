@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Field, FieldAction } from '@/components/patterns/field';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 import { QueryLink } from '@/components/patterns/query-link';
+import { RowForms } from '@/components/patterns/row-forms';
 import { Section } from '@/components/patterns/section';
 import { Cluster } from '@/components/layout/cluster';
 import { Stack } from '@/components/layout/stack';
@@ -158,51 +159,10 @@ export async function AssignQueue({
 
   return (
     <>
-      <Section title={t('needsAttentionTitle')} description={t('needsAttentionDescription')}>
-        <Stack gap="md">
-          {/*
-            SPEC-017 BR-017-17 / DL-017-08 — out-of-balance wallets land in **this**
-            queue rather than a new one. SPEC-010 BR-010-12 already established
-            one place to look for "is there anything for me to do?", and a second
-            surface splits the answer across two screens. Each links to the
-            wallet's balancing in Portfólio.
-          */}
-          {unbalanced.length > 0 && (
-            <NodeTable
-              columns={[
-                {
-                  id: 'wallet',
-                  header: t('columnWallet'),
-                  kind: 'text',
-                  width: 28,
-                  sortable: true,
-                },
-                {
-                  id: 'status',
-                  header: t('columnStatus'),
-                  kind: 'text',
-                  width: 44,
-                  sortable: true,
-                },
-                {
-                  id: 'actions',
-                  header: t('columnActions'),
-                  kind: 'control',
-                  width: '10rem',
-                  srOnlyHeader: true,
-                },
-              ]}
-              rows={unbalancedRows}
-              caption={t('needsAttentionUnbalancedCaption')}
-              noun={t('walletNoun')}
-              filterPlaceholder={t('list.search')}
-              paramPrefix="unbalanced"
-              sort={{ id: 'wallet', desc: false }}
-            />
-          )}
-
+      {(pending.length > 0 || unbalanced.length === 0) && (
+        <Section title={t('needsAttentionTitle')} description={t('needsAttentionDescription')}>
           {pending.length === 0 ? (
-            unbalanced.length === 0 && <EmptyState title={t('needsAttentionEmpty')} />
+            <EmptyState title={t('needsAttentionEmpty')} />
           ) : (
             <NodeTable
               columns={[
@@ -242,8 +202,52 @@ export async function AssignQueue({
               sort={{ id: 'asset', desc: false }}
             />
           )}
-        </Stack>
-      </Section>
+        </Section>
+      )}
+
+      {/*
+        SPEC-017 BR-017-17 / DL-017-08 — out-of-balance wallets land in **this**
+        queue rather than a new one. SPEC-010 BR-010-12 already established
+        one place to look for "is there anything for me to do?", and a second
+        surface splits the answer across two screens. Each links to the
+        wallet's balancing in Portfólio. A panel of its own: a table's pager
+        closes the panel it is in, so two tables never share one.
+      */}
+      {unbalanced.length > 0 && (
+        <Section title={t('unbalancedTitle')} description={t('unbalancedDescription')}>
+          <NodeTable
+            columns={[
+              {
+                id: 'wallet',
+                header: t('columnWallet'),
+                kind: 'text',
+                width: 28,
+                sortable: true,
+              },
+              {
+                id: 'status',
+                header: t('columnStatus'),
+                kind: 'text',
+                width: 44,
+                sortable: true,
+              },
+              {
+                id: 'actions',
+                header: t('columnActions'),
+                kind: 'control',
+                width: '10rem',
+                srOnlyHeader: true,
+              },
+            ]}
+            rows={unbalancedRows}
+            caption={t('needsAttentionUnbalancedCaption')}
+            noun={t('walletNoun')}
+            filterPlaceholder={t('list.search')}
+            paramPrefix="unbalanced"
+            sort={{ id: 'wallet', desc: false }}
+          />
+        </Section>
+      )}
 
       {resolving !== undefined && (
         <Section
@@ -349,15 +353,17 @@ export async function AssignQueue({
           />
           {/* DS-28 renders each cell twice, so a form never sits in one: each row's
               button names its form here, outside the table, by `form`. */}
-          {standingRules.map((rule) => (
-            <ActionForm
-              key={rule.assetId}
-              id={`clear-rule-${rule.assetId}`}
-              action={clearStandingRuleAction}
-            >
-              <input type="hidden" name="assetId" value={rule.assetId} />
-            </ActionForm>
-          ))}
+          <RowForms>
+            {standingRules.map((rule) => (
+              <ActionForm
+                key={rule.assetId}
+                id={`clear-rule-${rule.assetId}`}
+                action={clearStandingRuleAction}
+              >
+                <input type="hidden" name="assetId" value={rule.assetId} />
+              </ActionForm>
+            ))}
+          </RowForms>
         </Section>
       )}
     </>
