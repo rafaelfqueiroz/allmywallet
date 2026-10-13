@@ -17,9 +17,23 @@ describe('ranksOf', () => {
     expect(ranksOf(rows, (row) => row)).toEqual([1, undefined, 0]);
   });
 
-  it('keeps ties in their input order', () => {
+  it('gives equal figures the same rank, so a stable sort keeps their order in both directions', () => {
     const rows = ['2', '1', '2', '1'].map((value) => Quantity.fromString(value));
-    expect(ranksOf(rows, (row) => row)).toEqual([2, 0, 3, 1]);
+    expect(ranksOf(rows, (row) => row)).toEqual([1, 0, 1, 0]);
+  });
+
+  it('keeps equal rows in input order when sorted ascending and descending by rank', () => {
+    const figures = ['1000.00', '1000.00', '5.00'].map((value) => Money.fromString(value));
+    const ranks = ranksOf(figures, (figure) => figure) as number[];
+    const names = ['A', 'B', 'C'];
+    const order = (descending: boolean) =>
+      names
+        .map((name, index) => ({ name, rank: ranks[index] as number }))
+        // Array.prototype.sort is stable, as TanStack's is.
+        .sort((a, b) => (descending ? b.rank - a.rank : a.rank - b.rank))
+        .map((row) => row.name);
+    expect(order(false)).toEqual(['C', 'A', 'B']);
+    expect(order(true)).toEqual(['A', 'B', 'C']);
   });
 
   it('ranks figures by value, not by how they read as text', () => {
@@ -38,9 +52,9 @@ describe('ranksOf', () => {
     expect(ranksOf(rows, (row) => row)).toEqual([0, undefined, 1, undefined]);
   });
 
-  it('keeps the input order between equal figures', () => {
+  it('shares one rank between all equal figures', () => {
     const rows = ['5', '5', '5'].map((value) => Money.fromString(value));
-    expect(ranksOf(rows, (row) => row)).toEqual([0, 1, 2]);
+    expect(ranksOf(rows, (row) => row)).toEqual([0, 0, 0]);
   });
 
   it('ranks an empty column as empty', () => {

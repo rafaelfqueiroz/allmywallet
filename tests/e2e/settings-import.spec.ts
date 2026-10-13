@@ -245,7 +245,7 @@ test('history rows stay flat and pagination spans the panel', async ({ signedIn 
     .filter({ has: page.locator('[data-slot="data-table"]') });
   await expect(panel).toHaveCount(1);
   await expect(panel.locator('[data-slot="card"]')).toHaveCount(0);
-  const footer = panel.locator('[data-slot="table-footer"]');
+  const footer = panel.locator('[data-slot="table-pager"]');
   await expect(footer).toBeVisible();
   const panelBox = await panel.boundingBox();
   const footerBox = await footer.boundingBox();

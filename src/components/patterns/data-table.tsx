@@ -942,7 +942,7 @@ function DataTableView<TData>({
 
       {pagination && (
         <footer
-          data-slot="table-footer"
+          data-slot="table-pager"
           className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm group-[[data-variant=panel]]/panel:-mx-4 group-[[data-variant=panel]]/panel:-mb-4 group-[[data-variant=panel]]/panel:border-t group-[[data-variant=panel]]/panel:px-4 group-[[data-variant=panel]]/panel:py-3"
         >
           <p className="text-muted-foreground">

@@ -10,8 +10,11 @@
  * ever standing in for an amount (AR-06–AR-10), and a masked column still
  * sorts: an order is not an amount (BR-022-24).
  *
- * Ties keep their input order (`Array.prototype.sort` is stable), so two equal
- * rows do not swap places when the table is sorted by another column and back.
+ * **Equal figures share a rank** (dense ranking: 0, 1, 1, 2). The table's own
+ * sort is stable, so rows with the same rank keep their input order in *both*
+ * directions; distinct consecutive ranks would have flipped them when the
+ * column was sorted descending, and two holdings worth the same would swap
+ * places between ↑ and ↓. Equality is the exact `comparedTo(...) === 0`.
  * An absent figure gets no rank rather than a low one: `sortUndefined: 'last'`
  * keeps it at the bottom in both directions, which "no figure" is owed — it is
  * not the smallest value. Neutral on purpose (imports nothing, structural
@@ -31,7 +34,10 @@ export function ranksOf<T, F extends { comparedTo(other: never): number }>(
     .sort((a, b) => a.figure.comparedTo(b.figure as never));
 
   const ranks: (number | undefined)[] = items.map(() => undefined);
-  present.forEach((entry, rank) => {
+  let rank = -1;
+  present.forEach((entry, position) => {
+    const previous = present[position - 1];
+    if (previous === undefined || previous.figure.comparedTo(entry.figure as never) !== 0) rank++;
     ranks[entry.index] = rank;
   });
   return ranks;
