@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/app/money';
 import { formatPercentPoints } from '@/i18n/format';
 import { Note } from '@/components/patterns/note';
+import { CellLabel } from '@/components/patterns/cell-label';
 import { Field } from '@/components/patterns/field';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
@@ -105,13 +106,18 @@ export async function WalletBalance({
     keys: { asset: nameOf(row.assetId), ...rankKeys(balanceRanks, index) },
     cells: {
       asset: (
-        <Stack gap="xs" align="start">
-          <span>{nameOf(row.assetId)}</span>
-          {row.outOfTolerance && (
-            // SPEC-022 BR-022-31 — drift is a warning (DS-05).
-            <Badge variant="warning">{t('outOfTolerance')}</Badge>
-          )}
-        </Stack>
+        <CellLabel
+          layout="stacked"
+          strong={false}
+          badge={
+            row.outOfTolerance && (
+              // SPEC-022 BR-022-31 — drift is a warning (DS-05).
+              <Badge variant="warning">{t('outOfTolerance')}</Badge>
+            )
+          }
+        >
+          {nameOf(row.assetId)}
+        </CellLabel>
       ),
       quantity: <Money value={row.quantity} kind="quantity" />,
       value: <Money value={row.value} />,

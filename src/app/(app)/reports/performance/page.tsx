@@ -29,6 +29,7 @@ import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { CellLabel } from '@/components/patterns/cell-label';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
@@ -414,14 +415,17 @@ function ContributionTable({
                explanation. A computed gain printed in the same ink as an
                observed one claims a precision this product does not have. */
             group: (
-              <Cluster gap="sm" align="baseline">
-                <span className="font-medium">{name}</span>
-                {group.estimated ? (
-                  <Badge variant="outline" title={labels.estimateExplanation}>
-                    {labels.estimated}
-                  </Badge>
-                ) : null}
-              </Cluster>
+              <CellLabel
+                badge={
+                  group.estimated ? (
+                    <Badge variant="outline" title={labels.estimateExplanation}>
+                      {labels.estimated}
+                    </Badge>
+                  ) : null
+                }
+              >
+                {name}
+              </CellLabel>
             ),
             weight: <Money value={group.weight} kind="percent" />,
             ownReturn: <RateCell rate={group.ownReturn} />,

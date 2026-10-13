@@ -23,11 +23,7 @@ import type { Row } from '@tanstack/react-table';
  */
 const COLLATOR = new Intl.Collator('pt-BR', { numeric: true, sensitivity: 'base' });
 
-export function collatedSortingFn<TData>(
-  rowA: Row<TData>,
-  rowB: Row<TData>,
-  id: string,
-): number {
+export function collatedSortingFn<TData>(rowA: Row<TData>, rowB: Row<TData>, id: string): number {
   const a: unknown = rowA.getValue(id);
   const b: unknown = rowB.getValue(id);
   if (typeof a === 'string' && typeof b === 'string') return COLLATOR.compare(a, b);

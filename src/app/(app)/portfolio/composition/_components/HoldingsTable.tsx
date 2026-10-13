@@ -6,6 +6,7 @@ import { DataTable } from '@/components/patterns/data-table';
 import { Badge } from '@/components/ui/badge';
 import { StateBadge, type WatchState } from '@/components/patterns/state-badge';
 import { Text } from '@/components/ui/text';
+import { CellLabel } from '@/components/patterns/cell-label';
 import { Cluster } from '@/components/layout/cluster';
 import { MoneyMask } from '@/components/patterns/money-mask';
 
@@ -212,19 +213,22 @@ export function HoldingsTable({
         meta: { kind: 'text', width: 22 },
         accessorFn: (row) => row.code,
         cell: ({ row }) => (
-          <Cluster gap="sm" align="baseline">
-            <span className="font-medium">{row.original.code}</span>
-            {row.original.concentrated && (
-              /*
-               * BR-015-06 — informational, never advice. Both the badge and
-               * its title come from the message catalogue, where a human
-               * reviewed the wording; nothing is composed here.
-               */
-              <Badge variant="secondary" title={labels.concentratedTitle}>
-                {labels.concentrated}
-              </Badge>
-            )}
-          </Cluster>
+          <CellLabel
+            badge={
+              row.original.concentrated && (
+                /*
+                 * BR-015-06 — informational, never advice. Both the badge and
+                 * its title come from the message catalogue, where a human
+                 * reviewed the wording; nothing is composed here.
+                 */
+                <Badge variant="secondary" title={labels.concentratedTitle}>
+                  {labels.concentrated}
+                </Badge>
+              )
+            }
+          >
+            {row.original.code}
+          </CellLabel>
         ),
       },
       {

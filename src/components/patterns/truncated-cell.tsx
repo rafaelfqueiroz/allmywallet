@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { cn } from '@/lib/utils';
+import './truncated-cell.css';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { useTipInteraction } from '@/components/patterns/use-tip-interaction';
 
@@ -18,6 +19,12 @@ function fullText(element: HTMLElement): string {
   }
   return parts.join(' ');
 }
+
+/**
+ * The elements inside a cell that truncate themselves: a line a cell marks
+ * (`CellLabel`) and a badge.
+ */
+const TRUNCATING_LINES = '[data-cell-line], [data-slot="badge"]';
 
 const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]';
 
@@ -41,7 +48,12 @@ function useOverflow(ref: RefObject<HTMLDivElement | null>): Overflow {
   const measure = () => {
     const element = ref.current;
     if (!element) return;
-    const overflowing = element.scrollWidth > element.clientWidth;
+    // The box itself, or any line inside it that truncates on its own: a flex
+    // child or a badge ellipsizes its text where it sits (`truncated-cell.css`),
+    // so the box around it never overflows even though text has been cut.
+    const overflowing = [element, ...element.querySelectorAll<HTMLElement>(TRUNCATING_LINES)].some(
+      (candidate) => candidate.scrollWidth > candidate.clientWidth,
+    );
     const next: Overflow = overflowing
       ? {
           overflowing,

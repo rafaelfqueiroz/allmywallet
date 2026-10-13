@@ -65,7 +65,11 @@ export function ImportHistoryTable({ rows }: { readonly rows: readonly ImportHis
       {
         id: 'status',
         header: t('columnStatus'),
-        meta: { kind: 'badge' },
+        // Sized for the longest status label, "Não foi possível processar" (26
+        // characters in the 12px badge, plus its dot): at the badge default
+        // (14) a failed import read "Não foi possível" and was cut. Any label
+        // that still does not fit ends in an ellipsis with its text on demand.
+        meta: { kind: 'badge', width: 26 },
         accessorFn: (row) => row.statusLabel,
         cell: ({ row }) => (
           <Badge dot variant={BATCH_STATUS_VARIANT[row.original.status]}>
