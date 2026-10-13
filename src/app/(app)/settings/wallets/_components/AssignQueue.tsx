@@ -13,6 +13,7 @@ import { ActionForm } from '@/components/patterns/action-form';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Field, FieldAction } from '@/components/patterns/field';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
+import { QueryLink } from '@/components/patterns/query-link';
 import { Section } from '@/components/patterns/section';
 import { Cluster } from '@/components/layout/cluster';
 import { Stack } from '@/components/layout/stack';
@@ -113,12 +114,14 @@ export async function AssignQueue({
         reason,
         actions: (
           <Button asChild variant="outline" size="sm">
-            <Link
-              href={`/settings/wallets/assign?resolve=${item.assetId}#${RESOLVE_ANCHOR}`}
+            {/* Keeps the tables' own sort, page and filter (see `QueryLink`). */}
+            <QueryLink
+              set={{ resolve: item.assetId }}
+              hash={RESOLVE_ANCHOR}
               aria-label={t('resolveOpenFor', { asset: labelFor(labels, item.assetId).code })}
             >
               {t('resolveOpen')}
-            </Link>
+            </QueryLink>
           </Button>
         ),
       },
