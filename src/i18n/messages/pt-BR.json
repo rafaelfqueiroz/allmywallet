@@ -272,7 +272,13 @@
       "unassignedTitle": "Não atribuído",
       "unassignedDescription": "O que sobra de cada ativo depois de somar todas as carteiras — sempre visível, para que nada fique escondido.",
       "unassignedEmpty": "Tudo o que você tem está atribuído a alguma carteira.",
-      "balanceTitle": "Balanceamento · {wallet}"
+      "balanceTitle": "Balanceamento · {wallet}",
+      "noun": "carteiras",
+      "filterPlaceholder": "Buscar carteira",
+      "unassignedColumnAsset": "Ativo",
+      "unassignedColumnQuantity": "Quantidade",
+      "unassignedNoun": "ativos",
+      "unassignedFilterPlaceholder": "Buscar ativo"
     },
     "goals": {
       "title": "Metas · {wallet}",
@@ -1499,7 +1505,9 @@
     "untargetedEmpty": "Nada nesta carteira fica fora das metas.",
     "targetsTitle": "Definir metas",
     "targetPctLabel": "Meta de {asset} (%)",
-    "noAdviceNote": "Estes números são a distância até a meta que você definiu, calculada sobre um preço já exibido. Não são uma sugestão de operação."
+    "noAdviceNote": "Estes números são a distância até a meta que você definiu, calculada sobre um preço já exibido. Não são uma sugestão de operação.",
+    "noun": "ativos",
+    "filterPlaceholder": "Buscar ativo"
   },
   "objetivos": {
     "title": "Objetivos",

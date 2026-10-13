@@ -24,15 +24,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
+import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
 
 /**
  * SPEC-017 — one wallet's targets, the drift against them, and the distance in
@@ -79,6 +72,98 @@ export async function WalletBalance({
   ]);
   const nameOf = (assetId: (typeof balance.rows)[number]['assetId']) =>
     `${labelFor(labels, assetId).code} — ${labelFor(labels, assetId).name}`;
+
+  /*
+   * SPEC-022 BR-022-18 — both tables page, filter and sort. Cells are rendered
+   * here, on the server, through `Money` (masking, BR-022-24; no money crosses
+   * as a number); every figure column sorts by its **rank**, from exact
+   * `comparedTo` (`ranksOf`), and an unavailable figure has none, so it sorts
+   * last in both directions rather than passing for zero (BR-017-21).
+   */
+  const unavailable = <Unavailable label={t('unavailable')} />;
+  const balanceRanks = {
+    quantity: ranksOf(balance.rows, (row) => row.quantity),
+    value: ranksOf(balance.rows, (row) => row.value),
+    target: ranksOf(balance.rows, (row) => row.targetPct),
+    current: ranksOf(balance.rows, (row) => row.currentPct),
+    drift: ranksOf(balance.rows, (row) => row.driftPp),
+    gapValue: ranksOf(balance.rows, (row) => row.gap?.gapValue ?? null),
+    gapShares: ranksOf(balance.rows, (row) => row.gap?.tradableShares ?? null),
+  };
+  const balanceColumns: NodeColumn[] = [
+    { id: 'asset', header: t('columnAsset'), kind: 'text', width: 22, sortable: true },
+    { id: 'quantity', header: t('columnQuantity'), kind: 'number', sortable: true },
+    { id: 'value', header: t('columnValue'), kind: 'money', sortable: true },
+    { id: 'target', header: t('columnTarget'), kind: 'percent', sortable: true },
+    { id: 'current', header: t('columnCurrent'), kind: 'percent', sortable: true },
+    { id: 'drift', header: t('columnDrift'), kind: 'percent', sortable: true },
+    { id: 'gapValue', header: t('columnGapValue'), kind: 'money', sortable: true },
+    { id: 'gapShares', header: t('columnGapShares'), kind: 'number', sortable: true },
+  ];
+  const balanceRows: NodeRow[] = balance.rows.map((row, index) => ({
+    id: row.assetId,
+    keys: { asset: nameOf(row.assetId), ...rankKeys(balanceRanks, index) },
+    cells: {
+      asset: (
+        <Stack gap="xs" align="start">
+          <span>{nameOf(row.assetId)}</span>
+          {row.outOfTolerance && (
+            // SPEC-022 BR-022-31 — drift is a warning (DS-05).
+            <Badge variant="warning">{t('outOfTolerance')}</Badge>
+          )}
+        </Stack>
+      ),
+      quantity: <Money value={row.quantity} kind="quantity" />,
+      value: <Money value={row.value} />,
+      target: <Money value={row.targetPct} kind="percentPoints" />,
+      current:
+        row.currentPct === null ? (
+          unavailable
+        ) : (
+          <Money value={row.currentPct} kind="percentPoints" />
+        ),
+      drift:
+        row.driftPp === null ? (
+          unavailable
+        ) : (
+          <Money value={row.driftPp} kind="percentPoints" signed />
+        ),
+      gapValue: row.gap === null ? unavailable : <Money value={row.gap.gapValue} signed />,
+      gapShares:
+        row.gap === null || row.gap.tradableShares === null ? (
+          unavailable
+        ) : (
+          // BR-017-20: the count is arithmetic over a delayed quote, and says so
+          // next to itself rather than in a footnote the reader has to go and
+          // find. It wraps under the figure when the column is full.
+          <Cluster gap="xs" justify="end" align="baseline">
+            <Money value={row.gap.tradableShares} kind="quantity" signed />
+            <Text as="span" size="xs" tone="muted" title={t('approximateHint')}>
+              {t('approximate')}
+            </Text>
+          </Cluster>
+        ),
+    },
+  }));
+
+  const untargetedRanks = {
+    quantity: ranksOf(balance.untargeted, (row) => row.quantity),
+    value: ranksOf(balance.untargeted, (row) => row.value),
+  };
+  const untargetedColumns: NodeColumn[] = [
+    { id: 'asset', header: t('columnAsset'), kind: 'text', width: 30, sortable: true },
+    { id: 'quantity', header: t('columnQuantity'), kind: 'number', sortable: true },
+    { id: 'value', header: t('columnValue'), kind: 'money', sortable: true },
+  ];
+  const untargetedRows: NodeRow[] = balance.untargeted.map((row, index) => ({
+    id: row.assetId,
+    keys: { asset: nameOf(row.assetId), ...rankKeys(untargetedRanks, index) },
+    cells: {
+      asset: nameOf(row.assetId),
+      quantity: <Money value={row.quantity} kind="quantity" />,
+      value: <Money value={row.value} />,
+    },
+  }));
 
   return (
     <Stack gap="lg">
@@ -153,81 +238,15 @@ export async function WalletBalance({
                   : t('unavailableNoValue')}
               </Note>
             )}
-            <Table>
-              <TableCaption className="sr-only">{t('tableCaption')}</TableCaption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col">{t('columnAsset')}</TableHead>
-                  <TableHead scope="col">{t('columnQuantity')}</TableHead>
-                  <TableHead scope="col">{t('columnValue')}</TableHead>
-                  <TableHead scope="col">{t('columnTarget')}</TableHead>
-                  <TableHead scope="col">{t('columnCurrent')}</TableHead>
-                  <TableHead scope="col">{t('columnDrift')}</TableHead>
-                  <TableHead scope="col">{t('columnGapValue')}</TableHead>
-                  <TableHead scope="col">{t('columnGapShares')}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {balance.rows.map((row) => (
-                  <TableRow key={row.assetId}>
-                    <TableCell className="py-row">
-                      <Stack gap="xs" align="start">
-                        <span>{nameOf(row.assetId)}</span>
-                        {row.outOfTolerance && (
-                          // SPEC-022 BR-022-31 — drift is a warning (DS-05).
-                          <Badge variant="warning">{t('outOfTolerance')}</Badge>
-                        )}
-                      </Stack>
-                    </TableCell>
-                    <TableCell className="py-row">
-                      <Money value={row.quantity} kind="quantity" />
-                    </TableCell>
-                    <TableCell className="py-row">
-                      <Money value={row.value} />
-                    </TableCell>
-                    <TableCell className="py-row">
-                      <Money value={row.targetPct} kind="percentPoints" />
-                    </TableCell>
-                    <TableCell className="py-row">
-                      {row.currentPct === null ? (
-                        <Unavailable label={t('unavailable')} />
-                      ) : (
-                        <Money value={row.currentPct} kind="percentPoints" />
-                      )}
-                    </TableCell>
-                    <TableCell className="py-row">
-                      {row.driftPp === null ? (
-                        <Unavailable label={t('unavailable')} />
-                      ) : (
-                        <Money value={row.driftPp} kind="percentPoints" signed />
-                      )}
-                    </TableCell>
-                    <TableCell className="py-row">
-                      {row.gap === null ? (
-                        <Unavailable label={t('unavailable')} />
-                      ) : (
-                        <Money value={row.gap.gapValue} signed />
-                      )}
-                    </TableCell>
-                    <TableCell className="py-row">
-                      {row.gap === null || row.gap.tradableShares === null ? (
-                        <Unavailable label={t('unavailable')} />
-                      ) : (
-                        // BR-017-20: the count is arithmetic over a delayed
-                        // quote, and says so next to itself rather than in a
-                        // footnote the reader has to go and find.
-                        <Cluster gap="xs" align="baseline">
-                          <Money value={row.gap.tradableShares} kind="quantity" signed />
-                          <Text as="span" size="xs" tone="muted" title={t('approximateHint')}>
-                            {t('approximate')}
-                          </Text>
-                        </Cluster>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <NodeTable
+              columns={balanceColumns}
+              rows={balanceRows}
+              caption={t('tableCaption')}
+              noun={t('noun')}
+              filterPlaceholder={t('filterPlaceholder')}
+              paramPrefix="balance"
+              sort={{ id: 'asset', desc: false }}
+            />
 
             {/* BR-017-19 — stated, not implied. */}
             <Note>{t('noAdviceNote')}</Note>
@@ -299,29 +318,15 @@ export async function WalletBalance({
         {balance.untargeted.length === 0 ? (
           <EmptyState title={t('untargetedEmpty')} />
         ) : (
-          <Table>
-            <TableCaption className="sr-only">{t('untargetedTitle')}</TableCaption>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">{t('columnAsset')}</TableHead>
-                <TableHead scope="col">{t('columnQuantity')}</TableHead>
-                <TableHead scope="col">{t('columnValue')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {balance.untargeted.map((row) => (
-                <TableRow key={row.assetId}>
-                  <TableCell className="py-row">{nameOf(row.assetId)}</TableCell>
-                  <TableCell className="py-row">
-                    <Money value={row.quantity} kind="quantity" />
-                  </TableCell>
-                  <TableCell className="py-row">
-                    <Money value={row.value} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <NodeTable
+            columns={untargetedColumns}
+            rows={untargetedRows}
+            caption={t('untargetedTitle')}
+            noun={t('noun')}
+            filterPlaceholder={t('filterPlaceholder')}
+            paramPrefix="untargeted"
+            sort={{ id: 'asset', desc: false }}
+          />
         )}
       </Section>
     </Stack>

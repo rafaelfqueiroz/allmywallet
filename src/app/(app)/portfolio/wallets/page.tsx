@@ -5,7 +5,7 @@ import type { ReportQueryResult } from '@/core/reporting/base-query';
 import { UNASSIGNED_GROUP_ID, type ReportTotals } from '@/core/reporting/ports';
 import type { CompositionReport, CompositionSlice } from '@/core/reporting/composition/ports';
 import { unrealizedResult } from '@/core/reporting/composition/result';
-import { Money as MoneyValue } from '@/core/shared/money';
+import { Money as MoneyValue, type Quantity } from '@/core/shared/money';
 import { labelFor, loadWalletsPageData } from '@/app/(app)/wallets/data';
 import { loadCurrentComposition } from '@/app/(app)/portfolio/data';
 import { PortfolioFrame } from '@/app/(app)/portfolio/_components/PortfolioFrame';
@@ -21,18 +21,10 @@ import { ErrorState } from '@/components/patterns/error-state';
 import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
-import { List, ListItem } from '@/components/layout/list';
 import { Text } from '@/components/ui/text';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
+import { ranksOf } from '@/app/(app)/portfolio/_components/ranks';
+import { TableCell, TableHead, TableRow } from '@/components/ui/table';
 
 /**
  * SPEC-022 BR-022-02 — **Portfólio › Carteiras**: how holdings spread across
@@ -133,7 +125,7 @@ export default async function PortfolioWalletsPage({ searchParams }: PageProps) 
         {comparison !== null && row !== undefined && report !== null && (
           // SPEC-022 BR-022-36 — the selected wallet's row, in a panel.
           <Section title={row.name}>
-            <ComparisonTable rows={[row]} total={null} />
+            <ComparisonTable rows={[row]} total={null} paginated={false} />
           </Section>
         )}
         {balance}
@@ -172,21 +164,13 @@ export default async function PortfolioWalletsPage({ searchParams }: PageProps) 
           <EmptyState title={tp('wallets.unassignedEmpty')} />
         ) : (
           // One asset per row, so a quantity here counts one thing (BR-022-34).
-          <List gap="sm">
-            {unassigned.map((holding) => {
+          <UnassignedTable
+            holdings={unassigned}
+            names={unassigned.map((holding) => {
               const label = labelFor(labels, holding.assetId);
-              return (
-                <ListItem key={holding.assetId} separated>
-                  <Cluster justify="between" gap="sm">
-                    <span>
-                      {label.code} — {label.name}
-                    </span>
-                    <Money value={holding.quantity} kind="quantity" />
-                  </Cluster>
-                </ListItem>
-              );
+              return `${label.code} — ${label.name}`;
             })}
-          </List>
+          />
         )}
       </Section>
     </Stack>,
@@ -251,138 +235,249 @@ function comparisonRows(
   };
 }
 
+/**
+ * SPEC-022 BR-022-18 — the comparison as a `DataTable`: it grows with the
+ * wallets, so it pages, filters by wallet name and sorts by every column.
+ * Every cell is rendered here, on the server, through `Money` (masking,
+ * BR-022-24, and no money crossing as a number); the sort keys are names,
+ * counts and **ranks** from exact `Money.comparedTo` (`ranksOf`).
+ *
+ * The total (BR-022-34, BR-011-08) is the table's pinned footer, so it stays
+ * under the last row on every page. `paginated={false}` is the one-wallet view:
+ * one row, bounded by construction, which needs no pager.
+ */
 async function ComparisonTable({
   rows,
   total,
+  paginated = true,
 }: {
   readonly rows: readonly ComparisonRow[];
   readonly total: ReportTotals | null;
-}) {
-  const tp = await getTranslations('portfolio');
-
-  return (
-    <Table>
-      <TableCaption className="sr-only">{tp('wallets.comparisonTitle')}</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead scope="col">{tp('wallets.columnWallet')}</TableHead>
-          <TableHead scope="col" className="text-right">
-            {tp('wallets.columnAssets')}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {tp('wallets.columnValue')}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {tp('wallets.columnCost')}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {tp('wallets.columnResult')}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {tp('wallets.columnShare')}
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.walletId}>
-            <TableHead scope="row" className="py-row text-left font-medium">
-              {row.synthetic ? (
-                tp('wallets.unassignedTitle')
-              ) : (
-                <Link
-                  href={`/portfolio/wallets?wallet=${row.walletId}`}
-                  className="underline-offset-4 hover:underline"
-                >
-                  {row.name}
-                </Link>
-              )}
-            </TableHead>
-            <TableCell className="py-row text-right tabular-nums">{row.assets}</TableCell>
-            <Figures totals={row.slice?.totals ?? null} share={row.slice?.share ?? null} />
-          </TableRow>
-        ))}
-      </TableBody>
-      {total !== null && (
-        <TableFooter>
-          <TableRow>
-            <TableHead scope="row" className="py-row text-left">
-              {tp('wallets.total')}
-            </TableHead>
-            {/* No asset count: the rows count distinct assets per wallet, and
-                one asset split across two wallets is in both, so a column
-                total would be a sum that is not the portfolio's count. */}
-            <TableCell className="py-row" />
-            <Figures totals={total} share={null} whole />
-          </TableRow>
-        </TableFooter>
-      )}
-    </Table>
-  );
-}
-
-/** The portfolio's share of itself, through the same formatter as every row. */
-const WHOLE = MoneyValue.fromString('1');
-
-/** Value, cost, result and share — the four columns BR-022-34 names. */
-async function Figures({
-  totals,
-  share,
-  whole = false,
-}: {
-  readonly totals: ReportTotals | null;
-  readonly share: MoneyValue | null;
-  /** The footer: the portfolio is 100 % of itself by definition. */
-  readonly whole?: boolean;
+  readonly paginated?: boolean;
 }) {
   const tp = await getTranslations('portfolio');
   const t = await getTranslations('reports');
   const tCommon = await getTranslations('common');
 
-  if (totals === null) {
-    // A wallet holding nothing: said once, across the four figures, rather
-    // than as four zeros a reader could take for real ones.
-    return (
-      <TableCell colSpan={4} className="py-row text-right">
-        <Text as="span" size="sm" tone="muted">
-          {tp('wallets.noHoldings')}
-        </Text>
-      </TableCell>
-    );
-  }
+  const value = ranksOf(rows, (row) => row.slice?.totals.value ?? null);
+  const cost = ranksOf(rows, (row) => row.slice?.totals.costBasis ?? null);
+  const result = ranksOf(rows, (row) =>
+    row.slice === null ? null : unrealizedResult(row.slice.totals).result,
+  );
+  const share = ranksOf(rows, (row) => row.slice?.share ?? null);
 
-  const { result } = unrealizedResult(totals);
+  const columns: NodeColumn[] = [
+    {
+      id: 'wallet',
+      header: tp('wallets.columnWallet'),
+      kind: 'text',
+      width: 24,
+      sortable: paginated,
+    },
+    {
+      id: 'assets',
+      header: tp('wallets.columnAssets'),
+      kind: 'number',
+      width: 9,
+      sortable: paginated,
+    },
+    { id: 'value', header: tp('wallets.columnValue'), kind: 'money', sortable: paginated },
+    { id: 'cost', header: tp('wallets.columnCost'), kind: 'money', sortable: paginated },
+    { id: 'result', header: tp('wallets.columnResult'), kind: 'money', sortable: paginated },
+    { id: 'share', header: tp('wallets.columnShare'), kind: 'percent', sortable: paginated },
+  ];
+
+  const nodes: NodeRow[] = rows.map((row, index) => {
+    const label = row.synthetic ? tp('wallets.unassignedTitle') : row.name;
+    const totals = row.slice?.totals ?? null;
+    const dash = <span aria-hidden="true">—</span>;
+    return {
+      id: row.walletId,
+      keys: {
+        wallet: label,
+        assets: row.assets,
+        ...rankKey('value', value[index]),
+        ...rankKey('cost', cost[index]),
+        ...rankKey('result', result[index]),
+        ...rankKey('share', share[index]),
+      },
+      cells: {
+        wallet: row.synthetic ? (
+          <span className="font-medium">{label}</span>
+        ) : (
+          <Link
+            href={`/portfolio/wallets?wallet=${row.walletId}`}
+            className="font-medium underline-offset-4 hover:underline"
+          >
+            {row.name}
+          </Link>
+        ),
+        assets: row.assets,
+        // A wallet holding nothing: said once, in the first figure's cell,
+        // rather than as four zeros a reader could take for real ones.
+        value:
+          totals === null ? (
+            <Text as="span" size="sm" tone="muted" className="whitespace-normal">
+              {tp('wallets.noHoldings')}
+            </Text>
+          ) : (
+            // SPEC-009 / BR-011-15 — a wallet holding an accrued CDB is valued,
+            // not quoted, and says so beside the figure (BR-022-32).
+            <EstimatedValue value={totals.value} estimated={totals.estimated} justify="end" />
+          ),
+        cost:
+          totals === null ? (
+            dash
+          ) : (
+            <Cluster gap="sm" justify="end" align="baseline">
+              <Money value={totals.costBasis} />
+              {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
+              <CostEstimateMarker
+                shown={totals.costEstimated}
+                label={tCommon('estimated')}
+                title={t('markers.costEstimated.explanation')}
+              />
+            </Cluster>
+          ),
+        result: totals === null ? dash : <Money value={unrealizedResult(totals).result} signed />,
+        share: row.slice?.share == null ? dash : <Money value={row.slice.share} kind="percent" />,
+      },
+    };
+  });
 
   return (
-    <>
-      <TableCell className="py-row text-right">
-        {/* SPEC-009 / BR-011-15 — a wallet holding an accrued CDB is valued,
-            not quoted, and says so beside the figure (BR-022-32). */}
-        <EstimatedValue value={totals.value} estimated={totals.estimated} justify="end" />
-      </TableCell>
-      <TableCell className="py-row text-right">
-        <Cluster gap="sm" justify="end" align="baseline">
-          <Money value={totals.costBasis} />
-          {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
-          <CostEstimateMarker
-            shown={totals.costEstimated}
-            label={tCommon('estimated')}
-            title={t('markers.costEstimated.explanation')}
-          />
-        </Cluster>
-      </TableCell>
-      <TableCell className="py-row text-right">
-        <Money value={result} signed />
-      </TableCell>
-      <TableCell className="py-row text-right tabular-nums">
-        {whole ? (
-          <Money value={WHOLE} kind="percent" />
-        ) : share === null ? (
-          '—'
-        ) : (
-          <Money value={share} kind="percent" />
-        )}
-      </TableCell>
-    </>
+    <NodeTable
+      columns={columns}
+      rows={nodes}
+      caption={tp('wallets.comparisonTitle')}
+      noun={tp('wallets.noun')}
+      paramPrefix="wallets"
+      sort={{ id: 'value', desc: true }}
+      pagination={paginated}
+      {...(paginated ? { filterPlaceholder: tp('wallets.filterPlaceholder') } : {})}
+      {...(total === null ? {} : { footer: comparisonFooter(total, tp, t, tCommon) })}
+    />
+  );
+}
+
+/** A rank belongs in `keys` only where the figure exists. */
+function rankKey(column: string, rank: number | undefined): Record<string, number> {
+  return rank === undefined ? {} : { [column]: rank };
+}
+
+/** The portfolio's share of itself, through the same formatter as every row. */
+const WHOLE = MoneyValue.fromString('1');
+
+type Translate = Awaited<ReturnType<typeof getTranslations>>;
+
+/**
+ * Value, cost, result and share of the whole portfolio — the four columns
+ * BR-022-34 names. No asset count: the rows count distinct assets per wallet,
+ * and one asset split across two wallets is in both, so a column total would
+ * be a sum that is not the portfolio's count.
+ */
+function comparisonFooter(total: ReportTotals, tp: Translate, t: Translate, tCommon: Translate) {
+  const { result } = unrealizedResult(total);
+  const value = <EstimatedValue value={total.value} estimated={total.estimated} justify="end" />;
+  const cost = (
+    <Cluster gap="sm" justify="end" align="baseline">
+      <Money value={total.costBasis} />
+      <CostEstimateMarker
+        shown={total.costEstimated}
+        label={tCommon('estimated')}
+        title={t('markers.costEstimated.explanation')}
+      />
+    </Cluster>
+  );
+  const share = <Money value={WHOLE} kind="percent" />;
+  const figures: readonly (readonly [string, ReactNode])[] = [
+    [tp('wallets.columnValue'), value],
+    [tp('wallets.columnCost'), cost],
+    [tp('wallets.columnResult'), <Money key="result" value={result} signed />],
+    [tp('wallets.columnShare'), share],
+  ];
+
+  return {
+    row: (
+      <TableRow>
+        <TableHead scope="row" className="py-row text-left">
+          {tp('wallets.total')}
+        </TableHead>
+        <TableCell className="py-row" />
+        <TableCell className="py-row text-right">{value}</TableCell>
+        <TableCell className="py-row text-right">{cost}</TableCell>
+        <TableCell className="py-row text-right">
+          <Money value={result} signed />
+        </TableCell>
+        <TableCell className="py-row text-right tabular-nums">{share}</TableCell>
+      </TableRow>
+    ),
+    card: (
+      <div className="flex flex-col gap-1">
+        <p>{tp('wallets.total')}</p>
+        <dl className="flex flex-col gap-1">
+          {figures.map(([label, node]) => (
+            <div key={label} className="flex flex-wrap items-baseline justify-between gap-2">
+              <dt className="text-xs font-normal text-muted-foreground">{label}</dt>
+              <dd className="text-sm font-normal">{node}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    ),
+  };
+}
+
+/**
+ * SPEC-022 BR-022-18 — what no wallet has claimed, one asset per row. It grows
+ * with the portfolio, so it pages and filters by asset like every list.
+ */
+async function UnassignedTable({
+  holdings,
+  names,
+}: {
+  readonly holdings: readonly { readonly assetId: string; readonly quantity: Quantity }[];
+  /** Each holding's "CODE — Name", in the same order. */
+  readonly names: readonly string[];
+}) {
+  const tp = await getTranslations('portfolio');
+  const quantity = ranksOf(holdings, (holding) => holding.quantity);
+
+  const rows: NodeRow[] = holdings.map((holding, index) => {
+    const rank = quantity[index];
+    return {
+      id: holding.assetId,
+      keys: { asset: names[index] ?? '', ...(rank === undefined ? {} : { quantity: rank }) },
+      cells: {
+        asset: names[index],
+        quantity: <Money value={holding.quantity} kind="quantity" />,
+      },
+    };
+  });
+
+  return (
+    <NodeTable
+      columns={[
+        {
+          id: 'asset',
+          header: tp('wallets.unassignedColumnAsset'),
+          kind: 'text',
+          width: 40,
+          sortable: true,
+        },
+        {
+          id: 'quantity',
+          header: tp('wallets.unassignedColumnQuantity'),
+          kind: 'number',
+          sortable: true,
+        },
+      ]}
+      rows={rows}
+      caption={tp('wallets.unassignedTitle')}
+      noun={tp('wallets.unassignedNoun')}
+      filterPlaceholder={tp('wallets.unassignedFilterPlaceholder')}
+      paramPrefix="unassigned"
+      sort={{ id: 'asset', desc: false }}
+    />
   );
 }
