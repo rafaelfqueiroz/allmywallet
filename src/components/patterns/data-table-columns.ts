@@ -49,10 +49,11 @@ const CELL_PADDING = '1rem';
  * - `money` fits the largest plausible figure, thirteen digits —
  *   `R$ 12.345.678.901,23` — with a sign (`−` or `+`) in front, and the masked
  *   placeholder `R$ ••••••` (BR-022-26), which is narrower than any real
- *   figure. 13 digits and the `R$ ` prefix are 17 characters of digits and
- *   currency, four separators are narrower than a digit, and the sign one more:
- *   22 gives the slack a proportional font's `R`, `$` and the non-breaking space
- *   need.
+ *   figure. Measured in the app's font, that figure is about 17.3ch — the
+ *   separators and the non-breaking space are narrower than a digit — and the
+ *   sign brings it to 18: 19 leaves a character of slack and no more, because
+ *   a table of four money columns (Composição's holdings) pays for every spare
+ *   `ch` four times (#237 Decision log).
  * - `number` is a quantity: up to the same thirteen digits plus fraction.
  * - `percent` is `−1.234,56%`, and its header ("Participação") is the wider of
  *   the two.
@@ -62,11 +63,11 @@ const CELL_PADDING = '1rem';
  *   truncates. A table that wants the remainder passes its own width.
  */
 const DEFAULT_WIDTH: Record<ColumnKind, ColumnWidth> = {
-  text: 24,
+  text: 20,
   date: 11,
   badge: 14,
   number: 14,
-  money: 22,
+  money: 19,
   percent: 12,
   control: '3rem',
 };

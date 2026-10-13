@@ -815,15 +815,17 @@ describe('DataTable — column kinds', () => {
     // Default widths are the kind's own: the figure columns in `ch`, so they do
     // not depend on the digits shown, and a control a fixed length.
     const widths = cols.map((col) => col.style.width);
-    expect(widths[KINDS.indexOf('money')]).toBe('calc(22ch + 1rem)');
+    expect(widths[KINDS.indexOf('money')]).toBe('calc(19ch + 1rem)');
     expect(widths[KINDS.indexOf('number')]).toBe('calc(14ch + 1rem)');
     expect(widths[KINDS.indexOf('control')]).toBe('3rem');
     expect(widths.every((width) => width !== '')).toBe(true);
   });
 
   it('sizes the money column for thirteen digits and the mask, whatever the figures are', () => {
-    // 'R$ 12.345.678.901,23' is 20 characters, a sign makes 21, the mask 9.
-    const widest = 'R$ 12.345.678.901,23'.length + 1;
+    // 'R$ 12.345.678.901,23' measures ~17.3ch in the app's font (its separators
+    // are narrower than a digit) and a sign makes 18; the mask is 9 characters.
+    // The real-browser check is the 13-digit E2E in tests/e2e/transactions.spec.ts.
+    const widest = 18;
     const [, ch] = /calc\((\d+)ch/.exec(columnWidth('money')) ?? [];
     expect(Number(ch)).toBeGreaterThanOrEqual(widest);
     expect(Number(ch)).toBeGreaterThan(MASKED_CURRENCY.length);
