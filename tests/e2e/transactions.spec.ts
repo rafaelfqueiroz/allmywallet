@@ -210,6 +210,17 @@ async function seedWallet(userId: string, name: string): Promise<string> {
   return walletId;
 }
 
+/**
+ * A wallet's allocations: a table from md up, cards below it — the visible one
+ * of the two (DS-28).
+ */
+function allocations(page: Page) {
+  return page
+    .getByRole('table', { name: 'Ativos atribuídos' })
+    .or(page.getByRole('list', { name: 'Ativos atribuídos' }))
+    .filter({ visible: true });
+}
+
 test.describe('transaction management', () => {
   test('a CDB that no B3 extract carries can be entered by hand', async ({ signedIn }) => {
     const { page } = signedIn;
@@ -368,8 +379,8 @@ test.describe('transaction management', () => {
     await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
 
     await page.goto(`/settings/wallets/${walletId}`);
-    await expect(page.getByRole('table')).toContainText('ITSA4');
-    await expect(page.getByRole('table')).toContainText('100');
+    await expect(allocations(page)).toContainText('ITSA4');
+    await expect(allocations(page)).toContainText('100');
   });
 
   /**
@@ -413,8 +424,13 @@ test.describe('transaction management', () => {
       ['Trading', '40'],
     ] as const) {
       await page.goto('/settings/wallets/assign');
-      await page.getByLabel('Quantidade').first().fill(quantity);
-      await page.getByLabel('Atribuir a').first().selectOption({ label: walletName });
+      // The queue's Resolver panel opens on the first pending asset (#237);
+      // exact, because the queue's table is labelled by a caption too.
+      await page.getByLabel('Quantidade', { exact: true }).first().fill(quantity);
+      await page
+        .getByLabel('Atribuir a', { exact: true })
+        .first()
+        .selectOption({ label: walletName });
       await page.getByRole('button', { name: 'Atribuir', exact: true }).first().click();
       await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
     }
@@ -436,11 +452,11 @@ test.describe('transaction management', () => {
     await expect(page).toHaveURL(/\/transactions$/);
 
     await page.goto(`/settings/wallets/${trading}`);
-    await expect(page.getByRole('table')).toContainText('20');
+    await expect(allocations(page)).toContainText('20');
 
     // The assertion the proportional default would fail: untouched at 60.
     await page.goto(`/settings/wallets/${retirement}`);
-    await expect(page.getByRole('table')).toContainText('60');
+    await expect(allocations(page)).toContainText('60');
   });
 
   test('bulk delete removes a whole selection at once', async ({ signedIn }) => {

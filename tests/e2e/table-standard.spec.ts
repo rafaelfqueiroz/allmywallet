@@ -171,10 +171,16 @@ async function setHidden(page: Page, hidden: boolean): Promise<void> {
   await expect(eye).toHaveAttribute('aria-pressed', String(!hidden));
   await eye.click();
   await expect(eye).toHaveAttribute('aria-pressed', String(hidden));
-  const placeholder = page.getByText('R$ ••••••');
+  // Recharts keeps an off-screen span it measures tick labels with, holding the
+  // last label it measured; it is not an amount on the page.
+  const placeholder = page
+    .getByText('R$ ••••••')
+    .and(page.locator(':not(#recharts_measurement_span)'));
   // The card list carries the placeholder too, hidden at this width.
   if (hidden) await expect(placeholder.filter({ visible: true }).first()).toBeVisible();
-  else await expect(placeholder).toHaveCount(0);
+  else {
+    await expect(placeholder, `no amount left hidden on ${page.url()}`).toHaveCount(0);
+  }
 }
 
 test.describe('the table standard: a width per column', () => {

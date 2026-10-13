@@ -178,7 +178,12 @@ test('sorts the holdings from the card control, below md', async ({ signedIn, vi
 
   expect(await codes()).toEqual([big, small]);
 
-  await page.getByRole('button', { name: /ordem decrescente/i }).click();
+  // Groups and concentration are card lists with their own sort control too.
+  await page
+    .locator('section')
+    .filter({ has: cards })
+    .getByRole('button', { name: /ordem decrescente/i })
+    .click();
   expect(await codes()).toEqual([small, big]);
 });
 
