@@ -135,6 +135,36 @@ describe('NodeTable', () => {
     expect(replaceState).toHaveBeenLastCalledWith(null, '', '/settings/watch?rules_size=25');
   });
 
+  it('opens on the sort the page declares, and marks that column for assistive technology', () => {
+    render(<Table sort={{ id: 'asset', desc: true }} />);
+    expect(codesInTable()).toEqual(['ATV03', 'ATV02', 'ATV01']);
+    expect(screen.getByRole('columnheader', { name: /Ativo/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+  });
+
+  it('keeps the position in the URL under the table’s prefix, apart from another table’s', async () => {
+    render(<Table rows={many(23)} paramPrefix="monthly" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Próxima página' }));
+    expect(screen.getByText('Mostrando 11–20 de 23 regras')).toBeInTheDocument();
+    const written = String(replaceState.mock.lastCall?.[2]);
+    expect(written).toContain('monthly_page=2');
+    expect(written).not.toContain('history_page');
+  });
+
+  it('has no filter unless the page gives it something to say', () => {
+    render(<NodeTable columns={columns} rows={few} caption="Regras" noun="regras" />);
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+  });
+
+  it('puts the figures in a right-aligned column, in tabular digits', () => {
+    render(<Table />);
+    const table = screen.getByRole('table', { name: 'Regras' });
+    expect(within(table).getByRole('columnheader', { name: /Valor/ })).toHaveClass('text-right');
+    expect(within(table).getByText('R$ 1.000,00').closest('td')).toHaveClass('tabular-nums');
+  });
+
   it('shows the caller’s empty state when there is nothing to list', () => {
     render(<Table rows={[]} empty={<EmptyState title="Nenhuma regra ainda" />} />);
     expect(screen.getByText('Nenhuma regra ainda')).toBeInTheDocument();

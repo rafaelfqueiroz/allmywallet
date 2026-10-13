@@ -936,10 +936,6 @@
     "attentionTitle": "Precisam de atenção",
     "attentionDescription": "Estes ativos aparecem pelo custo de aquisição porque não conseguimos avaliá-los. Os totais acima os incluem por esse valor.",
     "tables": {
-      "sortBy": "Ordenar por {column}",
-      "sortField": "Ordenar por",
-      "sortAscending": "Ordem crescente",
-      "sortDescending": "Ordem decrescente",
       "empty": "Nada para mostrar neste período"
     }
   },

@@ -45,13 +45,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { columnWidth } from '@/components/patterns/data-table-columns';
-import {
-  ReportTable,
-  type ReportColumn,
-  type ReportTableLabels,
-} from '@/app/(app)/reports/_components/ReportTable';
-import { ranksOf } from '@/app/(app)/reports/_components/report-rows';
-import { tableLabels } from '@/app/(app)/reports/_components/table-labels';
+import { NodeTable, type NodeColumn } from '@/components/patterns/node-table';
+import { ranksOf } from '@/lib/rank-keys';
+import { tableLabels, type ReportTableLabels } from '@/app/(app)/reports/_components/table-labels';
 
 /**
  * SPEC-012 — **Rentabilidade**.
@@ -330,7 +326,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                 labelOf={(key) => resolveGroupLabel(key, report.value.groupNames, t)}
                 table={tableLabels(t, {
                   caption: tr('contribution.title'),
-                  itemNoun: tr('contribution.noun'),
+                  noun: tr('contribution.noun'),
                   filterPlaceholder: tr('contribution.filterPlaceholder'),
                 })}
               />
@@ -372,28 +368,27 @@ function ContributionTable({
   readonly labelOf: (key: GroupKey) => string;
   readonly table: ReportTableLabels;
 }) {
-  const columns: ReportColumn[] = [
+  const columns: NodeColumn[] = [
     // Room for the group's name and, beside it, the estimate badge.
-    { id: 'group', header: labels.group, kind: 'text', width: 24 },
-    { id: 'weight', header: labels.weight, kind: 'percent' },
+    { id: 'group', header: labels.group, kind: 'text', width: 24, sortable: true },
+    { id: 'weight', header: labels.weight, kind: 'percent', sortable: true },
     // Sized for their headers, the longest thing in them.
-    { id: 'ownReturn', header: labels.ownReturn, kind: 'percent', width: 21 },
-    { id: 'contribution', header: labels.contribution, kind: 'percent', width: 15 },
-    { id: 'gain', header: labels.gain, kind: 'money' },
+    { id: 'ownReturn', header: labels.ownReturn, kind: 'percent', width: 21, sortable: true },
+    { id: 'contribution', header: labels.contribution, kind: 'percent', width: 15, sortable: true },
+    { id: 'gain', header: labels.gain, kind: 'money', sortable: true },
   ];
   const { groups } = contribution;
-  const weightRanks = ranksOf(groups.map((group) => group.weight));
-  const ownReturnRanks = ranksOf(groups.map((group) => group.ownReturn));
-  const contributionRanks = ranksOf(groups.map((group) => group.contribution));
-  const gainRanks = ranksOf(groups.map((group) => group.gain));
+  const weightRanks = ranksOf(groups, (group) => group.weight);
+  const ownReturnRanks = ranksOf(groups, (group) => group.ownReturn);
+  const contributionRanks = ranksOf(groups, (group) => group.contribution);
+  const gainRanks = ranksOf(groups, (group) => group.gain);
 
   return (
-    <ReportTable
+    <NodeTable
       columns={columns}
-      labels={table}
+      {...table}
       paramPrefix="contribution"
-      initialSort={{ id: 'weight', desc: true }}
-      searchable
+      sort={{ id: 'weight', desc: true }}
       totals={{
         label: (
           <Cluster gap="sm" align="baseline">
@@ -435,7 +430,7 @@ function ContributionTable({
           },
           // A group with no return of its own has no rank: last in both
           // directions, not the smallest return.
-          sort: {
+          keys: {
             group: name,
             weight: weightRanks[index],
             ownReturn: ownReturnRanks[index],

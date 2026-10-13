@@ -46,13 +46,9 @@ import {
 } from '@/components/ui/table';
 import { columnWidth } from '@/components/patterns/data-table-columns';
 import { formatBusinessDate } from '@/i18n/format';
-import {
-  ReportTable,
-  type ReportColumn,
-  type ReportTableLabels,
-} from '@/app/(app)/reports/_components/ReportTable';
-import { ranksOf } from '@/app/(app)/reports/_components/report-rows';
-import { tableLabels } from '@/app/(app)/reports/_components/table-labels';
+import { NodeTable, type NodeColumn } from '@/components/patterns/node-table';
+import { ranksOf } from '@/lib/rank-keys';
+import { tableLabels, type ReportTableLabels } from '@/app/(app)/reports/_components/table-labels';
 
 /**
  * SPEC-013 — **Relatórios › Evolução patrimonial** (SPEC-022 BR-022-03), the
@@ -340,7 +336,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     }}
                     table={tableLabels(t, {
                       caption: tp('stacked.caption'),
-                      itemNoun: tp('table.noun'),
+                      noun: tp('table.noun'),
                     })}
                     nameOf={(key) => t(`assetClass.${key}`)}
                   />
@@ -400,7 +396,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     estimated: tCommon('estimated'),
                     gap: tp('table.gap'),
                   }}
-                  table={tableLabels(t, { caption: tp('table.title'), itemNoun: tp('table.noun') })}
+                  table={tableLabels(t, { caption: tp('table.title'), noun: tp('table.noun') })}
                 />
               </Section>
             </>
@@ -555,21 +551,21 @@ function SeriesTable({
   labels: Record<'caption' | 'date' | 'value' | 'basis' | 'observed' | 'estimated' | 'gap', string>;
   table: ReportTableLabels;
 }) {
-  const columns: ReportColumn[] = [
-    { id: 'date', header: labels.date, kind: 'date' },
-    { id: 'value', header: labels.value, kind: 'money' },
+  const columns: NodeColumn[] = [
+    { id: 'date', header: labels.date, kind: 'date', sortable: true },
+    { id: 'value', header: labels.value, kind: 'money', sortable: true },
     // The gap day's sentence is the longest cell in the report; it truncates
     // with its full text on demand (DS-67) rather than widening the column.
-    { id: 'basis', header: labels.basis, kind: 'text', width: 24 },
+    { id: 'basis', header: labels.basis, kind: 'text', width: 24, sortable: true },
   ];
-  const valueRanks = ranksOf(points.map((point) => point.value));
+  const valueRanks = ranksOf(points, (point) => point.value);
 
   return (
-    <ReportTable
+    <NodeTable
       columns={columns}
-      labels={table}
+      {...table}
       paramPrefix="history"
-      initialSort={{ id: 'date', desc: true }}
+      sort={{ id: 'date', desc: true }}
       rows={points.map((point, index) => {
         // SPEC-021 BR-021-31: a carried-forward gap day is never "observed".
         const basis = labels[basisOf(point, gapDates)];
@@ -579,7 +575,7 @@ function SeriesTable({
             value: <Money value={point.value} />,
             basis,
           },
-          sort: { date: point.date, value: valueRanks[index], basis },
+          keys: { date: point.date, value: valueRanks[index], basis },
         };
       })}
     />
@@ -619,9 +615,9 @@ function StackedComposition({
   const bandValue = (key: string, date: (typeof dates)[number]): MoneyValue =>
     valueAt.get(key)?.get(date) ?? MoneyValue.zero();
   // Each band's dates in ascending order of value, for the table's sort
-  // (`ReportTable`): exact `comparedTo`, never a float.
+  // (`NodeTable`): exact `comparedTo`, never a float.
   const bandRanks = new Map(
-    bands.map((band) => [band.key, ranksOf(dates.map((date) => bandValue(band.key, date)))]),
+    bands.map((band) => [band.key, ranksOf(dates, (date) => bandValue(band.key, date))]),
   );
 
   // SPEC-022 BR-022-24 — a synchronous component, so the request-cached read.
@@ -658,18 +654,19 @@ function StackedComposition({
           that grows with the history, so it pages and sorts like the series
           above. With every asset class held it is wider than the panel and
           scrolls inside its own container; no figure is squeezed (DS-67). */}
-      <ReportTable
+      <NodeTable
         columns={[
-          { id: 'date', header: labels.date, kind: 'date' } satisfies ReportColumn,
-          ...legend.map((band): ReportColumn => ({
+          { id: 'date', header: labels.date, kind: 'date', sortable: true } satisfies NodeColumn,
+          ...legend.map((band): NodeColumn => ({
             id: band.key,
             header: band.label,
             kind: 'money',
+            sortable: true,
           })),
         ]}
-        labels={table}
+        {...table}
         paramPrefix="stacked"
-        initialSort={{ id: 'date', desc: true }}
+        sort={{ id: 'date', desc: true }}
         rows={dates.map((date, dateIndex) => ({
           cells: {
             date: formatBusinessDate(date),
@@ -683,7 +680,7 @@ function StackedComposition({
               ]),
             ),
           },
-          sort: {
+          keys: {
             date,
             ...Object.fromEntries(
               bands.map((band) => [band.key, bandRanks.get(band.key)?.[dateIndex]]),

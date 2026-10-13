@@ -24,13 +24,9 @@ import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
 import { Text } from '@/components/ui/text';
-import {
-  ReportTable,
-  type ReportColumn,
-  type ReportTableLabels,
-} from '@/app/(app)/reports/_components/ReportTable';
-import { ranksOf } from '@/app/(app)/reports/_components/report-rows';
-import { tableLabels } from '@/app/(app)/reports/_components/table-labels';
+import { NodeTable, type NodeColumn } from '@/components/patterns/node-table';
+import { ranksOf } from '@/lib/rank-keys';
+import { tableLabels, type ReportTableLabels } from '@/app/(app)/reports/_components/table-labels';
 
 /**
  * SPEC-014 — **Proventos**.
@@ -158,7 +154,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
                 labels={monthlyLabels(tp)}
                 table={tableLabels(t, {
                   caption: tp('monthly.caption'),
-                  itemNoun: tp('monthly.noun'),
+                  noun: tp('monthly.noun'),
                 })}
               />
             </Stack>
@@ -177,7 +173,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
               labelOf={(key) => resolveGroupLabel(key, query.value.groupNames, t)}
               table={tableLabels(t, {
                 caption: tp('breakdown.caption'),
-                itemNoun: tp('breakdown.noun'),
+                noun: tp('breakdown.noun'),
                 filterPlaceholder: tp('breakdown.filterPlaceholder'),
               })}
             />
@@ -189,7 +185,7 @@ export default async function EarningsPage({ searchParams }: PageProps) {
               labels={assetLabels(tp)}
               table={tableLabels(t, {
                 caption: tp('perAsset.caption'),
-                itemNoun: tp('perAsset.noun'),
+                noun: tp('perAsset.noun'),
                 filterPlaceholder: tp('perAsset.filterPlaceholder'),
               })}
             />
@@ -308,21 +304,21 @@ function MonthlyTable({
   readonly labels: ReturnType<typeof monthlyLabels>;
   readonly table: ReportTableLabels;
 }) {
-  const columns: ReportColumn[] = [
-    { id: 'month', header: labels.month, kind: 'date' },
-    { id: 'amount', header: labels.amount, kind: 'money' },
+  const columns: NodeColumn[] = [
+    { id: 'month', header: labels.month, kind: 'date', sortable: true },
+    { id: 'amount', header: labels.amount, kind: 'money', sortable: true },
     // The header is the longest thing in this column ("Média móvel (12 meses)").
-    { id: 'average', header: labels.average, kind: 'money', width: 25 },
+    { id: 'average', header: labels.average, kind: 'money', width: 25, sortable: true },
   ];
-  const amountRanks = ranksOf(months.map((month) => month.amount));
-  const averageRanks = ranksOf(months.map((month) => month.movingAverage));
+  const amountRanks = ranksOf(months, (month) => month.amount);
+  const averageRanks = ranksOf(months, (month) => month.movingAverage);
 
   return (
-    <ReportTable
+    <NodeTable
       columns={columns}
-      labels={table}
+      {...table}
       paramPrefix="monthly"
-      initialSort={{ id: 'month', desc: true }}
+      sort={{ id: 'month', desc: true }}
       rows={months.map((month, index) => ({
         cells: {
           month: month.month,
@@ -331,7 +327,7 @@ function MonthlyTable({
             month.movingAverage === null ? labels.none : <Money value={month.movingAverage} />,
         },
         // No average for the first eleven months: absent, not the smallest.
-        sort: { month: month.month, amount: amountRanks[index], average: averageRanks[index] },
+        keys: { month: month.month, amount: amountRanks[index], average: averageRanks[index] },
       }))}
     />
   );
@@ -361,21 +357,20 @@ function BreakdownTable({
   readonly labelOf: (key: GroupKey) => string;
   readonly table: ReportTableLabels;
 }) {
-  const columns: ReportColumn[] = [
-    { id: 'group', header: labels.group, kind: 'text' },
-    { id: 'amount', header: labels.amount, kind: 'money' },
-    { id: 'share', header: labels.share, kind: 'percent', width: 15 },
+  const columns: NodeColumn[] = [
+    { id: 'group', header: labels.group, kind: 'text', sortable: true },
+    { id: 'amount', header: labels.amount, kind: 'money', sortable: true },
+    { id: 'share', header: labels.share, kind: 'percent', width: 15, sortable: true },
   ];
-  const amountRanks = ranksOf(report.breakdown.map((slice) => slice.amount));
-  const shareRanks = ranksOf(report.breakdown.map((slice) => slice.share));
+  const amountRanks = ranksOf(report.breakdown, (slice) => slice.amount);
+  const shareRanks = ranksOf(report.breakdown, (slice) => slice.share);
 
   return (
-    <ReportTable
+    <NodeTable
       columns={columns}
-      labels={table}
+      {...table}
       paramPrefix="breakdown"
-      initialSort={{ id: 'amount', desc: true }}
-      searchable
+      sort={{ id: 'amount', desc: true }}
       totals={{ label: labels.total, cells: { amount: <Money value={report.total} /> } }}
       rows={report.breakdown.map((slice, index) => {
         const group = labelOf(slice.key);
@@ -385,7 +380,7 @@ function BreakdownTable({
             amount: <Money value={slice.amount} />,
             share: slice.share === null ? '' : <Money value={slice.share} kind="percent" />,
           },
-          sort: { group, amount: amountRanks[index], share: shareRanks[index] },
+          keys: { group, amount: amountRanks[index], share: shareRanks[index] },
         };
       })}
     />
@@ -409,24 +404,23 @@ function AssetTable({
   readonly labels: ReturnType<typeof assetLabels>;
   readonly table: ReportTableLabels;
 }) {
-  const columns: ReportColumn[] = [
-    { id: 'asset', header: labels.asset, kind: 'text' },
-    { id: 'amount', header: labels.amount, kind: 'money' },
+  const columns: NodeColumn[] = [
+    { id: 'asset', header: labels.asset, kind: 'text', sortable: true },
+    { id: 'amount', header: labels.amount, kind: 'money', sortable: true },
     // Sized for their headers, the longest thing in them.
-    { id: 'yieldOnCost', header: labels.yieldOnCost, kind: 'percent', width: 16 },
-    { id: 'currentYield', header: labels.currentYield, kind: 'percent', width: 23 },
+    { id: 'yieldOnCost', header: labels.yieldOnCost, kind: 'percent', width: 16, sortable: true },
+    { id: 'currentYield', header: labels.currentYield, kind: 'percent', width: 23, sortable: true },
   ];
-  const amountRanks = ranksOf(rows.map((row) => row.amount));
-  const yieldOnCostRanks = ranksOf(rows.map((row) => row.yieldOnCost));
-  const currentYieldRanks = ranksOf(rows.map((row) => row.currentYield));
+  const amountRanks = ranksOf(rows, (row) => row.amount);
+  const yieldOnCostRanks = ranksOf(rows, (row) => row.yieldOnCost);
+  const currentYieldRanks = ranksOf(rows, (row) => row.currentYield);
 
   return (
-    <ReportTable
+    <NodeTable
       columns={columns}
-      labels={table}
+      {...table}
       paramPrefix="asset"
-      initialSort={{ id: 'amount', desc: true }}
-      searchable
+      sort={{ id: 'amount', desc: true }}
       rows={rows.map((row, index) => ({
         cells: {
           asset: <span className="font-medium">{row.assetCode}</span>,
@@ -436,7 +430,7 @@ function AssetTable({
         },
         // A yield the report declined to compute has no rank: it sorts last in
         // both directions rather than passing for 0 %.
-        sort: {
+        keys: {
           asset: row.assetCode,
           amount: amountRanks[index],
           yieldOnCost: yieldOnCostRanks[index],
