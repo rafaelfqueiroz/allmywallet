@@ -628,6 +628,42 @@ async function seedThirty(userId: string): Promise<void> {
   }
 }
 
+/** A broker name too long for its column, and the largest figure a ledger could show. */
+const LONG_BROKER = 'INTER DISTRIBUIDORA DE TÍTULOS E VALORES MOBILIÁRIOS LTDA';
+const THIRTEEN_DIGITS = '12345678901.23';
+
+async function seedExtremes(userId: string): Promise<void> {
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    const asset = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO assets (id, code, name, class) VALUES ($1, 'EXTR3', 'Extremos ON', 'stock')
+         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [randomUUID()],
+      )
+    ).rows[0]!.id;
+    const institution = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO institutions (id, name) VALUES ($1, $2)
+         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [randomUUID(), LONG_BROKER],
+      )
+    ).rows[0]!.id;
+    await pool.query(
+      `INSERT INTO transactions
+         (id, user_id, asset_id, institution_id, type, status, trade_date,
+          quantity, unit_price, fees, total_value, natural_key, occurrence,
+          import_batch_id, is_manual)
+       VALUES ($1, $2, $3, $4, 'buy', 'active', '2026-03-02', 1, $5, 0, $5, 'e2e-extremes', 1, NULL, true)`,
+      [randomUUID(), userId, asset, institution, THIRTEEN_DIGITS],
+    );
+  } finally {
+    await pool.end();
+  }
+}
+
 /**
  * SPEC-022 BR-022-18 over SPEC-006 BR-006-07/08 — the ledger is sorted and
  * paged by its query, so every one of these is a server round trip whose state
@@ -695,6 +731,55 @@ test.describe('the ledger table', () => {
     await expect(ledgerRows(page)).toHaveCount(25);
     await expect(page.getByLabel('Buscar')).toHaveValue('BBAS3');
     await expect(page.getByLabel('Itens por página')).toHaveValue('25');
+  });
+
+  /**
+   * SPEC-022 BR-022-18 / BR-022-26 — a width per column, set by the table and
+   * never by its content. A browser is the only thing that can say so: the
+   * component tests have no layout.
+   */
+  test('sizes its columns by definition: the largest amount fits, text truncates, and hiding values moves nothing', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    test.skip(isMobile(page), 'the table rendering is desktop-only');
+    await seedExtremes(userId);
+
+    await page.goto('/transactions');
+    const row = ledgerRow(page, 'EXTR3');
+    const headerWidths = () =>
+      ledger(page)
+        .locator('thead th')
+        .evaluateAll((cells) =>
+          cells.map((cell) => Math.round(cell.getBoundingClientRect().width)),
+        );
+    const before = await headerWidths();
+
+    // Thirteen digits fit their column, on one line: not clipped, not wrapped.
+    const total = row.getByRole('cell', { name: 'R$ 12.345.678.901,23' }).last();
+    await expect(total).toBeVisible();
+    expect(await total.evaluate((cell) => cell.scrollWidth <= cell.clientWidth)).toBe(true);
+    expect(
+      await total.evaluate((cell) => cell.querySelector('span')?.getClientRects().length),
+    ).toBe(1);
+
+    // A broker name too long for its column ends in an ellipsis, and its full
+    // text opens on keyboard focus and on hover.
+    const broker = row.locator('[data-slot="table-cell-text"]', { hasText: LONG_BROKER });
+    expect(await broker.evaluate((cell) => cell.scrollWidth > cell.clientWidth)).toBe(true);
+    expect(await broker.evaluate((cell) => getComputedStyle(cell).textOverflow)).toBe('ellipsis');
+    const tip = page.locator('[data-slot="popover-content"]');
+    await broker.focus();
+    await expect(tip).toHaveText(LONG_BROKER);
+    await page.keyboard.press('Escape');
+    await expect(tip).toHaveCount(0);
+    await broker.hover();
+    await expect(tip).toHaveText(LONG_BROKER);
+
+    // BR-022-24: hiding the amounts changes no column's width.
+    await page.getByRole('button', { name: 'Ocultar valores', exact: true }).click();
+    await expect(page.getByText('R$ ••••••').first()).toBeVisible();
+    expect(await headerWidths()).toEqual(before);
   });
 
   /**

@@ -113,15 +113,15 @@ test.describe('Configurações › Importar', () => {
     const bodyRows = table.locator('tbody tr');
 
     // BR-022-18 — bounded, with the total stated.
-    await expect(bodyRows).toHaveCount(25);
-    await expect(page.getByText(`Mostrando 1–25 de ${HISTORY_SIZE + 4} importações`)).toBeVisible();
+    await expect(bodyRows).toHaveCount(10);
+    await expect(page.getByText(`Mostrando 1–10 de ${HISTORY_SIZE + 4} importações`)).toBeVisible();
 
     // Newest first: the batch sent a minute ago read one row.
     await expect(bodyRows.first().locator('td').nth(3)).toHaveText('1');
 
     await page.getByRole('button', { name: 'Próxima página' }).click();
     await expect(page).toHaveURL(/[?&]page=2(&|$)/);
-    await expect(bodyRows.first().locator('td').nth(3)).toHaveText('26');
+    await expect(bodyRows.first().locator('td').nth(3)).toHaveText('11');
 
     // Sorting by Linhas, descending — a numeric column's first click — puts
     // the 300-row batch on top.
