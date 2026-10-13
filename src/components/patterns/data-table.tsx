@@ -59,9 +59,11 @@ import { EmptyState } from '@/components/patterns/empty-state';
  *
  * From `md` up this is a real `<table>`, at compact density, because a ledger
  * is a table and twenty visible rows beat eight. Below `md` the same rows
- * render as cards with the column header repeated as each field's label: a
+ * render as flat rows under hairlines — never a card inside the panel the table
+ * sits in (BR-022-36) — with the column header repeated as each field's label: a
  * six-column table on a 375px screen is either unreadable or a horizontal
- * scroll nobody discovers.
+ * scroll nobody discovers. Kinds, widths and truncation (BR-022-18, DS-67) belong
+ * to the table rendering; a row under a hairline lets its text wrap.
  *
  * Both renderings are always in the DOM, one hidden per breakpoint. That costs
  * markup and buys a layout that is correct on resize and on print without a
@@ -780,7 +782,7 @@ function DataTableView<TData>({
                     <dt className="text-xs text-muted-foreground">
                       {headerLabels.get(cell.column.id)}
                     </dt>
-                    <dd className="text-sm">
+                    <dd className="min-w-0 text-sm break-words">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </dd>
                   </div>
