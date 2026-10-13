@@ -74,7 +74,9 @@ function table(props: Partial<Parameters<typeof ReportTable>[0]> = {}) {
 
 /** The ticker of each body row on screen, in order. */
 function order(): string[] {
-  const body = within(screen.getByRole('table', { name: 'Valores do gráfico' })).getAllByRole('row');
+  const body = within(screen.getByRole('table', { name: 'Valores do gráfico' })).getAllByRole(
+    'row',
+  );
   return body.slice(1).map((r) => within(r).getAllByRole('cell')[0]?.textContent ?? '');
 }
 
