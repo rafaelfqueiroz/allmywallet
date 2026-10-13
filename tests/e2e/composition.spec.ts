@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './support/authenticated';
 import { seedHoldings, type SeededHolding } from './support/holdings';
+import { dataTableByCaption, expectPageSizeSurvivesReload } from './support/page-size';
 
 /**
  * SPEC-015 — the Composition report, over the real stack.
@@ -88,7 +89,10 @@ test('composes a real portfolio: shares, totals, the flag and its boundary', asy
   const concentration = page
     .locator('section')
     .filter({ has: page.getByRole('heading', { name: /participações acima do seu limite/i }) });
-  await expect(concentration.getByText(String(big), { exact: false })).toBeVisible();
+  // A table from md up and cards below (SPEC-022 BR-022-18): one rendering shown.
+  await expect(
+    concentration.getByText(String(big), { exact: false }).filter({ visible: true }),
+  ).toHaveCount(1);
   await expect(concentration.getByText(String(small), { exact: false })).toHaveCount(0);
 });
 
@@ -249,16 +253,56 @@ test('expanding a group reveals its assets in place, without leaving the report'
   const url = page.url();
   // Scoped to the groups table: the holdings table below lists every asset
   // on its own, so the page as a whole always shows the ticker.
-  const groups = page.getByRole('table', { name: 'Participação de cada grupo no valor total' });
+  // SPEC-022 BR-022-18: a table from md up, cards below — the group's own
+  // `<details>` is the one shown in either.
+  const group = dataTableByCaption(page, 'Participação de cada grupo no valor total')
+    .locator('details')
+    .filter({ visible: true })
+    .first();
 
   // The default grouping at portfolio scope is asset class (BR-011-04), so the
   // seeded stock lands in one group and the ticker is its constituent.
-  const constituent = groups.getByText(String(first), { exact: false });
+  const constituent = group.getByText(String(first), { exact: false });
   await expect(constituent).toBeHidden();
 
-  await groups.locator('details summary').first().click();
+  await group.locator('summary').click();
 
   await expect(constituent.first()).toBeVisible();
   // In place: same URL, no navigation, nothing re-fetched.
   expect(page.url()).toBe(url);
+});
+
+/**
+ * SPEC-022 BR-022-18 — Composição's groups table pages like every list, with the
+ * total pinned under it on every page, and keeps its page size through a reload.
+ * Grouped by asset there is one group per holding, which is the case where it
+ * grows.
+ */
+test('the groups table pages, keeps its total, and keeps its page size through a reload', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+  await seedHoldings(
+    userId,
+    Array.from({ length: 12 }, (_, index) => ({
+      code: `GRP${String(index + 1).padStart(2, '0')}`,
+      quantity: '10',
+      averageCost: '10',
+      price: '10',
+    })),
+  );
+
+  await page.goto('/portfolio/composition?grouping=asset');
+  const groups = dataTableByCaption(page, 'Participação de cada grupo no valor total');
+
+  // The total is the whole portfolio's (12 × 10 × R$ 10,00), not the page's.
+  await expect(groups).toContainText('Total');
+  await expect(groups).toContainText(/R\$\s*1\.200,00/);
+
+  await expectPageSizeSurvivesReload(
+    page,
+    'Participação de cada grupo no valor total',
+    'groups',
+    12,
+  );
 });

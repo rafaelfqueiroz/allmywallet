@@ -77,6 +77,8 @@ const PAGES_WITH_AMOUNTS = [
 ] as const;
 
 interface Seeded {
+  /** The asset carrying the seeded rule, which `/settings/watch?rule=` opens for editing. */
+  readonly ruleAssetId: string;
   readonly walletId: string;
   readonly transactionId: string;
   readonly batchId: string;
@@ -169,7 +171,13 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
     await dismissOnboarding(userId);
     const fixedIncome = await seedHeldFixedIncomeWithMissingRate(userId, 'CDBMASK');
 
-    return { walletId, transactionId, batchId, fixedIncomeId: fixedIncome.assetId };
+    return {
+      ruleAssetId: assetId,
+      walletId,
+      transactionId,
+      batchId,
+      fixedIncomeId: fixedIncome.assetId,
+    };
   } finally {
     await pool.end();
   }
@@ -261,7 +269,8 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const goals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(amountsIn(goals)).toContain('9.000,00');
   expect(goals).toMatch(GOAL_INPUT);
-  expect(await html(page, '/settings/watch')).toMatch(RULE_INPUT);
+  // The rule's form is the editor `?rule=` opens (SPEC-022 BR-022-18: no form in a table).
+  expect(await html(page, `/settings/watch?rule=${seeded.ruleAssetId}`)).toMatch(RULE_INPUT);
   // The Painel's watch-state card: the rule's threshold, beside its quote.
   expect(amountsIn(await html(page, '/dashboard'))).toContain('45,00');
   expect(await html(page, `/transactions/${seeded.transactionId}/edit`)).toMatch(PRICE_INPUT);
@@ -278,7 +287,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   const maskedGoals = await html(page, `/portfolio/goals?wallet=${seeded.walletId}`);
   expect(maskedGoals).not.toMatch(GOAL_INPUT);
   expect(maskedGoals).toContain('Mostrar valores');
-  expect(await html(page, '/settings/watch')).not.toMatch(RULE_INPUT);
+  expect(await html(page, `/settings/watch?rule=${seeded.ruleAssetId}`)).not.toMatch(RULE_INPUT);
   const maskedEdit = await html(page, `/transactions/${seeded.transactionId}/edit`);
   expect(maskedEdit).not.toMatch(PRICE_INPUT);
   expect(maskedEdit).toContain('Mostrar valores');

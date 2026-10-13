@@ -43,16 +43,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { TableCell, TableHead, TableRow } from '@/components/ui/table';
+import { TotalsCard } from '@/components/patterns/totals-card';
+import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
+import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
 
 /**
  * SPEC-015 — **Composição**, as Portfólio's second tab (SPEC-022 BR-022-02).
@@ -213,18 +207,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
                 {tc('concentration.none', { threshold: report.concentration.thresholdPct })}
               </Text>
             ) : (
-              <List gap="sm">
-                {report.rows
-                  .filter((row) => row.concentrated)
-                  .map((row) => (
-                    <ListItem key={row.assetId} separated>
-                      <Cluster justify="between" gap="sm">
-                        <span className="font-medium">{row.assetCode}</span>
-                        <Money value={row.share as MoneyValue} kind="percent" />
-                      </Cluster>
-                    </ListItem>
-                  ))}
-              </List>
+              <ConcentrationTable rows={report.rows.filter((row) => row.concentrated)} />
             )}
           </Section>
         </Stack>
@@ -388,72 +371,90 @@ async function GroupsTable({
 }) {
   const tc = await getTranslations('composicao');
 
+  const ranks = {
+    value: ranksOf(report.breakdown, (slice) => slice.totals.value),
+    share: ranksOf(report.breakdown, (slice) => slice.share),
+  };
+
+  const rows: NodeRow[] = report.breakdown.map((slice, index) => {
+    const label = labelOf(slice.key, names);
+    const holdings =
+      groups.find(
+        (group) => group.key.dimension === slice.key.dimension && group.key.id === slice.key.id,
+      )?.holdings ?? [];
+    return {
+      id: slice.key.id,
+      keys: { group: label, ...rankKeys(ranks, index) },
+      cells: {
+        group: (
+          <details className="whitespace-normal">
+            <summary className="cursor-pointer">{label}</summary>
+            <List gap="none">
+              {holdings.map((holding, holdingIndex) => (
+                <ListItem
+                  key={`${holding.assetId}-${holding.institutionId ?? NOT_CLASSIFIED_GROUP_ID}-${holdingIndex}`}
+                >
+                  <Cluster gap="sm" align="baseline">
+                    <Text as="span" size="xs" tone="muted">
+                      {holding.assetCode} · <Money value={holding.quantity} kind="quantity" /> ·{' '}
+                      <Money value={holding.value} />
+                    </Text>
+                    <HoldingMarkers holding={holding} />
+                  </Cluster>
+                </ListItem>
+              ))}
+            </List>
+          </details>
+        ),
+        value: <Money value={slice.totals.value} />,
+        share: shareText(slice.share),
+      },
+    };
+  });
+
+  const total = <Money value={report.total.value} />;
+  const whole = <Money value={WHOLE} kind="percent" />;
+
   return (
-    <Table>
-      <TableCaption className="sr-only">{tc('chart.caption')}</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead scope="col">{tc('groups.group')}</TableHead>
-          <TableHead scope="col" className="text-right">
-            {tc('groups.value')}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {tc('groups.share')}
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {report.breakdown.map((slice) => (
-          <TableRow key={slice.key.id} className="align-top">
-            <TableCell className="py-row">
-              <details>
-                <summary className="cursor-pointer">{labelOf(slice.key, names)}</summary>
-                <List gap="none">
-                  {(
-                    groups.find(
-                      (group) =>
-                        group.key.dimension === slice.key.dimension &&
-                        group.key.id === slice.key.id,
-                    )?.holdings ?? []
-                  ).map((holding, index) => (
-                    <ListItem
-                      key={`${holding.assetId}-${holding.institutionId ?? NOT_CLASSIFIED_GROUP_ID}-${index}`}
-                    >
-                      <Cluster gap="sm" align="baseline">
-                        <Text as="span" size="xs" tone="muted">
-                          {holding.assetCode} · <Money value={holding.quantity} kind="quantity" /> ·{' '}
-                          <Money value={holding.value} />
-                        </Text>
-                        <HoldingMarkers holding={holding} />
-                      </Cluster>
-                    </ListItem>
-                  ))}
-                </List>
-              </details>
-            </TableCell>
-            <TableCell className="py-row text-right">
-              <Money value={slice.totals.value} />
-            </TableCell>
-            <TableCell className="py-row text-right tabular-nums">
-              {shareText(slice.share)}
-            </TableCell>
+    <NodeTable
+      columns={[
+        /*
+         * SPEC-011 BR-011-07 — the group cell opens in place to list its
+         * assets, so it is a `control` column (never truncated: a one-line
+         * ellipsis would clip the list it expands into), given the width a
+         * group's name and its assets' lines need.
+         */
+        { id: 'group', header: tc('groups.group'), kind: 'control', width: 44, sortable: true },
+        { id: 'value', header: tc('groups.value'), kind: 'money', sortable: true },
+        { id: 'share', header: tc('groups.share'), kind: 'percent', sortable: true },
+      ]}
+      rows={rows}
+      caption={tc('chart.caption')}
+      noun={tc('groups.noun')}
+      filterPlaceholder={tc('groups.filterPlaceholder')}
+      paramPrefix="groups"
+      sort={{ id: 'value', desc: true }}
+      footer={{
+        row: (
+          <TableRow>
+            <TableHead scope="row" className="py-row text-left">
+              {tc('groups.total')}
+            </TableHead>
+            <TableCell className="py-row text-right">{total}</TableCell>
+            <TableCell className="py-row text-right">{whole}</TableCell>
           </TableRow>
-        ))}
-      </TableBody>
-      <TableFooter>
-        <TableRow>
-          <TableHead scope="row" className="py-row text-left">
-            {tc('groups.total')}
-          </TableHead>
-          <TableCell className="py-row text-right">
-            <Money value={report.total.value} />
-          </TableCell>
-          <TableCell className="py-row text-right">
-            <Money value={WHOLE} kind="percent" />
-          </TableCell>
-        </TableRow>
-      </TableFooter>
-    </Table>
+        ),
+        card: (
+          <TotalsCard
+            label={tc('groups.total')}
+            figures={[
+              { label: tc('groups.value'), value: total },
+              { label: tc('groups.share'), value: whole },
+            ]}
+          />
+        ),
+      }}
+    />
   );
 }
 
@@ -470,4 +471,40 @@ const plot = (value: MoneyValue): number => Number(value.toString());
 /** A share that does not exist renders as an em dash, never as `0,00 %`. */
 function shareText(share: MoneyValue | null): string {
   return share === null ? '—' : formatPercent(share);
+}
+
+/**
+ * BR-015-05/06 — the flagged holdings. With a low threshold it is as long as
+ * the portfolio, so it pages, filters and sorts like every list (SPEC-022
+ * BR-022-18). Informational and nothing more: no action is suggested.
+ */
+async function ConcentrationTable({
+  rows,
+}: {
+  readonly rows: readonly CompositionReport['rows'][number][];
+}) {
+  const tc = await getTranslations('composicao');
+  const ranks = { share: ranksOf(rows, (row) => row.share) };
+
+  return (
+    <NodeTable
+      columns={[
+        { id: 'asset', header: tc('holdings.code'), kind: 'text', width: 30, sortable: true },
+        { id: 'share', header: tc('holdings.share'), kind: 'percent', sortable: true },
+      ]}
+      rows={rows.map((row, index): NodeRow => ({
+        id: row.assetId,
+        keys: { asset: row.assetCode, ...rankKeys(ranks, index) },
+        cells: {
+          asset: <span className="font-medium">{row.assetCode}</span>,
+          share: row.share === null ? '—' : <Money value={row.share} kind="percent" />,
+        },
+      }))}
+      caption={tc('concentration.title')}
+      noun={tc('concentration.noun')}
+      filterPlaceholder={tc('concentration.filterPlaceholder')}
+      paramPrefix="concentration"
+      sort={{ id: 'share', desc: true }}
+    />
+  );
 }

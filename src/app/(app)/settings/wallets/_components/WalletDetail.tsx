@@ -17,20 +17,13 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { Field, FieldAction } from '@/components/patterns/field';
 import { Section } from '@/components/patterns/section';
 import { Cluster } from '@/components/layout/cluster';
-import { List, ListItem } from '@/components/layout/list';
 import { Stack } from '@/components/layout/stack';
 import { Button } from '@/components/ui/button';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
+import { RowForms } from '@/components/patterns/row-forms';
+import { ranksOf, rankKeys } from '@/app/(app)/portfolio/_components/ranks';
 import { formatQuantity } from '@/i18n/format';
 
 /**
@@ -58,6 +51,39 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
   const ruled = new Set(standingRules.map((rule) => rule.assetId));
   const ruleCandidates = held.filter((assetId) => !ruled.has(assetId));
   const ruleElsewhere = new Map(rulesElsewhere.map((rule) => [rule.assetId, rule.walletName]));
+
+  /*
+   * SPEC-022 BR-022-18 — the two lists grow with the portfolio, so they are
+   * tables: paged, filtered by asset, sorted. Cells are rendered here, on the
+   * server (`Money`, masking), and the quantity sorts by its exact rank.
+   */
+  const allocationRanks = { quantity: ranksOf(allocations, (allocation) => allocation.quantity) };
+  const allocationRows: NodeRow[] = allocations.map((allocation, index) => ({
+    id: allocation.assetId,
+    keys: { asset: assetName(allocation.assetId), ...rankKeys(allocationRanks, index) },
+    cells: {
+      asset: assetName(allocation.assetId),
+      quantity: <Money value={allocation.quantity} kind="quantity" />,
+    },
+  }));
+  const ruleRows: NodeRow[] = standingRules.map((rule) => ({
+    id: rule.assetId,
+    keys: { asset: assetName(rule.assetId) },
+    cells: {
+      asset: <span className="font-medium">{assetName(rule.assetId)}</span>,
+      actions: (
+        <Button
+          type="submit"
+          form={`clear-rule-${rule.assetId}`}
+          size="sm"
+          variant="outline"
+          aria-label={t('standingRuleClearFor', { asset: labelFor(labels, rule.assetId).code })}
+        >
+          {t('standingRuleClear')}
+        </Button>
+      ),
+    },
+  }));
 
   return (
     <Stack gap="lg">
@@ -110,27 +136,24 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
         {allocations.length === 0 ? (
           <EmptyState title={t('allocationsEmpty')} />
         ) : (
-          <Table>
-            <TableCaption className="sr-only">{t('allocationsTitle')}</TableCaption>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col">{t('columnAsset')}</TableHead>
-                <TableHead scope="col" className="text-right">
-                  {t('columnQuantity')}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {allocations.map((allocation) => (
-                <TableRow key={allocation.assetId}>
-                  <TableCell className="py-row">{assetName(allocation.assetId)}</TableCell>
-                  <TableCell className="py-row text-right tabular-nums">
-                    <Money value={allocation.quantity} kind="quantity" />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <NodeTable
+            columns={[
+              {
+                id: 'asset',
+                header: t('columnAsset'),
+                kind: 'text',
+                width: 40,
+                sortable: true,
+              },
+              { id: 'quantity', header: t('columnQuantity'), kind: 'number', sortable: true },
+            ]}
+            rows={allocationRows}
+            caption={t('allocationsTitle')}
+            noun={t('assetNoun')}
+            filterPlaceholder={t('filterAssetPlaceholder')}
+            paramPrefix="allocations"
+            sort={{ id: 'asset', desc: false }}
+          />
         )}
       </Section>
 
@@ -164,33 +187,6 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
       {/* BR-010-14 — rules that route this asset's future purchases here. */}
       <Section title={t('rulesTitle')} description={t('standingRuleDescription')}>
         <Stack gap="md">
-          {standingRules.length === 0 ? (
-            <EmptyState title={t('rulesEmpty')} />
-          ) : (
-            <List gap="sm">
-              {standingRules.map((rule) => (
-                <ListItem key={rule.assetId} separated>
-                  <Cluster justify="between" gap="sm" align="baseline">
-                    <span className="font-medium">{assetName(rule.assetId)}</span>
-                    <ActionForm action={clearStandingRuleAction}>
-                      <input type="hidden" name="assetId" value={rule.assetId} />
-                      <Button
-                        type="submit"
-                        size="sm"
-                        variant="outline"
-                        aria-label={t('standingRuleClearFor', {
-                          asset: labelFor(labels, rule.assetId).code,
-                        })}
-                      >
-                        {t('standingRuleClear')}
-                      </Button>
-                    </ActionForm>
-                  </Cluster>
-                </ListItem>
-              ))}
-            </List>
-          )}
-
           {ruleCandidates.length === 0 ? (
             <Text as="p" size="sm" tone="muted">
               {t('rulesNothing')}
@@ -221,6 +217,51 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
                 </FieldAction>
               </Cluster>
             </ActionForm>
+          )}
+          {/* The table closes the panel: the pager it ends in sits flush against the
+              panel's edge (SPEC-022 BR-022-36), so nothing may follow it. */}
+          {standingRules.length === 0 ? (
+            <EmptyState title={t('rulesEmpty')} />
+          ) : (
+            <>
+              <NodeTable
+                columns={[
+                  {
+                    id: 'asset',
+                    header: t('columnAsset'),
+                    kind: 'text',
+                    width: 40,
+                    sortable: true,
+                  },
+                  {
+                    id: 'actions',
+                    header: t('columnActions'),
+                    kind: 'control',
+                    width: '10rem',
+                    srOnlyHeader: true,
+                  },
+                ]}
+                rows={ruleRows}
+                caption={t('rulesTitle')}
+                noun={t('ruleNoun')}
+                filterPlaceholder={t('filterAssetPlaceholder')}
+                paramPrefix="rules"
+                sort={{ id: 'asset', desc: false }}
+              />
+              {/* DS-28 renders each cell twice, so a form never sits in one: the row's
+                  button names its form here, outside the table, by `form`. */}
+              <RowForms>
+                {standingRules.map((rule) => (
+                  <ActionForm
+                    key={rule.assetId}
+                    id={`clear-rule-${rule.assetId}`}
+                    action={clearStandingRuleAction}
+                  >
+                    <input type="hidden" name="assetId" value={rule.assetId} />
+                  </ActionForm>
+                ))}
+              </RowForms>
+            </>
           )}
         </Stack>
       </Section>

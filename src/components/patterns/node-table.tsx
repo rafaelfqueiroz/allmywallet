@@ -1,0 +1,142 @@
+'use client';
+
+import { useMemo, type ReactNode } from 'react';
+import type { ColumnDef } from '@tanstack/react-table';
+import { useTranslations } from 'next-intl';
+import { DataTable } from '@/components/patterns/data-table';
+import {
+  isNumericKind,
+  type ColumnKind,
+  type ColumnWidth,
+} from '@/components/patterns/data-table-columns';
+
+/**
+ * SPEC-022 BR-022-18 — a `DataTable` over cells a **Server Component** has
+ * already rendered.
+ *
+ * The growing lists on the Portfólio and Configurações screens each had their
+ * own rows of money, quantities, badges and links. Money must not cross the
+ * server→client boundary as a number (AR-06–AR-10), and masking (BR-022-24) is
+ * decided where `Money` renders, so every cell arrives as a finished node and
+ * this component owns only what a table owns: its columns (header, kind,
+ * width), which of them sort, and the keys they sort and search by — the
+ * pattern `LedgerTable` set, made reusable instead of copied per screen.
+ *
+ * `keys` is what the page decides for each column and this component never
+ * computes. A **number** orders numerically — an integer **rank** the server
+ * took from exact `Money.comparedTo` (see `holding-rows.ts`), epoch
+ * milliseconds for a date, a count — never a figure parsed back out of text.
+ * A **string** orders alphabetically *and is what the filter searches*; a
+ * column with no key is neither sorted nor searched. `undefined` is "no figure
+ * here" and sorts last in both directions, as an absence rather than a zero.
+ *
+ * **No form belongs in a cell** (DS-28 renders each cell twice, so a form id
+ * or an input name would exist twice). A row control is a link, or a button
+ * naming a form outside the table through its `form` attribute.
+ */
+export interface NodeColumn {
+  readonly id: string;
+  /** Translated — AR-44. */
+  readonly header: string;
+  readonly kind: ColumnKind;
+  readonly width?: ColumnWidth;
+  /** Whether the header sorts the table, by this column's `keys`. */
+  readonly sortable?: boolean;
+  /** A control column's header is read by assistive technology and not shown. */
+  readonly srOnlyHeader?: boolean;
+}
+
+export interface NodeRow {
+  readonly id: string;
+  /** One finished node per column id. */
+  readonly cells: Readonly<Record<string, ReactNode>>;
+  readonly keys?: Readonly<Record<string, string | number | undefined>>;
+  /** The element id a deep link names (`#regra-…`); see `DataTable`'s `rowAnchor`. */
+  readonly anchor?: string;
+}
+
+export interface NodeTableProps {
+  readonly columns: readonly NodeColumn[];
+  readonly rows: readonly NodeRow[];
+  /** The table's accessible name. */
+  readonly caption: string;
+  /** The plural noun the "Mostrando 1–10 de N …" summary counts. */
+  readonly noun: string;
+  /** Present when the list can run past a page: a text filter over the string keys. */
+  readonly filterPlaceholder?: string;
+  /** The order the table opens on. */
+  readonly sort?: { readonly id: string; readonly desc: boolean };
+  /** Two tables on one page need distinct prefixes (BR-022-18). */
+  readonly paramPrefix?: string;
+  readonly empty?: ReactNode;
+  /** `false` only for a list bounded by construction; say why where it is passed. */
+  readonly pagination?: boolean;
+  /** A pinned totals row, see `DataTable`. */
+  readonly footer?: { readonly row: ReactNode; readonly card: ReactNode };
+}
+
+export function NodeTable({
+  columns,
+  rows,
+  caption,
+  noun,
+  filterPlaceholder,
+  sort,
+  paramPrefix,
+  empty,
+  pagination,
+  footer,
+}: NodeTableProps) {
+  const t = useTranslations('cellTable');
+  const sortable = columns.some((column) => column.sortable === true);
+
+  const defs = useMemo<ColumnDef<NodeRow, unknown>[]>(
+    () =>
+      columns.map((column): ColumnDef<NodeRow, unknown> => {
+        // A figure, a count or a date orders by its number; text by its string.
+        const numeric = isNumericKind(column.kind) || column.kind === 'date';
+        return {
+          id: column.id,
+          header: column.srOnlyHeader
+            ? () => <span className="sr-only">{column.header}</span>
+            : column.header,
+          enableSorting: column.sortable === true,
+          meta: {
+            kind: column.kind,
+            ...(column.width !== undefined ? { width: column.width } : {}),
+          },
+          accessorFn: (row) => row.keys?.[column.id],
+          sortingFn: numeric ? 'basic' : 'alphanumeric',
+          sortUndefined: 'last',
+          // The first press on a column of figures shows the largest first, the
+          // order somebody pressing "Valor" is asking for (see `HoldingsTable`).
+          sortDescFirst: numeric,
+          cell: ({ row }) => row.original.cells[column.id] ?? null,
+        };
+      }),
+    [columns],
+  );
+
+  return (
+    <DataTable
+      columns={defs}
+      data={rows as NodeRow[]}
+      caption={caption}
+      sortable={sortable}
+      {...(sortable && sort ? { initialSorting: [{ id: sort.id, desc: sort.desc }] } : {})}
+      sortLabel={(column) => t('sortBy', { column })}
+      sortControlLabels={{
+        field: t('sortField'),
+        ascending: t('sortAscending'),
+        descending: t('sortDescending'),
+      }}
+      {...(filterPlaceholder !== undefined ? { filter: { placeholder: filterPlaceholder } } : {})}
+      {...(paramPrefix !== undefined ? { paramPrefix } : {})}
+      {...(pagination !== undefined ? { pagination } : {})}
+      {...(footer !== undefined ? { footer } : {})}
+      {...(empty !== undefined ? { empty } : {})}
+      itemNoun={noun}
+      rowAnchor={(row) => row.anchor}
+    />
+  );
+}
