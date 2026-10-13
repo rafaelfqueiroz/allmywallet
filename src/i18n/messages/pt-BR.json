@@ -255,7 +255,11 @@
       "assetsInClasses": "{classes, plural, one {em # classe} other {em # classes}}",
       "byClass": "Por classe",
       "classAssets": "{count, plural, one {# ativo} other {# ativos}}",
-      "byAsset": "Por ativo"
+      "byAsset": "Por ativo",
+      "unpricedAsset": "Ativo",
+      "unpricedMarkers": "Situação",
+      "unpricedNoun": "ativos",
+      "unpricedFilterPlaceholder": "Buscar ativo"
     },
     "wallets": {
       "comparisonTitle": "Comparação entre carteiras",
@@ -1334,7 +1338,9 @@
       "group": "Grupo",
       "value": "Valor",
       "share": "Participação",
-      "total": "Total"
+      "total": "Total",
+      "noun": "grupos",
+      "filterPlaceholder": "Buscar grupo"
     },
     "holdings": {
       "title": "Seus ativos",
@@ -1363,7 +1369,9 @@
       "title": "Participações acima do seu limite",
       "description": "Estes ativos passam de {threshold}% do escopo selecionado — o limite que você configurou. É uma marcação informativa: o AllMyWallet não dá recomendação de investimento e não sugere nenhuma ação sobre estes ativos.",
       "explanation": "Participação acima do limite de {threshold}% que você configurou. Marcação informativa, sem recomendação.",
-      "none": "Nenhum ativo passa de {threshold}% do escopo selecionado."
+      "none": "Nenhum ativo passa de {threshold}% do escopo selecionado.",
+      "noun": "ativos",
+      "filterPlaceholder": "Buscar ativo"
     }
   },
   "rentabilidade": {
