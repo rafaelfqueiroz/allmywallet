@@ -24,16 +24,9 @@ import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
 import { Text } from '@/components/ui/text';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { NodeTable, type NodeColumn } from '@/components/patterns/node-table';
+import { ranksOf } from '@/lib/rank-keys';
+import { tableLabels, type ReportTableLabels } from '@/app/(app)/reports/_components/table-labels';
 
 /**
  * SPEC-014 — **Proventos**.
@@ -142,7 +135,8 @@ export default async function EarningsPage({ searchParams }: PageProps) {
               <IncomeChart
                 masked={masked}
                 title={tp('monthly.chartLabel')}
-                summary={<MonthlyTable months={report.monthly} labels={monthlyLabels(tp)} />}
+                // SPEC-016 BR-016-16: the figures are the table beneath.
+                summary={tp('monthly.chartText')}
                 labels={{ bars: tp('monthly.bars'), average: tp('monthly.average') }}
                 points={concealSeries(
                   report.monthly.map((month) => ({
@@ -154,6 +148,14 @@ export default async function EarningsPage({ searchParams }: PageProps) {
                   ['amount', 'average'],
                   masked,
                 )}
+              />
+              <MonthlyTable
+                months={report.monthly}
+                labels={monthlyLabels(tp)}
+                table={tableLabels(t, {
+                  caption: tp('monthly.caption'),
+                  noun: tp('monthly.noun'),
+                })}
               />
             </Stack>
           </Section>
@@ -169,11 +171,24 @@ export default async function EarningsPage({ searchParams }: PageProps) {
                 total: t('table.total'),
               }}
               labelOf={(key) => resolveGroupLabel(key, query.value.groupNames, t)}
+              table={tableLabels(t, {
+                caption: tp('breakdown.caption'),
+                noun: tp('breakdown.noun'),
+                filterPlaceholder: tp('breakdown.filterPlaceholder'),
+              })}
             />
           </Section>
 
           <Section title={tp('perAsset.title')} description={tp('perAsset.description')}>
-            <AssetTable rows={report.perAsset} labels={assetLabels(tp)} />
+            <AssetTable
+              rows={report.perAsset}
+              labels={assetLabels(tp)}
+              table={tableLabels(t, {
+                caption: tp('perAsset.caption'),
+                noun: tp('perAsset.noun'),
+                filterPlaceholder: tp('perAsset.filterPlaceholder'),
+              })}
+            />
           </Section>
 
           {/*
@@ -270,53 +285,66 @@ function Headline({
 }
 
 /**
- * DS-31 / SPEC-016 BR-016-15 — the chart's required text equivalent. An SVG of
- * bars carries its whole message in a form a screen reader cannot read, so the
- * same figures are here as a table.
+ * DS-31 / SPEC-016 BR-016-15 — the monthly chart's required text equivalent: an
+ * SVG of bars carries its whole message in a form a screen reader cannot read,
+ * so the same figures are here as a table, next to the chart.
+ *
+ * SPEC-022 BR-022-18: it grows by a row a month, so it pages and sorts, newest
+ * month first. It used to sit visually hidden inside the chart's description;
+ * a paginated table with controls cannot be hidden (its buttons would be tab
+ * stops nobody can see), so it is on the page and the chart's own description
+ * is a sentence that points to it, the way Evolução patrimonial's is.
  */
 function MonthlyTable({
   months,
   labels,
+  table,
 }: {
   readonly months: readonly MonthlyIncome[];
   readonly labels: ReturnType<typeof monthlyLabels>;
+  readonly table: ReportTableLabels;
 }) {
+  const columns: NodeColumn[] = [
+    { id: 'month', header: labels.month, kind: 'date', sortable: true },
+    { id: 'amount', header: labels.amount, kind: 'money', sortable: true },
+    // The header is the longest thing in this column ("Média móvel (12 meses)").
+    { id: 'average', header: labels.average, kind: 'money', width: 25, sortable: true },
+  ];
+  const amountRanks = ranksOf(months, (month) => month.amount);
+  const averageRanks = ranksOf(months, (month) => month.movingAverage);
+
   return (
-    <Table>
-      <TableCaption className="sr-only">{labels.caption}</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead scope="col">{labels.month}</TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.amount}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.average}
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {months.map((month) => (
-          <TableRow key={month.month}>
-            <TableCell className="py-row">{month.month}</TableCell>
-            <TableCell className="py-row text-right">
-              <Money value={month.amount} />
-            </TableCell>
-            <TableCell className="py-row text-right">
-              {month.movingAverage === null ? labels.none : <Money value={month.movingAverage} />}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <NodeTable
+      columns={columns}
+      {...table}
+      paramPrefix="monthly"
+      sort={{ id: 'month', desc: true }}
+      rows={months.map((month, index) => ({
+        cells: {
+          month: month.month,
+          amount: <Money value={month.amount} />,
+          average:
+            month.movingAverage === null ? labels.none : <Money value={month.movingAverage} />,
+        },
+        // No average for the first eleven months: absent, not the smallest.
+        keys: { month: month.month, amount: amountRanks[index], average: averageRanks[index] },
+      }))}
+    />
   );
 }
 
-/** BR-014-04 — ranked groups with their share of the period's income. */
+/**
+ * BR-014-04 — ranked groups with their share of the period's income.
+ *
+ * SPEC-022 BR-022-18: the groups are the grouping the reader chose, and by
+ * asset or by sector they grow with the portfolio, so the table pages and
+ * filters like any other. The total closes it on every page.
+ */
 function BreakdownTable({
   report,
   labels,
   labelOf,
+  table,
 }: {
   readonly report: EarningsReport;
   readonly labels: {
@@ -327,46 +355,35 @@ function BreakdownTable({
     readonly total: string;
   };
   readonly labelOf: (key: GroupKey) => string;
+  readonly table: ReportTableLabels;
 }) {
+  const columns: NodeColumn[] = [
+    { id: 'group', header: labels.group, kind: 'text', sortable: true },
+    { id: 'amount', header: labels.amount, kind: 'money', sortable: true },
+    { id: 'share', header: labels.share, kind: 'percent', width: 15, sortable: true },
+  ];
+  const amountRanks = ranksOf(report.breakdown, (slice) => slice.amount);
+  const shareRanks = ranksOf(report.breakdown, (slice) => slice.share);
+
   return (
-    <Table>
-      <TableCaption className="sr-only">{labels.caption}</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead scope="col">{labels.group}</TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.amount}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.share}
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {report.breakdown.map((slice) => (
-          <TableRow key={slice.key.id}>
-            <TableCell className="py-row font-medium">{labelOf(slice.key)}</TableCell>
-            <TableCell className="py-row text-right">
-              <Money value={slice.amount} />
-            </TableCell>
-            <TableCell className="py-row text-right">
-              {slice.share === null ? '' : <Money value={slice.share} kind="percent" />}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-      <TableFooter>
-        <TableRow>
-          <TableHead scope="row" className="py-row text-left">
-            {labels.total}
-          </TableHead>
-          <TableCell className="py-row text-right">
-            <Money value={report.total} />
-          </TableCell>
-          <TableCell className="py-row" />
-        </TableRow>
-      </TableFooter>
-    </Table>
+    <NodeTable
+      columns={columns}
+      {...table}
+      paramPrefix="breakdown"
+      sort={{ id: 'amount', desc: true }}
+      totals={{ label: labels.total, cells: { amount: <Money value={report.total} /> } }}
+      rows={report.breakdown.map((slice, index) => {
+        const group = labelOf(slice.key);
+        return {
+          cells: {
+            group: <span className="font-medium">{group}</span>,
+            amount: <Money value={slice.amount} />,
+            share: slice.share === null ? '' : <Money value={slice.share} kind="percent" />,
+          },
+          keys: { group, amount: amountRanks[index], share: shareRanks[index] },
+        };
+      })}
+    />
   );
 }
 
@@ -374,48 +391,53 @@ function BreakdownTable({
  * BR-014-05/06 — both yields, side by side and labelled, which is the whole
  * point: they describe different people, and either one alone would be read as
  * "the yield".
+ *
+ * SPEC-022 BR-022-18: one row per asset that paid in the period, so it pages,
+ * sorts and filters by ticker.
  */
 function AssetTable({
   rows,
   labels,
+  table,
 }: {
   readonly rows: readonly AssetIncome[];
   readonly labels: ReturnType<typeof assetLabels>;
+  readonly table: ReportTableLabels;
 }) {
+  const columns: NodeColumn[] = [
+    { id: 'asset', header: labels.asset, kind: 'text', sortable: true },
+    { id: 'amount', header: labels.amount, kind: 'money', sortable: true },
+    // Sized for their headers, the longest thing in them.
+    { id: 'yieldOnCost', header: labels.yieldOnCost, kind: 'percent', width: 16, sortable: true },
+    { id: 'currentYield', header: labels.currentYield, kind: 'percent', width: 23, sortable: true },
+  ];
+  const amountRanks = ranksOf(rows, (row) => row.amount);
+  const yieldOnCostRanks = ranksOf(rows, (row) => row.yieldOnCost);
+  const currentYieldRanks = ranksOf(rows, (row) => row.currentYield);
+
   return (
-    <Table>
-      <TableCaption className="sr-only">{labels.caption}</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead scope="col">{labels.asset}</TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.amount}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.yieldOnCost}
-          </TableHead>
-          <TableHead scope="col" className="text-right">
-            {labels.currentYield}
-          </TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.assetId}>
-            <TableCell className="py-row font-medium">{row.assetCode}</TableCell>
-            <TableCell className="py-row text-right">
-              <Money value={row.amount} />
-            </TableCell>
-            <TableCell className="py-row text-right">
-              <Yield value={row.yieldOnCost} fallback={labels.unavailable} />
-            </TableCell>
-            <TableCell className="py-row text-right">
-              <Yield value={row.currentYield} fallback={labels.unavailable} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <NodeTable
+      columns={columns}
+      {...table}
+      paramPrefix="asset"
+      sort={{ id: 'amount', desc: true }}
+      rows={rows.map((row, index) => ({
+        cells: {
+          asset: <span className="font-medium">{row.assetCode}</span>,
+          amount: <Money value={row.amount} />,
+          yieldOnCost: <Yield value={row.yieldOnCost} fallback={labels.unavailable} />,
+          currentYield: <Yield value={row.currentYield} fallback={labels.unavailable} />,
+        },
+        // A yield the report declined to compute has no rank: it sorts last in
+        // both directions rather than passing for 0 %.
+        keys: {
+          asset: row.assetCode,
+          amount: amountRanks[index],
+          yieldOnCost: yieldOnCostRanks[index],
+          currentYield: currentYieldRanks[index],
+        },
+      }))}
+    />
   );
 }
 

@@ -5,6 +5,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import { TRANSACTION_SORT_KEYS } from '@/core/ledger/ports';
 import { DataTable } from '@/components/patterns/data-table';
+import type { ColumnKind, ColumnWidth } from '@/components/patterns/data-table-columns';
 import { LedgerSelection } from '@/app/(app)/transactions/_components/LedgerSelection';
 
 /**
@@ -22,7 +23,7 @@ import { LedgerSelection } from '@/app/(app)/transactions/_components/LedgerSele
  * formats a figure, so no `Money` or `Quantity` crosses the client boundary as
  * a number (AR-06–AR-10), and no cell can disagree with the CSV export's
  * formatting. This component owns only the columns: their headers, their
- * order, which of them sort, and which of them are figures.
+ * order, which of them sort, and what each holds (`KINDS`).
  */
 
 export const LEDGER_COLUMNS = [
@@ -61,7 +62,28 @@ const HEADER_KEYS = {
 
 /** The columns the repository can order by (`TransactionSortKey`). */
 const SORTABLE: ReadonlySet<string> = new Set(TRANSACTION_SORT_KEYS);
-const FIGURES: ReadonlySet<LedgerColumn> = new Set(['quantity', 'unitPrice', 'totalValue']);
+
+/**
+ * SPEC-022 BR-022-18 — each column's kind, which decides its alignment and
+ * default width, and the widths this table sets itself: the row actions are two
+ * icon buttons. The unit price's cost-estimate marker (BR-007-06) sits beside the
+ * figure and wraps under it when the column is full — the column is sized for the
+ * figure, never for the marker. Restructuring the columns so the ledger fits without scrolling is BR-022-40
+ * (#242), not this.
+ */
+const KINDS: Readonly<Record<LedgerColumn, { kind: ColumnKind; width?: ColumnWidth }>> = {
+  select: { kind: 'control' },
+  tradeDate: { kind: 'date' },
+  asset: { kind: 'text', width: 20 },
+  type: { kind: 'text', width: 14 },
+  institution: { kind: 'text', width: 18 },
+  quantity: { kind: 'number' },
+  unitPrice: { kind: 'money' },
+  totalValue: { kind: 'money' },
+  status: { kind: 'badge' },
+  provenance: { kind: 'badge', width: 20 },
+  actions: { kind: 'control', width: '5.5rem' },
+};
 
 export interface LedgerTableProps {
   readonly rows: readonly LedgerRow[];
@@ -102,7 +124,7 @@ export function LedgerTable({
               ? () => <span className="sr-only">{t('table.actions')}</span>
               : t(`table.${HEADER_KEYS[id]}`),
         enableSorting: SORTABLE.has(id),
-        meta: FIGURES.has(id) ? { align: 'right' } : {},
+        meta: KINDS[id],
         cell: ({ row }) => row.original.cells[id],
       })),
     [t],

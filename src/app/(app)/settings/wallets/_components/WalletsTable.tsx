@@ -51,19 +51,21 @@ export function WalletsTable({ rows }: { readonly rows: readonly WalletRow[] }) 
       {
         id: 'name',
         header: t('list.columnWallet'),
+        // SPEC-022 BR-022-18: every column's kind and width are the table's.
+        meta: { kind: 'text', width: 30 },
         accessorFn: (row) => row.name,
         cell: ({ row }) => (
           <Cluster gap="sm" align="center" className="flex-nowrap">
             <ColorSwatch color={row.original.color} />
-            <Stack gap="none">
+            <Stack gap="none" className="min-w-0">
               <Link
                 href={`/settings/wallets/${row.original.id}`}
-                className="font-medium underline-offset-4 hover:underline"
+                className="truncate font-medium underline-offset-4 hover:underline"
               >
                 {row.original.name}
               </Link>
               {row.original.description !== null && (
-                <Text as="span" size="xs" tone="muted">
+                <Text as="span" size="xs" tone="muted" className="truncate">
                   {row.original.description}
                 </Text>
               )}
@@ -74,12 +76,14 @@ export function WalletsTable({ rows }: { readonly rows: readonly WalletRow[] }) 
       {
         id: 'goal',
         header: t('list.columnGoal'),
+        meta: { kind: 'text', width: 22 },
         accessorFn: (row) => row.goal ?? '',
         cell: ({ row }) => row.original.goal ?? t('list.noGoal'),
       },
       {
         id: 'assets',
         header: t('list.columnAssets'),
+        meta: { kind: 'number', width: 9 },
         accessorFn: (row) => row.assetCount,
         sortingFn: 'basic',
         cell: ({ row }) => <span className="tabular-nums">{row.original.assetCount}</span>,
@@ -87,6 +91,8 @@ export function WalletsTable({ rows }: { readonly rows: readonly WalletRow[] }) 
       {
         id: 'updatedAt',
         header: t('list.columnUpdated'),
+        // The header ("Atualizada em") is wider than the date under it.
+        meta: { kind: 'date', width: 16 },
         accessorFn: (row) => row.updatedAtMs,
         sortingFn: 'basic',
         cell: ({ row }) => <span className="tabular-nums">{row.original.updatedAtText}</span>,

@@ -26,10 +26,10 @@ import { ErrorState } from '@/components/patterns/error-state';
 import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Note } from '@/components/patterns/note';
+import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
-import { List, ListItem } from '@/components/layout/list';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Text } from '@/components/ui/text';
@@ -137,17 +137,18 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
           </Section>
 
           <Section title={tp('patrimonio.byAsset')}>
+            {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
+                this product deducts tax, and the figures must say so where
+                they are read: in the panel that lists them (BR-022-36), above
+                the table, which closes it with the pager. */}
+            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
+              <Note>{t('grossOfTax')}</Note>
+            )}
             <HoldingsTable
               rows={holdingRows(report.rows, new Map(), t, tc, tw, masked)}
               labels={holdingsTableLabels(report, t, tc, tCommon)}
               hiddenColumns={['sector', 'opportunityState']}
             />
-            {/* SPEC-009 BR-009-12 / AC-10: fixed income is gross — nothing in
-                this product deducts tax, and the figures must say so where
-                they are read: in the panel that lists them (BR-022-36). */}
-            {hasFixedIncome(report.rows.map((row) => row.assetClass)) && (
-              <Note>{t('grossOfTax')}</Note>
-            )}
           </Section>
 
           <Unpriced holdings={query.value.report.groups.flatMap((group) => group.holdings)} />
@@ -287,21 +288,37 @@ function barPercent(share: MoneyValue | null): string {
  */
 async function Unpriced({ holdings }: { readonly holdings: readonly ReportHolding[] }) {
   const t = await getTranslations('reports');
+  const tp = await getTranslations('portfolio');
   const unpriced = holdings.filter((holding) => holding.needsAttention !== null);
   if (unpriced.length === 0) return null;
 
+  // SPEC-022 BR-022-18 — it grows with the portfolio, so it is a table: paged,
+  // filtered by asset, sorted. The markers are server-rendered cells.
+  const rows: NodeRow[] = unpriced.map((holding, index) => ({
+    id: `${holding.assetId}-${index}`,
+    keys: { asset: holding.assetCode },
+    cells: {
+      asset: <span className="font-medium">{holding.assetCode}</span>,
+      markers: <HoldingMarkers holding={holding} />,
+    },
+  }));
+
   return (
     <Section title={t('attentionTitle')} description={t('attentionDescription')}>
-      <List gap="sm">
-        {unpriced.map((holding, index) => (
-          <ListItem key={`${holding.assetId}-${index}`} separated>
-            <Cluster justify="between" gap="sm">
-              <span className="font-medium">{holding.assetCode}</span>
-              <HoldingMarkers holding={holding} />
-            </Cluster>
-          </ListItem>
-        ))}
-      </List>
+      <NodeTable
+        columns={[
+          { id: 'asset', header: tp('patrimonio.unpricedAsset'), kind: 'text', sortable: true },
+          // The markers are badges that wrap among themselves, so the column is
+          // wide rather than truncating (`control` never truncates).
+          { id: 'markers', header: tp('patrimonio.unpricedMarkers'), kind: 'control', width: 40 },
+        ]}
+        rows={rows}
+        caption={t('attentionTitle')}
+        noun={tp('patrimonio.unpricedNoun')}
+        filterPlaceholder={tp('patrimonio.unpricedFilterPlaceholder')}
+        paramPrefix="unpriced"
+        sort={{ id: 'asset', desc: false }}
+      />
     </Section>
   );
 }

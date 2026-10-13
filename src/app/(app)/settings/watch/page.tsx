@@ -1,35 +1,28 @@
 import { getTranslations } from 'next-intl/server';
-import type { Money as MoneyValue } from '@/core/shared/money';
 import type { OpportunityState } from '@/core/opportunity/ports';
-import { currencyText, formatDateTime } from '@/i18n/format';
 import { tryUserId } from '@/lib/session';
-import { loadWatchView, type WatchRuleRow } from '@/app/(app)/watch/data';
-import {
-  createRuleAction,
-  deleteRuleAction,
-  setRuleMutedAction,
-  updateRuleAction,
-} from '@/app/(app)/watch/actions';
+import { loadWatchView } from '@/app/(app)/watch/data';
+import { createRuleAction, updateRuleAction } from '@/app/(app)/watch/actions';
 import { RuleForm, type RuleFormLabels } from '@/app/(app)/settings/watch/_components/RuleForm';
+import {
+  AvailableTable,
+  IneligibleTable,
+  RetainedTable,
+  RULE_EDITOR_ANCHOR,
+  WatchedTable,
+} from '@/app/(app)/settings/watch/_components/WatchTables';
 import { WatchSection } from '@/app/(app)/settings/watch/_components/WatchSection';
 import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { PageShell } from '@/app/page-shell';
-import { watchRuleAnchor } from '@/lib/watch-paths';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Note } from '@/components/patterns/note';
-import { ActionForm } from '@/components/patterns/action-form';
-import { StateBadge } from '@/components/patterns/state-badge';
-import { Money } from '@/app/money';
-import { useHideValues } from '@/app/hide-values';
+import { QueryLink } from '@/components/patterns/query-link';
+import { loadHideValues } from '@/app/hide-values';
 import { saveHideValuesAction } from '@/app/(settings)/account/actions';
 import { RevealValuesForm } from '@/components/patterns/reveal-values-form';
 import { Stack } from '@/components/layout/stack';
-import { Cluster } from '@/components/layout/cluster';
-import { List, ListItem } from '@/components/layout/list';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Text } from '@/components/ui/text';
 
 /**
  * SPEC-018 — the watch screen (BR-018-19/20), as Configurações › Observar
@@ -41,6 +34,11 @@ import { Text } from '@/components/ui/text';
  * assets with none yet; and states, for a held CDB/LCI/LCA, that it has no
  * market price to watch (BR-018-02).
  *
+ * SPEC-022 BR-022-18 — each of the four lists is a table (`WatchTables`), and
+ * **no form sits in a cell**: the rule form is the one editor below the notes,
+ * opened by `?rule=<asset>` from a row's "Editar" or an available asset's
+ * "Criar regra".
+ *
  * Never statically prerendered: this renders one tenant's own holdings and
  * rules, so a cached copy built once would be served to every visitor — the
  * same tenant-isolation reasoning `(settings)/preferences/page.tsx` gives at
@@ -48,7 +46,11 @@ import { Text } from '@/components/ui/text';
  */
 export const dynamic = 'force-dynamic';
 
-export default async function WatchPage() {
+interface PageProps {
+  readonly searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+export default async function WatchPage({ searchParams }: PageProps) {
   const t = await getTranslations('watch');
   const ts = await getTranslations('settings');
   const userId = await tryUserId();
@@ -61,6 +63,9 @@ export default async function WatchPage() {
     );
   }
 
+  const raw = await searchParams;
+  const editing = typeof raw['rule'] === 'string' ? raw['rule'] : undefined;
+  const masked = await loadHideValues();
   const view = await loadWatchView(userId);
 
   const stateOptions: Readonly<Record<OpportunityState, string>> = {
@@ -81,6 +86,11 @@ export default async function WatchPage() {
   };
 
   const editLabels: RuleFormLabels = { ...formLabels, submit: t('save') };
+
+  // The rule the reader opened: one with a rule (edit) or one without (create).
+  // An id that is neither — a rule since deleted, a stale link — opens nothing.
+  const editedRule = view.watched.find((row) => row.assetId === editing);
+  const newRuleFor = view.available.find((asset) => asset.assetId === editing);
 
   return (
     <SettingsFrame>
@@ -105,59 +115,76 @@ export default async function WatchPage() {
           <Note>{view.emailConsented ? t('emailOn') : t('emailOff')}</Note>
         </Stack>
 
-        <Section title={t('yourRulesTitle')} description={t('yourRulesDescription')}>
+        {(editedRule !== undefined || newRuleFor !== undefined) && (
+          <Section
+            id={RULE_EDITOR_ANCHOR}
+            className="scroll-mt-20"
+            title={
+              editedRule !== undefined
+                ? t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })
+                : t('createTitle', {
+                    asset: `${newRuleFor?.code ?? ''} — ${newRuleFor?.name ?? ''}`,
+                  })
+            }
+            actions={
+              <Button asChild variant="ghost" size="sm">
+                <QueryLink drop={['rule']}>{t('closeEditor')}</QueryLink>
+              </Button>
+            }
+          >
+            {editedRule !== undefined ? (
+              masked ? (
+                // SPEC-022 BR-022-24: the thresholds would sit in the inputs.
+                <RevealValuesForm action={saveHideValuesAction} />
+              ) : (
+                <RuleForm
+                  // Keyed by the asset: going straight from "Editar" on one rule
+                  // to another keeps this component mounted, and its uncontrolled
+                  // fields would carry the first rule's limits into the second's
+                  // save (#246 review).
+                  key={`edit-${editedRule.assetId}`}
+                  action={updateRuleAction}
+                  assetId={editedRule.assetId}
+                  idPrefix={`edit-${editedRule.assetId}`}
+                  labels={editLabels}
+                  initial={{
+                    lowerPrice: editedRule.lower?.price.toString(),
+                    lowerState: editedRule.lower?.state,
+                    upperPrice: editedRule.upper?.price.toString(),
+                    upperState: editedRule.upper?.state,
+                    defaultState: editedRule.defaultState,
+                  }}
+                />
+              )
+            ) : (
+              newRuleFor !== undefined && (
+                <RuleForm
+                  key={`create-${newRuleFor.assetId}`}
+                  action={createRuleAction}
+                  assetId={newRuleFor.assetId}
+                  idPrefix={`create-${newRuleFor.assetId}`}
+                  labels={formLabels}
+                />
+              )
+            )}
+          </Section>
+        )}
+
+        <Section
+          title={t('yourRulesTitle')}
+          // The delete control is an icon, so what it does is said here, once.
+          description={`${t('yourRulesDescription')} ${t('deleteHint')}`}
+        >
           {view.watched.length === 0 ? (
             <EmptyState title={t('empty')} />
           ) : (
-            <List gap="lg">
-              {view.watched.map((row) => (
-                <WatchedRow key={row.assetId} row={row} t={t} editLabels={editLabels} />
-              ))}
-            </List>
+            <WatchedTable rows={view.watched} />
           )}
         </Section>
 
         {view.retained.length > 0 && (
           <Section title={t('retainedTitle')} description={t('retainedDescription')}>
-            <List gap="sm">
-              {view.retained.map((rule) => (
-                // A retained rule keeps its anchor: an e-mail sent before the
-                // sale still links here (BR-018-03).
-                <ListItem
-                  key={rule.assetId}
-                  separated
-                  id={watchRuleAnchor(rule.assetId)}
-                  linkTarget
-                >
-                  <Stack gap="sm">
-                    <Cluster justify="between" gap="sm">
-                      <span className="font-medium">
-                        {rule.code} — {rule.name}
-                      </span>
-                      <Badge variant="secondary">{t('retainedBadge')}</Badge>
-                    </Cluster>
-                    <Text as="span" size="xs" tone="muted">
-                      {t('columnLower')}: {boundText(rule.lower, t)} · {t('columnUpper')}:{' '}
-                      {boundText(rule.upper, t)} · {t('columnDefault')}:{' '}
-                      {t(`stateLabel.${rule.defaultState}`)}
-                    </Text>
-                    {/*
-                      The only affordance a paused rule needs. Editing thresholds
-                      on an asset the user no longer holds would be editing a
-                      rule against a position that does not exist; deleting it is
-                      what BR-018-03's "not silently deleted by a sale" leaves to
-                      the person who wrote it.
-                    */}
-                    <ActionForm action={deleteRuleAction}>
-                      <input type="hidden" name="assetId" value={rule.assetId} />
-                      <Button type="submit" variant="destructive" size="sm">
-                        {t('delete')}
-                      </Button>
-                    </ActionForm>
-                  </Stack>
-                </ListItem>
-              ))}
-            </List>
+            <RetainedTable rules={view.retained} />
           </Section>
         )}
 
@@ -165,195 +192,16 @@ export default async function WatchPage() {
           {view.available.length === 0 ? (
             <EmptyState title={t('availableEmpty')} />
           ) : (
-            <List gap="lg">
-              {view.available.map((asset) => (
-                <ListItem key={asset.assetId} separated>
-                  <Stack gap="sm">
-                    <span className="font-medium">
-                      {asset.code} — {asset.name}
-                    </span>
-                    <RuleForm
-                      action={createRuleAction}
-                      assetId={asset.assetId}
-                      idPrefix={`create-${asset.assetId}`}
-                      labels={formLabels}
-                    />
-                  </Stack>
-                </ListItem>
-              ))}
-            </List>
+            <AvailableTable assets={view.available} />
           )}
         </Section>
 
         {view.ineligible.length > 0 && (
           <Section title={t('ineligibleTitle')} description={t('ineligibleDescription')}>
-            <List gap="sm">
-              {view.ineligible.map((asset) => (
-                <ListItem key={asset.assetId} separated>
-                  <Cluster justify="between" gap="sm">
-                    <span>
-                      {asset.code} — {asset.name}
-                    </span>
-                    <Text as="span" tone="muted" size="xs">
-                      {t('ineligibleNoPrice')}
-                    </Text>
-                  </Cluster>
-                </ListItem>
-              ))}
-            </List>
+            <IneligibleTable assets={view.ineligible} />
           </Section>
         )}
       </WatchSection>
     </SettingsFrame>
-  );
-}
-
-/**
- * BR-018-18 — every sentence below names the user's own rule ("no seu limite
- * de {stateLabel} de {threshold}"), never a recommendation. `threshold` is
- * `null` exactly when the default band matched (`evaluate.ts`'s own
- * contract), so branching on it is what lets this read as prose rather than a
- * templated fill-in-the-blank for a case that does not apply.
- */
-function stateTitle(
-  row: WatchRuleRow,
-  t: Awaited<ReturnType<typeof getTranslations>>,
-  masked: boolean,
-): string {
-  if (row.evaluatedState === 'unknown') return t('stateTitleUnknown');
-  const stateLabel = t(`stateLabel.${row.evaluatedState}`);
-  if (row.threshold === null) return t('stateTitleDefault', { stateLabel });
-  // SPEC-022 BR-022-24: a `title` is a string, so the placeholder is too.
-  return t('stateTitleBound', { stateLabel, threshold: currencyText(masked)(row.threshold) });
-}
-
-function boundText(
-  bound: { readonly price: MoneyValue; readonly state: OpportunityState } | null,
-  t: Awaited<ReturnType<typeof getTranslations>>,
-): React.ReactNode {
-  if (bound === null) return t('noBound');
-  // `Money`, so the threshold masks with every other amount (BR-022-24).
-  return (
-    <>
-      <Money value={bound.price} /> → {t(`stateLabel.${bound.state}`)}
-    </>
-  );
-}
-
-function WatchedRow({
-  row,
-  t,
-  editLabels,
-}: {
-  readonly row: WatchRuleRow;
-  readonly t: Awaited<ReturnType<typeof getTranslations>>;
-  readonly editLabels: RuleFormLabels;
-}) {
-  const masked = useHideValues();
-  return (
-    // SPEC-022 BR-022-07 — the target of the Painel's "Ver regra" and of the
-    // opportunity e-mail's link, so the rule it names is marked on arrival.
-    <ListItem separated id={watchRuleAnchor(row.assetId)} linkTarget>
-      <Stack gap="sm">
-        <Cluster justify="between" gap="sm" align="baseline">
-          <Cluster gap="sm" align="baseline">
-            <span className="font-medium">
-              {row.code} — {row.name}
-            </span>
-            <StateBadge
-              state={row.evaluatedState}
-              label={t(`stateLabel.${row.evaluatedState}`)}
-              title={stateTitle(row, t, masked)}
-            />
-            {row.muted && <Badge variant="outline">{t('mutedBadge')}</Badge>}
-          </Cluster>
-
-          {/* BR-018-19: the price this state was read from, and its own
-              timestamp/source alongside — never implying a live price. */}
-          <Stack gap="xs" align="end">
-            {row.currentPrice === null ? (
-              <Text as="span" tone="muted" size="sm">
-                {t('noPrice')}
-              </Text>
-            ) : (
-              <Money value={row.currentPrice} className="text-sm font-medium" />
-            )}
-            {row.quotedAt !== null && (
-              <Text as="span" tone="muted" size="xs">
-                {formatDateTime(row.quotedAt)}
-                {row.source !== null ? ` · ${row.source}` : ''}
-              </Text>
-            )}
-          </Stack>
-        </Cluster>
-
-        <Cluster gap="lg">
-          <Text as="span" size="xs" tone="muted">
-            {t('columnLower')}: {boundText(row.lower, t)}
-          </Text>
-          <Text as="span" size="xs" tone="muted">
-            {t('columnUpper')}: {boundText(row.upper, t)}
-          </Text>
-          <Text as="span" size="xs" tone="muted">
-            {t('columnDefault')}: {t(`stateLabel.${row.defaultState}`)}
-          </Text>
-        </Cluster>
-
-        <Text as="span" size="xs" tone="muted">
-          {t('columnLastEmail')}:{' '}
-          {row.lastEmailSentAt === null ? t('noEmailSent') : formatDateTime(row.lastEmailSentAt)}
-        </Text>
-
-        <Cluster gap="sm" align="center">
-          <ActionForm action={setRuleMutedAction}>
-            <input type="hidden" name="assetId" value={row.assetId} />
-            <input type="hidden" name="muted" value={(!row.muted).toString()} />
-            <Button type="submit" size="sm" variant="outline">
-              {row.muted ? t('unmute') : t('mute')}
-            </Button>
-          </ActionForm>
-
-          <details>
-            <summary>
-              <Text as="span" weight="medium">
-                {t('edit')}
-              </Text>
-            </summary>
-            <Stack gap="sm">
-              {masked ? (
-                // SPEC-022 BR-022-24: the thresholds would sit in the inputs.
-                <RevealValuesForm action={saveHideValuesAction} />
-              ) : (
-                <RuleForm
-                  action={updateRuleAction}
-                  assetId={row.assetId}
-                  idPrefix={`edit-${row.assetId}`}
-                  labels={editLabels}
-                  initial={{
-                    lowerPrice: row.lower?.price.toString(),
-                    lowerState: row.lower?.state,
-                    upperPrice: row.upper?.price.toString(),
-                    upperState: row.upper?.state,
-                    defaultState: row.defaultState,
-                  }}
-                />
-              )}
-            </Stack>
-          </details>
-
-          <ActionForm action={deleteRuleAction}>
-            <input type="hidden" name="assetId" value={row.assetId} />
-            <Stack gap="xs">
-              <Button type="submit" variant="destructive" size="sm">
-                {t('delete')}
-              </Button>
-            </Stack>
-          </ActionForm>
-        </Cluster>
-        <Text as="span" size="xs" tone="muted">
-          {t('deleteHint')}
-        </Text>
-      </Stack>
-    </ListItem>
   );
 }

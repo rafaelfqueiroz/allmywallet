@@ -3,6 +3,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import { AssetId, InstitutionId, WalletId } from '@/core/shared/ids';
 import {
   PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
   fromSearchParams,
   hasActiveFilters,
   lastPage,
@@ -93,10 +94,10 @@ describe('ledgerViewFrom', () => {
   });
 
   it('reads a sort, a page and a page size', () => {
-    expect(view('sort=totalValue:asc&page=3&size=100')).toEqual({
+    expect(view('sort=totalValue:asc&page=3&size=25')).toEqual({
       sort: { key: 'totalValue', desc: false },
       page: 3,
-      pageSize: 100,
+      pageSize: 25,
     });
   });
 
@@ -120,6 +121,17 @@ describe('ledgerViewFrom', () => {
       expect(view(`page=${raw}`).page).toBe(1);
     },
   );
+
+  // SPEC-022 BR-022-18: one set of page sizes for every table.
+  it('offers 10, 25 and 50 rows per page, and opens on one of them', () => {
+    expect(PAGE_SIZE_OPTIONS).toEqual([10, 25, 50]);
+    expect(PAGE_SIZE_OPTIONS).toContain(PAGE_SIZE);
+    expect(view('size=10').pageSize).toBe(10);
+    expect(view('size=25').pageSize).toBe(25);
+    // The old 100 and 200 are gone: the URL cannot ask for them.
+    expect(view('size=100').pageSize).toBe(PAGE_SIZE);
+    expect(view('size=200').pageSize).toBe(PAGE_SIZE);
+  });
 
   it('refuses a page size it does not offer', () => {
     expect(view('size=30').pageSize).toBe(PAGE_SIZE);

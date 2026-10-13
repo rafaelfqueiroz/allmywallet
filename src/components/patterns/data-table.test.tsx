@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/components/patterns/money';
 import { Money as MoneyValue } from '@/core/shared/money';
-import { audit, render, screen, userEvent, within } from '@/components/test-utils';
+import { columnWidth } from '@/components/patterns/data-table-columns';
+import { MASKED_CURRENCY } from '@/i18n/masked';
+import { audit, render, screen, userEvent, waitFor, within } from '@/components/test-utils';
 
 // The table mirrors its state into the URL with `history.replaceState` — never
 // `router.replace`, which would refetch the page's server data (see the
@@ -278,15 +280,15 @@ describe('DataTable — pagination, filter and URL state', () => {
     expect(screen.getByText('Mostrando 1–5 de 12')).toBeInTheDocument();
   });
 
-  it('opens on 25 rows per page with 10/25/50/100 on offer by default', () => {
+  it('opens on 10 rows per page with 10/25/50 on offer by default (BR-022-18)', () => {
     render(<DataTable columns={itemColumns} data={items} caption="Importações" />);
     const select = screen.getByRole('combobox', { name: 'Itens por página' });
-    expect(select).toHaveValue('25');
+    expect(select).toHaveValue('10');
     expect(
       within(select)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['10', '25', '50', '100']);
+    ).toEqual(['10', '25', '50']);
   });
 
   it('moves between pages with next, previous and the numbered buttons', async () => {
@@ -573,7 +575,7 @@ describe('DataTable — server-paged', () => {
     {
       id: 'total',
       header: 'Total',
-      meta: { align: 'right' },
+      meta: { kind: 'money' },
       cell: ({ row }) => row.original.total,
     },
   ];
@@ -744,6 +746,340 @@ describe('DataTable — server-paged', () => {
   it('has no axe violations', async () => {
     nav.search = 'page=2';
     const { container } = render(<Ledger />);
+    expect(await audit(container)).toHaveNoViolations();
+  });
+});
+
+/**
+ * SPEC-022 BR-022-18 / DL-022-17 — a column is its *kind*: alignment, width and
+ * truncation follow from it, and never from what the cells hold.
+ */
+describe('DataTable — column kinds', () => {
+  type Wide = Record<string, string>;
+  const KINDS = ['text', 'date', 'badge', 'number', 'money', 'percent', 'control'] as const;
+  const wideRow: Wide = Object.fromEntries(KINDS.map((kind) => [kind, `${kind}-valor`]));
+
+  const kindColumns: ColumnDef<Wide, unknown>[] = KINDS.map((kind) => ({
+    id: kind,
+    header: `cab-${kind}`,
+    meta: { kind },
+    cell: ({ row }) => row.original[kind],
+  }));
+
+  const tableOf = () => screen.getByRole('table');
+  const headerOf = (kind: string) =>
+    within(tableOf()).getByRole('columnheader', { name: `cab-${kind}` });
+  const cellOf = (kind: string) => within(tableOf()).getByRole('cell', { name: `${kind}-valor` });
+
+  function renderKinds() {
+    return render(
+      <DataTable columns={kindColumns} data={[wideRow]} caption="Tipos" pagination={false} />,
+    );
+  }
+
+  it.each([
+    ['text', false],
+    ['date', false],
+    ['badge', false],
+    ['number', true],
+    ['money', true],
+    ['percent', true],
+    ['control', false],
+  ] as const)('%s: header and cell sit %s', (kind, right) => {
+    renderKinds();
+    // Right is text-right on both; left is the absence of it, never a stray class.
+    expect(headerOf(kind).className.includes('text-right')).toBe(right);
+    expect(cellOf(kind).className.includes('text-right')).toBe(right);
+    // Figures read down their decimal point (DS-13).
+    expect(cellOf(kind).className.includes('tabular-nums')).toBe(right);
+  });
+
+  it('treats a column with no kind as text', () => {
+    render(
+      <DataTable
+        columns={[{ id: 'a', header: 'Livre', cell: () => 'x' }]}
+        data={[wideRow]}
+        caption="Sem tipo"
+        pagination={false}
+      />,
+    );
+    expect(within(tableOf()).getByRole('columnheader').className).not.toContain('text-right');
+    expect(within(tableOf()).getByRole('cell').className).not.toContain('text-right');
+  });
+
+  it('lays the table out fixed, with one <col> per column carrying the defined width', () => {
+    renderKinds();
+    expect(tableOf().className).toContain('table-fixed');
+    const cols = Array.from(tableOf().querySelectorAll<HTMLTableColElement>('colgroup > col'));
+    expect(cols).toHaveLength(KINDS.length);
+    // Default widths are the kind's own: the figure columns in `ch`, so they do
+    // not depend on the digits shown, and a control a fixed length.
+    const widths = cols.map((col) => col.style.width);
+    expect(widths[KINDS.indexOf('money')]).toBe('calc(19ch + 1rem)');
+    expect(widths[KINDS.indexOf('number')]).toBe('calc(14ch + 1rem)');
+    expect(widths[KINDS.indexOf('control')]).toBe('3rem');
+    expect(widths.every((width) => width !== '')).toBe(true);
+  });
+
+  it('sizes the money column for thirteen digits and the mask, whatever the figures are', () => {
+    // 'R$ 12.345.678.901,23' measures ~17.3ch in the app's font (its separators
+    // are narrower than a digit) and a sign makes 18; the mask is 9 characters.
+    // The real-browser check is the 13-digit E2E in tests/e2e/transactions.spec.ts.
+    const widest = 18;
+    const [, ch] = /calc\((\d+)ch/.exec(columnWidth('money')) ?? [];
+    expect(Number(ch)).toBeGreaterThanOrEqual(widest);
+    expect(Number(ch)).toBeGreaterThan(MASKED_CURRENCY.length);
+  });
+
+  it('takes a column width from its definition, in characters or as a CSS length', () => {
+    render(
+      <DataTable
+        columns={[
+          { id: 'a', header: 'A', meta: { kind: 'text', width: 40 }, cell: () => 'x' },
+          { id: 'b', header: 'B', meta: { kind: 'number', width: '6rem' }, cell: () => '1' },
+        ]}
+        data={[wideRow]}
+        caption="Larguras"
+        pagination={false}
+      />,
+    );
+    const cols = Array.from(tableOf().querySelectorAll<HTMLTableColElement>('colgroup > col'));
+    expect(cols.map((col) => col.style.width)).toEqual(['calc(40ch + 1rem)', '6rem']);
+  });
+
+  it('gives hidden amounts the width of visible ones: the columns do not depend on the cells', () => {
+    const money: ColumnDef<{ value: string }, unknown>[] = [
+      {
+        id: 'value',
+        header: 'Valor',
+        meta: { kind: 'money' },
+        cell: ({ row }) => row.original.value,
+      },
+    ];
+    const widthFor = (value: string) => {
+      const { unmount } = render(
+        <DataTable columns={money} data={[{ value }]} caption="Valores" pagination={false} />,
+      );
+      const width = tableOf().querySelector<HTMLTableColElement>('col')?.style.width;
+      unmount();
+      return width;
+    };
+    expect(widthFor('R$ 1,00')).toBe(widthFor(MASKED_CURRENCY));
+    expect(widthFor('R$ 1,00')).toBe(widthFor('R$ 12.345.678.901,23'));
+  });
+
+  it('truncates text, dates and badges, and never a figure or a control', () => {
+    renderKinds();
+    for (const kind of ['text', 'date', 'badge']) {
+      expect(cellOf(kind).querySelector('[data-slot="table-cell-text"]')).not.toBeNull();
+    }
+    for (const kind of ['number', 'money', 'percent', 'control']) {
+      expect(cellOf(kind).querySelector('[data-slot="table-cell-text"]')).toBeNull();
+    }
+  });
+
+  it('keeps the card rendering as flat rows under hairlines, never a card (BR-022-36)', () => {
+    renderKinds();
+    const list = screen.getByRole('list', { name: 'Tipos' });
+    expect(list.className).toContain('divide-y');
+    expect(list.querySelector('[data-slot="card"]')).toBeNull();
+  });
+});
+
+/**
+ * SPEC-022 BR-022-18, #237 review F2 — a collection with no rows says so. A
+ * caller that forgets `empty` must not ship headers over nothing and a pager
+ * reading "Mostrando 0–0 de 0".
+ */
+describe('DataTable — empty collection', () => {
+  it('shows the catalogue empty state, not bare headers, when the caller passed none', () => {
+    render(<DataTable columns={columns} data={[]} caption="Posições" />);
+    expect(screen.getByRole('status')).toHaveTextContent('Nenhum registro por aqui');
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByText(/Mostrando/)).toBeNull();
+    expect(document.querySelector('[data-slot="table-pager"]')).toBeNull();
+  });
+
+  it('shows the caller’s own empty state when it passed one', () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={[]}
+        caption="Posições"
+        empty={<EmptyState title="Esta carteira ainda não tem metas" />}
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Esta carteira ainda não tem metas');
+    expect(screen.queryByText('Nenhum registro por aqui')).toBeNull();
+  });
+});
+
+/**
+ * SPEC-022 BR-022-18 — text that does not fit ends in an ellipsis, and its full
+ * text opens on hover, keyboard focus and tap. jsdom has no layout, so which
+ * cells overflow is stubbed through `scrollWidth`.
+ */
+describe('DataTable — truncated text', () => {
+  const LONG = 'INTER DISTRIBUIDORA DE TÍTULOS E VALORES MOBILIÁRIOS LTDA';
+  type Broker = { id: string; name: string };
+  const data: Broker[] = [
+    { id: '1', name: LONG },
+    { id: '2', name: 'XP' },
+  ];
+
+  function brokers(cell?: (row: Broker) => React.ReactNode) {
+    const columns: ColumnDef<Broker, unknown>[] = [
+      {
+        id: 'name',
+        header: 'Instituição',
+        meta: { kind: 'text' },
+        cell: ({ row }) => cell?.(row.original) ?? row.original.name,
+      },
+    ];
+    return <DataTable columns={columns} data={data} caption="Instituições" pagination={false} />;
+  }
+
+  /** The cell whose own text is `LONG` overflows its 100px box; nothing else does. */
+  function overflowLong() {
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(100);
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function (this: Element) {
+      return this.matches('[data-slot="table-cell-text"]') && this.textContent === LONG ? 400 : 100;
+    });
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    replaceState.mockClear();
+  });
+
+  const tipText = () => document.querySelector('[data-slot="popover-content"]')?.textContent;
+  const cellText = (text: string) =>
+    within(screen.getByRole('table'))
+      .getByText(text)
+      .closest<HTMLElement>('[data-slot="table-cell-text"]')!;
+
+  it('opens the full text on keyboard focus', async () => {
+    overflowLong();
+    const user = userEvent.setup();
+    render(brokers());
+    expect(tipText()).toBeUndefined();
+
+    await user.tab(); // the table's own scroll region
+    await user.tab(); // the truncated cell
+    expect(cellText(LONG)).toHaveFocus();
+    await waitFor(() => expect(tipText()).toBe(LONG));
+  });
+
+  it('opens the full text on hover, and closes it after the pointer leaves', async () => {
+    overflowLong();
+    const user = userEvent.setup();
+    render(brokers());
+    await user.hover(cellText(LONG));
+    await waitFor(() => expect(tipText()).toBe(LONG));
+
+    await user.unhover(cellText(LONG));
+    await waitFor(() => expect(tipText()).toBeUndefined());
+  });
+
+  it('opens the full text on tap, and a second tap does not slam it shut', async () => {
+    overflowLong();
+    const user = userEvent.setup();
+    render(brokers());
+    await user.click(cellText(LONG));
+    await waitFor(() => expect(tipText()).toBe(LONG));
+    await user.click(cellText(LONG));
+    expect(tipText()).toBe(LONG);
+  });
+
+  it('closes on Escape', async () => {
+    overflowLong();
+    const user = userEvent.setup();
+    render(brokers());
+    await user.click(cellText(LONG));
+    await waitFor(() => expect(tipText()).toBe(LONG));
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(tipText()).toBeUndefined());
+  });
+
+  it('makes only the cell that overflows a tab stop', () => {
+    overflowLong();
+    render(brokers());
+    expect(cellText(LONG)).toHaveAttribute('tabindex', '0');
+    // Text that fits is fully visible: nothing to reveal, nothing to tab to.
+    expect(cellText('XP')).not.toHaveAttribute('tabindex');
+  });
+
+  it('adds no tab stop and no popover when nothing overflows', async () => {
+    const user = userEvent.setup();
+    render(brokers());
+    expect(within(screen.getByRole('table')).queryByRole('link')).toBeNull();
+    expect(cellText(LONG)).not.toHaveAttribute('tabindex');
+    await user.hover(cellText(LONG));
+    await user.click(cellText(LONG));
+    expect(tipText()).toBeUndefined();
+  });
+
+  it('leaves a link in a truncated cell as the focus target, and opens the text on its focus', async () => {
+    overflowLong();
+    const user = userEvent.setup();
+    render(brokers((row) => <a href={`/instituicoes/${row.id}`}>{row.name}</a>));
+    // The cell is not a second tab stop beside its own link.
+    expect(cellText(LONG)).not.toHaveAttribute('tabindex');
+
+    await user.tab(); // the table's scroll region
+    await user.tab(); // the link
+    expect(within(screen.getByRole('table')).getAllByRole('link')[0]).toHaveFocus();
+    await waitFor(() => expect(tipText()).toBe(LONG));
+  });
+
+  it('keeps the full text in the cell for a screen reader, and hides the popover copy', async () => {
+    overflowLong();
+    const user = userEvent.setup();
+    render(brokers());
+    expect(within(screen.getByRole('table')).getByRole('cell', { name: LONG })).toBeInTheDocument();
+    await user.click(cellText(LONG));
+    await waitFor(() => expect(tipText()).toBe(LONG));
+    expect(document.querySelector('[data-slot="popover-content"]')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
+  });
+
+  it('reads two stacked lines as separate words in the popover', async () => {
+    const user = userEvent.setup();
+    const stacked = (
+      <DataTable
+        columns={[
+          {
+            id: 'name',
+            header: 'Ativo',
+            meta: { kind: 'text' },
+            cell: () => (
+              <div>
+                <span>PETR4</span>
+                <span>Petróleo</span>
+              </div>
+            ),
+          },
+        ]}
+        data={[{ id: '1', name: 'x' }]}
+        caption="Ativos"
+        pagination={false}
+      />
+    );
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(10);
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(50);
+    render(stacked);
+    await user.click(document.querySelector('[data-slot="table-cell-text"]')!);
+    await waitFor(() => expect(tipText()).toBe('PETR4 Petróleo'));
+  });
+
+  it('has no axe violations with an open tip', async () => {
+    overflowLong();
+    const user = userEvent.setup();
+    const { container } = render(brokers());
+    await user.click(cellText(LONG));
+    await waitFor(() => expect(tipText()).toBe(LONG));
     expect(await audit(container)).toHaveNoViolations();
   });
 });

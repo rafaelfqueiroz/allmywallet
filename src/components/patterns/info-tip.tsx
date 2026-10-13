@@ -1,18 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { Info } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-
-/**
- * Time the pointer has to travel from the icon onto the content before the
- * content closes. WCAG 1.4.13 "hoverable": the user must be able to move onto
- * the revealed text — to read a long instruction or zoom into it — without it
- * vanishing under the pointer.
- */
-const LEAVE_GRACE_MS = 150;
+import { useTipInteraction } from '@/components/patterns/use-tip-interaction';
 
 export interface InfoTipProps {
   /** The instructions. A node, so a Server Component can pass it across the boundary. */
@@ -70,44 +63,11 @@ export interface InfoTipProps {
  */
 export function InfoTip({ children, id, label, labelledBy, describedBy, className }: InfoTipProps) {
   const t = useTranslations('field');
-  const [open, setOpen] = useState(false);
-  const pinned = useRef(false);
-  const leaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const contentRef = useRef<HTMLDivElement>(null);
-
-  const cancelLeave = useCallback(() => {
-    clearTimeout(leaveTimer.current);
-    leaveTimer.current = undefined;
-  }, []);
-
-  useEffect(() => cancelLeave, [cancelLeave]);
-
-  const close = useCallback(() => {
-    cancelLeave();
-    pinned.current = false;
-    setOpen(false);
-  }, [cancelLeave]);
-
-  const scheduleLeave = () => {
-    if (pinned.current) return;
-    cancelLeave();
-    leaveTimer.current = setTimeout(close, LEAVE_GRACE_MS);
-  };
-
-  const pin = () => {
-    cancelLeave();
-    pinned.current = true;
-    setOpen(true);
-  };
+  const tip = useTipInteraction(contentRef);
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        if (next) setOpen(true);
-        else close();
-      }}
-    >
+    <Popover open={tip.open} onOpenChange={tip.onOpenChange}>
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -120,27 +80,13 @@ export function InfoTip({ children, id, label, labelledBy, describedBy, classNam
               })}
           {...(describedBy ? { 'aria-describedby': describedBy } : {})}
           data-slot="info-tip"
-          onPointerEnter={(event: PointerEvent) => {
-            if (event.pointerType === 'touch') return;
-            cancelLeave();
-            setOpen(true);
-          }}
-          onPointerLeave={(event: PointerEvent) => {
-            if (event.pointerType !== 'touch') scheduleLeave();
-          }}
-          onFocus={pin}
+          {...tip.trigger}
           onClick={(event) => {
             // Radix composes its own toggle after this handler and skips it
             // when the event is default-prevented — which is how "click only
             // opens" is enforced.
             event.preventDefault();
-            pin();
-          }}
-          onBlur={(event) => {
-            // Moving focus into the content (it has none today, but a link in
-            // the instructions would) is not leaving the tip.
-            if (contentRef.current?.contains(event.relatedTarget)) return;
-            close();
+            tip.pin();
           }}
           className={cn(
             // size-6 is the touch target; the negative margin keeps the layout
@@ -161,8 +107,7 @@ export function InfoTip({ children, id, label, labelledBy, describedBy, classNam
         // keyboard user out of the field they are filling in.
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
-        onPointerEnter={cancelLeave}
-        onPointerLeave={scheduleLeave}
+        {...tip.content}
       >
         {children}
       </PopoverContent>

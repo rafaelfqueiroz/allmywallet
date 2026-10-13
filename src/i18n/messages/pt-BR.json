@@ -218,6 +218,8 @@
       "price": "cotação",
       "bound": "{boundSide, select, lower {no ou abaixo do} other {no ou acima do}} seu limite de {stateLabel} de",
       "between": "entre os seus limites, na faixa que você definiu como \"{stateLabel}\"",
+      "seeAll": "Ver todos os {count} em Observar preços",
+      "seeAllLabel": "Ver todos os {count} em Observar preços, a lista completa de regras",
       "ruleLink": "Ver regra",
       "ruleLinkLabel": "Ver regra de {assetCode}",
       "emptyNoRules": "Você ainda não tem regras de observação de preços.",
@@ -255,7 +257,11 @@
       "assetsInClasses": "{classes, plural, one {em # classe} other {em # classes}}",
       "byClass": "Por classe",
       "classAssets": "{count, plural, one {# ativo} other {# ativos}}",
-      "byAsset": "Por ativo"
+      "byAsset": "Por ativo",
+      "unpricedAsset": "Ativo",
+      "unpricedMarkers": "Situação",
+      "unpricedNoun": "ativos",
+      "unpricedFilterPlaceholder": "Buscar ativo"
     },
     "wallets": {
       "comparisonTitle": "Comparação entre carteiras",
@@ -272,13 +278,25 @@
       "unassignedTitle": "Não atribuído",
       "unassignedDescription": "O que sobra de cada ativo depois de somar todas as carteiras — sempre visível, para que nada fique escondido.",
       "unassignedEmpty": "Tudo o que você tem está atribuído a alguma carteira.",
-      "balanceTitle": "Balanceamento · {wallet}"
+      "balanceTitle": "Balanceamento · {wallet}",
+      "noun": "carteiras",
+      "filterPlaceholder": "Buscar carteira",
+      "unassignedColumnAsset": "Ativo",
+      "unassignedColumnQuantity": "Quantidade",
+      "unassignedNoun": "ativos",
+      "unassignedFilterPlaceholder": "Buscar ativo"
     },
     "goals": {
       "title": "Metas · {wallet}",
       "chooseTitle": "Metas por carteira",
       "chooseDescription": "Cada meta pertence a uma carteira. Escolha uma para ver o progresso e criar metas."
     }
+  },
+  "cellTable": {
+    "sortBy": "Ordenar por {column}",
+    "sortField": "Ordenar por",
+    "sortAscending": "Ordem crescente",
+    "sortDescending": "Ordem decrescente"
   },
   "common": {
     "loading": "Carregando…",
@@ -526,8 +544,6 @@
     "save": "Salvar alterações",
     "balanceLink": "Balanceamento",
     "goalsLink": "Metas",
-    "needsAttentionOutOfBalance": "{wallet}: ao menos um ativo passou da tolerância que você definiu.",
-    "needsAttentionNeedsReview": "{wallet}: as metas não somam 100%.",
     "needsAttentionBalanceOpen": "Ver balanceamento",
     "sectionTitle": "Carteiras",
     "newWallet": "Nova carteira",
@@ -575,7 +591,27 @@
     "deleteDescription": "As atribuições desta carteira voltam para Não atribuído e as regras permanentes que apontam para ela são removidas. Nenhuma transação é excluída.",
     "standingRuleClearFor": "Remover regra de {asset}",
     "rulesOptionMoves": "{asset} (regra atual: {wallet})",
-    "colorNone": "Sem cor"
+    "colorNone": "Sem cor",
+    "assetNoun": "ativos",
+    "ruleNoun": "regras",
+    "filterAssetPlaceholder": "Buscar ativo",
+    "columnActions": "Ações",
+    "columnWallet": "Carteira",
+    "columnStatus": "Situação",
+    "columnUnassigned": "Não atribuída",
+    "columnReason": "Motivo",
+    "needsAttentionOutOfBalanceStatus": "Ao menos um ativo passou da tolerância que você definiu.",
+    "needsAttentionNeedsReviewStatus": "As metas não somam 100%.",
+    "needsAttentionUnbalancedCaption": "Carteiras que precisam de atenção, com a situação de cada uma",
+    "needsAttentionPendingCaption": "Ativos esperando uma decisão, com a quantidade ainda não atribuída e o motivo",
+    "walletNoun": "carteiras",
+    "resolveOpen": "Resolver",
+    "resolveOpenFor": "Resolver {asset}",
+    "resolveTitle": "Resolver {asset}",
+    "resolveDescription": "Atribua este ativo a uma carteira ou defina uma regra permanente para as próximas compras dele.",
+    "resolveUnassigned": "Quantidade não atribuída",
+    "unbalancedTitle": "Metas a revisar",
+    "unbalancedDescription": "Carteiras cujas metas passaram da tolerância que você definiu ou não somam 100%. O balanceamento de cada uma está em Portfólio."
   },
   "import": {
     "signedOut": "Entre na sua conta para importar extratos.",
@@ -671,6 +707,7 @@
       }
     },
     "reconciliationTitle": "Reconciliação com a posição da B3",
+    "reconciliationNoun": "divergências",
     "reconciliationStatus": {
       "reconciled": "Sem divergências",
       "discrepancies_found": "Divergências encontradas"
@@ -752,7 +789,7 @@
       "columnImported": "Quantidade importada",
       "columnWallets": "Carteiras",
       "columnAssign": "Atribuir",
-      "pageSummary": "Página {page} de {pages} · {total} ativo(s)"
+      "noun": "ativos"
     },
     "fileHint": "Você pode enviar os três extratos de uma vez, ou um de cada vez — a ordem não importa.",
     "uploading": "Enviando…",
@@ -791,12 +828,7 @@
       "columnDate": "Data",
       "columnDetail": "Motivo",
       "columnAction": "Ação",
-      "pageSummary": "Página {page} de {pages} · {total} linha(s)",
-      "pagination": {
-        "summary": "Paginação de O que esta importação mudou",
-        "attention": "Paginação de Precisa de atenção",
-        "ignored": "Paginação de Ignoradas"
-      }
+      "noun": "linhas"
     }
   },
   "reports": {
@@ -900,7 +932,10 @@
       }
     },
     "attentionTitle": "Precisam de atenção",
-    "attentionDescription": "Estes ativos aparecem pelo custo de aquisição porque não conseguimos avaliá-los. Os totais acima os incluem por esse valor."
+    "attentionDescription": "Estes ativos aparecem pelo custo de aquisição porque não conseguimos avaliá-los. Os totais acima os incluem por esse valor.",
+    "tables": {
+      "empty": "Nada para mostrar neste período"
+    }
   },
   "transactions": {
     "title": "Transações",
@@ -957,12 +992,6 @@
       "sortAscending": "Ordem crescente",
       "sortDescending": "Ordem decrescente",
       "noun": "transações"
-    },
-    "pagination": {
-      "label": "Paginação da lista de transações",
-      "summary": "Página {page} de {pages} · {total} transações",
-      "previous": "Anterior",
-      "next": "Próxima"
     },
     "export": {
       "csv": "Exportar CSV"
@@ -1273,7 +1302,8 @@
       "value": "Patrimônio",
       "basis": "Origem do valor",
       "observed": "Preço observado",
-      "gap": "Sem cotação de fechamento — valor do último fechamento disponível"
+      "gap": "Sem cotação de fechamento — valor do último fechamento disponível",
+      "noun": "datas"
     },
     "drift": {
       "title": "Variação da composição no período",
@@ -1306,7 +1336,9 @@
       "group": "Grupo",
       "value": "Valor",
       "share": "Participação",
-      "total": "Total"
+      "total": "Total",
+      "noun": "grupos",
+      "filterPlaceholder": "Buscar grupo"
     },
     "holdings": {
       "title": "Seus ativos",
@@ -1335,7 +1367,9 @@
       "title": "Participações acima do seu limite",
       "description": "Estes ativos passam de {threshold}% do escopo selecionado — o limite que você configurou. É uma marcação informativa: o AllMyWallet não dá recomendação de investimento e não sugere nenhuma ação sobre estes ativos.",
       "explanation": "Participação acima do limite de {threshold}% que você configurou. Marcação informativa, sem recomendação.",
-      "none": "Nenhum ativo passa de {threshold}% do escopo selecionado."
+      "none": "Nenhum ativo passa de {threshold}% do escopo selecionado.",
+      "noun": "ativos",
+      "filterPlaceholder": "Buscar ativo"
     }
   },
   "rentabilidade": {
@@ -1381,7 +1415,9 @@
       "columnOwnReturn": "Rendimento próprio",
       "columnContribution": "Contribuição",
       "columnGain": "Ganho",
-      "unavailable": "Não há base suficiente no período para decompor a rentabilidade por grupo."
+      "unavailable": "Não há base suficiente no período para decompor a rentabilidade por grupo.",
+      "noun": "grupos",
+      "filterPlaceholder": "Filtrar por grupo"
     },
     "chart": {
       "title": "Seu portfólio x os índices",
@@ -1422,7 +1458,9 @@
       "chartLabel": "Proventos mês a mês",
       "chartSummary": "Total de {total} em {months} meses; média móvel de 12 meses em {average}.",
       "bars": "Recebido no mês",
-      "average": "Média móvel de 12 meses"
+      "average": "Média móvel de 12 meses",
+      "noun": "meses",
+      "chartText": "Proventos recebidos em cada mês e média móvel de 12 meses. Os valores exatos estão na tabela abaixo."
     },
     "breakdown": {
       "title": "De onde vem",
@@ -1430,7 +1468,9 @@
       "columnGroup": "Grupo",
       "columnAmount": "Recebido",
       "columnShare": "Participação",
-      "caption": "Proventos por grupo"
+      "caption": "Proventos por grupo",
+      "noun": "grupos",
+      "filterPlaceholder": "Filtrar por grupo"
     },
     "perAsset": {
       "title": "Por ativo",
@@ -1441,7 +1481,9 @@
       "columnCurrentYield": "Dividend yield (12m)",
       "caption": "Proventos por ativo, com os dois indicadores de rendimento",
       "notHeld": "Não faz mais parte do portfólio",
-      "unavailable": "—"
+      "unavailable": "—",
+      "noun": "ativos",
+      "filterPlaceholder": "Filtrar por ativo"
     },
     "upcoming": {
       "title": "Proventos anunciados",
@@ -1490,10 +1532,14 @@
     "toleranceHint": "Tolerância atual: {tolerance} ponto(s) percentual(is), ajustável em Preferências.",
     "untargetedTitle": "Fora das metas",
     "untargetedDescription": "Renda fixa não recebe meta e não entra no total contra o qual os percentuais acima são calculados.",
+    "balanceEmptyTitle": "Esta carteira ainda não tem metas",
+    "balanceEmptyBody": "O desvio de cada ativo aparece aqui quando o modo das metas é Peso igual ou Manual.",
     "untargetedEmpty": "Nada nesta carteira fica fora das metas.",
     "targetsTitle": "Definir metas",
     "targetPctLabel": "Meta de {asset} (%)",
-    "noAdviceNote": "Estes números são a distância até a meta que você definiu, calculada sobre um preço já exibido. Não são uma sugestão de operação."
+    "noAdviceNote": "Estes números são a distância até a meta que você definiu, calculada sobre um preço já exibido. Não são uma sugestão de operação.",
+    "noun": "ativos",
+    "filterPlaceholder": "Buscar ativo"
   },
   "objetivos": {
     "title": "Objetivos",
@@ -1546,7 +1592,8 @@
         "observed": "Observado",
         "unavailable": "Indisponível — custo não registrado",
         "priceUnavailable": "Indisponível — sem preço no dia e sem custo registrado",
-        "unavailableShort": "Indisponível"
+        "unavailableShort": "Indisponível",
+        "noun": "datas"
       }
     },
     "earnings": {
@@ -1656,7 +1703,25 @@
     "defaultStateLabel": "Entre os dois limites, o preço significa",
     "boundsHint": "Defina ao menos um limite. O significado de cada limite é seu — \"abaixo de R$ 30\" pode ser compra para quem está comprando na baixa, ou venda para quem usa um stop-loss. Deixe um limite em branco para não defini-lo.",
     "create": "Criar regra",
-    "save": "Salvar alterações"
+    "save": "Salvar alterações",
+    "columnAsset": "Ativo",
+    "columnState": "Estado",
+    "columnPrice": "Última cotação",
+    "columnLimits": "Limites",
+    "columnActions": "Ações",
+    "columnReason": "Motivo",
+    "ruleNoun": "regras",
+    "assetNoun": "ativos",
+    "filterPlaceholder": "Buscar ativo",
+    "rulesCaption": "Regras de observação, com o estado, a última cotação, os limites e o último e-mail de cada ativo",
+    "retainedCaption": "Regras guardadas de ativos que você não possui mais",
+    "muteFor": "Silenciar avisos de {asset}",
+    "unmuteFor": "Reativar avisos de {asset}",
+    "editFor": "Editar regra de {asset}",
+    "deleteFor": "Excluir regra de {asset}",
+    "createFor": "Criar regra de {asset}",
+    "closeEditor": "Fechar",
+    "columnEmail": "Último e-mail"
   },
   "onboarding": {
     "title": "Primeiros passos",
@@ -1758,6 +1823,8 @@
     "submit": "Salvar taxa"
   },
   "dataTable": {
+    "emptyTitle": "Nenhum registro por aqui",
+    "emptyBody": "Quando houver itens, eles aparecem nesta tabela.",
     "filterLabel": "Filtrar a tabela",
     "filterPlaceholder": "Filtrar",
     "noResultsTitle": "Nenhum resultado para este filtro",

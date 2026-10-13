@@ -237,3 +237,25 @@ test('excludes an unclassified provento from the total', async ({ signedIn }) =>
   await expect(page.getByText(/R\$\s*70,00/).first()).toBeVisible();
   await expect(page.getByText(/R\$\s*999,00/)).toHaveCount(0);
 });
+
+/**
+ * SPEC-016 BR-016-16 / SPEC-022 BR-022-18 — the monthly chart's figures are a
+ * table on the page, not a description only a screen reader reads, and it is
+ * one of the tables that grow, so it says how many months it holds.
+ */
+test('shows the monthly proventos as a table beside the chart', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  const [code] = await seedHoldings(userId, [
+    { code: 'PETRM', quantity: '100', averageCost: '10', price: '40' },
+  ]);
+  await seedEarning(userId, String(code), { amount: '120', payDate: EARLY });
+
+  await page.goto(`/reports/earnings?${TWELVE_MONTHS}`);
+
+  const monthly = page
+    .locator('[data-slot="data-table"]')
+    .filter({ has: page.getByText(/^Mostrando 1–\d+ de \d+ meses$/) })
+    .first();
+  await expect(monthly).toBeVisible();
+  await expect(monthly).toContainText(/R\$\s*120,00/);
+});

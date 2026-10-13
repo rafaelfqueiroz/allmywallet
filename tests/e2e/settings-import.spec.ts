@@ -113,15 +113,15 @@ test.describe('Configurações › Importar', () => {
     const bodyRows = table.locator('tbody tr');
 
     // BR-022-18 — bounded, with the total stated.
-    await expect(bodyRows).toHaveCount(25);
-    await expect(page.getByText(`Mostrando 1–25 de ${HISTORY_SIZE + 4} importações`)).toBeVisible();
+    await expect(bodyRows).toHaveCount(10);
+    await expect(page.getByText(`Mostrando 1–10 de ${HISTORY_SIZE + 4} importações`)).toBeVisible();
 
     // Newest first: the batch sent a minute ago read one row.
     await expect(bodyRows.first().locator('td').nth(3)).toHaveText('1');
 
     await page.getByRole('button', { name: 'Próxima página' }).click();
     await expect(page).toHaveURL(/[?&]page=2(&|$)/);
-    await expect(bodyRows.first().locator('td').nth(3)).toHaveText('26');
+    await expect(bodyRows.first().locator('td').nth(3)).toHaveText('11');
 
     // Sorting by Linhas, descending — a numeric column's first click — puts
     // the 300-row batch on top.
@@ -218,20 +218,34 @@ test.describe('Configurações › Importar', () => {
     const attention = page.getByRole('table', { name: 'Precisa de atenção' });
     await expect(async () => {
       await page.reload();
-      await expect(attention.locator('tbody tr')).toHaveCount(50, { timeout: 1_000 });
+      await expect(attention.locator('tbody tr')).toHaveCount(10, { timeout: 1_000 });
     }).toPass({ timeout: 90_000 });
 
-    const pager = page.getByRole('navigation', { name: 'Paginação de Precisa de atenção' });
-    await expect(pager).toContainText('Página 1 de 2 · 60 linha(s)');
-    await pager.getByRole('link', { name: 'Próxima' }).click();
-    await expect(page).toHaveURL(/[?&]atencao=2#attention$/);
+    // Server-paged DataTable (DS-66): ten to a page, the pager's links name the
+    // table's own parameters and end at the table, and 60 rows are one batch.
+    const block = page.locator('[data-slot="data-table"]').filter({ has: attention });
+    const pager = block.getByRole('navigation', { name: 'Paginação' });
+    await expect(block.getByText('Mostrando 1–10 de 60 linhas')).toBeVisible();
+    await pager.getByRole('link', { name: 'Próxima página' }).click();
+    await expect(page).toHaveURL(/[?&]atencao_page=2#attention$/);
+    await expect(attention.locator('tbody tr')).toHaveCount(10);
+    await expect(block.getByText('Mostrando 11–20 de 60 linhas')).toBeVisible();
+
+    // Back to page 1 drops the default parameter and keeps the table in view.
+    await pager.getByRole('link', { name: 'Página anterior' }).click();
+    await expect(page).toHaveURL(/#attention$/);
+    await expect(page).not.toHaveURL(/atencao_page=/);
     await expect(attention.locator('tbody tr')).toHaveCount(10);
 
-    // Back to page 1 keeps the table's parameter (#230 review): Ignoradas is
-    // opened by it, and a page-1 link that dropped it would collapse the rows.
-    await pager.getByRole('link', { name: 'Anterior' }).click();
-    await expect(page).toHaveURL(/[?&]atencao=1#attention$/);
-    await expect(attention.locator('tbody tr')).toHaveCount(50);
+    // BR-022-18: 10, 25 or 50 a page, and the choice survives a reload.
+    await expect(block.getByLabel('Itens por página')).toHaveValue('10');
+    await block.getByLabel('Itens por página').selectOption('25');
+    await expect(page).toHaveURL(/[?&]atencao_size=25#attention$/);
+    await expect(attention.locator('tbody tr')).toHaveCount(25);
+    await page.reload();
+    await expect(block.getByLabel('Itens por página')).toHaveValue('25');
+    await expect(attention.locator('tbody tr')).toHaveCount(25);
+    await expect(block.getByText('Mostrando 1–25 de 60 linhas')).toBeVisible();
   });
 });
 
@@ -245,7 +259,7 @@ test('history rows stay flat and pagination spans the panel', async ({ signedIn 
     .filter({ has: page.locator('[data-slot="data-table"]') });
   await expect(panel).toHaveCount(1);
   await expect(panel.locator('[data-slot="card"]')).toHaveCount(0);
-  const footer = panel.locator('[data-slot="table-footer"]');
+  const footer = panel.locator('[data-slot="table-pager"]');
   await expect(footer).toBeVisible();
   const panelBox = await panel.boundingBox();
   const footerBox = await footer.boundingBox();

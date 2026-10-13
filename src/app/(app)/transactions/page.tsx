@@ -258,16 +258,19 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
       tradeDate: <span className="whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</span>,
       asset: (
         <Stack gap="none">
-          <Text as="span" weight="medium">
+          {/* BR-022-18: each line ends in its own ellipsis in a narrow column. */}
+          <Text as="span" weight="medium" className="truncate">
             {item.assetCode}
           </Text>
-          <Text as="span" size="xs" tone="muted">
+          <Text as="span" size="xs" tone="muted" className="truncate">
             {item.assetName}
           </Text>
         </Stack>
       ),
-      type: <span className="whitespace-nowrap">{tType(tx.type)}</span>,
-      institution: <span className="whitespace-nowrap">{item.institutionName ?? '—'}</span>,
+      // No `whitespace-nowrap` on these two: the table cell is already one line and
+      // truncates (BR-022-18), and in the card a long name has to be able to wrap.
+      type: <span>{tType(tx.type)}</span>,
+      institution: <span>{item.institutionName ?? '—'}</span>,
       quantity: <Money value={tx.quantity} kind="quantity" />,
       unitPrice: (
         <Cluster gap="sm" justify="end" align="baseline">

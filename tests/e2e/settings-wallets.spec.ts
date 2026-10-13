@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
+import type { Page } from '@playwright/test';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
 import { dismissOnboarding } from './support/onboarding';
+import { expectPageSizeSurvivesReload } from './support/page-size';
 
 /**
  * SPEC-022 BR-022-05/15/16/20/21 and SPEC-010 BR-010-03/07/09/12/13 —
@@ -35,6 +37,53 @@ async function seedWallet(userId: string, name: string): Promise<string> {
 }
 
 const isMobile = (viewportWidth: number | undefined) => (viewportWidth ?? 1280) < 768;
+
+/**
+ * Allocates each held asset's whole quantity to a wallet, straight to the table:
+ * what a wallet's page lists as its assets, without twelve trips through a form.
+ */
+async function allocateAll(
+  userId: string,
+  walletId: string,
+  codes: readonly string[],
+): Promise<void> {
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    const { rows } = await pool.query<{ id: string }>(
+      `SELECT id FROM assets WHERE code = ANY($1::text[])`,
+      [codes],
+    );
+    for (const { id } of rows) {
+      await pool.query(
+        `INSERT INTO wallet_allocations (id, user_id, wallet_id, asset_id, quantity, cost_basis_at_allocation)
+         VALUES ($1, $2, $3, $4, 10, 200)`,
+        [randomUUID(), userId, walletId, id],
+      );
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+/** Twelve holdings, one over a page of ten, with codes that sort in seeding order. */
+function manyHoldings(prefix: string) {
+  return Array.from({ length: 12 }, (_, index) => ({
+    code: `${prefix}${String(index + 1).padStart(2, '0')}`,
+    quantity: '10',
+    averageCost: '20.00',
+    price: '25.00',
+  }));
+}
+
+/**
+ * The panel the queue's forms sit in: a table holds no form (BR-022-18), so the
+ * forms for the asset being resolved are in a section of their own, titled by it.
+ */
+function resolvePanel(page: Page, code: string) {
+  return page
+    .locator('section')
+    .filter({ has: page.getByRole('heading', { name: new RegExp(`^Resolver .*${code}`) }) });
+}
 
 test.describe('Configurações › Carteiras', () => {
   test('creates, edits, assigns to and deletes a wallet', async ({ signedIn }) => {
@@ -123,7 +172,7 @@ test.describe('Configurações › Carteiras', () => {
     // BR-010-03: an empty quantity assigns the whole remainder in one click.
     await assign.getByLabel('Quantidade', { exact: true }).fill('');
     await assign.getByRole('button', { name: 'Atribuir', exact: true }).click();
-    const table = page.getByRole('table');
+    const table = page.locator('[data-slot="data-table"]').first();
     await expect(table).toContainText(code!);
     await expect(table).toContainText('10');
     // Nothing is left to assign, and the section says so.
@@ -175,7 +224,10 @@ test.describe('Configurações › Carteiras', () => {
       );
     }
 
-    const queueItem = page.getByRole('listitem').filter({ hasText: code! });
+    // BR-022-18: the queue is a table, and its forms are not in it — the asset
+    // is in the table and its forms are in the panel below.
+    await expect(page.locator('[data-slot="data-table"]').first()).toContainText(code!);
+    const queueItem = resolvePanel(page, code!);
     await queueItem
       .getByLabel('Atribuir a', { exact: true })
       .selectOption({ label: 'Aposentadoria' });
@@ -205,7 +257,7 @@ test.describe('Configurações › Carteiras', () => {
     await dismissOnboarding(userId);
 
     await page.goto('/settings/wallets/assign');
-    const item = page.getByRole('listitem').filter({ hasText: code! });
+    const item = resolvePanel(page, code!);
     await item.getByLabel('Atribuir a', { exact: true }).selectOption({ label: 'Aposentadoria' });
     await item.getByLabel('Quantidade', { exact: true }).fill('60');
     await item.getByRole('button', { name: 'Atribuir', exact: true }).click();
@@ -270,16 +322,16 @@ test.describe('Configurações › Carteiras', () => {
         .getByLabel('Ativo', { exact: true })
         .selectOption({ label: `${held} — Ativo ${held} — 10 não atribuída(s)` });
       await page.getByRole('button', { name: 'Atribuir', exact: true }).click();
-      await expect(page.getByRole('table')).toContainText(held!);
+      await expect(page.locator('[data-slot="data-table"]').first()).toContainText(held!);
 
       // Assign from the queue (BR-010-13): the same form, the wallet chosen.
       await page.goto('/settings/wallets/assign');
-      const item = page.getByRole('listitem').filter({ hasText: pending! }).first();
+      const item = resolvePanel(page, pending!);
       await item.getByLabel('Atribuir a', { exact: true }).selectOption({
         label: 'Sem script, editada',
       });
       await item.getByRole('button', { name: 'Atribuir', exact: true }).click();
-      await expect(page.getByRole('listitem').filter({ hasText: pending! })).toHaveCount(0);
+      await expect(page.getByText('Nada esperando uma decisão no momento.')).toBeVisible();
     } finally {
       await context.close();
     }
@@ -302,7 +354,7 @@ test.describe('Configurações › Carteiras', () => {
     await quantity.fill('60');
     await page.getByRole('button', { name: 'Atribuir', exact: true }).click();
 
-    await expect(page.getByRole('table')).toContainText('60');
+    await expect(page.locator('[data-slot="data-table"]').first()).toContainText('60');
     await expect(quantity).toHaveValue('');
     await expect(asset).toHaveValue('');
     // What is left is what the select now offers.
@@ -310,7 +362,7 @@ test.describe('Configurações › Carteiras', () => {
 
     await asset.selectOption({ label: `${code} — Ativo ${code} — 40 não atribuída(s)` });
     await page.getByRole('button', { name: 'Atribuir', exact: true }).click();
-    await expect(page.getByRole('table')).toContainText('100');
+    await expect(page.locator('[data-slot="data-table"]').first()).toContainText('100');
     await expect(page.locator('[data-slot="error-state"]')).toHaveCount(0);
   });
 
@@ -339,6 +391,44 @@ test.describe('Configurações › Carteiras', () => {
         .getByLabel('Ativo da regra', { exact: true })
         .locator('option', { hasText: '(regra atual: Aposentadoria)' }),
     ).toHaveCount(1);
+  });
+
+  /**
+   * SPEC-022 BR-022-18 — the queue is a table that pages, and a row's
+   * "Resolver" opens that asset's forms without losing the table's own page.
+   */
+  test('the queue pages, and Resolver opens the asset it names', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const codes = await seedHoldings(userId, manyHoldings('QUE'));
+    await seedWallet(userId, 'Aposentadoria');
+    await dismissOnboarding(userId);
+
+    await page.goto('/settings/wallets/assign');
+    await expectPageSizeSurvivesReload(page, 'Ativos esperando uma decisão', 'pending', 12);
+
+    // With no asset named, the panel opens on one of the queue's.
+    await expect(page.getByRole('heading', { name: /^Resolver / })).toBeVisible();
+
+    // A row's link opens that asset's forms, and the table keeps its own state.
+    const third = codes[2]!;
+    await page.getByRole('link', { name: `Resolver ${third}` }).click();
+    await expect(page).toHaveURL(/[?&]resolve=/);
+    await expect(page).toHaveURL(/[?&]pending_size=25(&|#|$)/);
+    await expect(resolvePanel(page, third)).toBeVisible();
+    await expect(resolvePanel(page, third).getByLabel('Atribuir a', { exact: true })).toBeVisible();
+  });
+
+  test('a wallet’s assigned assets and standing rules page, and keep the page size through a reload', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const codes = await seedHoldings(userId, manyHoldings('ALC'));
+    const walletId = await seedWallet(userId, 'Aposentadoria');
+    await allocateAll(userId, walletId, codes);
+    await dismissOnboarding(userId);
+
+    await page.goto(`/settings/wallets/${walletId}`);
+    await expectPageSizeSurvivesReload(page, 'Ativos atribuídos', 'allocations', 12);
   });
 
   test('every Carteiras screen holds at a phone width with no page scroll', async ({

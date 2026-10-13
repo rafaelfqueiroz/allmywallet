@@ -1,70 +1,104 @@
-/**
- * SPEC-022 BR-022-18 (#211) — a batch page's row tables are paged on the
- * server, one URL parameter per table, so paging works without JavaScript
- * (DS-37) and each table keeps its own place. A file with a few thousand rows
- * has a few thousand mirrors in Ignoradas; rendered at once, each with its
- * classify form, that was one unbounded page.
- *
- * Not `DataTable`: it renders every cell twice (table and cards, DS-28), and
- * these cells hold forms — two copies of each control id, one hidden, is a
- * label that points at the wrong input.
- */
-export const ROW_PAGE_SIZE = 50;
+import {
+  parseTableUrlState,
+  type ReadableParams,
+  type TableUrlOptions,
+} from '@/lib/table-url-state';
 
-export const ROW_PAGE_PARAMS = {
+/**
+ * SPEC-022 BR-022-18 (#211, #237) — a batch page's row tables are paged on the
+ * server, as `DataTable` server mode (DS-66): the URL is the state, the page
+ * parses it with the same options the table writes with, and cuts the rows
+ * before they are rendered. A file with a few thousand rows has a few thousand
+ * mirrors in Ignoradas, each with its classify form; rendering them all at once
+ * was one unbounded page, and rendering only the page asked for keeps the
+ * forms to ten, twenty-five or fifty.
+ *
+ * Each table has a prefix of its own (`resumo_page`, `atencao_size`, …), so
+ * they keep their places independently and a link to one table leaves the
+ * others where they were. 10, 25 or 50 rows a page, opening on 10, like every
+ * table in the product — a choice that lives in the URL.
+ *
+ * **Sorting is off** for all three. The rows are the batch's own, in file
+ * order, held in memory by the page; the table renders the page it is handed
+ * and no query exists that could order it. `sortableIds` is empty, so a stray
+ * `?atencao_sort=` is unreadable rather than a different order.
+ */
+export const ROW_TABLE_PREFIX = {
   summary: 'resumo',
   attention: 'atencao',
   ignored: 'ignoradas',
 } as const;
 
-export type RowTable = keyof typeof ROW_PAGE_PARAMS;
+export type RowTable = keyof typeof ROW_TABLE_PREFIX;
+
+export const ROW_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50];
+export const ROW_DEFAULT_PAGE_SIZE = 10;
+
+/** The options the table writes with (`paramPrefix`) and the server reads with. */
+export function rowTableOptions(table: RowTable): TableUrlOptions {
+  return {
+    prefix: ROW_TABLE_PREFIX[table],
+    pageSizeOptions: ROW_PAGE_SIZE_OPTIONS,
+    sortableIds: [],
+    defaults: { sort: null, pageSize: ROW_DEFAULT_PAGE_SIZE },
+  };
+}
+
+/** Next hands the page `searchParams` as a record; the parser reads `.get`. */
+export function readableParams(
+  query: Readonly<Record<string, string | string[] | undefined>>,
+): ReadableParams {
+  return {
+    get: (name) => {
+      const value = query[name];
+      if (Array.isArray(value)) return value[0] ?? null;
+      return value ?? null;
+    },
+  };
+}
 
 export interface RowPage<T> {
   /** 1-based, clamped into the table's range. */
   readonly page: number;
+  readonly pageSize: number;
   readonly rows: readonly T[];
   readonly total: number;
 }
 
 /**
- * The requested page of `items`. A missing, malformed or out-of-range page
- * clamps rather than empties: after the last row of a page is classified the
- * same link must still land on rows, not on nothing.
+ * The page of `items` the URL asks `table` for. A missing, malformed or
+ * out-of-range page clamps rather than empties: after the last row of a page is
+ * classified the same link must still land on rows, not on nothing — and the
+ * table clamps the same way, so the page it labels is the page it shows.
  */
 export function rowPage<T>(
   items: readonly T[],
-  requested: string | string[] | undefined,
-  size: number = ROW_PAGE_SIZE,
+  query: Readonly<Record<string, string | string[] | undefined>>,
+  table: RowTable,
 ): RowPage<T> {
-  const pages = Math.max(1, Math.ceil(items.length / size));
-  const parsed = Number.parseInt(
-    Array.isArray(requested) ? (requested[0] ?? '') : (requested ?? ''),
-    10,
+  const { page: requested, pageSize } = parseTableUrlState(
+    readableParams(query),
+    rowTableOptions(table),
   );
-  const page = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), pages) : 1;
-  return { page, rows: items.slice((page - 1) * size, page * size), total: items.length };
+  const pages = Math.max(1, Math.ceil(items.length / pageSize));
+  const page = Math.min(requested, pages);
+  return {
+    page,
+    pageSize,
+    rows: items.slice((page - 1) * pageSize, page * pageSize),
+    total: items.length,
+  };
 }
 
 /**
- * The batch page's URL with one table moved to `page`, the others kept.
- *
- * The table being paged keeps its parameter even on page 1: its presence is
- * what says the user is working in that table — Ignoradas renders open on it
- * (a closed disclosure would swallow the rows and the pager the user just
- * clicked). The other tables drop a page-1 parameter, their default.
+ * Whether the URL addresses `table` at all: any of its parameters is present.
+ * Ignoradas renders open on it — a closed disclosure would swallow the rows and
+ * the pager a shared link points at.
  */
-export function rowPageHref(
-  basePath: string,
-  current: Readonly<Partial<Record<RowTable, number>>>,
+export function rowTableAddressed(
+  query: Readonly<Record<string, string | string[] | undefined>>,
   table: RowTable,
-  page: number,
-): string {
-  const params = new URLSearchParams();
-  for (const key of Object.keys(ROW_PAGE_PARAMS) as RowTable[]) {
-    const value = key === table ? page : current[key];
-    if (value === undefined || (key !== table && value <= 1)) continue;
-    params.set(ROW_PAGE_PARAMS[key], String(value));
-  }
-  const query = params.toString();
-  return `${basePath}${query === '' ? '' : `?${query}`}#${table}`;
+): boolean {
+  const prefix = `${ROW_TABLE_PREFIX[table]}_`;
+  return Object.keys(query).some((name) => name.startsWith(prefix));
 }

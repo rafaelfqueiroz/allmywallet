@@ -36,10 +36,21 @@ import {
   TableBody,
   TableCaption,
   TableCell,
+  TableColGroup,
+  TableFooter,
   TableHead,
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  columnWidth,
+  isNumericKind,
+  truncatesKind,
+  type ColumnKind,
+  type ColumnWidth,
+} from '@/components/patterns/data-table-columns';
+import { TruncatedCell } from '@/components/patterns/truncated-cell';
+import { collatedSortingFn } from '@/components/patterns/table-sorting';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -50,9 +61,11 @@ import { EmptyState } from '@/components/patterns/empty-state';
  *
  * From `md` up this is a real `<table>`, at compact density, because a ledger
  * is a table and twenty visible rows beat eight. Below `md` the same rows
- * render as cards with the column header repeated as each field's label: a
+ * render as flat rows under hairlines — never a card inside the panel the table
+ * sits in (BR-022-36) — with the column header repeated as each field's label: a
  * six-column table on a 375px screen is either unreadable or a horizontal
- * scroll nobody discovers.
+ * scroll nobody discovers. Kinds, widths and truncation (BR-022-18, DS-67) belong
+ * to the table rendering; a row under a hairline lets its text wrap.
  *
  * Both renderings are always in the DOM, one hidden per breakpoint. That costs
  * markup and buys a layout that is correct on resize and on print without a
@@ -156,9 +169,9 @@ export type DataTableProps<TData> = {
    * by construction, and say so where it is passed.
    */
   pagination?: boolean;
-  /** The page sizes offered. Default 10 / 25 / 50 / 100. */
+  /** The page sizes offered. Default 10 / 25 / 50 (BR-022-18). */
   pageSizeOptions?: readonly number[];
-  /** The page size a view opens on; must be one of the options. Default 25. */
+  /** The page size a view opens on; must be one of the options. Default 10. */
   defaultPageSize?: number;
   /**
    * The plural noun the summary counts — "importações" gives "Mostrando 1–5 de
@@ -176,12 +189,51 @@ export type DataTableProps<TData> = {
   /** Extra filters (a status select, say), rendered beside the text filter. */
   toolbar?: ReactNode;
   /**
+   * A closing row for the whole collection, not for the page on screen — the
+   * "Total" under a breakdown, which a reader checks the rows against
+   * (SPEC-012 BR-012-16: "the contributions sum to the total"). `label` sits in
+   * the first column; `cells` maps a column id to its figure, and a column it
+   * does not name is left empty. It is shown on every page and is never
+   * filtered: a total that changed with the search box would no longer be the
+   * total. Cells arrive rendered (money never crosses as a number, DS-66).
+   */
+  totals?: {
+    readonly label: ReactNode;
+    readonly cells: Readonly<Record<string, ReactNode>>;
+  };
+  /**
    * Prefix for this table's URL parameters, so two tables on one page do not
    * share a page number. Without it: `sort`, `page`, `size`, `q`.
    */
   paramPrefix?: string;
   /** Shown when a filter matches nothing. Catalogue default otherwise. */
   noResults?: ReactNode;
+  /**
+   * The id a link elsewhere points at (`#regra-…`), per row. The table row
+   * carries it, and the card rendering `<id>-card` — a document has one element
+   * per id, and CSS shows only one rendering. Client mode only. On arrival, and
+   * whenever the hash changes, the table pages to the row, scrolls to the
+   * rendering that is visible and marks it (`data-linked`) — a row on page 3 is
+   * where a deep link must land, not on page 1 (SPEC-022 BR-022-07/18).
+   */
+  rowAnchor?: (row: TData) => string | undefined;
+  /**
+   * Render the table alone, without the card list that replaces it below `md`
+   * (DS-28). Default `true`. **For a table whose cells hold forms**: the two
+   * renderings are both in the DOM, so a form in a cell would exist twice —
+   * the same ids, the same field names — and a control in the hidden copy
+   * would still be submitted with a `form=` attribute. Single-rendered, each
+   * form exists once. The table then scrolls inside its own container on a
+   * phone, as any wide table does (SPEC-022 BR-022-18, #237 review F3: the
+   * import batch's row tables).
+   */
+  cards?: boolean;
+  /**
+   * Server mode: the fragment the page links end in (`#ignoradas`), so paging
+   * and the page-size select land back on this table rather than the top of a
+   * page that has several.
+   */
+  linkHash?: string;
   /**
    * Server-paged mode: `data` is the current page, already sorted and filtered
    * by the server, and `total` is how many rows match in all. `filter` does
@@ -205,16 +257,27 @@ declare module '@tanstack/react-table' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface ColumnMeta<TData extends RowData, TValue> {
     /**
-     * A column of figures reads down its decimal point, so its header and its
-     * cells sit right (DS-13). The card rendering ignores it:
-     * there the label is on the left and the value already on the right.
+     * SPEC-022 BR-022-18 — what the column holds, from which its alignment,
+     * its default width and its truncation follow
+     * (`data-table-columns.ts`). Text, dates and badges sit left; numbers,
+     * amounts and percentages sit right in tabular digits, so a column of
+     * figures reads down its decimal point (DS-13), and the header sits like
+     * its column. Default `text`. The card rendering ignores it: there the
+     * label is on the left and the value already on the right.
      */
-    readonly align?: 'right';
+    readonly kind?: ColumnKind;
+    /**
+     * The column's width, set by the definition and never by the content
+     * (BR-022-18): a number is characters of content, a string a CSS length.
+     * Defaults to the kind's.
+     */
+    readonly width?: ColumnWidth;
   }
 }
 
-const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50, 100];
-const DEFAULT_PAGE_SIZE = 25;
+// SPEC-022 BR-022-18: 10, 25 or 50 rows a page, opening on 10.
+const DEFAULT_PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50];
+const DEFAULT_PAGE_SIZE = 10;
 
 /** A column's id, as TanStack will derive it — needed before the table exists. */
 function columnId<TData>(column: ColumnDef<TData, unknown>): string | undefined {
@@ -351,7 +414,8 @@ function ServerDataTable<TData>({
 
   const hrefFor: HrefFor = (next) => {
     const query = writeTableUrlState(searchParams.toString(), next, options);
-    return query === '' ? pathname : `${pathname}?${query}`;
+    const hash = props.linkHash === undefined ? '' : `#${props.linkHash}`;
+    return `${query === '' ? pathname : `${pathname}?${query}`}${hash}`;
   };
 
   return (
@@ -398,7 +462,10 @@ function DataTableView<TData>({
   itemNoun,
   filter,
   toolbar,
+  totals,
   noResults,
+  rowAnchor,
+  cards = true,
   server,
   className,
   state,
@@ -425,6 +492,8 @@ function DataTableView<TData>({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    // pt-BR collation for every text column that names no function of its own.
+    defaultColumn: { sortingFn: collatedSortingFn<TData> },
     /*
      * Paging is ours (the slice below), so TanStack's own reset must be off.
      * Left on, it queues a page-index reset whenever the row model re-derives,
@@ -480,6 +549,54 @@ function DataTableView<TData>({
       ? matching.slice((page - 1) * state.pageSize, page * state.pageSize)
       : matching;
 
+  /*
+   * SPEC-022 BR-022-07/18 — a deep link to a row (`#regra-<id>`) lands on the
+   * row even when pagination put it on another page: follow the hash to the
+   * page that holds the row, then scroll to whichever rendering is visible
+   * (the table from `md` up, the cards below) and mark it. Run on arrival and
+   * on `hashchange` only — never on a page change, or paging away from the
+   * linked row would pull the reader straight back to it.
+   */
+  const [linked, setLinked] = useState<string | null>(null);
+  const latest = useRef({ matching, page, state, onStateChange });
+  useEffect(() => {
+    latest.current = { matching, page, state, onStateChange };
+  });
+  const pendingScroll = useRef<string | null>(null);
+  useEffect(() => {
+    if (!rowAnchor || server) return;
+    const follow = () => {
+      const hash = decodeHash(window.location.hash);
+      const current = latest.current;
+      const index =
+        hash === '' ? -1 : current.matching.findIndex((row) => rowAnchor(row.original) === hash);
+      if (index < 0) {
+        setLinked(null);
+        return;
+      }
+      setLinked(hash);
+      pendingScroll.current = hash;
+      const target = pagination ? Math.floor(index / current.state.pageSize) + 1 : 1;
+      if (target !== current.page) current.onStateChange({ ...current.state, page: target });
+    };
+    follow();
+    window.addEventListener('hashchange', follow);
+    return () => window.removeEventListener('hashchange', follow);
+    // The row set and the page are read through `latest`: the hash is the input.
+  }, []);
+  useEffect(() => {
+    const hash = pendingScroll.current;
+    if (hash === null) return;
+    const row = document.getElementById(hash);
+    const visible =
+      row !== null && row.getClientRects().length > 0
+        ? row
+        : document.getElementById(`${hash}-card`);
+    if (visible === null) return;
+    pendingScroll.current = null;
+    if (typeof visible.scrollIntoView === 'function') visible.scrollIntoView({ block: 'center' });
+  });
+
   /** Server mode decides sortability from the URL's own list, not TanStack's accessors. */
   const canSortColumn = (id: string, tanstack: boolean): boolean =>
     sortable && (sortableIds ? sortableIds.includes(id) : tanstack);
@@ -507,8 +624,13 @@ function DataTableView<TData>({
 
   // The caller's empty state wins over everything: with no data there is
   // nothing to filter, and a toolbar over an empty table would only invite a
-  // search that cannot find anything.
-  if (data.length === 0 && empty) return <>{empty}</>;
+  // search that cannot find anything. A client-mode table with no rows and no
+  // `empty` of its own gets the catalogue's, never bare headers over nothing
+  // and a pager reading "Mostrando 0–0 de 0" (BR-022-18, #237 review F2): a
+  // caller names *why* the list is empty by passing its own.
+  if (data.length === 0 && (empty || server === undefined)) {
+    return <>{empty ?? <EmptyState title={t('emptyTitle')} description={t('emptyBody')} />}</>;
+  }
 
   const toolbarRow =
     filter || toolbar ? (
@@ -569,9 +691,17 @@ function DataTableView<TData>({
   return (
     <div data-slot="data-table" className={className}>
       {toolbarRow}
-      <div className="hidden md:block">
-        <Table>
+      <div className={cards ? 'hidden md:block' : undefined}>
+        {/* BR-022-18: widths come from the column definitions, never the cells. */}
+        <Table fixed>
           <TableCaption className="sr-only">{caption}</TableCaption>
+          <TableColGroup
+            widths={table
+              .getVisibleLeafColumns()
+              .map((column) =>
+                columnWidth(column.columnDef.meta?.kind ?? 'text', column.columnDef.meta?.width),
+              )}
+          />
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
@@ -596,7 +726,7 @@ function DataTableView<TData>({
                       scope="col"
                       className={cn(
                         'py-row',
-                        header.column.columnDef.meta?.align === 'right' && 'text-right',
+                        isNumericKind(header.column.columnDef.meta?.kind ?? 'text') && 'text-right',
                       )}
                       /*
                        * `aria-sort` belongs on the header cell, not on the
@@ -646,123 +776,207 @@ function DataTableView<TData>({
             ))}
           </TableHeader>
           <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell
-                    key={cell.id}
-                    className={cn(
-                      'py-row',
-                      cell.column.columnDef.meta?.align === 'right' && 'text-right',
-                    )}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
+            {rows.map((row) => {
+              const anchor = rowAnchor?.(row.original);
+              return (
+                <TableRow
+                  key={row.id}
+                  {...(anchor !== undefined
+                    ? { id: anchor, ...(linked === anchor ? { 'data-linked': true } : {}) }
+                    : {})}
+                  className={cn(
+                    anchor !== undefined &&
+                      'scroll-mt-20 data-linked:outline-2 data-linked:-outline-offset-2 data-linked:outline-ring',
+                  )}
+                >
+                  {row.getVisibleCells().map((cell) => {
+                    const kind = cell.column.columnDef.meta?.kind ?? 'text';
+                    const content = flexRender(cell.column.columnDef.cell, cell.getContext());
+                    return (
+                      <TableCell
+                        key={cell.id}
+                        className={cn('py-row', isNumericKind(kind) && 'text-right tabular-nums')}
+                      >
+                        {/* BR-022-18: text that does not fit ends in an ellipsis, with
+                          its full text on hover, focus and tap; a number never does. */}
+                        {truncatesKind(kind) ? <TruncatedCell>{content}</TruncatedCell> : content}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              );
+            })}
           </TableBody>
+          {totals && (
+            <TableFooter>
+              <TableRow>
+                {table.getVisibleLeafColumns().map((column, index) =>
+                  index === 0 ? (
+                    <TableHead key={column.id} scope="row" className="py-row text-left">
+                      {totals.label}
+                    </TableHead>
+                  ) : (
+                    <TableCell
+                      key={column.id}
+                      className={cn(
+                        'py-row',
+                        isNumericKind(column.columnDef.meta?.kind ?? 'text') &&
+                          'text-right tabular-nums',
+                      )}
+                    >
+                      {totals.cells[column.id]}
+                    </TableCell>
+                  ),
+                )}
+              </TableRow>
+            </TableFooter>
+          )}
         </Table>
       </div>
 
-      <div className="md:hidden">
-        <p id={captionId} className="sr-only">
-          {caption}
-        </p>
+      {cards && (
+        <div className="md:hidden">
+          <p id={captionId} className="sr-only">
+            {caption}
+          </p>
 
-        {/*
-          DL-12 puts the rows in cards below `md`, which removes every column
-          header — and with them the only way to sort. A phone is where a
-          holdings list is *most* likely to be long enough to need it, so the
-          affordance is rebuilt rather than dropped: one native select for the
-          column, one button for the direction.
+          {/*
+            DL-12 puts the rows in cards below `md`, which removes every column
+            header — and with them the only way to sort. A phone is where a
+            holdings list is *most* likely to be long enough to need it, so the
+            affordance is rebuilt rather than dropped: one native select for the
+            column, one button for the direction.
 
-          Native controls on purpose. They are the sort control that works
-          before hydration finishes, with a screen reader, and with the
-          system's own picker on a phone — the same reasoning that makes the
-          report's period and scope a plain GET form.
-        */}
-        {sortable && sortControlLabels && (
-          <div className="mb-2 flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              {sortControlLabels.field}
-              <NativeSelect
-                className="w-auto text-foreground"
-                value={sorting[0]?.id ?? ''}
-                onChange={(event) =>
-                  onStateChange({
-                    ...state,
-                    sort: { id: event.target.value, desc: sorting[0]?.desc ?? true },
-                    page: 1,
-                  })
+            Native controls on purpose. They are the sort control that works
+            before hydration finishes, with a screen reader, and with the
+            system's own picker on a phone — the same reasoning that makes the
+            report's period and scope a plain GET form.
+          */}
+          {sortable && sortControlLabels && (
+            <div className="mb-2 flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                {sortControlLabels.field}
+                <NativeSelect
+                  className="w-auto text-foreground"
+                  value={sorting[0]?.id ?? ''}
+                  onChange={(event) =>
+                    onStateChange({
+                      ...state,
+                      sort: { id: event.target.value, desc: sorting[0]?.desc ?? true },
+                      page: 1,
+                    })
+                  }
+                >
+                  {table
+                    .getAllColumns()
+                    .filter((column) => canSortColumn(column.id, column.getCanSort()))
+                    .map((column) => (
+                      <option key={column.id} value={column.id}>
+                        {headerText(headerLabels.get(column.id))}
+                      </option>
+                    ))}
+                </NativeSelect>
+              </label>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label={
+                  sorting[0]?.desc === false
+                    ? sortControlLabels.ascending
+                    : sortControlLabels.descending
                 }
+                onClick={() => {
+                  const first = sorting[0];
+                  if (first === undefined) return;
+                  onStateChange({ ...state, sort: { id: first.id, desc: !first.desc }, page: 1 });
+                }}
               >
-                {table
-                  .getAllColumns()
-                  .filter((column) => canSortColumn(column.id, column.getCanSort()))
-                  .map((column) => (
-                    <option key={column.id} value={column.id}>
-                      {headerText(headerLabels.get(column.id))}
-                    </option>
-                  ))}
-              </NativeSelect>
-            </label>
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label={
-                sorting[0]?.desc === false
-                  ? sortControlLabels.ascending
-                  : sortControlLabels.descending
-              }
-              onClick={() => {
-                const first = sorting[0];
-                if (first === undefined) return;
-                onStateChange({ ...state, sort: { id: first.id, desc: !first.desc }, page: 1 });
-              }}
-            >
-              {sorting[0]?.desc === false ? (
-                <ArrowUp aria-hidden="true" className="size-3.5" />
-              ) : (
-                <ArrowDown aria-hidden="true" className="size-3.5" />
-              )}
-            </Button>
-          </div>
-        )}
-        <ul aria-labelledby={captionId} className="flex flex-col divide-y">
-          {rows.map((row) => (
-            <li key={row.id} className="py-3">
-              {/*
-               * Deliberately plain elements rather than Stack/Cluster: HTML
-               * allows a `dt`/`dd` pair to sit inside *one* wrapping div
-               * under the `dl`, and nesting two layout components produces
-               * two — which axe rejects as `dlitem`, correctly, because it
-               * breaks the term/definition association a screen reader
-               * relies on.
-               */}
+                {sorting[0]?.desc === false ? (
+                  <ArrowUp aria-hidden="true" className="size-3.5" />
+                ) : (
+                  <ArrowDown aria-hidden="true" className="size-3.5" />
+                )}
+              </Button>
+            </div>
+          )}
+          <ul aria-labelledby={captionId} className="flex flex-col divide-y">
+            {rows.map((row) => {
+              const anchor = rowAnchor?.(row.original);
+              return (
+                <li
+                  key={row.id}
+                  {...(anchor !== undefined
+                    ? {
+                        id: `${anchor}-card`,
+                        ...(linked === anchor ? { 'data-linked': true } : {}),
+                      }
+                    : {})}
+                  className={cn(
+                    'py-3',
+                    anchor !== undefined &&
+                      'scroll-mt-20 data-linked:outline-2 data-linked:-outline-offset-2 data-linked:outline-ring',
+                  )}
+                >
+                  {/*
+                   * Deliberately plain elements rather than Stack/Cluster: HTML
+                   * allows a `dt`/`dd` pair to sit inside *one* wrapping div
+                   * under the `dl`, and nesting two layout components produces
+                   * two — which axe rejects as `dlitem`, correctly, because it
+                   * breaks the term/definition association a screen reader
+                   * relies on.
+                   */}
+                  <dl className="flex flex-col gap-1">
+                    {row.getVisibleCells().map((cell) => (
+                      <div
+                        key={cell.id}
+                        className="flex flex-wrap items-baseline justify-between gap-2"
+                      >
+                        <dt className="text-xs text-muted-foreground">
+                          {headerLabels.get(cell.column.id)}
+                        </dt>
+                        <dd className="min-w-0 text-sm break-words">
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </li>
+              );
+            })}
+          </ul>
+          {/*
+           * Outside the list: a total sums the records, it is not one of them, so
+           * it neither counts as an item nor sits among them for a screen reader.
+           */}
+          {totals && (
+            <div className="border-t py-3">
+              <p className="mb-1 text-sm font-medium">{totals.label}</p>
               <dl className="flex flex-col gap-1">
-                {row.getVisibleCells().map((cell) => (
-                  <div
-                    key={cell.id}
-                    className="flex flex-wrap items-baseline justify-between gap-2"
-                  >
-                    <dt className="text-xs text-muted-foreground">
-                      {headerLabels.get(cell.column.id)}
-                    </dt>
-                    <dd className="text-sm">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </dd>
-                  </div>
-                ))}
+                {table
+                  .getVisibleLeafColumns()
+                  .filter((column) => totals.cells[column.id] !== undefined)
+                  .map((column) => (
+                    <div
+                      key={column.id}
+                      className="flex flex-wrap items-baseline justify-between gap-2"
+                    >
+                      <dt className="text-xs text-muted-foreground">
+                        {headerLabels.get(column.id)}
+                      </dt>
+                      <dd className="min-w-0 text-sm font-medium break-words">
+                        {totals.cells[column.id]}
+                      </dd>
+                    </div>
+                  ))}
               </dl>
-            </li>
-          ))}
-        </ul>
-      </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {pagination && (
         <footer
-          data-slot="table-footer"
+          data-slot="table-pager"
           className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-sm group-[[data-variant=panel]]/panel:-mx-4 group-[[data-variant=panel]]/panel:-mb-4 group-[[data-variant=panel]]/panel:border-t group-[[data-variant=panel]]/panel:px-4 group-[[data-variant=panel]]/panel:py-3"
         >
           <p className="text-muted-foreground">
@@ -926,4 +1140,13 @@ function PageLinks({
  */
 function headerText(label: ReactNode): string {
   return typeof label === 'string' ? label : '';
+}
+
+/** `location.hash` without its `#`, decoded; unreadable escapes read as no hash. */
+function decodeHash(hash: string): string {
+  try {
+    return decodeURIComponent(hash.replace(/^#/, ''));
+  } catch {
+    return '';
+  }
 }

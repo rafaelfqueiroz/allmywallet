@@ -57,8 +57,11 @@ export const PARAM = {
  */
 export const PAGE_SIZE = 50;
 
-/** SPEC-022 BR-022-18's selectable page size. The largest is `MAX_PAGE_SIZE`. */
-export const PAGE_SIZE_OPTIONS: readonly number[] = [25, 50, 100, 200];
+/**
+ * SPEC-022 BR-022-18's selectable page size — 10, 25 or 50, the same for every
+ * table. All of them are well under `MAX_PAGE_SIZE`; `PAGE_SIZE` is in the set.
+ */
+export const PAGE_SIZE_OPTIONS: readonly number[] = [10, 25, 50];
 
 /**
  * SPEC-022 BR-022-18 — the ledger's sort, page and page size, in the

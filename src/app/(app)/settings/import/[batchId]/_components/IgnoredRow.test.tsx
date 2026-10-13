@@ -4,8 +4,7 @@ import { AssetId, ImportBatchId, ImportRowId, TransactionId } from '@/core/share
 import { Money, Quantity } from '@/core/shared/money';
 import type { ImportRow, NormalizedTransactionRecord } from '@/core/ingestion/ports';
 import { render, screen } from '@/components/test-utils';
-import { Table, TableBody } from '@/components/ui/table';
-import { IgnoredRow } from './IgnoredRow';
+import { ignoredRow } from './IgnoredRow';
 
 const exerciseRecord: NormalizedTransactionRecord = {
   kind: 'transaction',
@@ -39,20 +38,27 @@ const exercise: ImportRow = {
 
 const classifyForm = (rowId: string) => <button type="button">{`Classificar ${rowId}`}</button>;
 
-describe('IgnoredRow (SPEC-005 BR-005-19/20d, #179)', () => {
+/** The row's cells, rendered side by side as a table row would show them. */
+function renderRow(row: ImportRow) {
+  const { id, cells } = ignoredRow({
+    row,
+    committed: true,
+    resolvedExerciseLabel: 'Exercício resolvido no ativo principal',
+    classifyForm,
+  });
+  expect(id).toBe(row.id);
+  return render(
+    <ul>
+      {Object.entries(cells).map(([column, cell]) => (
+        <li key={column}>{cell}</li>
+      ))}
+    </ul>,
+  );
+}
+
+describe('ignoredRow (SPEC-005 BR-005-19/20d, #179)', () => {
   it('keeps a resolved exercise visible without a classify form', () => {
-    render(
-      <Table>
-        <TableBody>
-          <IgnoredRow
-            row={exercise}
-            committed
-            resolvedExerciseLabel="Exercício resolvido no ativo principal"
-            classifyForm={classifyForm}
-          />
-        </TableBody>
-      </Table>,
-    );
+    renderRow(exercise);
 
     expect(screen.getByText('XXXX12')).toBeInTheDocument();
     expect(screen.getByText('Exercício resolvido no ativo principal')).toBeInTheDocument();
@@ -72,18 +78,7 @@ describe('IgnoredRow (SPEC-005 BR-005-19/20d, #179)', () => {
       transactionId: null,
     };
 
-    render(
-      <Table>
-        <TableBody>
-          <IgnoredRow
-            row={mirror}
-            committed
-            resolvedExerciseLabel="Exercício resolvido no ativo principal"
-            classifyForm={classifyForm}
-          />
-        </TableBody>
-      </Table>,
-    );
+    renderRow(mirror);
 
     expect(screen.getByText('XXXX11')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `Classificar ${mirror.id}` })).toBeInTheDocument();

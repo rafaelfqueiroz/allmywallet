@@ -48,12 +48,16 @@ export function ImportHistoryTable({ rows }: { readonly rows: readonly ImportHis
       {
         id: 'type',
         header: t('columnType'),
+        // SPEC-022 BR-022-18: every column's kind and width are the table's.
+        meta: { kind: 'text', width: 16 },
         accessorFn: (row) => row.typeLabel,
         cell: ({ row }) => <span className="font-medium">{row.original.typeLabel}</span>,
       },
       {
         id: 'sentAt',
         header: t('columnSentAt'),
+        // `dd/mm/yyyy hh:mm`: sixteen characters, wider than a date alone.
+        meta: { kind: 'date', width: 17 },
         accessorFn: (row) => row.sentAtMs,
         sortingFn: 'basic',
         cell: ({ row }) => <span className="tabular-nums">{row.original.sentAtText}</span>,
@@ -61,6 +65,11 @@ export function ImportHistoryTable({ rows }: { readonly rows: readonly ImportHis
       {
         id: 'status',
         header: t('columnStatus'),
+        // Sized for the longest status label, "Não foi possível processar" (26
+        // characters in the 12px badge, plus its dot): at the badge default
+        // (14) a failed import read "Não foi possível" and was cut. Any label
+        // that still does not fit ends in an ellipsis with its text on demand.
+        meta: { kind: 'badge', width: 26 },
         accessorFn: (row) => row.statusLabel,
         cell: ({ row }) => (
           <Badge dot variant={BATCH_STATUS_VARIANT[row.original.status]}>
@@ -71,6 +80,7 @@ export function ImportHistoryTable({ rows }: { readonly rows: readonly ImportHis
       {
         id: 'rows',
         header: t('columnRows'),
+        meta: { kind: 'number', width: 9 },
         // A batch not yet staged has no count; it sorts below every staged one.
         accessorFn: (row) => row.rowsRead ?? -1,
         sortingFn: 'basic',
@@ -83,6 +93,7 @@ export function ImportHistoryTable({ rows }: { readonly rows: readonly ImportHis
       {
         id: 'action',
         header: t('columnAction'),
+        meta: { kind: 'control', width: '7rem' },
         enableSorting: false,
         cell: ({ row }) => (
           <Button asChild variant="link" size="sm">

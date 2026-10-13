@@ -27,10 +27,11 @@ export function DemoTable() {
   const vocabulary = useTranslations('vocabulary');
 
   const columns: ColumnDef<Row, unknown>[] = [
-    { accessorKey: 'code', header: vocabulary('patrimonio') },
+    { accessorKey: 'code', header: vocabulary('patrimonio'), meta: { kind: 'text' } },
     {
       accessorKey: 'quantity',
       header: vocabulary('precoMedio'),
+      meta: { kind: 'number' },
       cell: ({ row }) => (
         <Money value={Quantity.fromString(row.original.quantity)} kind="quantity" />
       ),
@@ -38,6 +39,7 @@ export function DemoTable() {
     {
       accessorKey: 'change',
       header: vocabulary('rentabilidade'),
+      meta: { kind: 'money' },
       cell: ({ row }) => <Money value={MoneyValue.fromString(row.original.change)} signed />,
     },
   ];

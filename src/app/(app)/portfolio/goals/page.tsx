@@ -8,7 +8,7 @@ import { fromSearchParams, PARAM } from '@/lib/report-url-state';
 import { loadScopeWallets } from '@/app/(app)/portfolio/data';
 import { PortfolioFrame } from '@/app/(app)/portfolio/_components/PortfolioFrame';
 import { ErrorState } from '@/components/patterns/error-state';
-import { List, ListItem } from '@/components/layout/list';
+import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 import { GrowthGoalCard } from '@/app/(app)/portfolio/goals/_components/GrowthGoalCard';
 import { EarningsGoalCard } from '@/app/(app)/portfolio/goals/_components/EarningsGoalCard';
 import { PageShell } from '@/app/page-shell';
@@ -90,21 +90,39 @@ export default async function PortfolioGoalsPage({
     return (
       <PortfolioFrame wallets={wallets}>
         <Section title={tp('goals.chooseTitle')} description={tp('goals.chooseDescription')}>
-          {wallets.length === 0 ? (
-            <EmptyState title={tp('wallets.empty')} />
-          ) : (
-            <List gap="sm">
-              {wallets.map((wallet) => (
-                <ListItem key={wallet.walletId} separated>
-                  <Button asChild variant="link">
-                    <Link href={`/portfolio/goals?${PARAM.wallet}=${wallet.walletId}`}>
-                      {wallet.name}
-                    </Link>
-                  </Button>
-                </ListItem>
-              ))}
-            </List>
-          )}
+          {/* One row a wallet, so it grows with the portfolio: a paged,
+              filterable table like every collection (BR-022-18). */}
+          <NodeTable
+            columns={[
+              {
+                id: 'wallet',
+                header: tp('wallets.columnWallet'),
+                kind: 'text',
+                width: 40,
+                sortable: true,
+              },
+            ]}
+            rows={wallets.map((wallet): NodeRow => ({
+              id: wallet.walletId,
+              keys: { wallet: wallet.name },
+              cells: {
+                wallet: (
+                  <Link
+                    href={`/portfolio/goals?${PARAM.wallet}=${wallet.walletId}`}
+                    className="font-medium underline underline-offset-4"
+                  >
+                    {wallet.name}
+                  </Link>
+                ),
+              },
+            }))}
+            caption={tp('goals.chooseTitle')}
+            noun={tp('wallets.noun')}
+            filterPlaceholder={tp('wallets.filterPlaceholder')}
+            paramPrefix="wallets"
+            sort={{ id: 'wallet', desc: false }}
+            empty={<EmptyState title={tp('wallets.empty')} />}
+          />
         </Section>
       </PortfolioFrame>
     );

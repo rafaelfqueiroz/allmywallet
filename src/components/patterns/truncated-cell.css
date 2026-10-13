@@ -1,0 +1,41 @@
+/*
+ * SPEC-022 BR-022-18 / DS-67 — text that does not fit ends in an ellipsis,
+ * wherever in the cell it sits.
+ *
+ * `text-overflow` only reaches the inline text of the box that carries it. A
+ * cell whose content is a flex container (a `Cluster`, a `Stack`) or a badge
+ * (`inline-flex`) holds its text in boxes the cell's own ellipsis cannot see, so
+ * that text was cut mid-glyph by the cell's `overflow: hidden`. Each of those
+ * boxes truncates its own text instead:
+ *
+ *  - a line the cell marks `data-cell-line` (`CellLabel`);
+ *  - a badge, which here is a block holding its text rather than a flex
+ *    container with an anonymous box nothing can style — capped at the column,
+ *    its dot and icon kept inline beside the text. Its height is unchanged: the
+ *    line is the content box (20px - 2px border - 4px padding).
+ *
+ * Scoped to `table-cell-text`, not global: the card rendering below `md` lets
+ * the same text wrap, and a badge outside a table keeps its natural layout.
+ * Plain CSS in its own file, so a test can load exactly what ships.
+ */
+[data-slot='table-cell-text'] [data-cell-line],
+[data-slot='table-cell-text'] [data-slot='badge'] {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-slot='table-cell-text'] [data-slot='badge'] {
+  display: block;
+  width: fit-content;
+  line-height: 0.875rem;
+}
+
+[data-slot='table-cell-text'] [data-slot='badge'] > svg,
+[data-slot='table-cell-text'] [data-slot='badge'] > [data-slot='badge-dot'] {
+  display: inline-block;
+  margin-right: 0.25rem;
+  vertical-align: middle;
+}

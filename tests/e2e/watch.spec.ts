@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import AxeBuilder from '@axe-core/playwright';
+import type { Page } from '@playwright/test';
 import { expect, test } from './support/authenticated';
 import { seedHoldings } from './support/holdings';
 import { dismissOnboarding } from './support/onboarding';
+import { dataTableByCaption, expectPageSizeSurvivesReload } from './support/page-size';
 
 /**
  * SPEC-018 — Observar preços, over the real stack: Configurações › Observar
@@ -78,6 +80,21 @@ async function seedRule(
   }
 }
 
+/** The rows of a table, as the one shown: a table row from md up, a card below. */
+function rows(page: Page, caption: string) {
+  return dataTableByCaption(page, caption).locator('tr:visible, li:visible');
+}
+
+/** Twelve holdings, one over a page of ten, with codes that sort in seeding order. */
+function manyHoldings(prefix: string) {
+  return Array.from({ length: 12 }, (_, index) => ({
+    code: `${prefix}${String(index + 1).padStart(2, '0')}`,
+    quantity: '10',
+    averageCost: '20.00',
+    price: '25.00',
+  }));
+}
+
 test.describe('SPEC-018 — Observar preços', () => {
   test('a rule the user writes, and a price that crosses it', async ({ signedIn }) => {
     const { page, userId } = signedIn;
@@ -95,7 +112,10 @@ test.describe('SPEC-018 — Observar preços', () => {
     // criterion, so it is asserted before anything else.
     await expect(page.getByText(/atraso de cerca de/i)).toBeVisible();
 
-    // BR-018-01/02 — an asset with no rule yet offers a form.
+    // BR-018-01/02 — an asset with no rule yet offers a rule. SPEC-022 BR-022-18:
+    // the available assets are a table, and no form sits in a table's cell, so
+    // the row's "Criar regra" opens the one rule editor, and the form is there.
+    await page.getByRole('link', { name: `Criar regra de ${stockCode}` }).click();
     const form = page
       .locator('form')
       .filter({ has: page.getByRole('button', { name: 'Criar regra' }) })
@@ -112,9 +132,8 @@ test.describe('SPEC-018 — Observar preços', () => {
     await form.getByRole('button', { name: 'Criar regra' }).click();
 
     // R$ 32,00 sits between the two bounds, so the default band applies.
-    // The watch screen renders its rules as a list, not a table — one rule is
-    // a small block of prose and two bounds, not a row of comparable figures.
-    const watched = page.getByRole('listitem').filter({ hasText: stockCode });
+    // The rule is a row of the rules table (a table row from md up, a card below).
+    const watched = rows(page, 'Regras de observação').filter({ hasText: stockCode });
     // The badge itself, not merely the word: the edit form's own <option>
     // elements carry the same three labels, and matching those would let this
     // pass against a rule whose state never rendered at all. BR-018-17 also
@@ -177,7 +196,7 @@ test.describe('SPEC-018 — Observar preços', () => {
 
     await page.goto('/settings/watch');
 
-    const row = page.getByRole('listitem').filter({ hasText: code });
+    const row = rows(page, 'Sem preço de mercado').filter({ hasText: code });
     await expect(row.getByText(/não tem preço de mercado/i)).toBeVisible();
 
     // The other half of AC-2, and the half worth having: the message is only
@@ -234,6 +253,141 @@ test.describe('SPEC-018 — Observar preços', () => {
     await card.getByRole('link', { name: `Ver regra de ${buyCode}` }).click();
     await expect(page).toHaveURL(new RegExp(`/settings/watch#regra-${assetId}$`));
     await expect(page.locator(`[id="regra-${assetId}"]`)).toContainText(buyCode);
+    // SPEC-022 BR-022-07 — the rule the link names is marked on arrival, in
+    // whichever rendering is shown (the table row, or its card below md).
+    await expect(
+      page
+        .locator(`[id="regra-${assetId}"], [id="regra-${assetId}-card"]`)
+        .filter({ visible: true }),
+    ).toHaveAttribute('data-linked', 'true');
+  });
+
+  /**
+   * SPEC-022 BR-022-18 / DS-65 — the Painel's card summarises: five at most,
+   * and a link to Observar preços for the rest, where they page.
+   */
+  test('the Painel card lists five opportunities and links to the full list', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const codes = await seedHoldings(userId, manyHoldings('OPP'));
+    for (const code of codes) await seedRule(code, '30.00', 'buy');
+    await dismissOnboarding(userId);
+
+    await page.goto('/dashboard');
+    const card = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Em zona de compra ou venda' }) });
+    await expect(card.getByRole('listitem')).toHaveCount(5);
+    await card.getByRole('link', { name: /^Ver todos os 12 em Observar preços/ }).click();
+    await expect(page).toHaveURL(/\/settings\/watch$/);
+  });
+
+  /**
+   * SPEC-022 BR-018-18 — the rules are a table that pages, with its page size
+   * in the URL, and a link to a rule on a later page still lands on it: the
+   * Painel's "Ver regra" and an e-mail sent before this table paged carry the
+   * anchor alone.
+   */
+  test('the rules page, and keep the page size through a reload', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const codes = await seedHoldings(userId, manyHoldings('RUL'));
+    for (const code of codes) await seedRule(code, '30.00', 'buy');
+
+    await page.goto('/settings/watch');
+    await expectPageSizeSurvivesReload(page, 'Regras de observação', 'rules', 12);
+  });
+
+  test('a link to a rule on a later page lands on it, marked', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const codes = await seedHoldings(userId, manyHoldings('LNK'));
+    // Rules sort by asset, so the last one seeded is on the second page.
+    let lastId = '';
+    for (const code of codes) lastId = await seedRule(code, '30.00', 'buy');
+    const last = codes[codes.length - 1]!;
+
+    await page.goto(`/settings/watch#regra-${lastId}`);
+
+    const table = dataTableByCaption(page, 'Regras de observação');
+    await expect(table.getByText(/Mostrando 11–12 de 12/)).toBeVisible();
+    const target = table
+      .locator(`[id="regra-${lastId}"], [id="regra-${lastId}-card"]`)
+      .filter({ visible: true });
+    await expect(target).toContainText(last);
+    await expect(target).toHaveAttribute('data-linked', 'true');
+    await expect(target).toBeInViewport();
+  });
+
+  /**
+   * A rule's controls hold no form: Silenciar and Excluir are buttons joined to
+   * forms outside the table, and Editar is a link to the editor.
+   */
+  test('a row’s controls mute, edit and delete without a form in the table', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const [code] = await seedHoldings(userId, [
+      { code: 'CTRL', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    const assetId = await seedRule(code!, '30.00', 'buy');
+
+    await page.goto('/settings/watch');
+    const table = dataTableByCaption(page, 'Regras de observação');
+    await expect(table.locator('form')).toHaveCount(0);
+
+    // Silenciar: the badge says so.
+    await page.getByRole('button', { name: `Silenciar avisos de ${code}` }).click();
+    await expect(
+      rows(page, 'Regras de observação').filter({ hasText: code! }).getByText('Silenciado'),
+    ).toBeVisible();
+
+    // Editar opens the editor for this rule, and Fechar closes it.
+    await page.getByRole('link', { name: `Editar regra de ${code}` }).click();
+    await expect(page).toHaveURL(new RegExp(`[?&]rule=${assetId}`));
+    await expect(
+      page.getByRole('heading', { name: new RegExp(`^Editar regra de ${code}`) }),
+    ).toBeVisible();
+    await expect(page.getByLabel('Limite inferior (R$)')).toHaveValue(/^30(\.0+)?$/);
+    await page.getByRole('link', { name: 'Fechar' }).click();
+    await expect(page.getByLabel('Limite inferior (R$)')).toHaveCount(0);
+
+    // Excluir.
+    await page.getByRole('button', { name: `Excluir regra de ${code}` }).click();
+    await expect(
+      page.getByText('Você ainda não configurou nenhuma regra de observação.'),
+    ).toBeVisible();
+  });
+
+  /**
+   * #246 review — Editar on one rule, then straight to Editar on another,
+   * keeps the editor mounted. Unkeyed, its uncontrolled fields kept the first
+   * rule's limits under the second rule's id, and saving overwrote it.
+   */
+  test('switching the editor from one rule to another shows the second rule’s limits', async ({
+    signedIn,
+  }) => {
+    const { page, userId } = signedIn;
+    const [first, second] = await seedHoldings(userId, [
+      { code: 'EDTA', quantity: '10', averageCost: '20.00', price: '25.00' },
+      { code: 'EDTB', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedRule(first!, '30.00', 'buy');
+    await seedRule(second!, '12.00', 'sell');
+
+    await page.goto('/settings/watch');
+    const lower = page.getByLabel('Limite inferior (R$)');
+    const lowerState = page.getByLabel('Neste limite ou abaixo dele, o preço significa');
+
+    await page.getByRole('link', { name: `Editar regra de ${first}` }).click();
+    await expect(lower).toHaveValue(/^30(\.0+)?$/);
+    await expect(lowerState).toHaveValue('buy');
+
+    await page.getByRole('link', { name: `Editar regra de ${second}` }).click();
+    await expect(
+      page.getByRole('heading', { name: new RegExp(`^Editar regra de ${second}`) }),
+    ).toBeVisible();
+    await expect(lower).toHaveValue(/^12(\.0+)?$/);
+    await expect(lowerState).toHaveValue('sell');
   });
 
   test('Configurações lists Observar preços in its sub-navigation, and the sidebar no longer does', async ({
