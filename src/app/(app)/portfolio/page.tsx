@@ -147,7 +147,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
             <HoldingsTable
               rows={holdingRows(report.rows, new Map(), t, tc, tw, masked)}
               labels={holdingsTableLabels(report, t, tc, tCommon)}
-              hiddenColumns={['sector', 'opportunityState']}
+              hidden={['sector', 'opportunityState']}
             />
           </Section>
 

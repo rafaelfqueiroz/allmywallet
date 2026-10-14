@@ -145,6 +145,21 @@ export interface StackedBand {
 }
 
 /**
+ * One date of the stacked series, every band present (`stackedTable`): the
+ * chart's row and the composition table's rows for that date.
+ */
+export interface StackedDay {
+  readonly date: BusinessDate;
+  readonly bands: readonly {
+    readonly key: string;
+    /** Zero where the band has no point that day: the class was not held. */
+    readonly value: Money;
+    /** Of the day's total, as a fraction (`0.25`); `null` when the day is worth nothing. */
+    readonly share: Money | null;
+  }[];
+}
+
+/**
  * SPEC-013's typed absence, **defined once for every report** in
  * `core/reporting/snapshot-derived.ts` and re-exported here.
  *

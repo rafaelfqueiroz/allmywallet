@@ -1,13 +1,15 @@
 import type { BusinessDate } from '@/core/shared/clock';
-import { Money } from '@/core/shared/money';
+import { Money, sumMoney } from '@/core/shared/money';
 import type { AssetClass } from '@/core/quotes/ports';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import type { Grouping } from '@/core/reporting/ports';
+import { sharesOf } from '@/core/reporting/composition/breakdown';
 import {
   HistoryUnavailable,
   type Granularity,
   type MonthlyContribution,
   type StackedBand,
+  type StackedDay,
   type StackedSeries,
   type ValuePoint,
 } from '@/core/reporting/portfolio-value/ports';
@@ -222,4 +224,43 @@ export function stackedSeries(
   }));
 
   return { kind: 'available', grouping, bands };
+}
+
+/**
+ * SPEC-013 BR-013-05 / SPEC-022 BR-022-41 — the bands as days: every date any
+ * band carries, ascending, each with every band's value and its share of that
+ * day's total.
+ *
+ * **The date union is the whole job.** A band only carries points for the
+ * dates on which its class had a value — a portfolio that bought its first FII
+ * in March has an `fii` band starting in March. A chart stacks by row, so every
+ * row needs every band, and a missing one leaves a hole in the stack and the
+ * bands stop summing to the total. Absent means zero here, and zero is the
+ * truth: the class was not held that day.
+ *
+ * Each day's shares are SPEC-015's `sharesOf` over that day's bands, so they
+ * sum to exactly 100 % (BR-015-10) and are all `null` on a day worth nothing —
+ * a share of nothing is undefined, not zero.
+ */
+export function stackedTable(bands: readonly StackedBand[]): readonly StackedDay[] {
+  const valueAt = new Map(
+    bands.map((band) => [band.key, new Map(band.points.map((point) => [point.date, point.value]))]),
+  );
+  const dates = [
+    ...new Set(bands.flatMap((band) => band.points.map((point) => point.date))),
+  ].sort();
+
+  return dates.map((date) => {
+    const values = bands.map((band) => valueAt.get(band.key)?.get(date) ?? Money.zero());
+    const shares = sharesOf(values, sumMoney(values));
+    return {
+      date,
+      bands: bands.map((band, index) => ({
+        key: band.key,
+        // Non-null: `values` and `shares` are indexed by `bands`.
+        value: values[index] as Money,
+        share: shares === null ? null : (shares[index] as Money),
+      })),
+    };
+  });
 }

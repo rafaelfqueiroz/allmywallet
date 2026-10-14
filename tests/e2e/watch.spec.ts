@@ -41,6 +41,18 @@ const MIGRATION_URL =
   'postgresql://allmywallet_migrator:allmywallet@localhost:5432/allmywallet';
 
 /** Moves the stored quote, the way a poll would. BR-008-04's two timestamps stay honest. */
+/**
+ * SPEC-022 BR-022-41 — a rule's actions sit behind its "⋯" menu. The table and
+ * the card list both carry one (DS-28); only the one for the viewport shows.
+ */
+async function ruleAction(page: Page, code: string, item: string | RegExp): Promise<void> {
+  await page
+    .getByRole('button', { name: `Ações da regra de ${code}` })
+    .filter({ visible: true })
+    .click();
+  await page.getByRole('menuitem', { name: item }).click();
+}
+
 async function movePrice(code: string, price: string): Promise<void> {
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
   try {
@@ -319,8 +331,8 @@ test.describe('SPEC-018 — Observar preços', () => {
   });
 
   /**
-   * A rule's controls hold no form: Silenciar and Excluir are buttons joined to
-   * forms outside the table, and Editar is a link to the editor.
+   * A rule's controls hold no form: Silenciar and Excluir are menu items that
+   * submit forms outside the table, and Editar is a link to the editor.
    */
   test('a row’s controls mute, edit and delete without a form in the table', async ({
     signedIn,
@@ -336,13 +348,13 @@ test.describe('SPEC-018 — Observar preços', () => {
     await expect(table.locator('form')).toHaveCount(0);
 
     // Silenciar: the badge says so.
-    await page.getByRole('button', { name: `Silenciar avisos de ${code}` }).click();
+    await ruleAction(page, code!, 'Silenciar avisos');
     await expect(
       rows(page, 'Regras de observação').filter({ hasText: code! }).getByText('Silenciado'),
     ).toBeVisible();
 
     // Editar opens the editor for this rule, and Fechar closes it.
-    await page.getByRole('link', { name: `Editar regra de ${code}` }).click();
+    await ruleAction(page, code!, 'Editar regra');
     await expect(page).toHaveURL(new RegExp(`[?&]rule=${assetId}`));
     await expect(
       page.getByRole('heading', { name: new RegExp(`^Editar regra de ${code}`) }),
@@ -352,10 +364,39 @@ test.describe('SPEC-018 — Observar preços', () => {
     await expect(page.getByLabel('Limite inferior (R$)')).toHaveCount(0);
 
     // Excluir.
-    await page.getByRole('button', { name: `Excluir regra de ${code}` }).click();
+    await ruleAction(page, code!, 'Excluir regra');
     await expect(
       page.getByText('Você ainda não configurou nenhuma regra de observação.'),
     ).toBeVisible();
+  });
+
+  /** SPEC-022 BR-022-41 / DS-15 — the "⋯" menu opens and acts by keyboard alone. */
+  test('a rule’s menu works by keyboard', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const [code] = await seedHoldings(userId, [
+      { code: 'KEYB', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedRule(code!, '30.00', 'buy');
+
+    await page.goto('/settings/watch');
+    const trigger = page
+      .getByRole('button', { name: `Ações da regra de ${code}` })
+      .filter({ visible: true });
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menuitem', { name: 'Silenciar avisos' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(
+      rows(page, 'Regras de observação').filter({ hasText: code! }).getByText('Silenciado'),
+    ).toBeVisible();
+
+    // Escape closes the menu and returns focus to the trigger.
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(trigger).toBeFocused();
   });
 
   /**
@@ -378,11 +419,11 @@ test.describe('SPEC-018 — Observar preços', () => {
     const lower = page.getByLabel('Limite inferior (R$)');
     const lowerState = page.getByLabel('Neste limite ou abaixo dele, o preço significa');
 
-    await page.getByRole('link', { name: `Editar regra de ${first}` }).click();
+    await ruleAction(page, first!, 'Editar regra');
     await expect(lower).toHaveValue(/^30(\.0+)?$/);
     await expect(lowerState).toHaveValue('buy');
 
-    await page.getByRole('link', { name: `Editar regra de ${second}` }).click();
+    await ruleAction(page, second!, 'Editar regra');
     await expect(
       page.getByRole('heading', { name: new RegExp(`^Editar regra de ${second}`) }),
     ).toBeVisible();

@@ -8,6 +8,7 @@ import {
   granularityFor,
   monthlyContributions,
   stackedSeries,
+  stackedTable,
   valueSeries,
   weekOf,
   withLiveEndpoint,
@@ -309,4 +310,71 @@ describe('stackedSeries (BR-013-05)', () => {
       expect(result.grouping).toBe(grouping);
     },
   );
+});
+
+describe('stackedTable (BR-013-05 / SPEC-022 BR-022-41)', () => {
+  const band = (key: string, points: readonly [string, string][]) => ({
+    key,
+    points: points.map(([date, value]) => ({ date: d(date), value: m(value), estimated: false })),
+  });
+
+  it('gives every date every band, zero where the class was not held', () => {
+    /*
+     * stock holds on both days; fii is bought on the second.
+     *   2026-03-02: stock 300, fii   0 → total 300
+     *   2026-03-03: stock 300, fii 100 → total 400
+     */
+    const days = stackedTable([
+      band('stock', [
+        ['2026-03-02', '300'],
+        ['2026-03-03', '300'],
+      ]),
+      band('fii', [['2026-03-03', '100']]),
+    ]);
+
+    expect(days.map((day) => day.date)).toEqual(['2026-03-02', '2026-03-03']);
+    expect(days[0]!.bands.map((cell) => [cell.key, to8(cell.value)])).toEqual([
+      ['stock', '300.00000000'],
+      ['fii', '0.00000000'],
+    ]);
+  });
+
+  it("shares each day's total, summing to exactly one", () => {
+    /*
+     *   2026-03-03: stock 300 ÷ 400 = 0,75; fii = 1 − 0,75 = 0,25 (the residual)
+     *   2026-03-04: three thirds of 300 — 0,33333333, 0,33333333, 0,33333334
+     */
+    const days = stackedTable([
+      band('stock', [
+        ['2026-03-03', '300'],
+        ['2026-03-04', '100'],
+      ]),
+      band('fii', [
+        ['2026-03-03', '100'],
+        ['2026-03-04', '100'],
+      ]),
+      band('cdb', [['2026-03-04', '100']]),
+    ]);
+
+    expect(days[0]!.bands.map((cell) => cell.share && to8(cell.share))).toEqual([
+      '0.75000000',
+      '0.25000000',
+      '0.00000000',
+    ]);
+    expect(days[1]!.bands.map((cell) => cell.share && to8(cell.share))).toEqual([
+      '0.33333333',
+      '0.33333333',
+      '0.33333334',
+    ]);
+  });
+
+  /** A share of nothing is undefined, not zero (BR-015-10's `sharesOf`). */
+  it('has no shares on a day worth nothing', () => {
+    const days = stackedTable([band('stock', [['2026-03-02', '0']])]);
+    expect(days[0]!.bands[0]!.share).toBeNull();
+  });
+
+  it('has no days without bands', () => {
+    expect(stackedTable([])).toEqual([]);
+  });
 });

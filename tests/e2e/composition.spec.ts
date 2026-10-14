@@ -142,8 +142,14 @@ test('sorts the holdings by a column header, from md up', async ({ signedIn, vie
   const table = page.getByRole('table', { name: /ativos do escopo/i });
   await expect(table).toBeVisible();
 
+  // The code is the Ativo cell's first line; the class and sector sit under it
+  // (SPEC-022 BR-022-41).
   const codes = async () =>
-    (await table.locator('tbody tr td:first-child').allInnerTexts()).map(stripBadges);
+    table
+      .locator('tbody tr td:first-child')
+      .evaluateAll((cells) =>
+        cells.map((cell) => cell.querySelector('[data-cell-line]')?.textContent ?? ''),
+      );
 
   // Opens largest-first.
   expect(await codes()).toEqual([big, small]);
@@ -172,7 +178,11 @@ test('sorts the holdings from the card control, below md', async ({ signedIn, vi
   const codes = async () => {
     const items = await cards.locator('li').all();
     return Promise.all(
-      items.map(async (item) => stripBadges(await item.locator('dd').first().innerText())),
+      items.map(
+        async (item) =>
+          (await item.locator('dd').first().locator('[data-cell-line]').first().textContent()) ??
+          '',
+      ),
     );
   };
 
@@ -195,13 +205,6 @@ test('sorts the holdings from the card control, below md', async ({ signedIn, vi
  */
 function visibleText(page: Page, text: string) {
   return page.getByText(text, { exact: false }).filter({ visible: true }).first();
-}
-
-function stripBadges(text: string): string {
-  return text
-    .replace(/\s*Acima de \d+%\s*/, '')
-    .replace(/\s*Estimado\s*/, '')
-    .trim();
 }
 
 /**
