@@ -124,6 +124,37 @@ test('a refused parameter says why, under the field', async ({ signedIn }) => {
   await expect(form.getByText(message)).toBeVisible();
   await expect(page.getByLabel(label, { exact: true })).toHaveAttribute('aria-invalid', 'true');
   await expect(form.getByRole('status')).toHaveText('');
+  // What was typed survives the refusal (React resets the form after every
+  // action), and Cancelar is what returns to the loaded value (#248 review).
+  await expect(page.getByLabel(label, { exact: true })).toHaveValue('400');
+  await form.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByLabel(label, { exact: true })).not.toHaveValue('400');
+});
+
+/**
+ * #248 review — the form posts, beside each value, the one its field was
+ * loaded with, and only a changed key is written. Hiding values elsewhere
+ * after the form loaded must survive a save of another preference here.
+ */
+test('saving Preferências does not undo values hidden since it loaded', async ({ signedIn }) => {
+  const { page } = signedIn;
+
+  await page.goto('/preferences');
+  await expect(page.getByRole('checkbox', { name: 'Ocultar valores' })).not.toBeChecked();
+
+  // The eye toggle in the top bar, on this same page: its name stays, and
+  // `aria-pressed` says the values are hidden.
+  const eye = page.getByRole('button', { name: 'Ocultar valores', exact: true });
+  await eye.click();
+  await expect(eye).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByLabel(CONCENTRATION, { exact: true }).fill('33');
+  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  await expect(page.getByRole('status').filter({ hasText: 'Salvo.' })).toBeVisible();
+
+  await page.reload();
+  await expect(eye).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel(CONCENTRATION, { exact: true })).toHaveValue('33');
 });
 
 test('Preferências shows its options in Portuguese', async ({ signedIn }) => {

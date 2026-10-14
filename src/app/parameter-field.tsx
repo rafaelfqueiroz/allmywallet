@@ -99,12 +99,7 @@ export function ParameterFields({
   const invalid = new Set(state.status === 'error' ? (state.invalid ?? []) : []);
 
   return (
-    <form
-      action={formAction}
-      onSubmit={remember}
-      // Cancelar: back to what was loaded, not to a refused draft.
-      onReset={() => setPosted((previous) => ({ count: previous.count + 1, data: null }))}
-    >
+    <form action={formAction} onSubmit={remember}>
       <FormPanel
         title={title}
         description={description}
@@ -116,7 +111,14 @@ export function ParameterFields({
               </Text>
             }
             cancel={
-              <Button type="reset" variant="outline">
+              // Back to what was loaded, not to a refused draft. On the button,
+              // not the form's `onReset`: React resets the form itself after
+              // every action, refusals included, and that must keep the draft.
+              <Button
+                type="reset"
+                variant="outline"
+                onClick={() => setPosted((previous) => ({ count: previous.count + 1, data: null }))}
+              >
                 {t('cancel')}
               </Button>
             }
@@ -127,18 +129,16 @@ export function ParameterFields({
           </FormActions>
         }
       >
-        {/* What each field showed when the form loaded: only a key the user
-            changed is written, so a save here cannot undo a change made
-            elsewhere since (#238 review). */}
-        {parameters.map(({ key, control }) => (
-          <input
-            key={key}
-            type="hidden"
-            name={loadedFieldName(key)}
-            value={JSON.stringify(control.value ?? null)}
-          />
-        ))}
         <FormGrid key={posted.count}>
+          {/* What each field was loaded with, kept with the field's own mount
+              (#248 review): only a key the user changed is written, so a save
+              here cannot undo a change made elsewhere since — the eye
+              toggle's `ui.hide_values`. A revalidation refreshes `parameters`
+              but not an uncontrolled control already on screen, so the
+              reference must not follow it either. */}
+          {parameters.map(({ key, control }) => (
+            <LoadedValue key={`loaded-${key}`} name={loadedFieldName(key)} value={control.value} />
+          ))}
           {parameters.map(({ key, label, hint, invalidMessage, control }) => {
             const error = invalid.has(key) ? invalidMessage : undefined;
             const value = draft === null ? control : withDraft(control, key, draft);
@@ -154,6 +154,12 @@ export function ParameterFields({
       </FormPanel>
     </form>
   );
+}
+
+/** A hidden reference fixed when its field mounts; see `ParameterFields`. */
+function LoadedValue({ name, value }: { name: string; value: unknown }) {
+  const [loaded] = useState(() => JSON.stringify(value ?? null));
+  return <input type="hidden" name={name} value={loaded} />;
 }
 
 /** The control as it was posted, so a refusal does not undo the typing. */

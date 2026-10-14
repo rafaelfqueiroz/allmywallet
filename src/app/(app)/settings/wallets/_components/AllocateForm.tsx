@@ -85,6 +85,15 @@ export function AllocateForm({
   // The server action goes to the hook as is, so the form posts without
   // JavaScript (DS-37); what was sent is read in `onSubmit` (see `WalletForm`).
   const [state, formAction, pending] = useActionState(action, IDLE);
+  // Cancelar returns to what was loaded (DESIGN.md DS-68), not to a refused
+  // draft: the draft is dropped and the fields re-mount from the defaults. On
+  // the button, not the form's `onReset`: React resets the form itself after
+  // every action, refusals included, and that reset must keep the draft.
+  const [resets, setResets] = useState(0);
+  const cancel = () => {
+    setSubmitted(null);
+    setResets((count) => count + 1);
+  };
   const remember = (event: FormEvent<HTMLFormElement>) => {
     const formData = new FormData(event.currentTarget);
     setSubmitted({
@@ -114,7 +123,7 @@ export function AllocateForm({
         footer={
           <FormActions
             cancel={
-              <Button type="reset" variant="outline">
+              <Button type="reset" variant="outline" onClick={cancel}>
                 {t('cancel')}
               </Button>
             }
@@ -127,7 +136,7 @@ export function AllocateForm({
       >
         <input type="hidden" name={fixed.name} value={fixed.value} />
         {summary}
-        <FormGrid>
+        <FormGrid key={resets}>
           <Field id={`${idPrefix}-choice`} label={choice.label}>
             {/* `key`: a native select does not follow a changed `defaultValue`, so the
                 choice is remounted with the one that was submitted. */}
