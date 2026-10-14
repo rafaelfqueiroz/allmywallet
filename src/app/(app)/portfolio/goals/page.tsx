@@ -16,7 +16,7 @@ import { ActionForm } from '@/components/patterns/action-form';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Field } from '@/components/patterns/field';
-import { Stack } from '@/components/layout/stack';
+import { FormActions, FormGrid } from '@/components/patterns/form-layout';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -197,66 +197,96 @@ export default async function PortfolioGoalsPage({
         DL-019-06 — SPEC-010 BR-010-02's free-text goal becomes the name a new
         goal starts with, on both forms: the wallet's stated purpose did not
         pick a kind, so neither form claims it more than the other.
+        SPEC-022 BR-022-37 — each is the standard form: Nome beside Valor, the
+        third field alone (short, so its neighbouring cell stays empty).
       */}
-      <Section title={t('createGrowthTitle')} description={t('createGrowthDescription')}>
-        <ActionForm action={createGoalAction}>
-          <input type="hidden" name="walletId" value={view.wallet.id} />
-          <input type="hidden" name="kind" value="growth" />
-          <Stack gap="md" align="start">
-            <Field id="growth-goal-name" label={t('nameLabel')} width="lg">
-              <Input
-                name="name"
-                required
-                defaultValue={view.wallet.goal ?? ''}
-                placeholder={t('namePlaceholder')}
-              />
-            </Field>
-            <Field id="growth-goal-amount" label={t('amountLabel')} width="md">
-              <Input name="amount" inputMode="decimal" required />
-            </Field>
-            <Field id="growth-goal-basis" label={t('basisLabel')} width="md">
-              <NativeSelect name="basis" defaultValue={GROWTH_BASES[0]}>
-                {GROWTH_BASES.map((basis) => (
-                  <option key={basis} value={basis}>
-                    {t(basis === 'invested' ? 'basisInvested' : 'basisCurrentValue')}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Button type="submit">{t('create')}</Button>
-          </Stack>
-        </ActionForm>
-      </Section>
+      <ActionForm
+        action={createGoalAction}
+        panel={{
+          title: t('createGrowthTitle'),
+          description: t('createGrowthDescription'),
+          footer: (
+            <FormActions
+              cancel={
+                <Button type="reset" variant="outline">
+                  {t('cancel')}
+                </Button>
+              }
+            >
+              <Button type="submit">{t('create')}</Button>
+            </FormActions>
+          ),
+        }}
+      >
+        <input type="hidden" name="walletId" value={view.wallet.id} />
+        <input type="hidden" name="kind" value="growth" />
+        <FormGrid>
+          <Field id="growth-goal-name" label={t('nameLabel')}>
+            <Input
+              name="name"
+              required
+              defaultValue={view.wallet.goal ?? ''}
+              placeholder={t('namePlaceholder')}
+            />
+          </Field>
+          <Field id="growth-goal-amount" label={t('amountLabel')}>
+            <Input name="amount" inputMode="decimal" required />
+          </Field>
+          <Field id="growth-goal-basis" label={t('basisLabel')}>
+            <NativeSelect name="basis" defaultValue={GROWTH_BASES[0]}>
+              {GROWTH_BASES.map((basis) => (
+                <option key={basis} value={basis}>
+                  {t(basis === 'invested' ? 'basisInvested' : 'basisCurrentValue')}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+        </FormGrid>
+      </ActionForm>
 
-      <Section title={t('createEarningsTitle')} description={t('createEarningsDescription')}>
-        <ActionForm action={createGoalAction}>
-          <input type="hidden" name="walletId" value={view.wallet.id} />
-          <input type="hidden" name="kind" value="earnings" />
-          <Stack gap="md" align="start">
-            <Field id="earnings-goal-name" label={t('nameLabel')} width="lg">
-              <Input
-                name="name"
-                required
-                defaultValue={view.wallet.goal ?? ''}
-                placeholder={t('namePlaceholder')}
-              />
-            </Field>
-            <Field id="earnings-goal-amount" label={t('amountLabel')} width="md">
-              <Input name="amount" inputMode="decimal" required />
-            </Field>
-            <Field id="earnings-goal-period" label={t('periodLabel')} width="md">
-              <NativeSelect name="period" defaultValue={EARNINGS_PERIODS[0]}>
-                {EARNINGS_PERIODS.map((period) => (
-                  <option key={period} value={period}>
-                    {t(period === 'monthly' ? 'periodMonthly' : 'periodYearly')}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Button type="submit">{t('create')}</Button>
-          </Stack>
-        </ActionForm>
-      </Section>
+      <ActionForm
+        action={createGoalAction}
+        panel={{
+          title: t('createEarningsTitle'),
+          description: t('createEarningsDescription'),
+          footer: (
+            <FormActions
+              cancel={
+                <Button type="reset" variant="outline">
+                  {t('cancel')}
+                </Button>
+              }
+            >
+              <Button type="submit">{t('create')}</Button>
+            </FormActions>
+          ),
+        }}
+      >
+        <input type="hidden" name="walletId" value={view.wallet.id} />
+        <input type="hidden" name="kind" value="earnings" />
+        <FormGrid>
+          <Field id="earnings-goal-name" label={t('nameLabel')}>
+            <Input
+              name="name"
+              required
+              defaultValue={view.wallet.goal ?? ''}
+              placeholder={t('namePlaceholder')}
+            />
+          </Field>
+          <Field id="earnings-goal-amount" label={t('amountLabel')}>
+            <Input name="amount" inputMode="decimal" required />
+          </Field>
+          <Field id="earnings-goal-period" label={t('periodLabel')}>
+            <NativeSelect name="period" defaultValue={EARNINGS_PERIODS[0]}>
+              {EARNINGS_PERIODS.map((period) => (
+                <option key={period} value={period}>
+                  {t(period === 'monthly' ? 'periodMonthly' : 'periodYearly')}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+        </FormGrid>
+      </ActionForm>
     </PortfolioFrame>
   );
 }

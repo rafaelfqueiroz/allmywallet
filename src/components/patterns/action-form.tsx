@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { useTranslations } from 'next-intl';
 import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { ErrorState } from '@/components/patterns/error-state';
+import { FormPanel } from '@/components/patterns/form-layout';
 import { Stack } from '@/components/layout/stack';
 
 /**
@@ -30,24 +31,49 @@ import { Stack } from '@/components/layout/stack';
  * The error region is `Stack`ed *above* the fields on purpose: a refusal below
  * a submit button, on a form long enough to scroll, is a refusal the user never
  * sees.
+ *
+ * **`panel` makes it a create or edit form** (SPEC-022 BR-022-37): the form
+ * wraps a `FormPanel` with that title, the refusal opens the panel's body, and
+ * `panel.footer` — the form's `FormActions` — sits inside the form, so its
+ * buttons submit it without JavaScript (DS-37). Without `panel` it is the bare
+ * form a table row's button or a one-button delete needs.
  */
 export function ActionForm({
   action,
+  panel,
   children,
   ...rest
 }: {
   readonly action: (state: ActionState, formData: FormData) => Promise<ActionState>;
+  readonly panel?: {
+    readonly title: React.ReactNode;
+    readonly description?: React.ReactNode;
+    readonly footer?: React.ReactNode;
+    readonly id?: string;
+    readonly className?: string;
+  };
   readonly children: React.ReactNode;
 } & Omit<React.ComponentProps<'form'>, 'action' | 'children'>) {
   const tErrors = useTranslations('errors');
   const [state, formAction] = useActionState(action, IDLE);
+  const alert = state.status === 'error' && (
+    <ErrorState title={tErrors(state.code, messageValues(state.context))} />
+  );
+
+  if (panel !== undefined) {
+    return (
+      <form action={formAction} {...rest}>
+        <FormPanel {...panel} alert={alert}>
+          {children}
+        </FormPanel>
+      </form>
+    );
+  }
 
   return (
     <form action={formAction} {...rest}>
       <Stack gap="sm">
-        {state.status === 'error' && (
-          <ErrorState title={tErrors(state.code, messageValues(state.context))} />
-        )}
+        {alert}
         {children}
       </Stack>
     </form>

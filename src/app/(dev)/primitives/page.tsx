@@ -8,6 +8,7 @@ import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard, StatCardSkeleton } from '@/components/patterns/stat-card';
 import { Money } from '@/components/patterns/money';
 import { Field } from '@/components/patterns/field';
+import { FormActions, FormGrid, FormPanel } from '@/components/patterns/form-layout';
 import { FileUpload } from '@/components/patterns/file-upload';
 import { RouteTabs } from '@/components/patterns/route-tabs';
 import { ScopeSelector } from '@/components/patterns/scope-selector';
@@ -236,6 +237,47 @@ export default async function PrimitivesPage() {
           </Field>
         </Grid>
       </Section>
+
+      {/* SPEC-022 BR-022-37 — the standard form, as the "Editar carteira" frame
+          draws it: two columns, a long field across both, and the footer's
+          order — destructive alone at the left, Cancelar then the primary at
+          the right. The visual baselines hold it in both themes. */}
+      <form>
+        <FormPanel
+          title={SAMPLE_WALLETS[0].name}
+          description={vocabulary('composicao')}
+          footer={
+            <FormActions
+              destructive={
+                <Button type="button" variant="destructive">
+                  {t('delete')}
+                </Button>
+              }
+              cancel={
+                <Button type="reset" variant="outline">
+                  {t('cancel')}
+                </Button>
+              }
+            >
+              <Button type="button">{t('save')}</Button>
+            </FormActions>
+          }
+        >
+          <FormGrid>
+            <Field id="form-name" label={vocabulary('patrimonio')}>
+              <Input defaultValue={SAMPLE_WALLETS[0].name} />
+            </Field>
+            <Field id="form-select" label={vocabulary('composicao')} hint={t('loading')}>
+              <NativeSelect defaultValue="long">
+                <option value="long">{SAMPLE_WALLETS[1].name}</option>
+              </NativeSelect>
+            </Field>
+            <Field id="form-long" label={vocabulary('rentabilidade')} span="full">
+              <Input defaultValue={SAMPLE_WALLETS[1].name} />
+            </Field>
+          </FormGrid>
+        </FormPanel>
+      </form>
 
       <Section title={vocabulary('proventos')}>
         <DemoTable />

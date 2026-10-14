@@ -9,7 +9,6 @@ import { ImportSection } from '@/app/(app)/settings/import/_components/ImportSec
 import { StalenessPrompt } from '@/app/(app)/settings/import/_components/StalenessPrompt';
 import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { PageShell } from '@/app/page-shell';
-import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Split } from '@/components/layout/split';
 
@@ -58,9 +57,11 @@ export default async function ImportSendPage() {
             in that order; the guide's lead differs for a first run, which has
             no file yet and reads it as instructions rather than reference. */}
         <Split side="even">
-          <Section title={t('uploadTitle')} description={t('uploadHint')}>
-            <UploadForm action={uploadExtractAction} />
-          </Section>
+          {/* SPEC-022 BR-022-37 — the standard form: Enviar at the footer's right. */}
+          <UploadForm
+            action={uploadExtractAction}
+            panel={{ title: t('uploadTitle'), description: t('uploadHint') }}
+          />
           <div id={IMPORT_GUIDE_ANCHOR}>
             <ExportGuide firstRun={freshness.firstRun} />
           </div>

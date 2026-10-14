@@ -19,6 +19,7 @@ const choice = {
 function Form({ action }: { action: (s: ActionState, f: FormData) => Promise<ActionState> }) {
   return (
     <AllocateForm
+      title="Atribuir ativo"
       action={action}
       idPrefix="assign"
       fixed={{ name: 'walletId', value: 'w1' }}
@@ -40,6 +41,7 @@ describe('AllocateForm — after a success', () => {
   function Queue({ defaultQuantity }: { defaultQuantity: string }) {
     return (
       <AllocateForm
+        title="Atribuir ativo"
         action={async () => IDLE}
         idPrefix="allocate-a1"
         fixed={{ name: 'assetId', value: 'a1' }}
@@ -136,5 +138,50 @@ describe('AllocateForm', () => {
   it('has no axe violations', async () => {
     const { container } = render(<Form action={async () => IDLE} />);
     expect(await audit(container)).toHaveNoViolations();
+  });
+});
+
+/**
+ * #248 review — Cancelar returns to the values the form loaded (DS-68), not
+ * to a refused submission.
+ */
+describe('AllocateForm — Cancelar after a refusal', () => {
+  it('restores the loaded choice and quantity', async () => {
+    const refuses = async (): Promise<ActionState> =>
+      failure({ code: WalletErrorCode.INVALID_ALLOCATION_QUANTITY, context: {} });
+    render(
+      <AllocateForm
+        title="Resolver PETR4"
+        action={refuses}
+        idPrefix="allocate-a1"
+        fixed={{ name: 'assetId', value: 'a1' }}
+        choice={{
+          name: 'walletId',
+          label: 'Atribuir a',
+          placeholder: 'Escolha uma carteira',
+          options: [{ value: 'w1', label: 'Aposentadoria' }],
+        }}
+        defaultQuantity="10"
+        submitLabel="Atribuir"
+      />,
+    );
+
+    await userEvent.selectOptions(screen.getByLabelText('Atribuir a'), 'w1');
+    const quantity = screen.getByLabelText('Quantidade');
+    await userEvent.clear(quantity);
+    await userEvent.type(quantity, '-1');
+    await userEvent.click(screen.getByRole('button', { name: 'Atribuir' }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Quantidade')).toHaveAttribute('aria-invalid', 'true'),
+    );
+    // The refused values survive the refusal — React's own form reset after
+    // the action must not count as Cancelar…
+    expect(screen.getByLabelText('Quantidade')).toHaveValue('-1');
+    expect(screen.getByLabelText('Atribuir a')).toHaveValue('w1');
+
+    // …and Cancelar puts back what was loaded.
+    await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
+    await waitFor(() => expect(screen.getByLabelText('Quantidade')).toHaveValue('10'));
+    expect(screen.getByLabelText('Atribuir a')).toHaveValue('');
   });
 });

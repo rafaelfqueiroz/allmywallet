@@ -9,10 +9,8 @@ import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { SharedErrorCode } from '@/core/shared/domain-error';
 import { Field } from '@/components/patterns/field';
 import { ErrorState } from '@/components/patterns/error-state';
-import { Section } from '@/components/patterns/section';
+import { FormActions, FormGrid, FormPanel } from '@/components/patterns/form-layout';
 import { Stack } from '@/components/layout/stack';
-import { Cluster } from '@/components/layout/cluster';
-import { Grid } from '@/components/layout/grid';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -213,32 +211,48 @@ export function TransactionForm({
 
   return (
     <form action={formAction} onSubmit={remember}>
-      <Stack gap="lg">
-        {refusal && errorField === undefined && <ErrorState title={message} />}
-
+      {/* SPEC-022 BR-022-37 — the standard form: one panel, its three groups
+          of fields two to a row, and Cancelar then the primary action at the
+          footer's right. */}
+      <FormPanel
+        title={t('panelTitle')}
+        alert={refusal && errorField === undefined ? <ErrorState title={message} /> : undefined}
+        footer={
+          <FormActions
+            cancel={
+              <Button asChild variant="outline">
+                <Link href="/transactions">{t('cancel')}</Link>
+              </Button>
+            }
+          >
+            <Button type="submit" disabled={pending}>
+              {pending ? t('submitting') : t(mode === 'create' ? 'submitCreate' : 'submitEdit')}
+            </Button>
+          </FormActions>
+        }
+      >
         {/* The fields re-mount per submission, so React's post-action reset
             lands on what was posted rather than on the page's original
-            values. The buttons stay outside, so the one just pressed keeps
-            focus through a refusal shown in the banner. */}
+            values. The buttons stay outside, in the footer, so the one just
+            pressed keeps focus through a refusal shown in the banner. */}
         <Stack gap="lg" key={submissions}>
           {values.transactionId !== undefined && (
             <input type="hidden" name="transactionId" value={values.transactionId} />
           )}
 
-          <Section title={t('assetSection')}>
-            <Grid cols={4}>
-              <Field id="transaction-asset" label={t('assetExisting')} width="full">
-                <NativeSelect name="assetId" defaultValue={draft.assetId}>
-                  <option value="">{t('assetExistingNone')}</option>
-                  {assetOptions.map((option) => (
-                    <option key={option.assetId} value={option.assetId}>
-                      {option.code} — {option.name}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
+          <FormGrid legend={t('assetSection')}>
+            <Field id="transaction-asset" label={t('assetExisting')} span="full">
+              <NativeSelect name="assetId" defaultValue={draft.assetId}>
+                <option value="">{t('assetExistingNone')}</option>
+                {assetOptions.map((option) => (
+                  <option key={option.assetId} value={option.assetId}>
+                    {option.code} — {option.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
 
-              {/*
+            {/*
               The spec's "a CDB absent from every B3 extract" criterion. The
               catalogue only ever contains what an extract or a quote sync put
               there, so an instrument nobody has imported has to be nameable
@@ -246,120 +260,98 @@ export function TransactionForm({
               this through the same `DrizzleAssetResolver` the import commit
               uses, so a manually entered PETR4 and an imported one are one row.
             */}
-              <Field
-                id="transaction-asset-code"
-                label={t('assetNewCode')}
-                hint={t('assetNewCodeHint')}
-                width="full"
-              >
-                <Input name="assetCode" autoComplete="off" defaultValue={draft.assetCode ?? ''} />
-              </Field>
-              <Field id="transaction-asset-name" label={t('assetNewName')} width="full">
-                <Input name="assetName" autoComplete="off" defaultValue={draft.assetName ?? ''} />
-              </Field>
-              <Field id="transaction-asset-class" label={t('assetNewClass')} width="full">
-                {/* #110: blank states nothing, so typing an existing code never
+            <Field
+              id="transaction-asset-code"
+              label={t('assetNewCode')}
+              hint={t('assetNewCodeHint')}
+            >
+              <Input name="assetCode" autoComplete="off" defaultValue={draft.assetCode ?? ''} />
+            </Field>
+            <Field id="transaction-asset-name" label={t('assetNewName')}>
+              <Input name="assetName" autoComplete="off" defaultValue={draft.assetName ?? ''} />
+            </Field>
+            <Field id="transaction-asset-class" label={t('assetNewClass')}>
+              {/* #110: blank states nothing, so typing an existing code never
                   overwrites the class Posição stated. */}
-                <NativeSelect name="assetClass" defaultValue={draft.assetClass ?? ''}>
-                  <option value="">{t('assetNewClassUnstated')}</option>
-                  {assetClasses.map((value) => (
-                    <option key={value} value={value}>
-                      {tAssetClass(value)}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-            </Grid>
-          </Section>
+              <NativeSelect name="assetClass" defaultValue={draft.assetClass ?? ''}>
+                <option value="">{t('assetNewClassUnstated')}</option>
+                {assetClasses.map((value) => (
+                  <option key={value} value={value}>
+                    {tAssetClass(value)}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+          </FormGrid>
 
-          <Section title={t('institutionSection')}>
-            <Grid cols={4}>
-              <Field id="transaction-institution" label={t('institutionExisting')} width="full">
-                <NativeSelect name="institutionId" defaultValue={draft.institutionId}>
-                  {/* BR-007-08: no institution is a real, distinct bucket — an
+          <FormGrid legend={t('institutionSection')}>
+            <Field id="transaction-institution" label={t('institutionExisting')}>
+              <NativeSelect name="institutionId" defaultValue={draft.institutionId}>
+                {/* BR-007-08: no institution is a real, distinct bucket — an
                     asset held directly — not "any institution". */}
-                  <option value="">{t('institutionExistingNone')}</option>
-                  {institutionOptions.map((option) => (
-                    <option key={option.institutionId} value={option.institutionId}>
-                      {option.name}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Field id="transaction-institution-name" label={t('institutionNew')} width="full">
-                <Input
-                  name="institutionName"
-                  autoComplete="off"
-                  defaultValue={draft.institutionName ?? ''}
-                />
-              </Field>
-            </Grid>
-          </Section>
+                <option value="">{t('institutionExistingNone')}</option>
+                {institutionOptions.map((option) => (
+                  <option key={option.institutionId} value={option.institutionId}>
+                    {option.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field id="transaction-institution-name" label={t('institutionNew')}>
+              <Input
+                name="institutionName"
+                autoComplete="off"
+                defaultValue={draft.institutionName ?? ''}
+              />
+            </Field>
+          </FormGrid>
 
-          <Section title={t('detailsSection')}>
-            <Grid cols={4}>
-              {/* BR-006-05: grouped conversion legs are never edited alone. */}
-              <Field id="transaction-type" label={t('type')} width="full">
-                <NativeSelect name="type" defaultValue={draft.type} required>
-                  {USER_EDITABLE_TRANSACTION_TYPES.map((value) => (
-                    <option key={value} value={value}>
-                      {tType(value)}
-                    </option>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Field
-                id="transaction-date"
-                label={t('tradeDate')}
-                width="full"
-                {...errorFor('tradeDate')}
-              >
-                <Input type="date" name="tradeDate" defaultValue={draft.tradeDate} required />
-              </Field>
+          <FormGrid legend={t('detailsSection')}>
+            {/* BR-006-05: grouped conversion legs are never edited alone. */}
+            <Field id="transaction-type" label={t('type')}>
+              <NativeSelect name="type" defaultValue={draft.type} required>
+                {USER_EDITABLE_TRANSACTION_TYPES.map((value) => (
+                  <option key={value} value={value}>
+                    {tType(value)}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field id="transaction-date" label={t('tradeDate')} {...errorFor('tradeDate')}>
+              <Input type="date" name="tradeDate" defaultValue={draft.tradeDate} required />
+            </Field>
 
-              {/*
+            {/*
               `inputMode="decimal"` on a text field rather than
               `type="number"`: a pt-BR keyboard produces `32,15`, which a
               number input refuses to submit at all. `lib/decimal-input.ts`
               reads both forms, and AR-06 keeps the value a string the whole
               way to `Money`/`Quantity`.
             */}
-              <Field
-                id="transaction-quantity"
-                label={t('quantity')}
-                width="full"
-                {...errorFor('quantity')}
-              >
-                <Input name="quantity" inputMode="decimal" defaultValue={draft.quantity} required />
-              </Field>
-              <Field
-                id="transaction-price"
-                label={t('unitPrice')}
-                hint={t('decimalHint')}
-                width="full"
-                {...errorFor('unitPrice')}
-              >
-                <Input
-                  name="unitPrice"
-                  inputMode="decimal"
-                  defaultValue={draft.unitPrice}
-                  required
-                />
-              </Field>
-              <Field id="transaction-fees" label={t('fees')} width="full" {...errorFor('fees')}>
-                <Input name="fees" inputMode="decimal" defaultValue={draft.fees} />
-              </Field>
-              {/* SPEC-007 BR-007-04 — split and grupamento only. */}
-              <Field
-                id="transaction-ratio"
-                label={t('ratio')}
-                hint={t('ratioHint')}
-                width="full"
-                {...errorFor('ratio')}
-              >
-                <Input name="ratio" inputMode="decimal" defaultValue={draft.ratio} />
-              </Field>
-              {/*
+            <Field id="transaction-quantity" label={t('quantity')} {...errorFor('quantity')}>
+              <Input name="quantity" inputMode="decimal" defaultValue={draft.quantity} required />
+            </Field>
+            <Field
+              id="transaction-price"
+              label={t('unitPrice')}
+              hint={t('decimalHint')}
+              {...errorFor('unitPrice')}
+            >
+              <Input name="unitPrice" inputMode="decimal" defaultValue={draft.unitPrice} required />
+            </Field>
+            <Field id="transaction-fees" label={t('fees')} {...errorFor('fees')}>
+              <Input name="fees" inputMode="decimal" defaultValue={draft.fees} />
+            </Field>
+            {/* SPEC-007 BR-007-04 — split and grupamento only. */}
+            <Field
+              id="transaction-ratio"
+              label={t('ratio')}
+              hint={t('ratioHint')}
+              {...errorFor('ratio')}
+            >
+              <Input name="ratio" inputMode="decimal" defaultValue={draft.ratio} />
+            </Field>
+            {/*
               SPEC-010 BR-010-17 / AC-010-15 — "a sale with a specified wallet
               reduces only that wallet". `applySell` has accepted a wallet
               since it was written and nothing ever passed one, so the rule
@@ -372,37 +364,26 @@ export function TransactionForm({
               holding the asset — the default, and the only honest reading of
               an unanswered question.
             */}
-              {walletOptions.length > 0 && (
-                <Field
-                  id="transaction-sold-from"
-                  label={t('soldFromWallet')}
-                  hint={t('soldFromWalletHint')}
-                  width="full"
-                >
-                  <NativeSelect name="soldFromWallet" defaultValue={draft.soldFromWallet ?? ''}>
-                    <option value="">{t('soldFromWalletProportional')}</option>
-                    {walletOptions.map((wallet) => (
-                      <option key={wallet.walletId} value={wallet.walletId}>
-                        {wallet.name}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </Field>
-              )}
-            </Grid>
-          </Section>
+            {walletOptions.length > 0 && (
+              <Field
+                id="transaction-sold-from"
+                label={t('soldFromWallet')}
+                hint={t('soldFromWalletHint')}
+                span="full"
+              >
+                <NativeSelect name="soldFromWallet" defaultValue={draft.soldFromWallet ?? ''}>
+                  <option value="">{t('soldFromWalletProportional')}</option>
+                  {walletOptions.map((wallet) => (
+                    <option key={wallet.walletId} value={wallet.walletId}>
+                      {wallet.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
+          </FormGrid>
         </Stack>
-
-        {/* The Configurações forms' order (#210): Cancelar, then the action. */}
-        <Cluster gap="sm" justify="end">
-          <Button asChild variant="outline">
-            <Link href="/transactions">{t('cancel')}</Link>
-          </Button>
-          <Button type="submit" disabled={pending}>
-            {pending ? t('submitting') : t(mode === 'create' ? 'submitCreate' : 'submitEdit')}
-          </Button>
-        </Cluster>
-      </Stack>
+      </FormPanel>
     </form>
   );
 }

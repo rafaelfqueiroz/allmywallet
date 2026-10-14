@@ -48,6 +48,7 @@ import { allocateAction } from '@/app/(app)/wallets/actions';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
 import { ActionForm } from '@/components/patterns/action-form';
+import { FormActions } from '@/components/patterns/form-layout';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
@@ -455,9 +456,23 @@ export default async function ImportBatchDetailPage({
             {t(`status.${batch.status}`)}
           </Badge>
         }
+        // SPEC-022 BR-022-37 — the footer's order: cancelling the import is
+        // destructive, alone at the left; confirming it is the primary action,
+        // at the right. Two forms, so neither posts the other's fields.
         footer={
           canCommit || canCancel ? (
-            <Cluster gap="sm">
+            <FormActions
+              destructive={
+                canCancel ? (
+                  <form action={cancelBatchAction}>
+                    <input type="hidden" name="batchId" value={batch.id} />
+                    <Button type="submit" variant="destructive">
+                      {t('cancel')}
+                    </Button>
+                  </form>
+                ) : undefined
+              }
+            >
               {canCommit && (
                 <form action={commitBatchAction}>
                   <input type="hidden" name="batchId" value={batch.id} />
@@ -479,15 +494,7 @@ export default async function ImportBatchDetailPage({
                   </Cluster>
                 </form>
               )}
-              {canCancel && (
-                <form action={cancelBatchAction}>
-                  <input type="hidden" name="batchId" value={batch.id} />
-                  <Button type="submit" variant="destructive">
-                    {t('cancel')}
-                  </Button>
-                </form>
-              )}
-            </Cluster>
+            </FormActions>
           ) : undefined
         }
       >

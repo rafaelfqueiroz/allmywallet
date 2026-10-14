@@ -148,8 +148,10 @@ test.describe('Configurações › Carteiras', () => {
     await expect(page.locator('main')).not.toContainText(/R\$\s*\d/);
 
     // Edit.
+    // Enter saves: Excluir carteira comes first in the footer but submits a form
+    // of its own, so it is not this form's default button (#238 review).
     await page.getByLabel('Nome', { exact: true }).fill('Reserva de emergência');
-    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+    await page.getByLabel('Nome', { exact: true }).press('Enter');
     await expect(page.getByRole('status').filter({ hasText: 'Alterações salvas.' })).toBeVisible();
     await expect(
       page.getByRole('heading', { level: 2, name: 'Reserva de emergência' }),
@@ -193,7 +195,10 @@ test.describe('Configurações › Carteiras', () => {
 
     // Delete (BR-010-07): back on the list, and the wallet is gone.
     await row.getByRole('link', { name: 'Reserva de emergência' }).click();
-    await page.getByRole('button', { name: 'Excluir carteira' }).click();
+    // SPEC-022 BR-022-37: Excluir sits in the edit form's footer and posts that
+    // form to its own action — a blank Nome does not stop it.
+    await page.getByLabel('Nome', { exact: true }).fill('');
+    await page.getByRole('button', { name: 'Excluir carteira', exact: true }).click();
     await expect(page).toHaveURL(/\/settings\/wallets$/);
     await expect(page.getByText('Você ainda não criou nenhuma carteira.')).toBeVisible();
   });

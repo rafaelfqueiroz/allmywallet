@@ -9,9 +9,17 @@ import { InfoTip } from '@/components/patterns/info-tip';
  * Named widths rather than `w-48` at the call site. Five different arbitrary
  * widths across two forms is how two date inputs end up 8px apart for no
  * reason — and DS-22 bars the literal from `src/app/` anyway.
+ *
+ * `width` is for a field in an **inline filter bar** only. Inside a
+ * `FormGrid` a field is as wide as its column, and a long one takes both with
+ * `span="full"` (SPEC-022 BR-022-37).
  */
 const fieldVariants = cva('flex flex-col gap-1', {
   variants: {
+    span: {
+      column: '',
+      full: 'col-span-full',
+    },
     width: {
       auto: '',
       xs: 'w-20',
@@ -21,7 +29,7 @@ const fieldVariants = cva('flex flex-col gap-1', {
       full: 'w-full',
     },
   },
-  defaultVariants: { width: 'auto' },
+  defaultVariants: { span: 'column', width: 'auto' },
 });
 
 /**
@@ -68,7 +76,7 @@ export type FieldProps = VariantProps<typeof fieldVariants> & {
   children: ReactElement<ControlProps>;
 };
 
-export function Field({ id, label, hint, error, width, className, children }: FieldProps) {
+export function Field({ id, label, hint, error, span, width, className, children }: FieldProps) {
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const describedBy = [hint ? hintId : null, error ? errorId : null].filter(Boolean).join(' ');
@@ -76,7 +84,7 @@ export function Field({ id, label, hint, error, width, className, children }: Fi
   const labelId = `${id}-label`;
 
   return (
-    <div data-slot="field" className={cn(fieldVariants({ width }), className)}>
+    <div data-slot="field" className={cn(fieldVariants({ span, width }), className)}>
       {/* One 20px line box whether or not the icon is present (BR-022-20): the
           icon's layout box is 20px, so only the label's own text can grow the
           row. `min-h` rather than `h`, so a label that wraps pushes the control

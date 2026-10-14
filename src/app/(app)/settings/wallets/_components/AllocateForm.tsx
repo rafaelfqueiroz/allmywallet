@@ -5,9 +5,8 @@ import { useTranslations } from 'next-intl';
 import { WalletErrorCode } from '@/core/wallets/errors';
 import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { ErrorState } from '@/components/patterns/error-state';
-import { Field, FieldAction } from '@/components/patterns/field';
-import { Cluster } from '@/components/layout/cluster';
-import { Stack } from '@/components/layout/stack';
+import { Field } from '@/components/patterns/field';
+import { FormActions, FormGrid, FormPanel } from '@/components/patterns/form-layout';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
@@ -30,6 +29,10 @@ import { NativeSelect } from '@/components/ui/native-select';
  * What was typed survives a refusal (React would otherwise reset the form to
  * its defaults), so correcting a number does not mean choosing again — and
  * only a refusal: after a success the form returns to the server's defaults.
+ *
+ * The standard form (SPEC-022 BR-022-37): its own panel, the choice beside
+ * Quantidade, and the primary action at the footer's right. `summary` is what
+ * the panel says before the fields — the queue's unassigned remainder.
  */
 export interface AllocateChoice {
   /** The form field the choice posts as: the wallet in the queue, the asset on a wallet's page. */
@@ -46,6 +49,11 @@ const QUANTITY_CODES: readonly string[] = [
 
 export function AllocateForm({
   action,
+  title,
+  description,
+  id,
+  className,
+  summary,
   idPrefix,
   fixed,
   choice,
@@ -54,6 +62,13 @@ export function AllocateForm({
   submitLabel,
 }: {
   readonly action: (state: ActionState, formData: FormData) => Promise<ActionState>;
+  readonly title: React.ReactNode;
+  readonly description?: React.ReactNode;
+  /** The panel's id, for a link that scrolls to it. */
+  readonly id?: string;
+  readonly className?: string;
+  /** Rendered above the fields. */
+  readonly summary?: React.ReactNode;
   /** Unique on the page: the queue has one form per asset. */
   readonly idPrefix: string;
   /** The half of the pair that is already decided, posted as a hidden field. */
@@ -70,6 +85,15 @@ export function AllocateForm({
   // The server action goes to the hook as is, so the form posts without
   // JavaScript (DS-37); what was sent is read in `onSubmit` (see `WalletForm`).
   const [state, formAction, pending] = useActionState(action, IDLE);
+  // Cancelar returns to what was loaded (DESIGN.md DS-68), not to a refused
+  // draft: the draft is dropped and the fields re-mount from the defaults. On
+  // the button, not the form's `onReset`: React resets the form itself after
+  // every action, refusals included, and that reset must keep the draft.
+  const [resets, setResets] = useState(0);
+  const cancel = () => {
+    setSubmitted(null);
+    setResets((count) => count + 1);
+  };
   const remember = (event: FormEvent<HTMLFormElement>) => {
     const formData = new FormData(event.currentTarget);
     setSubmitted({
@@ -90,11 +114,30 @@ export function AllocateForm({
 
   return (
     <form action={formAction} onSubmit={remember}>
-      <Stack gap="sm">
-        {refusal && !quantityRefused && <ErrorState title={message} />}
+      <FormPanel
+        title={title}
+        description={description}
+        {...(id !== undefined ? { id } : {})}
+        {...(className !== undefined ? { className } : {})}
+        alert={refusal && !quantityRefused ? <ErrorState title={message} /> : undefined}
+        footer={
+          <FormActions
+            cancel={
+              <Button type="reset" variant="outline" onClick={cancel}>
+                {t('cancel')}
+              </Button>
+            }
+          >
+            <Button type="submit" disabled={pending}>
+              {submitLabel}
+            </Button>
+          </FormActions>
+        }
+      >
         <input type="hidden" name={fixed.name} value={fixed.value} />
-        <Cluster gap="sm" align="start">
-          <Field id={`${idPrefix}-choice`} label={choice.label} width="md">
+        {summary}
+        <FormGrid key={resets}>
+          <Field id={`${idPrefix}-choice`} label={choice.label}>
             {/* `key`: a native select does not follow a changed `defaultValue`, so the
                 choice is remounted with the one that was submitted. */}
             <NativeSelect
@@ -114,19 +157,13 @@ export function AllocateForm({
           <Field
             id={`${idPrefix}-quantity`}
             label={t('assignQuantity')}
-            width="md"
             {...(quantityHint ? { hint: quantityHint } : {})}
             {...(quantityRefused ? { error: message } : {})}
           >
             <Input name="quantity" inputMode="decimal" defaultValue={draft.quantity} />
           </Field>
-          <FieldAction>
-            <Button type="submit" disabled={pending}>
-              {submitLabel}
-            </Button>
-          </FieldAction>
-        </Cluster>
-      </Stack>
+        </FormGrid>
+      </FormPanel>
     </form>
   );
 }

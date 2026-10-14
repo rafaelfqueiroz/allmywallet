@@ -2,15 +2,13 @@ import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { REGISTRY, type ConfigKey, type ParameterSurface } from '@/config/registry';
 import { loadParameters } from '@/app/parameter-data';
-import { saveParameterAction } from '@/app/parameter-actions';
-import { ParameterField, type ParameterControl } from '@/app/parameter-field';
-import { Section } from '@/components/patterns/section';
-import { List, ListItem } from '@/components/layout/list';
+import { saveParametersAction } from '@/app/parameter-actions';
+import { ParameterFields, type ParameterControl } from '@/app/parameter-field';
 
 /**
  * SPEC-022 BR-022-13 / DL-022-10 — the parameter-form pattern: one field per
- * user-settable registry key on `surface`, each a form of its own that saves
- * through `setConfigValue` (BR-002-03/04).
+ * user-settable registry key on `surface`, all in one standard form (BR-022-37)
+ * that saves the changed ones through `setConfigValue` (BR-002-03/04).
  *
  * Preferências renders `surface="preferences"`; each Configurações section
  * renders its own `settings.*` surface. Nothing here, and nothing on those
@@ -21,33 +19,37 @@ import { List, ListItem } from '@/components/layout/list';
  * The caller must be signed in — the page renders its own signed-out state,
  * because what a visitor is told differs from screen to screen.
  */
-export async function ParameterForm({ surface }: { surface: ParameterSurface }) {
+export async function ParameterForm({
+  surface,
+  title,
+  description,
+}: {
+  surface: ParameterSurface;
+  title: React.ReactNode;
+  description?: React.ReactNode;
+}) {
   const t = await getTranslations('parameters');
   const parameters = await loadParameters(surface);
 
   return (
-    <List gap="lg">
-      {parameters.map(({ key, value }) => (
-        <ListItem key={key} separated>
-          <ParameterField
-            id={key}
-            label={t(`keys.${key}.label` as Parameters<typeof t>[0])}
-            hint={t(`keys.${key}.description` as Parameters<typeof t>[0])}
-            invalidMessage={invalidMessage(key, t)}
-            control={controlFor(key, value, t)}
-            action={saveParameterAction.bind(null, key)}
-          />
-        </ListItem>
-      ))}
-    </List>
+    <ParameterFields
+      title={title}
+      description={description}
+      action={saveParametersAction.bind(null, surface)}
+      parameters={parameters.map(({ key, value }) => ({
+        key,
+        label: t(`keys.${key}.label` as Parameters<typeof t>[0]),
+        hint: t(`keys.${key}.description` as Parameters<typeof t>[0]),
+        invalidMessage: invalidMessage(key, t),
+        control: controlFor(key, value, t),
+      }))}
+    />
   );
 }
 
 /**
  * A Configurações section's parameters, under one heading, so the sections
- * cannot word it three ways. Until #210–#212 move each feature under
- * Configurações, it renders on the feature's current screen — the screen
- * those issues move.
+ * cannot word it three ways.
  */
 export async function ParameterSection({
   surface,
@@ -56,9 +58,11 @@ export async function ParameterSection({
 }) {
   const t = await getTranslations('parameters');
   return (
-    <Section title={t('sectionTitle')} description={t('sectionDescription')}>
-      <ParameterForm surface={surface} />
-    </Section>
+    <ParameterForm
+      surface={surface}
+      title={t('sectionTitle')}
+      description={t('sectionDescription')}
+    />
   );
 }
 

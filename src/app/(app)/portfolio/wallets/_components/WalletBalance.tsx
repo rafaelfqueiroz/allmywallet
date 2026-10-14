@@ -9,6 +9,7 @@ import { TARGET_FIELD_PREFIX } from '@/app/(app)/wallets/target-fields';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletBalance } from '@/app/(app)/wallets/balance-data';
 import { ActionForm } from '@/components/patterns/action-form';
+import { FormActions, FormGrid } from '@/components/patterns/form-layout';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Money } from '@/app/money';
@@ -284,64 +285,79 @@ export async function WalletBalance({
             />
           </Section>
 
-          <Section title={t('targetsTitle')} description={t('modeHint')}>
-            <ActionForm action={setWalletTargetsAction}>
-              <input type="hidden" name="walletId" value={balance.walletId} />
-              <Stack gap="md" align="start">
-                <Field id="target-mode" label={t('modeLabel')} width="md">
-                  <NativeSelect name="mode" defaultValue={balance.mode}>
-                    {TARGET_MODES.map((mode) => (
-                      <option key={mode} value={mode}>
-                        {t(
-                          mode === 'none'
-                            ? 'modeNone'
-                            : mode === 'equal_weight'
-                              ? 'modeEqualWeight'
-                              : 'modeManual',
-                        )}
-                      </option>
-                    ))}
-                  </NativeSelect>
+          {/* SPEC-022 BR-022-37 — the standard form: the mode and one short
+              field per asset, two to a row, the discard confirmation across
+              both columns, and Cancelar then Salvar at the footer's right. */}
+          <ActionForm
+            action={setWalletTargetsAction}
+            panel={{
+              title: t('targetsTitle'),
+              description: t('modeHint'),
+              footer: (
+                <FormActions
+                  cancel={
+                    <Button type="reset" variant="outline">
+                      {t('cancel')}
+                    </Button>
+                  }
+                >
+                  <Button type="submit">{t('save')}</Button>
+                </FormActions>
+              ),
+            }}
+          >
+            <input type="hidden" name="walletId" value={balance.walletId} />
+            <FormGrid>
+              <Field id="target-mode" label={t('modeLabel')}>
+                <NativeSelect name="mode" defaultValue={balance.mode}>
+                  {TARGET_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {t(
+                        mode === 'none'
+                          ? 'modeNone'
+                          : mode === 'equal_weight'
+                            ? 'modeEqualWeight'
+                            : 'modeManual',
+                      )}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+
+              {/*
+                Every targetable holding gets a field, always — including in
+                equal-weight mode, where the values are what `100 / n`
+                currently derives. Switching the select to Manual then starts
+                from what is on screen rather than from an empty form, and
+                BR-017-05's "stores nothing" is unaffected: these are only
+                read when the submitted mode is manual.
+              */}
+              {balance.rows.map((row) => (
+                <Field
+                  key={row.assetId}
+                  id={`${TARGET_FIELD_PREFIX}${row.assetId}`}
+                  label={t('targetPctLabel', { asset: labelFor(labels, row.assetId).code })}
+                >
+                  <Input
+                    name={`${TARGET_FIELD_PREFIX}${row.assetId}`}
+                    inputMode="decimal"
+                    defaultValue={formatPct(row.targetPct)}
+                  />
                 </Field>
+              ))}
 
-                {/*
-                  Every targetable holding gets a field, always — including in
-                  equal-weight mode, where the values are what `100 / n`
-                  currently derives. Switching the select to Manual then starts
-                  from what is on screen rather than from an empty form, and
-                  BR-017-05's "stores nothing" is unaffected: these are only
-                  read when the submitted mode is manual.
-                */}
-                {balance.rows.map((row) => (
-                  <Field
-                    key={row.assetId}
-                    id={`${TARGET_FIELD_PREFIX}${row.assetId}`}
-                    label={t('targetPctLabel', { asset: labelFor(labels, row.assetId).code })}
-                    width="xs"
-                  >
-                    <Input
-                      name={`${TARGET_FIELD_PREFIX}${row.assetId}`}
-                      inputMode="decimal"
-                      defaultValue={formatPct(row.targetPct)}
-                    />
-                  </Field>
-                ))}
-
-                {/* BR-017-08 / AC-5 — named, and only then discarded. */}
-                {balance.mode === 'manual' && (
-                  <Cluster gap="sm" align="center">
-                    <Checkbox id="confirm-discard" name="confirmDiscard" />
-                    <Label htmlFor="confirm-discard">{t('discardConfirm')}</Label>
-                    <Text as="span" size="xs" tone="muted">
-                      {t('discardWarning', { count: balance.rows.length })}
-                    </Text>
-                  </Cluster>
-                )}
-
-                <Button type="submit">{t('save')}</Button>
-              </Stack>
-            </ActionForm>
-          </Section>
+              {/* BR-017-08 / AC-5 — named, and only then discarded. */}
+              {balance.mode === 'manual' && (
+                <Cluster gap="sm" align="center" className="col-span-full">
+                  <Checkbox id="confirm-discard" name="confirmDiscard" />
+                  <Label htmlFor="confirm-discard">{t('discardConfirm')}</Label>
+                  <Text as="span" size="xs" tone="muted">
+                    {t('discardWarning', { count: balance.rows.length })}
+                  </Text>
+                </Cluster>
+              )}
+            </FormGrid>
+          </ActionForm>
         </>
       )}
 
