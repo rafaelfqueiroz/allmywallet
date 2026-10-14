@@ -1,6 +1,5 @@
 import type { BusinessDate } from '@/core/shared/clock';
 import { Money, sumMoney } from '@/core/shared/money';
-import type { AssetClass } from '@/core/quotes/ports';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import type { Grouping } from '@/core/reporting/ports';
 import { sharesOf } from '@/core/reporting/composition/breakdown';
@@ -204,13 +203,19 @@ export function stackedSeries(
   }
 
   /*
-   * Each bucket is its **closing snapshot**, as on the value line: the bands
-   * share the line's dates, and a class sold during the bucket — absent from
-   * the closing snapshot, which leaves out positions at zero — has no point
-   * there, because at the close it was not held. Taking each class's own last
-   * snapshot in the bucket instead dated a class sold mid-week to an earlier
-   * day than the others, and split one bucket into two rows of one class each
-   * (#245 review).
+   * Each bucket is its **closing snapshot**, as on the value line, and every
+   * band carries a point at **every** closing date — zero where its class was
+   * not held at the close. So the bands have exactly the line's dates:
+   *
+   *  - a class sold during the bucket is absent from the closing snapshot
+   *    (which leaves out positions at zero) and reads zero there. Taking each
+   *    class's own last snapshot in the bucket instead dated a class sold
+   *    mid-week to an earlier day than the others, and split one bucket into
+   *    two rows of one class each (#245 review);
+   *  - a bucket that closes with nothing held has an empty breakdown, and still
+   *    gets its date. Emitting points only for the classes present dropped that
+   *    close, and the chart joined the value before it straight to the next
+   *    purchase while the line went to zero (#247 review).
    *
    * `estimated` is OR-ed across the bucket, as `valueSeries` does (BR-013-07).
    */
@@ -222,19 +227,19 @@ export function stackedSeries(
     estimated.set(key, (estimated.get(key) ?? false) || snapshot.hasEstimates);
   }
 
-  const byClass = new Map<AssetClass, ValuePoint[]>();
-  for (const [key, snapshot] of closing) {
-    for (const [assetClass, value] of snapshot.byAssetClass) {
-      const points = byClass.get(assetClass) ?? [];
-      // Non-null: every key in `closing` was set in `estimated` alongside it.
-      points.push({ date: snapshot.date, value, estimated: estimated.get(key) as boolean });
-      byClass.set(assetClass, points);
-    }
-  }
+  // Every class held at any close, in the order first seen.
+  const classes = [
+    ...new Set([...closing.values()].flatMap((snapshot) => [...snapshot.byAssetClass.keys()])),
+  ];
 
-  const bands: StackedBand[] = [...byClass.entries()].map(([assetClass, points]) => ({
+  const bands: StackedBand[] = classes.map((assetClass) => ({
     key: assetClass,
-    points,
+    points: [...closing].map(([key, snapshot]) => ({
+      date: snapshot.date,
+      value: snapshot.byAssetClass.get(assetClass) ?? Money.zero(),
+      // Non-null: every key in `closing` was set in `estimated` alongside it.
+      estimated: estimated.get(key) as boolean,
+    })),
   }));
 
   return { kind: 'available', grouping, bands };
@@ -245,13 +250,12 @@ export function stackedSeries(
  * band carries, ascending, each with every band's value and its share of that
  * day's total.
  *
- * **The date union is the whole job.** A band only carries points for the
- * buckets whose closing snapshot held its class — a portfolio that bought its
- * first FII in March has an `fii` band starting in March, and one that sold it
- * in May has none after. A chart stacks by row, so every
- * row needs every band, and a missing one leaves a hole in the stack and the
- * bands stop summing to the total. Absent means zero here, and zero is the
- * truth: the class was not held that day.
+ * `stackedSeries` already gives every band a point at every closing date, so
+ * the union below is that one set of dates. It is still taken, and an absent
+ * point still reads zero, so bands from anywhere else cannot leave a hole in
+ * the stack: a chart stacks by row, and a missing band stops the bands
+ * summing to the total. Absent means zero here, and zero is the truth: the
+ * class was not held that day.
  *
  * Each day's shares are SPEC-015's `sharesOf` over that day's bands, so they
  * sum to exactly 100 % (BR-015-10) and are all `null` on a day worth nothing —

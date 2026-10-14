@@ -326,6 +326,70 @@ describe('stackedSeries (BR-013-05)', () => {
     expect(stackedTable(result.bands).map((day) => day.date)).toEqual(['2026-03-06']);
   });
 
+  /**
+   * #247 review — a full liquidation. Weekly:
+   *   Fri 02-27: stock 100            (week of 02-23)
+   *   Mon 03-02: stock 100
+   *   Fri 03-06: total 0, empty breakdown   ← that week's close: nothing held
+   *   Fri 03-13: stock 120            (week of 03-09)
+   * The value line has 02-27 → 100, 03-06 → 0, 03-13 → 120; the bands must
+   * have the same three dates, the middle one at zero, or the chart joins 100
+   * straight to 120 across the week the line drops to zero.
+   */
+  it('keeps a bucket that closes with nothing held, at zero', () => {
+    const snapshots = [
+      snapshot('2026-02-27', '100', '0', { byAssetClass: classes([['stock', '100']]) }),
+      snapshot('2026-03-02', '100', '0', { byAssetClass: classes([['stock', '100']]) }),
+      snapshot('2026-03-06', '0', '0', { byAssetClass: classes([]) }),
+      snapshot('2026-03-13', '120', '0', { byAssetClass: classes([['stock', '120']]) }),
+    ];
+    const line = valueSeries(snapshots, 'weekly');
+    const result = stackedSeries(snapshots, 'weekly', 'asset_class');
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    const stock = result.bands.map((band) =>
+      band.points.map((point) => [point.date, to8(point.value)]),
+    );
+    expect(stock).toEqual([
+      [
+        ['2026-02-27', '100.00000000'],
+        ['2026-03-06', '0.00000000'],
+        ['2026-03-13', '120.00000000'],
+      ],
+    ]);
+    // The bands' dates are the line's.
+    expect(stackedTable(result.bands).map((day) => day.date)).toEqual(
+      line.map((point) => point.date),
+    );
+    // A day worth nothing has no shares (BR-015-10's `sharesOf`).
+    expect(stackedTable(result.bands)[1]!.bands[0]!.share).toBeNull();
+  });
+
+  /** A class bought later reads zero at the closes before it, rather than having no point. */
+  it('gives every band a point at every close', () => {
+    const result = stackedSeries(
+      [
+        snapshot('2026-03-02', '100', '0', { byAssetClass: classes([['stock', '100']]) }),
+        snapshot('2026-03-03', '150', '0', {
+          byAssetClass: classes([
+            ['stock', '100'],
+            ['fii', '50'],
+          ]),
+        }),
+      ],
+      'daily',
+      'asset_class',
+    );
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    expect(
+      result.bands.map((band) => [band.key, band.points.map((point) => to8(point.value))]),
+    ).toEqual([
+      ['stock', ['100.00000000', '100.00000000']],
+      ['fii', ['0.00000000', '50.00000000']],
+    ]);
+  });
+
   it('marks a band estimated when any snapshot in its bucket was', () => {
     const result = stackedSeries(
       [
