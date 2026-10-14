@@ -112,7 +112,13 @@ export function AllocateForm({
         {...(className !== undefined ? { className } : {})}
         alert={refusal && !quantityRefused ? <ErrorState title={message} /> : undefined}
         footer={
-          <FormActions>
+          <FormActions
+            cancel={
+              <Button type="reset" variant="outline">
+                {t('cancel')}
+              </Button>
+            }
+          >
             <Button type="submit" disabled={pending}>
               {submitLabel}
             </Button>

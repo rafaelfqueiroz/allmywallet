@@ -12,9 +12,9 @@ import { dismissOnboarding } from './support/onboarding';
  * the form posts natively, so it works with JavaScript off. The wallet forms'
  * own no-script journey is in settings-wallets.spec.ts; the import's in
  * import.spec.ts. This covers the rest — including the two mechanisms the
- * layout introduced: Excluir posting the edit form to another action
- * (`formAction`, the wallet) or another form (`form=`, a goal), and a surface's
- * parameters saved by one form.
+ * layout introduced: Excluir in an edit form's footer submitting a form of its
+ * own (`form=`, a wallet and a goal), and a surface's parameters saved by one
+ * form.
  */
 
 const MIGRATION_URL =
@@ -35,6 +35,21 @@ async function seedWallet(userId: string, name: string): Promise<string> {
   }
   return walletId;
 }
+
+async function query<T extends Record<string, unknown>>(
+  sql: string,
+  params: readonly unknown[],
+): Promise<T[]> {
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    return (await pool.query<T>(sql, params as unknown[])).rows;
+  } finally {
+    await pool.end();
+  }
+}
+
+const assetIdOf = async (code: string) =>
+  (await query<{ id: string }>(`SELECT id FROM assets WHERE code = $1`, [code]))[0]!.id;
 
 /** A page with JavaScript off, carrying the signed-in session. */
 async function withoutScript(
@@ -132,6 +147,14 @@ test.describe('BR-022-37 — the standard form posts without JavaScript', () => 
       });
       await page.goto('/settings/watch');
       await expect(page.getByRole('link', { name: `Criar regra de ${code}` })).toHaveCount(0);
+
+      // Edit it: the row's menu needs a script, so the editor is opened by URL.
+      const assetId = await assetIdOf(code!);
+      await page.goto(`/settings/watch?rule=${assetId}`);
+      await page.getByLabel('Limite inferior (R$)').fill('21,00');
+      await page.getByRole('button', { name: 'Salvar alterações' }).click();
+      await page.goto(`/settings/watch?rule=${assetId}`);
+      await expect(page.getByLabel('Limite inferior (R$)')).toHaveValue(/^21(\.0+)?$/);
     });
   });
 
@@ -171,7 +194,7 @@ test.describe('BR-022-37 — the standard form posts without JavaScript', () => 
     });
   });
 
-  test('Carteiras: Excluir carteira posts the edit form to its own action', async ({
+  test('Carteiras: Excluir carteira submits its own form', async ({
     browser,
     baseURL,
     signedIn,
@@ -181,11 +204,124 @@ test.describe('BR-022-37 — the standard form posts without JavaScript', () => 
 
     await withoutScript(browser, baseURL, signedIn.page, async (page) => {
       await page.goto(`/settings/wallets/${walletId}`);
-      // A blank Nome does not block it (`formNoValidate`).
+      // Its own form holds no Nome, so a blank one does not block it.
       await page.getByLabel('Nome', { exact: true }).fill('');
       await page.getByRole('button', { name: 'Excluir carteira', exact: true }).click();
       await expect(page).toHaveURL(/\/settings\/wallets$/);
       await expect(page.getByText('Excluir sem script')).toHaveCount(0);
+    });
+  });
+
+  test('Configurações › Parâmetros: a section’s parameters save', async ({
+    browser,
+    baseURL,
+    signedIn,
+  }) => {
+    await withoutScript(browser, baseURL, signedIn.page, async (page) => {
+      await page.goto('/settings/wallets/parameters');
+      await page.getByLabel('Tolerância de desvio (p.p.)', { exact: true }).fill('2.5');
+      await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+      await page.goto('/settings/wallets/parameters');
+      await expect(page.getByLabel('Tolerância de desvio (p.p.)', { exact: true })).toHaveValue(
+        '2.5',
+      );
+    });
+  });
+
+  test('Atribuir ativos: a standing rule from the queue', async ({
+    browser,
+    baseURL,
+    signedIn,
+  }) => {
+    const [code] = await seedHoldings(signedIn.userId, [
+      { code: 'NJSR', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedWallet(signedIn.userId, 'Regra sem script');
+    await dismissOnboarding(signedIn.userId);
+
+    await withoutScript(browser, baseURL, signedIn.page, async (page) => {
+      await page.goto(`/settings/wallets/assign?resolve=${await assetIdOf(code!)}`);
+      const panel = page
+        .locator('section')
+        .filter({ has: page.getByRole('heading', { name: /^Regra permanente para / }) });
+      await panel
+        .getByLabel('Carteira das próximas compras', { exact: true })
+        .selectOption({ label: 'Regra sem script' });
+      await panel.getByRole('button', { name: 'Definir regra' }).click();
+      // The rules list renders only once a rule exists (BR-010-14).
+      await expect(
+        page.getByRole('heading', { name: 'Regra permanente', exact: true }),
+      ).toBeVisible();
+    });
+  });
+
+  test('Carteiras › Balanceamento: the targets save', async ({ browser, baseURL, signedIn }) => {
+    const [code] = await seedHoldings(signedIn.userId, [
+      { code: 'NJSB', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    const walletId = await seedWallet(signedIn.userId, 'Metas sem script');
+    await query(
+      `INSERT INTO wallet_allocations (id, user_id, wallet_id, asset_id, quantity, cost_basis_at_allocation)
+       VALUES ($1, $2, $3, $4, 10, 200)`,
+      [randomUUID(), signedIn.userId, walletId, await assetIdOf(code!)],
+    );
+    await dismissOnboarding(signedIn.userId);
+
+    await withoutScript(browser, baseURL, signedIn.page, async (page) => {
+      await page.goto(`/portfolio/wallets?wallet=${walletId}`);
+      await page.getByLabel('Modo', { exact: true }).selectOption({ label: 'Peso igual' });
+      await page.getByRole('button', { name: 'Salvar metas' }).click();
+      await page.goto(`/portfolio/wallets?wallet=${walletId}`);
+      await expect(page.getByLabel('Modo', { exact: true })).toHaveValue('equal_weight');
+    });
+  });
+
+  test('Transações: create and then edit an asset conversion', async ({
+    browser,
+    baseURL,
+    signedIn,
+  }) => {
+    const suffix = randomUUID().slice(0, 6).toUpperCase();
+    const [from, to] = [`NJSFROM${suffix}`, `NJSTO${suffix}`];
+
+    await withoutScript(browser, baseURL, signedIn.page, async (page) => {
+      // Two assets with a history, through the form itself.
+      for (const [code, date] of [
+        [from, '2026-03-02'],
+        [to, '2026-03-03'],
+      ] as const) {
+        await page.goto('/transactions/new');
+        await page.getByLabel('Ou informe um código novo', { exact: true }).fill(code);
+        await page.getByLabel('Nome do ativo').fill(`Ativo ${code}`);
+        await page.getByLabel('Tipo').selectOption('buy');
+        await page.getByLabel('Data da operação').fill(date);
+        await page.getByLabel('Quantidade').fill('10');
+        await page.getByLabel('Preço unitário', { exact: true }).fill('10,00');
+        await page.getByRole('button', { name: 'Registrar transação' }).click();
+        await expect(page).toHaveURL(/\/transactions$/);
+      }
+
+      await page.goto('/transactions/conversions/new');
+      await page
+        .getByLabel('Ativo de origem', { exact: true })
+        .selectOption({ label: `${from} · Ativo ${from}` });
+      await page
+        .getByLabel('Ativo de destino', { exact: true })
+        .selectOption({ label: `${to} · Ativo ${to}` });
+      await page.getByLabel('Data da conversão', { exact: true }).fill('2026-03-10');
+      await page.getByLabel('Quantidade que sai', { exact: true }).fill('10');
+      await page.getByLabel('Quantidade que entra', { exact: true }).fill('5');
+      await page.getByLabel('Custo transferido', { exact: true }).fill('100');
+      await page.getByRole('button', { name: 'Registrar conversão' }).click();
+      await expect(page).toHaveURL(/\/transactions$/);
+
+      const [leg] = await query<{ id: string }>(
+        `SELECT id FROM transactions WHERE user_id = $1 AND conversion_group_id IS NOT NULL LIMIT 1`,
+        [signedIn.userId],
+      );
+      await page.goto(`/transactions/${leg!.id}/edit`);
+      await page.getByRole('button', { name: 'Salvar conversão' }).click();
+      await expect(page).toHaveURL(/\/transactions$/);
     });
   });
 });

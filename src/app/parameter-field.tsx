@@ -14,6 +14,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Text } from '@/components/ui/text';
 import type { SaveParametersState } from '@/app/parameter-actions';
+import { loadedFieldName } from '@/app/parameter-names';
 
 /**
  * The control a registry key renders as, worked out on the server from its
@@ -75,10 +76,7 @@ export function ParameterFields({
   readonly title: React.ReactNode;
   readonly description?: React.ReactNode;
   readonly parameters: readonly ParameterEntry[];
-  readonly action: (
-    state: SaveParametersState,
-    formData: FormData,
-  ) => Promise<SaveParametersState>;
+  readonly action: (state: SaveParametersState, formData: FormData) => Promise<SaveParametersState>;
 }) {
   const t = useTranslations('parameters');
   // The server action goes to the hook as is, so the form posts without
@@ -92,13 +90,21 @@ export function ParameterFields({
     const data = new FormData(event.currentTarget);
     setPosted((previous) => ({ count: previous.count + 1, data }));
   };
-  // Only a refusal keeps the posted values: after a save the server's own,
-  // now equal to them, are the defaults again.
-  const draft = state.status === 'error' ? posted.data : null;
+  // While a save is pending and after a refusal the fields show what was
+  // posted — a native select does not follow a changed default, so they
+  // re-mount on each submission. After a save the server's own values, now
+  // equal to them, are the defaults again, so a change made elsewhere since
+  // (the eye toggle's `ui.hide_values`) shows here rather than a stale draft.
+  const draft = pending || state.status === 'error' ? posted.data : null;
   const invalid = new Set(state.status === 'error' ? (state.invalid ?? []) : []);
 
   return (
-    <form action={formAction} onSubmit={remember}>
+    <form
+      action={formAction}
+      onSubmit={remember}
+      // Cancelar: back to what was loaded, not to a refused draft.
+      onReset={() => setPosted((previous) => ({ count: previous.count + 1, data: null }))}
+    >
       <FormPanel
         title={title}
         description={description}
@@ -121,19 +127,23 @@ export function ParameterFields({
           </FormActions>
         }
       >
+        {/* What each field showed when the form loaded: only a key the user
+            changed is written, so a save here cannot undo a change made
+            elsewhere since (#238 review). */}
+        {parameters.map(({ key, control }) => (
+          <input
+            key={key}
+            type="hidden"
+            name={loadedFieldName(key)}
+            value={JSON.stringify(control.value ?? null)}
+          />
+        ))}
         <FormGrid key={posted.count}>
           {parameters.map(({ key, label, hint, invalidMessage, control }) => {
             const error = invalid.has(key) ? invalidMessage : undefined;
             const value = draft === null ? control : withDraft(control, key, draft);
             return value.kind === 'choices' ? (
-              <Choices
-                key={key}
-                id={key}
-                label={label}
-                hint={hint}
-                error={error}
-                control={value}
-              />
+              <Choices key={key} id={key} label={label} hint={hint} error={error} control={value} />
             ) : (
               <Field key={key} id={key} label={label} hint={hint} error={error}>
                 <SingleControl name={key} control={value} />
@@ -199,13 +209,7 @@ function SingleControl({
    * and the refusal renders under the field with the range, in pt-BR.
    */
   return (
-    <Input
-      {...fieldProps}
-      name={name}
-      type="number"
-      step="any"
-      defaultValue={control.value}
-    />
+    <Input {...fieldProps} name={name} type="number" step="any" defaultValue={control.value} />
   );
 }
 
@@ -229,22 +233,22 @@ function Choices({
   return (
     <div className="col-span-full">
       <FieldGroup id={id} legend={label} hint={hint} error={error}>
-      <Cluster gap="md">
-        {control.options.map((option) => (
-          <Label
-            key={option.value}
-            htmlFor={`${id}-${option.value}`}
-            className="text-sm font-normal"
-          >
-            <Checkbox
-              id={`${id}-${option.value}`}
-              name={id}
-              value={option.value}
-              defaultChecked={control.value.includes(option.value)}
-            />
-            {option.label}
-          </Label>
-        ))}
+        <Cluster gap="md">
+          {control.options.map((option) => (
+            <Label
+              key={option.value}
+              htmlFor={`${id}-${option.value}`}
+              className="text-sm font-normal"
+            >
+              <Checkbox
+                id={`${id}-${option.value}`}
+                name={id}
+                value={option.value}
+                defaultChecked={control.value.includes(option.value)}
+              />
+              {option.label}
+            </Label>
+          ))}
         </Cluster>
       </FieldGroup>
     </div>

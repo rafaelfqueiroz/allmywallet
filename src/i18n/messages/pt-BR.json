@@ -1545,7 +1545,8 @@
     "targetPctLabel": "Meta de {asset} (%)",
     "noAdviceNote": "Estes números são a distância até a meta que você definiu, calculada sobre um preço já exibido. Não são uma sugestão de operação.",
     "noun": "ativos",
-    "filterPlaceholder": "Buscar ativo"
+    "filterPlaceholder": "Buscar ativo",
+    "cancel": "Cancelar"
   },
   "objetivos": {
     "title": "Objetivos",
@@ -1625,7 +1626,8 @@
         "yearToDateAverage": "Média acumulada",
         "notElapsed": "Ainda não ocorreu"
       }
-    }
+    },
+    "cancel": "Cancelar"
   },
   "email": {
     "opportunity": {
@@ -1825,7 +1827,8 @@
     },
     "rateLabel": "Taxa contratada",
     "rateHint": "Por exemplo, 110 para 110% do CDI, ou 6 para IPCA + 6% a.a.",
-    "submit": "Salvar taxa"
+    "submit": "Salvar taxa",
+    "cancel": "Cancelar"
   },
   "dataTable": {
     "emptyTitle": "Nenhum registro por aqui",

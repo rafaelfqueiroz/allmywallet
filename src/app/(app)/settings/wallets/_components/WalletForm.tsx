@@ -41,12 +41,15 @@ import { Text } from '@/components/ui/text';
  * both columns, and a footer with Excluir carteira alone at the left and
  * Cancelar, then the primary action, at the right.
  *
- * **Excluir carteira posts this same form to another action** — the button's
- * `formAction` — so it sits in the footer the frame draws without a second
- * `<form>` nested in the first, which HTML does not allow. Its `formNoValidate`
- * lets a wallet be deleted while Nome is blank. BR-010-07's consequences —
- * the assignments return to Não atribuído, no transaction is touched — are its
- * instructions, behind the info icon beside it and in its description.
+ * **Excluir carteira submits a form of its own**, rendered after this one, by
+ * the button's `form` attribute — so it sits in the footer the frame draws
+ * without a `<form>` nested in another, which HTML does not allow. It must not
+ * submit the edit form itself (`formAction`): it comes first in the footer, so
+ * it would be that form's default button, and Enter in Nome would delete the
+ * wallet (#238 review). Its own form holds only the wallet id, so a blank Nome
+ * does not block it. BR-010-07's consequences — the assignments return to Não
+ * atribuído, no transaction is touched — are its instructions, behind the
+ * info icon beside it and in its description.
  */
 export interface WalletFormValues {
   readonly name: string;
@@ -109,8 +112,12 @@ export function WalletForm({
   const [state, formAction, pending] = useActionState(action, IDLE);
   // A hook cannot be conditional, so a create form holds an inert one.
   const [deleteState, deleteFormAction, deleting] = useActionState(deleteAction ?? NO_DELETE, IDLE);
+  // Which of the two forms spoke last: only its outcome is on screen, so an old
+  // delete refusal neither sits beside a later save nor hides its refusal.
+  const [last, setLast] = useState<'save' | 'delete'>('save');
   const remember = (event: FormEvent<HTMLFormElement>) => {
     const formData = new FormData(event.currentTarget);
+    setLast('save');
     setSubmissions((count) => count + 1);
     setDraft({
       name: String(formData.get('name') ?? ''),
@@ -120,103 +127,110 @@ export function WalletForm({
     });
   };
 
-  const refusal = state.status === 'error' ? state : null;
+  const refusal = last === 'save' && state.status === 'error' ? state : null;
   const message = refusal ? tErrors(refusal.code, messageValues(refusal.context)) : undefined;
   const nameRefused = refusal?.code === WalletErrorCode.INVALID_NAME;
   const deleteRefusal =
-    deleteState.status === 'error'
+    last === 'delete' && deleteState.status === 'error'
       ? tErrors(deleteState.code, messageValues(deleteState.context))
       : undefined;
   const deleteHintId = `${idPrefix}-delete-hint`;
+  const deleteFormId = `${idPrefix}-delete-form`;
 
   return (
-    <form action={formAction} onSubmit={remember}>
-      <FormPanel
-        title={title}
-        description={description}
-        actions={headerActions}
-        alert={
-          (refusal && !nameRefused) || deleteRefusal !== undefined ? (
-            <ErrorState title={deleteRefusal ?? message} />
-          ) : undefined
-        }
-        footer={
-          <FormActions
-            destructive={
-              deleteAction !== undefined && (
-                <>
-                  <Button
-                    id={`${idPrefix}-delete`}
-                    type="submit"
-                    variant="destructive"
-                    formAction={deleteFormAction}
-                    formNoValidate
-                    disabled={deleting}
-                    aria-describedby={deleteHintId}
-                  >
-                    {t('delete')}
-                  </Button>
-                  <InfoTip
-                    id={`${idPrefix}-delete-info`}
-                    label={t('delete')}
-                    labelledBy={`${idPrefix}-delete`}
-                  >
-                    {t('deleteDescription')}
-                  </InfoTip>
-                  <span id={deleteHintId} hidden>
-                    {t('deleteDescription')}
-                  </span>
-                </>
-              )
-            }
-            status={
-              <Text as="span" size="xs" tone="muted" role="status">
-                {state.status === 'saved' ? t('saved') : ''}
-              </Text>
-            }
-            cancel={
-              <Button asChild variant="outline">
-                <Link href={cancelHref}>{t('cancel')}</Link>
+    <>
+      <form action={formAction} onSubmit={remember}>
+        <FormPanel
+          title={title}
+          description={description}
+          actions={headerActions}
+          alert={
+            (refusal && !nameRefused) || deleteRefusal !== undefined ? (
+              <ErrorState title={deleteRefusal ?? message} />
+            ) : undefined
+          }
+          footer={
+            <FormActions
+              destructive={
+                deleteAction !== undefined && (
+                  <>
+                    <Button
+                      id={`${idPrefix}-delete`}
+                      type="submit"
+                      form={deleteFormId}
+                      variant="destructive"
+                      disabled={deleting}
+                      aria-describedby={deleteHintId}
+                    >
+                      {t('delete')}
+                    </Button>
+                    <InfoTip
+                      id={`${idPrefix}-delete-info`}
+                      label={t('delete')}
+                      labelledBy={`${idPrefix}-delete`}
+                    >
+                      {t('deleteDescription')}
+                    </InfoTip>
+                    <span id={deleteHintId} hidden>
+                      {t('deleteDescription')}
+                    </span>
+                  </>
+                )
+              }
+              status={
+                <Text as="span" size="xs" tone="muted" role="status">
+                  {last === 'save' && state.status === 'saved' ? t('saved') : ''}
+                </Text>
+              }
+              cancel={
+                <Button asChild variant="outline">
+                  <Link href={cancelHref}>{t('cancel')}</Link>
+                </Button>
+              }
+            >
+              <Button type="submit" disabled={pending}>
+                {submitLabel}
               </Button>
-            }
-          >
-            <Button type="submit" disabled={pending}>
-              {submitLabel}
-            </Button>
-          </FormActions>
-        }
-      >
-        {walletId !== undefined && <input type="hidden" name="walletId" value={walletId} />}
+            </FormActions>
+          }
+        >
+          {walletId !== undefined && <input type="hidden" name="walletId" value={walletId} />}
 
-        <FormGrid>
-          <Field
-            id={`${idPrefix}-name`}
-            label={t('nameLabel')}
-            {...(nameRefused ? { error: message } : {})}
-          >
-            <Input
-              name="name"
-              required
-              defaultValue={draft.name}
-              placeholder={t('namePlaceholder')}
-            />
-          </Field>
-          <Field id={`${idPrefix}-color`} label={t('colorLabel')}>
-            <ColorInput
-              key={submissions}
-              name="color"
-              defaultValue={draft.color}
-              noneLabel={t('colorNone')}
-            />
-          </Field>
-          <Field id={`${idPrefix}-description`} label={t('descriptionLabel')} span="full">
-            <Input name="description" defaultValue={draft.description} />
-          </Field>
-          <Field id={`${idPrefix}-goal`} label={t('goalLabel')} hint={t('goalHint')} span="full">
-            <Input name="goal" defaultValue={draft.goal} />
-          </Field>
-        </FormGrid>
-      </FormPanel>
-    </form>
+          <FormGrid>
+            <Field
+              id={`${idPrefix}-name`}
+              label={t('nameLabel')}
+              {...(nameRefused ? { error: message } : {})}
+            >
+              <Input
+                name="name"
+                required
+                defaultValue={draft.name}
+                placeholder={t('namePlaceholder')}
+              />
+            </Field>
+            <Field id={`${idPrefix}-color`} label={t('colorLabel')}>
+              <ColorInput
+                key={submissions}
+                name="color"
+                defaultValue={draft.color}
+                noneLabel={t('colorNone')}
+              />
+            </Field>
+            <Field id={`${idPrefix}-description`} label={t('descriptionLabel')} span="full">
+              <Input name="description" defaultValue={draft.description} />
+            </Field>
+            <Field id={`${idPrefix}-goal`} label={t('goalLabel')} hint={t('goalHint')} span="full">
+              <Input name="goal" defaultValue={draft.goal} />
+            </Field>
+          </FormGrid>
+        </FormPanel>
+      </form>
+      {deleteAction !== undefined && walletId !== undefined && (
+        <form id={deleteFormId} action={deleteFormAction} onSubmit={() => setLast('delete')}>
+          <input type="hidden" name="walletId" value={walletId} />
+        </form>
+      )}
+    </>
   );
 }

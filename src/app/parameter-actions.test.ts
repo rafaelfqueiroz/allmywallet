@@ -124,9 +124,30 @@ describe('saveParameters — one form per surface (BR-022-37)', () => {
 
     expect(state).toEqual({ status: 'error', invalid: ['ui.theme'] });
     const shouldRollback = vi.mocked(withTenantRollbackOn).mock.calls.at(-1)![2];
-    expect(shouldRollback(state as never)).toBe(true);
-    expect(shouldRollback({ status: 'saved' } as never)).toBe(false);
+    expect(shouldRollback({ status: 'refused', invalid: ['ui.theme'] } as never)).toBe(true);
+    expect(shouldRollback({ status: 'saved', written: [] } as never)).toBe(false);
     expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  // #238 review: the eye toggle writes `ui.hide_values` on every page. A
+  // Preferências form loaded before it must not undo it on its next save.
+  it('leaves alone a key the user did not change since the form loaded', async () => {
+    vi.mocked(getEffectiveConfig).mockResolvedValue(
+      EFFECTIVE.map((entry) =>
+        entry.key === 'ui.hide_values' ? { ...entry, value: true } : entry,
+      ) as never,
+    );
+    const data = preferences({ 'ui.theme': 'dark' });
+    data.set('loaded:ui.hide_values', 'false');
+    data.set('loaded:ui.theme', '"system"');
+
+    await saveParameters('preferences', data);
+
+    expect(setConfigValue).toHaveBeenCalledTimes(1);
+    expect(setConfigValue).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ key: 'ui.theme', value: 'dark' }),
+    );
   });
 
   it('reads only the posted surface’s keys, and refuses an unknown surface', async () => {

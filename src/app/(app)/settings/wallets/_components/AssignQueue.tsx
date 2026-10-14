@@ -293,7 +293,13 @@ export async function AssignQueue({
               title: t('standingRuleFor', { asset: assetName(resolving.assetId) }),
               description: t('standingRuleDescription'),
               footer: (
-                <FormActions>
+                <FormActions
+                  cancel={
+                    <Button type="reset" variant="outline">
+                      {t('cancel')}
+                    </Button>
+                  }
+                >
                   <Button type="submit">{t('standingRuleSet')}</Button>
                 </FormActions>
               ),

@@ -206,7 +206,13 @@ export default async function PortfolioGoalsPage({
           title: t('createGrowthTitle'),
           description: t('createGrowthDescription'),
           footer: (
-            <FormActions>
+            <FormActions
+              cancel={
+                <Button type="reset" variant="outline">
+                  {t('cancel')}
+                </Button>
+              }
+            >
               <Button type="submit">{t('create')}</Button>
             </FormActions>
           ),
@@ -244,7 +250,13 @@ export default async function PortfolioGoalsPage({
           title: t('createEarningsTitle'),
           description: t('createEarningsDescription'),
           footer: (
-            <FormActions>
+            <FormActions
+              cancel={
+                <Button type="reset" variant="outline">
+                  {t('cancel')}
+                </Button>
+              }
+            >
               <Button type="submit">{t('create')}</Button>
             </FormActions>
           ),

@@ -285,16 +285,22 @@ export async function WalletBalance({
             />
           </Section>
 
-          {/* SPEC-022 BR-022-37 — the standard form: the mode, then one short
-              field per asset two to a row, the discard confirmation across
-              both columns, and Salvar at the footer's right. */}
+          {/* SPEC-022 BR-022-37 — the standard form: the mode and one short
+              field per asset, two to a row, the discard confirmation across
+              both columns, and Cancelar then Salvar at the footer's right. */}
           <ActionForm
             action={setWalletTargetsAction}
             panel={{
               title: t('targetsTitle'),
               description: t('modeHint'),
               footer: (
-                <FormActions>
+                <FormActions
+                  cancel={
+                    <Button type="reset" variant="outline">
+                      {t('cancel')}
+                    </Button>
+                  }
+                >
                   <Button type="submit">{t('save')}</Button>
                 </FormActions>
               ),
@@ -302,7 +308,7 @@ export async function WalletBalance({
           >
             <input type="hidden" name="walletId" value={balance.walletId} />
             <FormGrid>
-              <Field id="target-mode" label={t('modeLabel')} span="full">
+              <Field id="target-mode" label={t('modeLabel')}>
                 <NativeSelect name="mode" defaultValue={balance.mode}>
                   {TARGET_MODES.map((mode) => (
                     <option key={mode} value={mode}>

@@ -2,18 +2,16 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { isErr } from '@/core/shared/result';
 import { db } from '@/db/client';
-import { getEffectiveConfig } from '@/config/effective';
 import {
   PARAMETER_SURFACES,
   REGISTRY,
   keysOnSurface,
   type ConfigKey,
-  type ConfigValue,
   type ParameterSurface,
 } from '@/config/registry';
-import { setConfigValue } from '@/config/resolve';
+import { saveUserParameters } from '@/config/user-parameters';
+import { loadedFieldName } from '@/app/parameter-names';
 import { withTenantRollbackOn } from '@/db/tenant';
 import { requireUserId } from '@/lib/session';
 
@@ -50,41 +48,28 @@ function coerceFormValue(key: ConfigKey, formData: FormData): unknown {
   return Number.isNaN(asNumber) ? raw : asNumber;
 }
 
-/**
- * Whether a submitted value says the same as the effective one. A checkbox
- * group posts its choices in option order, not in the stored order, so an
- * array compares as a set.
- */
-function sameValue(submitted: unknown, effective: unknown): boolean {
-  const canonical = (value: unknown) =>
-    JSON.stringify(Array.isArray(value) ? [...(value as unknown[])].map(String).sort() : value);
-  return canonical(submitted) === canonical(effective);
-}
-
 export interface SaveParametersState {
   readonly status: 'idle' | 'saved' | 'error';
-  /** The keys whose value the schema refused — each said under its own field. */
+  /** The keys whose value was refused — each said under its own field. */
   readonly invalid?: readonly ConfigKey[];
+}
+
+function loadedValue(key: ConfigKey, formData: FormData): { value: unknown } | undefined {
+  const raw = formData.get(loadedFieldName(key));
+  if (typeof raw !== 'string') return undefined;
+  try {
+    return { value: JSON.parse(raw) as unknown };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
  * One surface's parameters, saved by one form (SPEC-022 BR-022-37: a form has
- * one footer and one Salvar).
- *
- * AR-32: validates input with Zod at the boundary, resolves the session, and
- * calls exactly one operation per changed key — `setConfigValue`, which itself
- * re-validates the coerced value against the key's own schema (BR-002-04) and
- * authorizes the write (BR-002-03) before anything reaches the database.
- *
- * **All or nothing.** Every value is checked against its schema first; one
- * refusal writes none, and each refused key is named so the form says why
- * under that field (BR-022-21). The writes then share one transaction, so a
- * late refusal rolls back the keys already written.
- *
- * **Only a changed value is written.** The form posts every key on the
- * surface; writing the unchanged ones would turn each default the user merely
- * looked at into a user-level override, and audit a "change" from a value to
- * itself (BR-002-07).
+ * one footer and one Salvar). AR-32: the boundary — the surface checked
+ * against the registry's list, the session resolved, the fields coerced — and
+ * one use case, `saveUserParameters`, which decides what is written and is
+ * all or nothing; `withTenantRollbackOn` undoes a partial write it refuses.
  */
 export async function saveParameters(
   surface: unknown,
@@ -96,42 +81,25 @@ export async function saveParameters(
   // SPEC-001 BR-001-08 / AR-12: the tenant is the verified session's, and
   // nothing in `formData` is ever read as one.
   const userId = await requireUserId();
-  const submitted = keys.map((key) => ({ key, value: coerceFormValue(key, formData) }));
-  const invalid = submitted
-    .filter(({ key, value }) => !REGISTRY[key].schema.safeParse(value).success)
-    .map(({ key }) => key);
-  if (invalid.length > 0) return { status: 'error', invalid };
+  const entries = keys.map((key) => {
+    const loaded = loadedValue(key, formData);
+    return {
+      key,
+      value: coerceFormValue(key, formData),
+      ...(loaded !== undefined ? { loaded } : {}),
+    };
+  });
 
   // AR-11: a user-level write reads `config_overrides` for the audit's
   // previous value, and that RLS policy raises 22P02 outside `withTenant`
-  // rather than failing closed. One transaction also keeps every upsert and
-  // its BR-002-07 audit row atomic.
+  // rather than failing closed.
   const outcome = await withTenantRollbackOn(
     userId,
-    async (tx): Promise<SaveParametersState> => {
-      const effective = await getEffectiveConfig(tx, { userId, keys });
-      const current = new Map(effective.map((entry) => [entry.key, entry.value]));
-      for (const { key, value } of submitted) {
-        if (sameValue(value, current.get(key))) continue;
-        const result = await setConfigValue(tx, {
-          key,
-          level: 'user',
-          // `setConfigValue` re-validates this against the registry schema.
-          // The cast is unavoidable — `key`'s static type is the full
-          // `ConfigKey` union, so its paired value type is a union too, and
-          // only the runtime re-validation actually narrows it.
-          value: value as ConfigValue<ConfigKey>,
-          actor: { kind: 'user', userId },
-          userId,
-        });
-        if (isErr(result)) return { status: 'error', invalid: [key] };
-      }
-      return { status: 'saved' };
-    },
-    (state) => state.status === 'error',
+    (tx) => saveUserParameters(tx, { userId, entries }),
+    (result) => result.status === 'refused',
     db,
   );
-  if (outcome.status === 'error') return outcome;
+  if (outcome.status === 'refused') return { status: 'error', invalid: outcome.invalid };
 
   // The layout, not just this page: `ui.theme` and `ui.hide_values` are read
   // by the signed-in frame (its theme sync, the eye toggle and the charts'

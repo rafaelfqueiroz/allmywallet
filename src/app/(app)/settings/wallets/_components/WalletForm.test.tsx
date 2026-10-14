@@ -323,9 +323,8 @@ describe('WalletForm — the standard form (BR-022-37)', () => {
       />,
     );
     const deleteButton = screen.getByRole('button', { name: 'Excluir carteira' });
-    // A blank Nome must not block it; jsdom ignores the attribute, so the
-    // browser journey (settings-wallets.spec.ts) is what proves the effect.
-    expect(deleteButton).toHaveAttribute('formnovalidate');
+    // It submits a form of its own, which holds no Nome to block it.
+    expect(deleteButton).toHaveAttribute('form', 'wallet-delete-form');
     // BR-010-07's consequences are its description, not only a tip.
     expect(deleteButton).toHaveAccessibleDescription(/Nenhuma transação é excluída/);
     await userEvent.click(deleteButton);

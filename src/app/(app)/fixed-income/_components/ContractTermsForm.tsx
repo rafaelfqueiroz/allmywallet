@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import type { ActionState } from '@/lib/action-state';
 import { FIXED_INCOME_INDEXERS, type FixedIncomeIndexer } from '@/core/valuation/ports';
@@ -49,7 +50,14 @@ export async function ContractTermsForm({
         title,
         description,
         footer: (
-          <FormActions>
+          <FormActions
+            cancel={
+              // The page is reached from the Painel's rate gate; Cancelar returns there.
+              <Button asChild variant="outline">
+                <Link href="/dashboard">{t('cancel')}</Link>
+              </Button>
+            }
+          >
             <Button type="submit">{t('submit')}</Button>
           </FormActions>
         ),

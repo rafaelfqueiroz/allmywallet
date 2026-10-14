@@ -81,7 +81,14 @@ export function EditDeleteForms({
                 />
               </Field>
             </FormGrid>
-            <FormActions destructive={deleteButton}>
+            <FormActions
+              destructive={deleteButton}
+              cancel={
+                <Button type="reset" variant="outline">
+                  {t('cancel')}
+                </Button>
+              }
+            >
               <Button type="submit">{t('save')}</Button>
             </FormActions>
           </Stack>

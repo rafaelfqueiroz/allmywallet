@@ -148,8 +148,10 @@ test.describe('Configurações › Carteiras', () => {
     await expect(page.locator('main')).not.toContainText(/R\$\s*\d/);
 
     // Edit.
+    // Enter saves: Excluir carteira comes first in the footer but submits a form
+    // of its own, so it is not this form's default button (#238 review).
     await page.getByLabel('Nome', { exact: true }).fill('Reserva de emergência');
-    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+    await page.getByLabel('Nome', { exact: true }).press('Enter');
     await expect(page.getByRole('status').filter({ hasText: 'Alterações salvas.' })).toBeVisible();
     await expect(
       page.getByRole('heading', { level: 2, name: 'Reserva de emergência' }),
