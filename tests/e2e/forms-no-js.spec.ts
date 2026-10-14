@@ -63,10 +63,6 @@ async function withoutScript(
     ...(baseURL ? { baseURL } : {}),
     locale: 'pt-BR',
     timezoneId: 'America/Sao_Paulo',
-    // Without script, something on these pages keeps animating, and
-    // Playwright then never finds a button "stable" enough to click — the
-    // macOS no-script flake on settings-wallets.spec.ts. Reduced motion stops it.
-    reducedMotion: 'reduce',
   });
   try {
     await context.addCookies(await signedInPage.context().cookies());

@@ -303,8 +303,6 @@ test.describe('Configurações › Carteiras', () => {
       ...(baseURL ? { baseURL } : {}),
       locale: 'pt-BR',
       timezoneId: 'America/Sao_Paulo',
-      // See forms-no-js.spec.ts: without it a button is never "stable".
-      reducedMotion: 'reduce',
     });
     try {
       await context.addCookies(await seededPage.context().cookies());
