@@ -4,7 +4,7 @@ import { FIXED_INCOME_INDEXERS, type FixedIncomeIndexer } from '@/core/valuation
 import type { AssetId } from '@/core/shared/ids';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Field } from '@/components/patterns/field';
-import { Cluster } from '@/components/layout/cluster';
+import { FormActions, FormGrid } from '@/components/patterns/form-layout';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
@@ -20,13 +20,21 @@ import { Button } from '@/components/ui/button';
  * refusal rendering, which already posts without JavaScript through the
  * form's native submission (`RuleForm`/`GoalEditDeleteForms` are the same
  * shape).
+ *
+ * The standard form (SPEC-022 BR-022-37): its own panel, Indexador beside
+ * Taxa, the primary action at the footer's right. The page's `description` —
+ * why the contract cannot be valued without these — opens the panel.
  */
 export async function ContractTermsForm({
   assetId,
   indexer,
   ratePercent,
   action,
+  title,
+  description,
 }: {
+  readonly title: React.ReactNode;
+  readonly description: React.ReactNode;
   readonly assetId: AssetId;
   readonly indexer: FixedIncomeIndexer | null;
   readonly ratePercent: string | null;
@@ -35,10 +43,21 @@ export async function ContractTermsForm({
   const t = await getTranslations('fixedIncome');
 
   return (
-    <ActionForm action={action}>
+    <ActionForm
+      action={action}
+      panel={{
+        title,
+        description,
+        footer: (
+          <FormActions>
+            <Button type="submit">{t('submit')}</Button>
+          </FormActions>
+        ),
+      }}
+    >
       <input type="hidden" name="assetId" value={assetId} />
-      <Cluster gap="md" align="end">
-        <Field id="contract-indexer" label={t('indexerLabel')} width="md">
+      <FormGrid>
+        <Field id="contract-indexer" label={t('indexerLabel')}>
           <NativeSelect name="indexer" defaultValue={indexer ?? ''} required>
             <option value="">—</option>
             {FIXED_INCOME_INDEXERS.map((value) => (
@@ -48,13 +67,10 @@ export async function ContractTermsForm({
             ))}
           </NativeSelect>
         </Field>
-        <Field id="contract-rate" label={t('rateLabel')} hint={t('rateHint')} width="sm">
+        <Field id="contract-rate" label={t('rateLabel')} hint={t('rateHint')}>
           <Input name="ratePercent" inputMode="decimal" defaultValue={ratePercent ?? ''} required />
         </Field>
-      </Cluster>
-      <Cluster>
-        <Button type="submit">{t('submit')}</Button>
-      </Cluster>
+      </FormGrid>
     </ActionForm>
   );
 }

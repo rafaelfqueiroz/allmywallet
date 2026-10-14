@@ -2,12 +2,10 @@ import type { ActionState } from '@/lib/action-state';
 import type { OpportunityState } from '@/core/opportunity/ports';
 import { ActionForm } from '@/components/patterns/action-form';
 import { Field } from '@/components/patterns/field';
-import { Cluster } from '@/components/layout/cluster';
-import { Stack } from '@/components/layout/stack';
+import { FormActions, FormGrid } from '@/components/patterns/form-layout';
 import { Input } from '@/components/ui/input';
 import { NativeSelect } from '@/components/ui/native-select';
 import { Button } from '@/components/ui/button';
-import { Text } from '@/components/ui/text';
 
 /**
  * SPEC-018 BR-018-05..10 — the one form shared by "create a rule" and "edit a
@@ -23,6 +21,11 @@ import { Text } from '@/components/ui/text';
  * a price but no chosen state is a shape this form makes as easy to leave
  * incomplete as to fill in, and the server refuses it either way
  * (`NO_BOUNDS_SET`/`INVALID_THRESHOLD` in `core/opportunity/rule.ts`).
+ *
+ * The standard form (SPEC-022 BR-022-37): its own panel, each bound's price
+ * beside its state, and Cancelar — closing the editor — before the primary
+ * action at the footer's right. What a bound means is the panel's
+ * description, said once above the fields.
  */
 
 export interface RuleFormLabels {
@@ -49,12 +52,22 @@ const STATE_ORDER: readonly OpportunityState[] = ['buy', 'hold', 'sell'];
 
 export function RuleForm({
   action,
+  title,
+  id,
+  className,
+  cancel,
   assetId,
   idPrefix,
   labels,
   initial,
 }: {
   readonly action: (state: ActionState, formData: FormData) => Promise<ActionState>;
+  readonly title: React.ReactNode;
+  /** The panel's id, for the link that scrolls to the editor. */
+  readonly id?: string;
+  readonly className?: string;
+  /** Cancelar: the link that closes the editor. */
+  readonly cancel: React.ReactNode;
   readonly assetId: string;
   /** Unique per rendered form on the page — two rules on screen must not collide on field ids. */
   readonly idPrefix: string;
@@ -68,47 +81,49 @@ export function RuleForm({
   ));
 
   return (
-    <ActionForm action={action}>
+    <ActionForm
+      action={action}
+      panel={{
+        title,
+        description: labels.hint,
+        ...(id !== undefined ? { id } : {}),
+        ...(className !== undefined ? { className } : {}),
+        footer: (
+          <FormActions cancel={cancel}>
+            <Button type="submit">{labels.submit}</Button>
+          </FormActions>
+        ),
+      }}
+    >
       <input type="hidden" name="assetId" value={assetId} />
-      <Stack gap="md">
-        <Text as="span" size="xs" tone="muted">
-          {labels.hint}
-        </Text>
-
-        <Cluster gap="md" align="end">
-          <Field id={`${idPrefix}-lower-price`} label={labels.lowerPriceLabel} width="sm">
-            <Input name="lowerPrice" inputMode="decimal" defaultValue={initial?.lowerPrice} />
-          </Field>
-          <Field id={`${idPrefix}-lower-state`} label={labels.lowerStateLabel} width="md">
-            <NativeSelect name="lowerState" defaultValue={initial?.lowerState ?? ''}>
-              <option value="">—</option>
-              {stateOptions}
-            </NativeSelect>
-          </Field>
-        </Cluster>
-
-        <Cluster gap="md" align="end">
-          <Field id={`${idPrefix}-upper-price`} label={labels.upperPriceLabel} width="sm">
-            <Input name="upperPrice" inputMode="decimal" defaultValue={initial?.upperPrice} />
-          </Field>
-          <Field id={`${idPrefix}-upper-state`} label={labels.upperStateLabel} width="md">
-            <NativeSelect name="upperState" defaultValue={initial?.upperState ?? ''}>
-              <option value="">—</option>
-              {stateOptions}
-            </NativeSelect>
-          </Field>
-        </Cluster>
-
-        <Field id={`${idPrefix}-default-state`} label={labels.defaultStateLabel} width="md">
-          <NativeSelect name="defaultState" defaultValue={initial?.defaultState ?? 'hold'} required>
+      <FormGrid>
+        <Field id={`${idPrefix}-lower-price`} label={labels.lowerPriceLabel}>
+          <Input name="lowerPrice" inputMode="decimal" defaultValue={initial?.lowerPrice} />
+        </Field>
+        <Field id={`${idPrefix}-lower-state`} label={labels.lowerStateLabel}>
+          <NativeSelect name="lowerState" defaultValue={initial?.lowerState ?? ''}>
+            <option value="">—</option>
             {stateOptions}
           </NativeSelect>
         </Field>
 
-        <Cluster>
-          <Button type="submit">{labels.submit}</Button>
-        </Cluster>
-      </Stack>
+        <Field id={`${idPrefix}-upper-price`} label={labels.upperPriceLabel}>
+          <Input name="upperPrice" inputMode="decimal" defaultValue={initial?.upperPrice} />
+        </Field>
+        <Field id={`${idPrefix}-upper-state`} label={labels.upperStateLabel}>
+          <NativeSelect name="upperState" defaultValue={initial?.upperState ?? ''}>
+            <option value="">—</option>
+            {stateOptions}
+          </NativeSelect>
+        </Field>
+
+        {/* Short: it leaves the cell beside it empty rather than stretching (#238). */}
+        <Field id={`${idPrefix}-default-state`} label={labels.defaultStateLabel}>
+          <NativeSelect name="defaultState" defaultValue={initial?.defaultState ?? 'hold'} required>
+            {stateOptions}
+          </NativeSelect>
+        </Field>
+      </FormGrid>
     </ActionForm>
   );
 }

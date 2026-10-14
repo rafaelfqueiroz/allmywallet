@@ -353,14 +353,14 @@ test.describe('SPEC-018 — Observar preços', () => {
       rows(page, 'Regras de observação').filter({ hasText: code! }).getByText('Silenciado'),
     ).toBeVisible();
 
-    // Editar opens the editor for this rule, and Fechar closes it.
+    // Editar opens the editor for this rule, and Cancelar closes it (BR-022-37).
     await ruleAction(page, code!, 'Editar regra');
     await expect(page).toHaveURL(new RegExp(`[?&]rule=${assetId}`));
     await expect(
       page.getByRole('heading', { name: new RegExp(`^Editar regra de ${code}`) }),
     ).toBeVisible();
     await expect(page.getByLabel('Limite inferior (R$)')).toHaveValue(/^30(\.0+)?$/);
-    await page.getByRole('link', { name: 'Fechar' }).click();
+    await page.getByRole('link', { name: 'Cancelar' }).click();
     await expect(page.getByLabel('Limite inferior (R$)')).toHaveCount(0);
 
     // Excluir.

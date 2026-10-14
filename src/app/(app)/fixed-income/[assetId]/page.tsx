@@ -6,9 +6,7 @@ import { supplyContractTermsAction } from '@/app/(app)/fixed-income/actions';
 import { ContractTermsForm } from '@/app/(app)/fixed-income/_components/ContractTermsForm';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Text } from '@/components/ui/text';
 
 /**
  * SPEC-020 BR-020-19 / SPEC-009 BR-009-13 — the "Needs attention" gate's own
@@ -56,23 +54,20 @@ export default async function FixedIncomeContractPage({ params }: PageProps) {
       title={t('title')}
       description={t('assetLabel', { code: form.assetCode, name: form.assetName })}
     >
-      {/* SPEC-022 BR-022-36 — the form in a panel. */}
-      <Section title={t('termsTitle')}>
-        {/* BR-020-19 — plainly: this contract cannot be valued, so portfolio
-            value is understated until the rate is supplied. Said here again,
-            not only in the dashboard's queue item, because a user can land on
-            this screen directly (a bookmark, a shared link) without ever
-            reading the queue's own copy. */}
-        <Text size="sm" tone="muted">
-          {t('why')}
-        </Text>
-        <ContractTermsForm
-          assetId={assetId}
-          indexer={form.indexer}
-          ratePercent={form.ratePercent}
-          action={supplyContractTermsAction}
-        />
-      </Section>
+      {/* SPEC-022 BR-022-37 — the standard form, in its own panel.
+          BR-020-19 — plainly: this contract cannot be valued, so portfolio
+          value is understated until the rate is supplied. Said here again,
+          not only in the dashboard's queue item, because a user can land on
+          this screen directly (a bookmark, a shared link) without ever
+          reading the queue's own copy. */}
+      <ContractTermsForm
+        title={t('termsTitle')}
+        description={t('why')}
+        assetId={assetId}
+        indexer={form.indexer}
+        ratePercent={form.ratePercent}
+        action={supplyContractTermsAction}
+      />
     </PageShell>
   );
 }

@@ -19,6 +19,7 @@ const choice = {
 function Form({ action }: { action: (s: ActionState, f: FormData) => Promise<ActionState> }) {
   return (
     <AllocateForm
+      title="Atribuir ativo"
       action={action}
       idPrefix="assign"
       fixed={{ name: 'walletId', value: 'w1' }}
@@ -40,6 +41,7 @@ describe('AllocateForm — after a success', () => {
   function Queue({ defaultQuantity }: { defaultQuantity: string }) {
     return (
       <AllocateForm
+        title="Atribuir ativo"
         action={async () => IDLE}
         idPrefix="allocate-a1"
         fixed={{ name: 'assetId', value: 'a1' }}

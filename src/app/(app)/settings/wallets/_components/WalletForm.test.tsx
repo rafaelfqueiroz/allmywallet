@@ -18,6 +18,7 @@ const refusesName = async (): Promise<ActionState> =>
 function CreateForm({ action = vi.fn(async () => IDLE) }: { action?: () => Promise<ActionState> }) {
   return (
     <WalletForm
+      title="Carteira"
       action={action}
       idPrefix="new-wallet"
       submitLabel="Criar carteira"
@@ -94,7 +95,13 @@ async function submitted(ui: (action: Action) => React.ReactElement, change?: ()
 
 describe('WalletForm — Sem cor submit mapping', () => {
   const create = (action: Action) => (
-    <WalletForm action={action} idPrefix="new-wallet" submitLabel="Criar carteira" />
+    <WalletForm
+      title="Carteira"
+      cancelHref="/settings/wallets"
+      action={action}
+      idPrefix="new-wallet"
+      submitLabel="Criar carteira"
+    />
   );
 
   it('posts noColor=on for a new wallet left on its default', async () => {
@@ -116,6 +123,8 @@ describe('WalletForm — Sem cor submit mapping', () => {
   it('starts an edit of a NULL colour checked, and keeps it NULL unless changed', async () => {
     const edit = (color: string | null) => (action: Action) => (
       <WalletForm
+        title="Carteira"
+        cancelHref="/settings/wallets"
         action={action}
         idPrefix="wallet"
         submitLabel="Salvar alterações"
@@ -131,6 +140,8 @@ describe('WalletForm — Sem cor submit mapping', () => {
   it('starts an edit of a stored colour unchecked, and posts that colour', async () => {
     const data = await submitted((action) => (
       <WalletForm
+        title="Carteira"
+        cancelHref="/settings/wallets"
         action={action}
         idPrefix="wallet"
         submitLabel="Salvar alterações"
@@ -181,6 +192,8 @@ describe('WalletForm — a refusal lands under its field (BR-022-21)', () => {
     const saves = async (): Promise<ActionState> => SAVED;
     render(
       <WalletForm
+        title="Carteira"
+        cancelHref="/settings/wallets"
         action={saves}
         idPrefix="wallet"
         submitLabel="Salvar alterações"
@@ -221,6 +234,8 @@ describe('the colour after an action', () => {
     };
     render(
       <WalletForm
+        title="Carteira"
+        cancelHref="/settings/wallets"
         action={action}
         idPrefix="wallet"
         submitLabel="Salvar"
@@ -258,5 +273,68 @@ describe('the colour after an action', () => {
     await waitFor(() => expect(posted).toHaveLength(2));
     expect(posted[1]!.get('noColor')).toBeNull();
     expect(posted[1]!.get('color')).toBe('#ff0000');
+  });
+});
+
+/**
+ * SPEC-022 BR-022-37 — the "Editar carteira" frame: Excluir carteira alone at
+ * the footer's left, Cancelar then Salvar alterações at its right.
+ */
+describe('WalletForm — the standard form (BR-022-37)', () => {
+  const values = { name: 'Aposentadoria', description: '', goal: '', color: null };
+
+  it('puts Excluir carteira at the left and Cancelar before the primary action', () => {
+    const { container } = render(
+      <WalletForm
+        title="Aposentadoria"
+        action={vi.fn(async () => IDLE)}
+        deleteAction={vi.fn(async () => IDLE)}
+        idPrefix="wallet"
+        submitLabel="Salvar alterações"
+        walletId="w-1"
+        values={values}
+        cancelHref="/settings/wallets"
+      />,
+    );
+    const left = container.querySelector('[data-slot=form-actions-destructive]')!;
+    expect(left).toContainElement(screen.getByRole('button', { name: 'Excluir carteira' }));
+    const right = container.querySelector('[data-slot=form-actions-main]')!;
+    expect(
+      Array.from(right.querySelectorAll('a, button')).map((element) => element.textContent),
+    ).toEqual(['Cancelar', 'Salvar alterações']);
+  });
+
+  it('deletes through its own action, not the update', async () => {
+    const update = vi.fn(async () => IDLE);
+    const remove = vi.fn(async (_: ActionState, formData: FormData) => {
+      expect(formData.get('walletId')).toBe('w-1');
+      return IDLE;
+    });
+    render(
+      <WalletForm
+        title="Aposentadoria"
+        action={update}
+        deleteAction={remove}
+        idPrefix="wallet"
+        submitLabel="Salvar alterações"
+        walletId="w-1"
+        values={values}
+        cancelHref="/settings/wallets"
+      />,
+    );
+    const deleteButton = screen.getByRole('button', { name: 'Excluir carteira' });
+    // A blank Nome must not block it; jsdom ignores the attribute, so the
+    // browser journey (settings-wallets.spec.ts) is what proves the effect.
+    expect(deleteButton).toHaveAttribute('formnovalidate');
+    // BR-010-07's consequences are its description, not only a tip.
+    expect(deleteButton).toHaveAccessibleDescription(/Nenhuma transação é excluída/);
+    await userEvent.click(deleteButton);
+    await waitFor(() => expect(remove).toHaveBeenCalledTimes(1));
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('offers no delete when creating', () => {
+    render(<CreateForm />);
+    expect(screen.queryByRole('button', { name: 'Excluir carteira' })).toBeNull();
   });
 });

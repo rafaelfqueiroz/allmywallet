@@ -1,3 +1,4 @@
+import { Fragment } from 'react';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import {
@@ -11,7 +12,8 @@ import { ranksOf, rankKeys } from '@/lib/rank-keys';
 import { Money } from '@/app/money';
 import { ActionForm } from '@/components/patterns/action-form';
 import { EmptyState } from '@/components/patterns/empty-state';
-import { Field, FieldAction } from '@/components/patterns/field';
+import { Field } from '@/components/patterns/field';
+import { FormActions, FormGrid } from '@/components/patterns/form-layout';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
 import { QueryLink } from '@/components/patterns/query-link';
 import { RowForms } from '@/components/patterns/row-forms';
@@ -249,68 +251,69 @@ export async function AssignQueue({
         </Section>
       )}
 
+      {/* Keyed on the asset: another asset's forms start from their own defaults.
+          SPEC-022 BR-022-37 — the two ways to resolve it are two standard
+          forms, each its own panel: a form cannot sit inside another. */}
       {resolving !== undefined && (
-        <Section
-          id={RESOLVE_ANCHOR}
-          title={t('resolveTitle', { asset: assetName(resolving.assetId) })}
-          description={t('resolveDescription')}
-          className="scroll-mt-20"
-        >
-          {/* Keyed on the asset: another asset's forms start from their own defaults. */}
-          <Stack key={resolving.assetId} gap="sm">
-            <Cluster gap="sm" align="baseline">
-              <Text as="span" size="sm">
-                {t('resolveUnassigned')}:
-              </Text>
-              <Money value={resolving.unassignedQuantity} kind="quantity" />
-              <Text as="span" size="xs" tone="muted">
-                {t(resolving.reason === 'no_wallet' ? 'reasonNoWallet' : 'reasonAmbiguousSplit')}
-              </Text>
-            </Cluster>
-            <Cluster gap="lg" align="start">
-              {/* BR-010-13: one action, quantity pre-filled with the unassigned remainder. */}
-              <AllocateForm
-                action={allocateAction}
-                idPrefix={`allocate-${resolving.assetId}`}
-                fixed={{ name: 'assetId', value: resolving.assetId }}
-                choice={{
-                  name: 'walletId',
-                  label: t('resolveAssign'),
-                  placeholder: t('chooseWallet'),
-                  options: walletOptions,
-                }}
-                defaultQuantity={resolving.unassignedQuantity.toString()}
-                submitLabel={t('resolveSubmit')}
-              />
+        <Fragment key={resolving.assetId}>
+          {/* BR-010-13: one action, quantity pre-filled with the unassigned remainder. */}
+          <AllocateForm
+            action={allocateAction}
+            id={RESOLVE_ANCHOR}
+            className="scroll-mt-20"
+            title={t('resolveTitle', { asset: assetName(resolving.assetId) })}
+            description={t('resolveDescription')}
+            summary={
+              <Cluster gap="sm" align="baseline">
+                <Text as="span" size="sm">
+                  {t('resolveUnassigned')}:
+                </Text>
+                <Money value={resolving.unassignedQuantity} kind="quantity" />
+                <Text as="span" size="xs" tone="muted">
+                  {t(resolving.reason === 'no_wallet' ? 'reasonNoWallet' : 'reasonAmbiguousSplit')}
+                </Text>
+              </Cluster>
+            }
+            idPrefix={`allocate-${resolving.assetId}`}
+            fixed={{ name: 'assetId', value: resolving.assetId }}
+            choice={{
+              name: 'walletId',
+              label: t('resolveAssign'),
+              placeholder: t('chooseWallet'),
+              options: walletOptions,
+            }}
+            defaultQuantity={resolving.unassignedQuantity.toString()}
+            submitLabel={t('resolveSubmit')}
+          />
 
-              {/* BR-010-14: the escape hatch — a standing rule for this asset. */}
-              <ActionForm action={setStandingRuleAction}>
-                <input type="hidden" name="assetId" value={resolving.assetId} />
-                <Cluster gap="sm" align="start">
-                  <Field
-                    id={`standing-rule-${resolving.assetId}`}
-                    label={t('standingRuleTitle')}
-                    width="md"
-                  >
-                    <NativeSelect name="walletId" required>
-                      <option value="">{t('chooseWallet')}</option>
-                      {walletOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <FieldAction>
-                    <Button type="submit" variant="outline">
-                      {t('standingRuleSet')}
-                    </Button>
-                  </FieldAction>
-                </Cluster>
-              </ActionForm>
-            </Cluster>
-          </Stack>
-        </Section>
+          {/* BR-010-14: the escape hatch — a standing rule for this asset. */}
+          <ActionForm
+            action={setStandingRuleAction}
+            panel={{
+              title: t('standingRuleFor', { asset: assetName(resolving.assetId) }),
+              description: t('standingRuleDescription'),
+              footer: (
+                <FormActions>
+                  <Button type="submit">{t('standingRuleSet')}</Button>
+                </FormActions>
+              ),
+            }}
+          >
+            <input type="hidden" name="assetId" value={resolving.assetId} />
+            <FormGrid>
+              <Field id={`standing-rule-${resolving.assetId}`} label={t('standingRuleWallet')}>
+                <NativeSelect name="walletId" required>
+                  <option value="">{t('chooseWallet')}</option>
+                  {walletOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            </FormGrid>
+          </ActionForm>
+        </Fragment>
       )}
 
       {/*

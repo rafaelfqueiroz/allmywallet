@@ -96,12 +96,17 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
         </Button>
       </div>
 
-      {/* SPEC-022 BR-022-36 — the wallet's name heads the panels below it,
-          so it is a plain section with the links as its actions. */}
-      <Section
-        variant="plain"
+      {/* SPEC-022 BR-022-37 — the standard form, as the "Editar carteira" frame
+          draws it: the wallet's name heads its panel, the links to its
+          balancing and goals sit beside it, and Excluir carteira closes it at
+          the bottom left. */}
+      <WalletForm
+        action={updateWalletAction}
+        deleteAction={deleteWalletAction}
+        idPrefix="wallet"
         title={wallet.name}
-        actions={
+        description={t('dataDescription')}
+        headerActions={
           <Cluster gap="sm">
             {/* SPEC-017 — the wallet's targets and the drift against them. */}
             <Button asChild variant="outline" size="sm">
@@ -113,24 +118,16 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
             </Button>
           </Cluster>
         }
+        submitLabel={t('save')}
+        walletId={wallet.id}
+        values={{
+          name: wallet.name,
+          description: wallet.description ?? '',
+          goal: wallet.goal ?? '',
+          color: wallet.color,
+        }}
+        cancelHref="/settings/wallets"
       />
-
-      <Section title={t('dataTitle')}>
-        <div className="max-w-prose">
-          <WalletForm
-            action={updateWalletAction}
-            idPrefix="wallet"
-            submitLabel={t('save')}
-            walletId={wallet.id}
-            values={{
-              name: wallet.name,
-              description: wallet.description ?? '',
-              goal: wallet.goal ?? '',
-              color: wallet.color,
-            }}
-          />
-        </div>
-      </Section>
 
       <Section title={t('allocationsTitle')}>
         {allocations.length === 0 ? (
@@ -158,31 +155,33 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
       </Section>
 
       {/* BR-010-09 — the wallet screen is one of the places an asset is assigned. */}
-      <Section title={t('assignTitle')} description={t('assignDescription')}>
-        {unassigned.length === 0 ? (
+      {unassigned.length === 0 ? (
+        <Section title={t('assignTitle')} description={t('assignDescription')}>
           <EmptyState title={t('assignNothing')} description={t('assignNothingBody')} />
-        ) : (
-          <AllocateForm
-            action={allocateAction}
-            idPrefix="assign"
-            fixed={{ name: 'walletId', value: wallet.id }}
-            choice={{
-              name: 'assetId',
-              label: t('assignAsset'),
-              placeholder: t('assignChooseAsset'),
-              options: unassigned.map((holding) => ({
-                value: holding.assetId,
-                label: t('assignOption', {
-                  asset: assetName(holding.assetId),
-                  quantity: formatQuantity(holding.quantity),
-                }),
-              })),
-            }}
-            quantityHint={t('assignQuantityHint')}
-            submitLabel={t('assignSubmit')}
-          />
-        )}
-      </Section>
+        </Section>
+      ) : (
+        <AllocateForm
+          action={allocateAction}
+          title={t('assignTitle')}
+          description={t('assignDescription')}
+          idPrefix="assign"
+          fixed={{ name: 'walletId', value: wallet.id }}
+          choice={{
+            name: 'assetId',
+            label: t('assignAsset'),
+            placeholder: t('assignChooseAsset'),
+            options: unassigned.map((holding) => ({
+              value: holding.assetId,
+              label: t('assignOption', {
+                asset: assetName(holding.assetId),
+                quantity: formatQuantity(holding.quantity),
+              }),
+            })),
+          }}
+          quantityHint={t('assignQuantityHint')}
+          submitLabel={t('assignSubmit')}
+        />
+      )}
 
       {/* BR-010-14 — rules that route this asset's future purchases here. */}
       <Section title={t('rulesTitle')} description={t('standingRuleDescription')}>
@@ -267,18 +266,6 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
             </Stack>
           )}
         </Stack>
-      </Section>
-
-      {/* BR-010-07 — said before it is done: nothing about the ledger changes. */}
-      <Section title={t('deleteTitle')} description={t('deleteDescription')}>
-        <ActionForm action={deleteWalletAction}>
-          <input type="hidden" name="walletId" value={wallet.id} />
-          <div>
-            <Button type="submit" variant="destructive">
-              {t('delete')}
-            </Button>
-          </div>
-        </ActionForm>
       </Section>
     </Stack>
   );

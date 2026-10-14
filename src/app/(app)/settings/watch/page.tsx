@@ -91,6 +91,11 @@ export default async function WatchPage({ searchParams }: PageProps) {
   // An id that is neither — a rule since deleted, a stale link — opens nothing.
   const editedRule = view.watched.find((row) => row.assetId === editing);
   const newRuleFor = view.available.find((asset) => asset.assetId === editing);
+  const closeEditor = (
+    <Button asChild variant="outline">
+      <QueryLink drop={['rule']}>{t('cancel')}</QueryLink>
+    </Button>
+  );
 
   return (
     <SettingsFrame>
@@ -115,59 +120,59 @@ export default async function WatchPage({ searchParams }: PageProps) {
           <Note>{view.emailConsented ? t('emailOn') : t('emailOff')}</Note>
         </Stack>
 
-        {(editedRule !== undefined || newRuleFor !== undefined) && (
+        {/* SPEC-022 BR-022-37 — the editor is the standard form, in its own
+            panel; masked, the panel holds only the way to reveal the values. */}
+        {editedRule !== undefined && masked ? (
           <Section
             id={RULE_EDITOR_ANCHOR}
             className="scroll-mt-20"
-            title={
-              editedRule !== undefined
-                ? t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })
-                : t('createTitle', {
-                    asset: `${newRuleFor?.code ?? ''} — ${newRuleFor?.name ?? ''}`,
-                  })
-            }
+            title={t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })}
             actions={
               <Button asChild variant="ghost" size="sm">
                 <QueryLink drop={['rule']}>{t('closeEditor')}</QueryLink>
               </Button>
             }
           >
-            {editedRule !== undefined ? (
-              masked ? (
-                // SPEC-022 BR-022-24: the thresholds would sit in the inputs.
-                <RevealValuesForm action={saveHideValuesAction} />
-              ) : (
-                <RuleForm
-                  // Keyed by the asset: going straight from "Editar" on one rule
-                  // to another keeps this component mounted, and its uncontrolled
-                  // fields would carry the first rule's limits into the second's
-                  // save (#246 review).
-                  key={`edit-${editedRule.assetId}`}
-                  action={updateRuleAction}
-                  assetId={editedRule.assetId}
-                  idPrefix={`edit-${editedRule.assetId}`}
-                  labels={editLabels}
-                  initial={{
-                    lowerPrice: editedRule.lower?.price.toString(),
-                    lowerState: editedRule.lower?.state,
-                    upperPrice: editedRule.upper?.price.toString(),
-                    upperState: editedRule.upper?.state,
-                    defaultState: editedRule.defaultState,
-                  }}
-                />
-              )
-            ) : (
-              newRuleFor !== undefined && (
-                <RuleForm
-                  key={`create-${newRuleFor.assetId}`}
-                  action={createRuleAction}
-                  assetId={newRuleFor.assetId}
-                  idPrefix={`create-${newRuleFor.assetId}`}
-                  labels={formLabels}
-                />
-              )
-            )}
+            {/* SPEC-022 BR-022-24: the thresholds would sit in the inputs. */}
+            <RevealValuesForm action={saveHideValuesAction} />
           </Section>
+        ) : editedRule !== undefined ? (
+          <RuleForm
+            // Keyed by the asset: going straight from "Editar" on one rule
+            // to another keeps this component mounted, and its uncontrolled
+            // fields would carry the first rule's limits into the second's
+            // save (#246 review).
+            key={`edit-${editedRule.assetId}`}
+            action={updateRuleAction}
+            id={RULE_EDITOR_ANCHOR}
+            className="scroll-mt-20"
+            title={t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })}
+            cancel={closeEditor}
+            assetId={editedRule.assetId}
+            idPrefix={`edit-${editedRule.assetId}`}
+            labels={editLabels}
+            initial={{
+              lowerPrice: editedRule.lower?.price.toString(),
+              lowerState: editedRule.lower?.state,
+              upperPrice: editedRule.upper?.price.toString(),
+              upperState: editedRule.upper?.state,
+              defaultState: editedRule.defaultState,
+            }}
+          />
+        ) : (
+          newRuleFor !== undefined && (
+            <RuleForm
+              key={`create-${newRuleFor.assetId}`}
+              action={createRuleAction}
+              id={RULE_EDITOR_ANCHOR}
+              className="scroll-mt-20"
+              title={t('createTitle', { asset: `${newRuleFor.code} — ${newRuleFor.name}` })}
+              cancel={closeEditor}
+              assetId={newRuleFor.assetId}
+              idPrefix={`create-${newRuleFor.assetId}`}
+              labels={formLabels}
+            />
+          )
         )}
 
         <Section
