@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { useTranslations } from 'next-intl';
 import { IDLE, messageValues, type ActionState } from '@/lib/action-state';
 import { Field } from '@/components/patterns/field';
+import { FormActions, FormPanel } from '@/components/patterns/form-layout';
 import { FileUpload } from '@/components/patterns/file-upload';
 import { Stack } from '@/components/layout/stack';
 import { Button } from '@/components/ui/button';
@@ -26,36 +27,62 @@ import { Button } from '@/components/ui/button';
  */
 export interface UploadFormProps {
   readonly action: (state: ActionState, formData: FormData) => Promise<ActionState>;
+  /**
+   * Importar › Enviar's own panel (SPEC-022 BR-022-37, the "Enviar extrato"
+   * frame): the drop zone in the body and Enviar at the footer's right.
+   * Without it the form sits inline, inside a panel that holds more than the
+   * upload — the onboarding step.
+   */
+  readonly panel?: { readonly title: React.ReactNode; readonly description?: React.ReactNode };
 }
 
-export function UploadForm({ action }: UploadFormProps) {
+export function UploadForm({ action, panel }: UploadFormProps) {
   const t = useTranslations('import');
   const tErrors = useTranslations('errors');
   const [state, formAction, pending] = useActionState(action, IDLE);
 
+  // The refusal renders inside the drop zone (SPEC-022 BR-022-21/23), where
+  // the user's eye already is, rather than as a banner above it.
+  const field = (
+    <Field id="extract-file" label={t('fileLabel')} hint={t('fileHint')} width="full">
+      <FileUpload
+        name="file"
+        accept=".xlsx,.xls"
+        multiple
+        required
+        title={t('dropTitle')}
+        acceptHint={t('acceptHint')}
+        {...(state.status === 'error'
+          ? { error: tErrors(state.code, messageValues(state.context)) }
+          : {})}
+      />
+    </Field>
+  );
+  const submit = (
+    <Button type="submit" disabled={pending}>
+      {pending ? t('uploading') : t('upload')}
+    </Button>
+  );
+
+  if (panel !== undefined) {
+    return (
+      <form action={formAction}>
+        <FormPanel
+          title={panel.title}
+          description={panel.description}
+          footer={<FormActions>{submit}</FormActions>}
+        >
+          {field}
+        </FormPanel>
+      </form>
+    );
+  }
+
   return (
     <form action={formAction}>
       <Stack gap="md">
-        {/* The refusal renders inside the drop zone (SPEC-022 BR-022-21/23),
-            where the user's eye already is, rather than as a banner above it. */}
-        <Field id="extract-file" label={t('fileLabel')} hint={t('fileHint')} width="full">
-          <FileUpload
-            name="file"
-            accept=".xlsx,.xls"
-            multiple
-            required
-            title={t('dropTitle')}
-            acceptHint={t('acceptHint')}
-            {...(state.status === 'error'
-              ? { error: tErrors(state.code, messageValues(state.context)) }
-              : {})}
-          />
-        </Field>
-        <div>
-          <Button type="submit" disabled={pending}>
-            {pending ? t('uploading') : t('upload')}
-          </Button>
-        </div>
+        {field}
+        <div>{submit}</div>
       </Stack>
     </form>
   );
