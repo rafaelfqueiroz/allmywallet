@@ -203,24 +203,38 @@ export function stackedSeries(
     };
   }
 
-  const byClass = new Map<AssetClass, Map<string, ValuePoint>>();
-
+  /*
+   * Each bucket is its **closing snapshot**, as on the value line: the bands
+   * share the line's dates, and a class sold during the bucket — absent from
+   * the closing snapshot, which leaves out positions at zero — has no point
+   * there, because at the close it was not held. Taking each class's own last
+   * snapshot in the bucket instead dated a class sold mid-week to an earlier
+   * day than the others, and split one bucket into two rows of one class each
+   * (#245 review).
+   *
+   * `estimated` is OR-ed across the bucket, as `valueSeries` does (BR-013-07).
+   */
+  const closing = new Map<string, DailyValuationSnapshot>();
+  const estimated = new Map<string, boolean>();
   for (const snapshot of snapshots) {
     const key = bucketKey(snapshot.date, granularity);
+    closing.set(key, snapshot);
+    estimated.set(key, (estimated.get(key) ?? false) || snapshot.hasEstimates);
+  }
+
+  const byClass = new Map<AssetClass, ValuePoint[]>();
+  for (const [key, snapshot] of closing) {
     for (const [assetClass, value] of snapshot.byAssetClass) {
-      const buckets = byClass.get(assetClass) ?? new Map<string, ValuePoint>();
-      buckets.set(key, {
-        date: snapshot.date,
-        value,
-        estimated: (buckets.get(key)?.estimated ?? false) || snapshot.hasEstimates,
-      });
-      byClass.set(assetClass, buckets);
+      const points = byClass.get(assetClass) ?? [];
+      // Non-null: every key in `closing` was set in `estimated` alongside it.
+      points.push({ date: snapshot.date, value, estimated: estimated.get(key) as boolean });
+      byClass.set(assetClass, points);
     }
   }
 
-  const bands: StackedBand[] = [...byClass.entries()].map(([assetClass, buckets]) => ({
+  const bands: StackedBand[] = [...byClass.entries()].map(([assetClass, points]) => ({
     key: assetClass,
-    points: [...buckets.values()],
+    points,
   }));
 
   return { kind: 'available', grouping, bands };
@@ -232,8 +246,9 @@ export function stackedSeries(
  * day's total.
  *
  * **The date union is the whole job.** A band only carries points for the
- * dates on which its class had a value — a portfolio that bought its first FII
- * in March has an `fii` band starting in March. A chart stacks by row, so every
+ * buckets whose closing snapshot held its class — a portfolio that bought its
+ * first FII in March has an `fii` band starting in March, and one that sold it
+ * in May has none after. A chart stacks by row, so every
  * row needs every band, and a missing one leaves a hole in the stack and the
  * bands stop summing to the total. Absent means zero here, and zero is the
  * truth: the class was not held that day.

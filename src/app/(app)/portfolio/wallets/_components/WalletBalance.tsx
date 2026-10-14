@@ -98,74 +98,80 @@ export async function WalletBalance({
   const balanceColumns: NodeColumn[] = [
     { id: 'asset', header: t('columnAsset'), kind: 'text', width: 22, sortable: true },
     { id: 'value', header: t('columnValue'), kind: 'money', sortable: true },
+    // Three percentages of at most `+100,00%` under one-word headers (Meta, Hoje,
+    // Desvio): 10ch holds them, where the default's 12 is sized for "Participação".
     { id: 'target', header: t('columnTarget'), kind: 'percent', width: 10, sortable: true },
     { id: 'current', header: t('columnCurrent'), kind: 'percent', width: 10, sortable: true },
     { id: 'drift', header: t('columnDrift'), kind: 'percent', width: 10, sortable: true },
     { id: 'gapValue', header: t('columnGapValue'), kind: 'money', sortable: true },
   ];
-  const balanceRows: NodeRow[] = balance.rows.map((row, index) => ({
-    id: row.assetId,
-    keys: { asset: nameOf(row.assetId), ...rankKeys(balanceRanks, index) },
-    cells: {
-      asset: (
-        <CellLabel
-          layout="stacked"
-          detail={labelFor(labels, row.assetId).name}
-          badge={
-            row.outOfTolerance && (
-              // SPEC-022 BR-022-31 — drift is a warning (DS-05).
-              <Badge variant="warning">{t('outOfTolerance')}</Badge>
-            )
-          }
-        >
-          {labelFor(labels, row.assetId).code}
-        </CellLabel>
-      ),
-      value: (
-        <Stack gap="xs" align="end">
-          <Money value={row.value} />
-          <Text as="span" size="xs" tone="muted">
-            {t('quantityPrefix')} <Money value={row.quantity} kind="quantity" />
-          </Text>
-        </Stack>
-      ),
-      target: <Money value={row.targetPct} kind="percentPoints" />,
-      current:
-        row.currentPct === null ? (
-          unavailable
-        ) : (
-          <Money value={row.currentPct} kind="percentPoints" />
+  const balanceRows: NodeRow[] = balance.rows.map((row, index) => {
+    const tradable = row.gap?.tradableShares ?? null;
+    return {
+      id: row.assetId,
+      keys: { asset: nameOf(row.assetId), ...rankKeys(balanceRanks, index) },
+      cells: {
+        asset: (
+          <CellLabel
+            layout="stacked"
+            detail={labelFor(labels, row.assetId).name}
+            badge={
+              row.outOfTolerance && (
+                // SPEC-022 BR-022-31 — drift is a warning (DS-05).
+                <Badge variant="warning">{t('outOfTolerance')}</Badge>
+              )
+            }
+          >
+            {labelFor(labels, row.assetId).code}
+          </CellLabel>
         ),
-      drift:
-        row.driftPp === null ? (
-          unavailable
-        ) : (
-          <Money value={row.driftPp} kind="percentPoints" signed />
-        ),
-      gapValue:
-        row.gap === null ? (
-          unavailable
-        ) : (
+        value: (
           <Stack gap="xs" align="end">
-            <Money value={row.gap.gapValue} signed />
-            {row.gap.tradableShares === null ? (
-              // No unit price (a zero quantity): no count exists to convert to.
-              <Text as="span" size="xs" tone="muted">
-                — {t('gapSharesUnit')}
-              </Text>
-            ) : (
-              // BR-017-20: the count is arithmetic over a delayed quote, and
-              // says so next to itself rather than in a footnote the reader has
-              // to go and find.
-              <Text as="span" size="xs" tone="muted" title={t('approximateHint')}>
-                <Money value={row.gap.tradableShares} kind="quantity" signed /> {t('gapSharesUnit')}{' '}
-                · {t('approximate')}
-              </Text>
-            )}
+            <Money value={row.value} />
+            <Text as="span" size="xs" tone="muted">
+              {t.rich('quantityOf', {
+                quantity: () => <Money value={row.quantity} kind="quantity" />,
+              })}
+            </Text>
           </Stack>
         ),
-    },
-  }));
+        target: <Money value={row.targetPct} kind="percentPoints" />,
+        current:
+          row.currentPct === null ? (
+            unavailable
+          ) : (
+            <Money value={row.currentPct} kind="percentPoints" />
+          ),
+        drift:
+          row.driftPp === null ? (
+            unavailable
+          ) : (
+            <Money value={row.driftPp} kind="percentPoints" signed />
+          ),
+        gapValue:
+          row.gap === null ? (
+            unavailable
+          ) : (
+            <Stack gap="xs" align="end">
+              <Money value={row.gap.gapValue} signed />
+              {tradable === null ? (
+                // No unit price (a zero quantity): no count exists to convert to.
+                unavailable
+              ) : (
+                // BR-017-20: the count is arithmetic over a delayed quote, and
+                // says so next to itself rather than in a footnote the reader has
+                // to go and find.
+                <Text as="span" size="xs" tone="muted" title={t('approximateHint')}>
+                  {t.rich('gapShares', {
+                    shares: () => <Money value={tradable} kind="quantity" signed />,
+                  })}
+                </Text>
+              )}
+            </Stack>
+          ),
+      },
+    };
+  });
 
   const untargetedRanks = {
     quantity: ranksOf(balance.untargeted, (row) => row.quantity),

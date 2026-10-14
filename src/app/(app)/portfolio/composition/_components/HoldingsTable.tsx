@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { StateBadge, type WatchState } from '@/components/patterns/state-badge';
 import { Text } from '@/components/ui/text';
 import { CellLabel } from '@/components/patterns/cell-label';
-import { Cluster } from '@/components/layout/cluster';
 import { Stack } from '@/components/layout/stack';
 import { MoneyMask } from '@/components/patterns/money-mask';
 
@@ -175,9 +174,10 @@ export function HoldingsTable({
        * SPEC-022 BR-022-18 / BR-022-41: sized to the figure each column holds,
        * not the 19ch default for the largest amount, so the six columns fit the
        * panel at 1280 px (#245):
-       *  - a price — *preço médio*, preço atual — 14ch: R$ 9.999.999,99;
+       *  - a price — *preço médio*, preço atual — 13ch: R$ 9.999.999,99;
        *  - a holding's value and its gain 16ch: ±R$ 999.999.999,99;
-       *  - a quantity 12ch.
+       *  - a quantity keeps the 14ch default: eight decimal places after a
+       *    grupamento (`3.333,33333333`) need it.
        */
       meta: { kind: id === 'quantity' ? 'number' : 'money', width },
       accessorFn: (row) => row[id].rank,
@@ -279,7 +279,7 @@ export function HoldingsTable({
           );
         },
       },
-      numeric('quantity', labels.quantity, 12),
+      numeric('quantity', labels.quantity, 14),
       /*
        * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — *preço médio* is
        * exactly the figure this column shows, so the marker sits next to it
@@ -289,7 +289,7 @@ export function HoldingsTable({
        * qualifies.
        */
       {
-        ...numeric('averagePrice', labels.averagePrice, 14),
+        ...numeric('averagePrice', labels.averagePrice, 13),
         cell: ({ row }) => (
           <Stack gap="xs" align="end">
             <Text as="span" className="tabular-nums">
@@ -303,7 +303,7 @@ export function HoldingsTable({
           </Stack>
         ),
       },
-      numeric('currentPrice', labels.currentPrice, 14),
+      numeric('currentPrice', labels.currentPrice, 13),
       /*
        * SPEC-009's valuation estimate qualifies the *current value* — how the
        * holding was priced today — so its marker sits beside that figure, the
@@ -324,19 +324,18 @@ export function HoldingsTable({
             <Text as="span" className="tabular-nums">
               <CellText cell={row.original.value} />
             </Text>
-            <Cluster gap="xs" justify="end" align="baseline">
-              {row.original.estimated && (
-                <Badge variant="outline" title={labels.estimatedTitle}>
-                  {labels.estimated}
-                </Badge>
-              )}
-              {/* A share of a zero total does not exist (`Cell.rank`). */}
-              {row.original.share.rank !== undefined && (
-                <Text as="span" size="xs" tone="muted" className="tabular-nums">
-                  {labels.shareOf.replace('{share}', row.original.share.text)}
-                </Text>
-              )}
-            </Cluster>
+            {/* BR-022-32: the marker under the figure it qualifies, before the share. */}
+            {row.original.estimated && (
+              <Badge variant="outline" title={labels.estimatedTitle}>
+                {labels.estimated}
+              </Badge>
+            )}
+            {/* A share of a zero total does not exist (`Cell.rank`). */}
+            {row.original.share.rank !== undefined && (
+              <Text as="span" size="xs" tone="muted" className="tabular-nums">
+                {labels.shareOf.replace('{share}', row.original.share.text)}
+              </Text>
+            )}
           </Stack>
         ),
       },

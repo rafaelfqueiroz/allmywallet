@@ -6,8 +6,9 @@ import type { ReactNode } from 'react';
  *
  * `DataTable` renders every cell twice (DS-28), so a form in a cell would post
  * its fields twice and repeat its ids. A row control is instead a `<button
- * form="…">` in the cell, and the form it submits is here — one small form per
- * row, each holding only hidden fields.
+ * form="…">` in the cell — or a `RowMenuSubmit` item of the row's "⋯" menu,
+ * which submits the form by id — and the form it submits is here: one small
+ * form per row, each holding only hidden fields.
  *
  * They take no room: a form with only hidden inputs has no height, and this
  * host adds none (so the pager the table ends in still closes the panel). Only

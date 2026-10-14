@@ -473,4 +473,35 @@ test.describe('the table standard: wide tables fit the panel', () => {
     }
     await setHidden(page, false);
   });
+
+  test('the merged cells carry what the columns did', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const { walletId, range } = await seedWideTenant(userId);
+
+    // Evolução patrimonial: one row per date and class, newest date first, each
+    // of the eight equal classes an eighth of the day.
+    await page.goto(`/reports?${range}`);
+    const composition = page.getByRole('table', {
+      name: 'Composição do patrimônio por classe de ativo, por data',
+    });
+    await expect(composition.getByRole('columnheader')).toHaveText([
+      /Data/,
+      /Classe de ativo/,
+      /Valor/,
+      /Participação/,
+    ]);
+    await expect(composition.getByRole('columnheader', { name: /Data/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+    const first = composition.locator('tbody tr').first().getByRole('cell');
+    await expect(first.nth(2)).toHaveText('R$ 100.000.000,00');
+    await expect(first.nth(3)).toHaveText('12,50%');
+
+    // Carteiras: the quantity under the value, the count of cotas under the distance.
+    await page.goto(`/wallets/${walletId}/balance`);
+    const balance = page.getByRole('table', { name: /^Meta, participação atual/ });
+    await expect(balance.getByText('Qtd. 123.456').first()).toBeVisible();
+    await expect(balance.getByText(/cotas · aproximado$/).first()).toBeVisible();
+  });
 });

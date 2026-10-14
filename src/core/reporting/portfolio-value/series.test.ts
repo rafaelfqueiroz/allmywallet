@@ -295,6 +295,55 @@ describe('stackedSeries (BR-013-05)', () => {
   });
 
   /**
+   * #245 review — a class sold mid-bucket. Weekly, Mon–Fri of one week:
+   *   Mon 03-02: stock 300, fii 100
+   *   Wed 03-04: stock 300            (every FII sold)
+   *   Fri 03-06: stock 310            ← the week's close
+   * The bucket is Friday's snapshot, so the FIIs, not held at the close, have
+   * no point — never one dated Monday beside a stock point dated Friday.
+   */
+  it('bands each bucket by its closing snapshot, so a class sold mid-bucket has no point', () => {
+    const result = stackedSeries(
+      [
+        snapshot('2026-03-02', '400', '0', {
+          byAssetClass: classes([
+            ['stock', '300'],
+            ['fii', '100'],
+          ]),
+        }),
+        snapshot('2026-03-04', '300', '0', { byAssetClass: classes([['stock', '300']]) }),
+        snapshot('2026-03-06', '310', '0', { byAssetClass: classes([['stock', '310']]) }),
+      ],
+      'weekly',
+      'asset_class',
+    );
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    expect(result.bands.map((band) => band.key)).toEqual(['stock']);
+    expect(result.bands[0]!.points.map((point) => [point.date, to8(point.value)])).toEqual([
+      ['2026-03-06', '310.00000000'],
+    ]);
+    expect(stackedTable(result.bands).map((day) => day.date)).toEqual(['2026-03-06']);
+  });
+
+  it('marks a band estimated when any snapshot in its bucket was', () => {
+    const result = stackedSeries(
+      [
+        snapshot('2026-03-02', '100', '0', {
+          hasEstimates: true,
+          byAssetClass: classes([['cdb', '100']]),
+        }),
+        snapshot('2026-03-06', '101', '0', { byAssetClass: classes([['cdb', '101']]) }),
+      ],
+      'weekly',
+      'asset_class',
+    );
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    expect(result.bands[0]!.points[0]!.estimated).toBe(true);
+  });
+
+  /**
    * The honest refusal. `by_asset_class` is the only historical breakdown
    * stored, so the other four dimensions cannot be banded — and returning
    * empty bands would render as "you held nothing", a false statement about
