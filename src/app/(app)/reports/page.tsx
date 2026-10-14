@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import { defaultGroupingFor } from '@/core/reporting/grouping';
 import { chartColorAt } from '@/components/charts/palette';
-import { Money as MoneyValue } from '@/core/shared/money';
+import { stackedTable } from '@/core/reporting/portfolio-value/series';
 import type { AllocationShift } from '@/core/reporting/composition/ports';
 import type {
   GrowthDecomposition,
@@ -331,12 +331,13 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                       summary: tp('stacked.summary'),
                       caption: tp('stacked.caption'),
                       date: tp('table.date'),
-                      total: tp('table.value'),
                       band: t(`grouping.${report.stacked.grouping}`),
+                      value: tp('stacked.value'),
+                      share: tp('stacked.share'),
                     }}
                     table={tableLabels(t, {
                       caption: tp('stacked.caption'),
-                      noun: tp('table.noun'),
+                      noun: tp('stacked.noun'),
                     })}
                     nameOf={(key) => t(`assetClass.${key}`)}
                   />
@@ -586,13 +587,14 @@ function SeriesTable({
  * SPEC-013 BR-013-05 / SPEC-016 BR-016-16 — the composition bands, as a chart
  * and as the table that carries the same figures.
  *
- * **The date union is the whole job here.** `stackedSeries` emits one band per
- * asset class, and a band only carries points for the dates on which that class
- * had a value — a portfolio that bought its first FII in March has a `fii` band
- * starting in March. Recharts stacks by row, so every row must carry a key for
- * every band; a missing key leaves a hole in the stack and the bands stop
- * summing to the total, which is the one claim a composition chart makes.
- * Absent means zero here, and zero is the truth: the class was not held.
+ * Both read `stackedTable`'s days, which give every date every band (absent
+ * means zero: the class was not held) — the chart because Recharts stacks by
+ * row and a missing key leaves a hole in the stack, the table because a row per
+ * class per date is what it lists.
+ *
+ * SPEC-022 BR-022-41: the table is **one row per date and class** — Data,
+ * Classe, Valor, Participação — not a money column per class, which with every
+ * class held was wider than the panel.
  */
 function StackedComposition({
   bands,
@@ -601,34 +603,21 @@ function StackedComposition({
   nameOf,
 }: {
   readonly bands: readonly StackedBand[];
-  readonly labels: Record<'title' | 'summary' | 'caption' | 'date' | 'total' | 'band', string>;
+  readonly labels: Record<
+    'title' | 'summary' | 'caption' | 'date' | 'band' | 'value' | 'share',
+    string
+  >;
   readonly table: ReportTableLabels;
   readonly nameOf: (key: string) => string;
 }) {
-  const dates = [
-    ...new Set(bands.flatMap((band) => band.points.map((point) => point.date))),
-  ].sort();
-
-  const valueAt = new Map(
-    bands.map((band) => [band.key, new Map(band.points.map((point) => [point.date, point.value]))]),
-  );
-  const bandValue = (key: string, date: (typeof dates)[number]): MoneyValue =>
-    valueAt.get(key)?.get(date) ?? MoneyValue.zero();
-  // Each band's dates in ascending order of value, for the table's sort
-  // (`NodeTable`): exact `comparedTo`, never a float.
-  const bandRanks = new Map(
-    bands.map((band) => [band.key, ranksOf(dates, (date) => bandValue(band.key, date))]),
-  );
+  const days = stackedTable(bands);
 
   // SPEC-022 BR-022-24 — a synchronous component, so the request-cached read.
   const masked = useHideValues();
   const rows = concealSeries(
-    dates.map((date) => {
-      const row: Record<string, string | number> = { date };
-      for (const band of bands) {
-        const value = valueAt.get(band.key)?.get(date);
-        row[band.key] = value === undefined ? 0 : plot(value);
-      }
+    days.map((day) => {
+      const row: Record<string, string | number> = { date: day.date };
+      for (const band of day.bands) row[band.key] = plot(band.value);
       return row;
     }),
     bands.map((band) => band.key),
@@ -641,6 +630,13 @@ function StackedComposition({
     color: chartColorAt(index),
   }));
 
+  // Date ascending, then the bands' own order — the order the table keeps
+  // within a date whichever way the dates are sorted (a stable sort).
+  const cells = days.flatMap((day) => day.bands.map((band) => ({ date: day.date, ...band })));
+  // Ranks from exact `comparedTo`, never a float (`NodeTable`).
+  const valueRanks = ranksOf(cells, (cell) => cell.value);
+  const shareRanks = ranksOf(cells, (cell) => cell.share);
+
   return (
     <Stack gap="md">
       <StackedChart
@@ -650,41 +646,32 @@ function StackedComposition({
         title={labels.title}
         summary={labels.summary}
       />
-      {/* SPEC-022 BR-022-18: a row a date, a money column a band — the table
-          that grows with the history, so it pages and sorts like the series
-          above. With every asset class held it is wider than the panel and
-          scrolls inside its own container; no figure is squeezed (DS-67). */}
+      {/* SPEC-022 BR-022-18: the table that grows with the history, so it
+          pages and sorts like the series above. */}
       <NodeTable
         columns={[
-          { id: 'date', header: labels.date, kind: 'date', sortable: true } satisfies NodeColumn,
-          ...legend.map((band): NodeColumn => ({
-            id: band.key,
-            header: band.label,
-            kind: 'money',
-            sortable: true,
-          })),
+          { id: 'date', header: labels.date, kind: 'date', sortable: true },
+          { id: 'band', header: labels.band, kind: 'text', sortable: true },
+          { id: 'value', header: labels.value, kind: 'money', sortable: true },
+          { id: 'share', header: labels.share, kind: 'percent', sortable: true },
         ]}
         {...table}
         paramPrefix="stacked"
         sort={{ id: 'date', desc: true }}
-        rows={dates.map((date, dateIndex) => ({
+        rows={cells.map((cell, index) => ({
           cells: {
-            date: formatBusinessDate(date),
-            ...Object.fromEntries(
-              bands.map((band) => [
-                band.key,
-                // Zero rather than an em dash: a class absent from a day's
-                // snapshot was not held that day, which is a figure, not a
-                // gap. It also keeps each row addable to the total.
-                <Money value={bandValue(band.key, date)} />,
-              ]),
-            ),
+            date: formatBusinessDate(cell.date),
+            band: nameOf(cell.key),
+            // Zero rather than an em dash: a class absent from a day's snapshot
+            // was not held that day, which is a figure, not a gap.
+            value: <Money value={cell.value} />,
+            share: cell.share === null ? '—' : <Money value={cell.share} kind="percent" />,
           },
           keys: {
-            date,
-            ...Object.fromEntries(
-              bands.map((band) => [band.key, bandRanks.get(band.key)?.[dateIndex]]),
-            ),
+            date: cell.date,
+            band: nameOf(cell.key),
+            value: valueRanks[index],
+            share: shareRanks[index],
           },
         }))}
       />

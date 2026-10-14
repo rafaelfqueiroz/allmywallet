@@ -270,7 +270,9 @@ async function ComparisonTable({
       id: 'wallet',
       header: tp('wallets.columnWallet'),
       kind: 'text',
-      width: 24,
+      // SPEC-022 BR-022-41: three amounts at their full width leave the name
+      // 18ch at 1280 px (#245); a longer name truncates, in full on demand.
+      width: 18,
       sortable: paginated,
     },
     {

@@ -82,14 +82,11 @@ export function holdingsTableLabels(
 ): HoldingsTableLabels {
   return {
     code: tc('holdings.code'),
-    state: tc('holdings.state'),
-    assetClass: tc('holdings.assetClass'),
-    sector: tc('holdings.sector'),
     quantity: tc('holdings.quantity'),
     averagePrice: tc('holdings.averagePrice'),
     currentPrice: tc('holdings.currentPrice'),
     value: tc('holdings.value'),
-    share: tc('holdings.share'),
+    shareOf: tc('holdings.shareOf', { share: '{share}' }),
     unrealizedGain: tc('holdings.unrealizedGain'),
     caption: tc('holdings.caption'),
     concentrated: tc('concentration.badge', { threshold: report.concentration.thresholdPct }),

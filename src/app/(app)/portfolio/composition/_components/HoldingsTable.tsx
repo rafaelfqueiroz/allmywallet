@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { StateBadge, type WatchState } from '@/components/patterns/state-badge';
 import { Text } from '@/components/ui/text';
 import { CellLabel } from '@/components/patterns/cell-label';
-import { Cluster } from '@/components/layout/cluster';
+import { Stack } from '@/components/layout/stack';
 import { MoneyMask } from '@/components/patterns/money-mask';
 
 /**
@@ -108,15 +108,12 @@ export interface HoldingRow {
 
 export interface HoldingsTableLabels {
   readonly code: string;
-  /** SPEC-018 BR-018-19 — the opportunity-state column header. */
-  readonly state: string;
-  readonly assetClass: string;
-  readonly sector: string;
   readonly quantity: string;
   readonly averagePrice: string;
   readonly currentPrice: string;
   readonly value: string;
-  readonly share: string;
+  /** SPEC-022 BR-022-41 — a template, "{share} do total", under the value. */
+  readonly shareOf: string;
   readonly unrealizedGain: string;
   readonly caption: string;
   readonly concentrated: string;
@@ -137,43 +134,52 @@ export interface HoldingsTableLabels {
 }
 
 /**
- * Columns a tab may leave out. SPEC-022 BR-022-02: Patrimônio reads value by
- * asset, so it drops the two categorical columns Composição keeps — the
- * sector (a composition dimension) and the watch state (SPEC-018 BR-018-19
- * places it in Composição's holdings list).
+ * Details a tab may leave out of the asset cell. SPEC-022 BR-022-02: Patrimônio
+ * reads value by asset, so it drops the two categorical details Composição
+ * keeps — the sector (a composition dimension) and the watch state (SPEC-018
+ * BR-018-19 places it in Composição's holdings list).
  */
-export type OptionalHoldingColumn = 'sector' | 'opportunityState';
+export type OptionalHoldingDetail = 'sector' | 'opportunityState';
 
 // One instance, so the default does not change the memoised columns on every
 // render — a new `columns` array re-renders DataTable's model (see its #204
 // Decision log #7 on what an unstable table input does).
-const NONE_HIDDEN: readonly OptionalHoldingColumn[] = [];
+const NONE_HIDDEN: readonly OptionalHoldingDetail[] = [];
 
 export function HoldingsTable({
   rows,
   labels,
-  hiddenColumns = NONE_HIDDEN,
+  hidden = NONE_HIDDEN,
 }: {
   readonly rows: readonly HoldingRow[];
   readonly labels: HoldingsTableLabels;
-  readonly hiddenColumns?: readonly OptionalHoldingColumn[];
+  readonly hidden?: readonly OptionalHoldingDetail[];
 }) {
+  const showSector = !hidden.includes('sector');
+  const showState = !hidden.includes('opportunityState');
+
   const columns = useMemo<ColumnDef<HoldingRow, unknown>[]>(() => {
     const numeric = (
       id: keyof Pick<
         HoldingRow,
-        'quantity' | 'averagePrice' | 'currentPrice' | 'value' | 'share' | 'unrealizedGain'
+        'quantity' | 'averagePrice' | 'currentPrice' | 'value' | 'unrealizedGain'
       >,
       header: string,
+      width: number,
       options?: { readonly signed?: boolean },
     ): ColumnDef<HoldingRow, unknown> => ({
       id,
       header,
-      // SPEC-022 BR-022-18: quantities and percentages are not amounts, so they
-      // do not take the money width. The estimate markers beside *preço médio*
-      // and the value wrap under the figure when the column is full; the column
-      // is sized for the figure.
-      meta: { kind: id === 'quantity' ? 'number' : id === 'share' ? 'percent' : 'money' },
+      /*
+       * SPEC-022 BR-022-18 / BR-022-41: sized to the figure each column holds,
+       * not the 19ch default for the largest amount, so the six columns fit the
+       * panel at 1280 px (#245):
+       *  - a price — *preço médio*, preço atual — 13ch: R$ 9.999.999,99;
+       *  - a holding's value and its gain 16ch: ±R$ 999.999.999,99;
+       *  - a quantity keeps the 14ch default: eight decimal places after a
+       *    grupamento (`3.333,33333333`) need it.
+       */
+      meta: { kind: id === 'quantity' ? 'number' : 'money', width },
       accessorFn: (row) => row[id].rank,
       sortingFn: 'basic',
       sortUndefined: 'last',
@@ -206,71 +212,74 @@ export function HoldingsTable({
       },
     });
 
-    const all: ColumnDef<HoldingRow, unknown>[] = [
+    return [
       {
+        /*
+         * SPEC-022 BR-022-41 — the asset carries its categories: the class (and
+         * on Composição the sector) on a second line, and the watch state under
+         * them. They are no longer columns of their own, so they no longer sort;
+         * Composição's groups table breaks the portfolio down by both.
+         *
+         * The column's value is the code followed by those words, so the filter
+         * still finds a holding by class, sector or state ("Filtrar por ativo,
+         * classe ou setor") and the sort, by the code that leads it.
+         */
         id: 'code',
         header: labels.code,
-        meta: { kind: 'text', width: 22 },
-        accessorFn: (row) => row.code,
-        cell: ({ row }) => (
-          <CellLabel
-            badge={
-              row.original.concentrated && (
-                /*
-                 * BR-015-06 — informational, never advice. Both the badge and
-                 * its title come from the message catalogue, where a human
-                 * reviewed the wording; nothing is composed here.
-                 */
-                <Badge variant="secondary" title={labels.concentratedTitle}>
-                  {labels.concentrated}
-                </Badge>
-              )
-            }
-          >
-            {row.original.code}
-          </CellLabel>
-        ),
+        meta: { kind: 'text', width: 20 },
+        accessorFn: (row) =>
+          [
+            row.code,
+            row.assetClass,
+            showSector ? row.sector : '',
+            showState ? row.opportunityStateLabel : '',
+          ].join(' '),
+        cell: ({ row }) => {
+          const asset = (
+            <CellLabel
+              badge={
+                row.original.concentrated && (
+                  /*
+                   * BR-015-06 — informational, never advice. Both the badge and
+                   * its title come from the message catalogue, where a human
+                   * reviewed the wording; nothing is composed here.
+                   */
+                  <Badge variant="secondary" title={labels.concentratedTitle}>
+                    {labels.concentrated}
+                  </Badge>
+                )
+              }
+              detail={
+                showSector
+                  ? `${row.original.assetClass} · ${row.original.sector}`
+                  : row.original.assetClass
+              }
+            >
+              {row.original.code}
+            </CellLabel>
+          );
+          /*
+           * SPEC-018 BR-018-19 — the watch state is which of the user's own
+           * rules currently matches (BR-018-18), not a figure: server-formatted
+           * label and title, like every other cell here. Absent for a holding
+           * with no rule, which is most of them.
+           */
+          const state = row.original.opportunityState;
+          return showState && state !== null ? (
+            <Stack gap="xs" align="start">
+              {asset}
+              <StateBadge
+                state={state}
+                label={row.original.opportunityStateLabel}
+                title={row.original.opportunityStateTitle}
+              />
+            </Stack>
+          ) : (
+            asset
+          );
+        },
       },
-      {
-        id: 'assetClass',
-        header: labels.assetClass,
-        meta: { kind: 'text', width: 14 },
-        accessorFn: (row) => row.assetClass,
-      },
-      {
-        id: 'sector',
-        header: labels.sector,
-        meta: { kind: 'text', width: 18 },
-        accessorFn: (row) => row.sector,
-      },
-      /*
-       * SPEC-018 BR-018-19 — the watch state, as a badge in the holdings
-       * list. It sits with the categorical columns rather than the figures
-       * because it is not one: it is which of the user's own rules currently
-       * matches (BR-018-18), and the cell carries no arithmetic at all —
-       * server-formatted label and title, exactly like every other cell in
-       * this table (see the header comment).
-       *
-       * `undefined` for a holding with no rule, so `sortUndefined: 'last'`
-       * keeps unwatched assets at the bottom in both directions: not having a
-       * rule is the absence of a state, not the lowest one.
-       */
-      {
-        id: 'opportunityState',
-        header: labels.state,
-        meta: { kind: 'badge' },
-        accessorFn: (row) => row.opportunityStateLabel || undefined,
-        sortUndefined: 'last',
-        cell: ({ row }) =>
-          row.original.opportunityState === null ? null : (
-            <StateBadge
-              state={row.original.opportunityState}
-              label={row.original.opportunityStateLabel}
-              title={row.original.opportunityStateTitle}
-            />
-          ),
-      },
-      numeric('quantity', labels.quantity),
+      numeric('quantity', labels.quantity, 14),
       /*
        * SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — *preço médio* is
        * exactly the figure this column shows, so the marker sits next to it
@@ -280,9 +289,9 @@ export function HoldingsTable({
        * qualifies.
        */
       {
-        ...numeric('averagePrice', labels.averagePrice),
+        ...numeric('averagePrice', labels.averagePrice, 13),
         cell: ({ row }) => (
-          <Cluster gap="sm" justify="end" align="baseline">
+          <Stack gap="xs" align="end">
             <Text as="span" className="tabular-nums">
               <CellText cell={row.original.averagePrice} />
             </Text>
@@ -291,10 +300,10 @@ export function HoldingsTable({
                 {labels.costEstimated}
               </Badge>
             )}
-          </Cluster>
+          </Stack>
         ),
       },
-      numeric('currentPrice', labels.currentPrice),
+      numeric('currentPrice', labels.currentPrice, 13),
       /*
        * SPEC-009's valuation estimate qualifies the *current value* — how the
        * holding was priced today — so its marker sits beside that figure, the
@@ -302,26 +311,37 @@ export function HoldingsTable({
        * one word "Estimado" could not say which figure it meant (SPEC-022
        * BR-022-32: the label sits beside the figure it qualifies).
        */
+      /*
+       * SPEC-022 BR-022-41 — the holding's share of the scope sits under its
+       * value rather than in a column of its own. No sort is lost: every share
+       * is a value over the one total, so the shares order exactly as the
+       * values do.
+       */
       {
-        ...numeric('value', labels.value),
+        ...numeric('value', labels.value, 16),
         cell: ({ row }) => (
-          <Cluster gap="sm" justify="end" align="baseline">
+          <Stack gap="xs" align="end">
             <Text as="span" className="tabular-nums">
               <CellText cell={row.original.value} />
             </Text>
+            {/* BR-022-32: the marker under the figure it qualifies, before the share. */}
             {row.original.estimated && (
               <Badge variant="outline" title={labels.estimatedTitle}>
                 {labels.estimated}
               </Badge>
             )}
-          </Cluster>
+            {/* A share of a zero total does not exist (`Cell.rank`). */}
+            {row.original.share.rank !== undefined && (
+              <Text as="span" size="xs" tone="muted" className="tabular-nums">
+                {labels.shareOf.replace('{share}', row.original.share.text)}
+              </Text>
+            )}
+          </Stack>
         ),
       },
-      numeric('share', labels.share),
-      numeric('unrealizedGain', labels.unrealizedGain, { signed: true }),
+      numeric('unrealizedGain', labels.unrealizedGain, 16, { signed: true }),
     ];
-    return all.filter((column) => !hiddenColumns.includes(column.id as OptionalHoldingColumn));
-  }, [labels, hiddenColumns]);
+  }, [labels, showSector, showState]);
 
   return (
     <DataTable

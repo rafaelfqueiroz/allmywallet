@@ -8,6 +8,7 @@ import {
   granularityFor,
   monthlyContributions,
   stackedSeries,
+  stackedTable,
   valueSeries,
   weekOf,
   withLiveEndpoint,
@@ -294,6 +295,119 @@ describe('stackedSeries (BR-013-05)', () => {
   });
 
   /**
+   * #245 review — a class sold mid-bucket. Weekly, Mon–Fri of one week:
+   *   Mon 03-02: stock 300, fii 100
+   *   Wed 03-04: stock 300            (every FII sold)
+   *   Fri 03-06: stock 310            ← the week's close
+   * The bucket is Friday's snapshot, so the FIIs, not held at the close, have
+   * no point — never one dated Monday beside a stock point dated Friday.
+   */
+  it('bands each bucket by its closing snapshot, so a class sold mid-bucket has no point', () => {
+    const result = stackedSeries(
+      [
+        snapshot('2026-03-02', '400', '0', {
+          byAssetClass: classes([
+            ['stock', '300'],
+            ['fii', '100'],
+          ]),
+        }),
+        snapshot('2026-03-04', '300', '0', { byAssetClass: classes([['stock', '300']]) }),
+        snapshot('2026-03-06', '310', '0', { byAssetClass: classes([['stock', '310']]) }),
+      ],
+      'weekly',
+      'asset_class',
+    );
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    expect(result.bands.map((band) => band.key)).toEqual(['stock']);
+    expect(result.bands[0]!.points.map((point) => [point.date, to8(point.value)])).toEqual([
+      ['2026-03-06', '310.00000000'],
+    ]);
+    expect(stackedTable(result.bands).map((day) => day.date)).toEqual(['2026-03-06']);
+  });
+
+  /**
+   * #247 review — a full liquidation. Weekly:
+   *   Fri 02-27: stock 100            (week of 02-23)
+   *   Mon 03-02: stock 100
+   *   Fri 03-06: total 0, empty breakdown   ← that week's close: nothing held
+   *   Fri 03-13: stock 120            (week of 03-09)
+   * The value line has 02-27 → 100, 03-06 → 0, 03-13 → 120; the bands must
+   * have the same three dates, the middle one at zero, or the chart joins 100
+   * straight to 120 across the week the line drops to zero.
+   */
+  it('keeps a bucket that closes with nothing held, at zero', () => {
+    const snapshots = [
+      snapshot('2026-02-27', '100', '0', { byAssetClass: classes([['stock', '100']]) }),
+      snapshot('2026-03-02', '100', '0', { byAssetClass: classes([['stock', '100']]) }),
+      snapshot('2026-03-06', '0', '0', { byAssetClass: classes([]) }),
+      snapshot('2026-03-13', '120', '0', { byAssetClass: classes([['stock', '120']]) }),
+    ];
+    const line = valueSeries(snapshots, 'weekly');
+    const result = stackedSeries(snapshots, 'weekly', 'asset_class');
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    const stock = result.bands.map((band) =>
+      band.points.map((point) => [point.date, to8(point.value)]),
+    );
+    expect(stock).toEqual([
+      [
+        ['2026-02-27', '100.00000000'],
+        ['2026-03-06', '0.00000000'],
+        ['2026-03-13', '120.00000000'],
+      ],
+    ]);
+    // The bands' dates are the line's.
+    expect(stackedTable(result.bands).map((day) => day.date)).toEqual(
+      line.map((point) => point.date),
+    );
+    // A day worth nothing has no shares (BR-015-10's `sharesOf`).
+    expect(stackedTable(result.bands)[1]!.bands[0]!.share).toBeNull();
+  });
+
+  /** A class bought later reads zero at the closes before it, rather than having no point. */
+  it('gives every band a point at every close', () => {
+    const result = stackedSeries(
+      [
+        snapshot('2026-03-02', '100', '0', { byAssetClass: classes([['stock', '100']]) }),
+        snapshot('2026-03-03', '150', '0', {
+          byAssetClass: classes([
+            ['stock', '100'],
+            ['fii', '50'],
+          ]),
+        }),
+      ],
+      'daily',
+      'asset_class',
+    );
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    expect(
+      result.bands.map((band) => [band.key, band.points.map((point) => to8(point.value))]),
+    ).toEqual([
+      ['stock', ['100.00000000', '100.00000000']],
+      ['fii', ['0.00000000', '50.00000000']],
+    ]);
+  });
+
+  it('marks a band estimated when any snapshot in its bucket was', () => {
+    const result = stackedSeries(
+      [
+        snapshot('2026-03-02', '100', '0', {
+          hasEstimates: true,
+          byAssetClass: classes([['cdb', '100']]),
+        }),
+        snapshot('2026-03-06', '101', '0', { byAssetClass: classes([['cdb', '101']]) }),
+      ],
+      'weekly',
+      'asset_class',
+    );
+
+    if (result.kind !== 'available') throw new Error('unreachable');
+    expect(result.bands[0]!.points[0]!.estimated).toBe(true);
+  });
+
+  /**
    * The honest refusal. `by_asset_class` is the only historical breakdown
    * stored, so the other four dimensions cannot be banded — and returning
    * empty bands would render as "you held nothing", a false statement about
@@ -309,4 +423,71 @@ describe('stackedSeries (BR-013-05)', () => {
       expect(result.grouping).toBe(grouping);
     },
   );
+});
+
+describe('stackedTable (BR-013-05 / SPEC-022 BR-022-41)', () => {
+  const band = (key: string, points: readonly [string, string][]) => ({
+    key,
+    points: points.map(([date, value]) => ({ date: d(date), value: m(value), estimated: false })),
+  });
+
+  it('gives every date every band, zero where the class was not held', () => {
+    /*
+     * stock holds on both days; fii is bought on the second.
+     *   2026-03-02: stock 300, fii   0 → total 300
+     *   2026-03-03: stock 300, fii 100 → total 400
+     */
+    const days = stackedTable([
+      band('stock', [
+        ['2026-03-02', '300'],
+        ['2026-03-03', '300'],
+      ]),
+      band('fii', [['2026-03-03', '100']]),
+    ]);
+
+    expect(days.map((day) => day.date)).toEqual(['2026-03-02', '2026-03-03']);
+    expect(days[0]!.bands.map((cell) => [cell.key, to8(cell.value)])).toEqual([
+      ['stock', '300.00000000'],
+      ['fii', '0.00000000'],
+    ]);
+  });
+
+  it("shares each day's total, summing to exactly one", () => {
+    /*
+     *   2026-03-03: stock 300 ÷ 400 = 0,75; fii = 1 − 0,75 = 0,25 (the residual)
+     *   2026-03-04: three thirds of 300 — 0,33333333, 0,33333333, 0,33333334
+     */
+    const days = stackedTable([
+      band('stock', [
+        ['2026-03-03', '300'],
+        ['2026-03-04', '100'],
+      ]),
+      band('fii', [
+        ['2026-03-03', '100'],
+        ['2026-03-04', '100'],
+      ]),
+      band('cdb', [['2026-03-04', '100']]),
+    ]);
+
+    expect(days[0]!.bands.map((cell) => cell.share && to8(cell.share))).toEqual([
+      '0.75000000',
+      '0.25000000',
+      '0.00000000',
+    ]);
+    expect(days[1]!.bands.map((cell) => cell.share && to8(cell.share))).toEqual([
+      '0.33333333',
+      '0.33333333',
+      '0.33333334',
+    ]);
+  });
+
+  /** A share of nothing is undefined, not zero (BR-015-10's `sharesOf`). */
+  it('has no shares on a day worth nothing', () => {
+    const days = stackedTable([band('stock', [['2026-03-02', '0']])]);
+    expect(days[0]!.bands[0]!.share).toBeNull();
+  });
+
+  it('has no days without bands', () => {
+    expect(stackedTable([])).toEqual([]);
+  });
 });

@@ -1,13 +1,14 @@
 import type { BusinessDate } from '@/core/shared/clock';
-import { Money } from '@/core/shared/money';
-import type { AssetClass } from '@/core/quotes/ports';
+import { Money, sumMoney } from '@/core/shared/money';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import type { Grouping } from '@/core/reporting/ports';
+import { sharesOf } from '@/core/reporting/composition/breakdown';
 import {
   HistoryUnavailable,
   type Granularity,
   type MonthlyContribution,
   type StackedBand,
+  type StackedDay,
   type StackedSeries,
   type ValuePoint,
 } from '@/core/reporting/portfolio-value/ports';
@@ -201,25 +202,84 @@ export function stackedSeries(
     };
   }
 
-  const byClass = new Map<AssetClass, Map<string, ValuePoint>>();
-
+  /*
+   * Each bucket is its **closing snapshot**, as on the value line, and every
+   * band carries a point at **every** closing date — zero where its class was
+   * not held at the close. So the bands have exactly the line's dates:
+   *
+   *  - a class sold during the bucket is absent from the closing snapshot
+   *    (which leaves out positions at zero) and reads zero there. Taking each
+   *    class's own last snapshot in the bucket instead dated a class sold
+   *    mid-week to an earlier day than the others, and split one bucket into
+   *    two rows of one class each (#245 review);
+   *  - a bucket that closes with nothing held has an empty breakdown, and still
+   *    gets its date. Emitting points only for the classes present dropped that
+   *    close, and the chart joined the value before it straight to the next
+   *    purchase while the line went to zero (#247 review).
+   *
+   * `estimated` is OR-ed across the bucket, as `valueSeries` does (BR-013-07).
+   */
+  const closing = new Map<string, DailyValuationSnapshot>();
+  const estimated = new Map<string, boolean>();
   for (const snapshot of snapshots) {
     const key = bucketKey(snapshot.date, granularity);
-    for (const [assetClass, value] of snapshot.byAssetClass) {
-      const buckets = byClass.get(assetClass) ?? new Map<string, ValuePoint>();
-      buckets.set(key, {
-        date: snapshot.date,
-        value,
-        estimated: (buckets.get(key)?.estimated ?? false) || snapshot.hasEstimates,
-      });
-      byClass.set(assetClass, buckets);
-    }
+    closing.set(key, snapshot);
+    estimated.set(key, (estimated.get(key) ?? false) || snapshot.hasEstimates);
   }
 
-  const bands: StackedBand[] = [...byClass.entries()].map(([assetClass, buckets]) => ({
+  // Every class held at any close, in the order first seen.
+  const classes = [
+    ...new Set([...closing.values()].flatMap((snapshot) => [...snapshot.byAssetClass.keys()])),
+  ];
+
+  const bands: StackedBand[] = classes.map((assetClass) => ({
     key: assetClass,
-    points: [...buckets.values()],
+    points: [...closing].map(([key, snapshot]) => ({
+      date: snapshot.date,
+      value: snapshot.byAssetClass.get(assetClass) ?? Money.zero(),
+      // Non-null: every key in `closing` was set in `estimated` alongside it.
+      estimated: estimated.get(key) as boolean,
+    })),
   }));
 
   return { kind: 'available', grouping, bands };
+}
+
+/**
+ * SPEC-013 BR-013-05 / SPEC-022 BR-022-41 — the bands as days: every date any
+ * band carries, ascending, each with every band's value and its share of that
+ * day's total.
+ *
+ * `stackedSeries` already gives every band a point at every closing date, so
+ * the union below is that one set of dates. It is still taken, and an absent
+ * point still reads zero, so bands from anywhere else cannot leave a hole in
+ * the stack: a chart stacks by row, and a missing band stops the bands
+ * summing to the total. Absent means zero here, and zero is the truth: the
+ * class was not held that day.
+ *
+ * Each day's shares are SPEC-015's `sharesOf` over that day's bands, so they
+ * sum to exactly 100 % (BR-015-10) and are all `null` on a day worth nothing —
+ * a share of nothing is undefined, not zero.
+ */
+export function stackedTable(bands: readonly StackedBand[]): readonly StackedDay[] {
+  const valueAt = new Map(
+    bands.map((band) => [band.key, new Map(band.points.map((point) => [point.date, point.value]))]),
+  );
+  const dates = [
+    ...new Set(bands.flatMap((band) => band.points.map((point) => point.date))),
+  ].sort();
+
+  return dates.map((date) => {
+    const values = bands.map((band) => valueAt.get(band.key)?.get(date) ?? Money.zero());
+    const shares = sharesOf(values, sumMoney(values));
+    return {
+      date,
+      bands: bands.map((band, index) => ({
+        key: band.key,
+        // Non-null: `values` and `shares` are indexed by `bands`.
+        value: values[index] as Money,
+        share: shares === null ? null : (shares[index] as Money),
+      })),
+    };
+  });
 }

@@ -28,14 +28,11 @@ vi.mock('next/navigation', () => ({
 
 const labels: HoldingsTableLabels = {
   code: 'Ativo',
-  state: 'Estado',
-  assetClass: 'Classe',
-  sector: 'Setor',
   quantity: 'Quantidade',
   averagePrice: 'Preço médio',
   currentPrice: 'Preço atual',
   value: 'Valor',
-  share: 'Participação',
+  shareOf: '{share} do total',
   unrealizedGain: 'Ganho não realizado',
   caption: 'Ativos do escopo selecionado',
   concentrated: 'Acima de 20%',
@@ -156,6 +153,16 @@ function stripBadges(text: string | null | undefined): string | undefined {
   return text?.replace(labels.concentrated, '').replace(labels.estimated, '');
 }
 
+/** The asset codes in row order: the first line of each Ativo cell. */
+function codes(): (string | null | undefined)[] {
+  return within(table())
+    .getAllByRole('row')
+    .slice(1)
+    .map(
+      (row) => within(row).getAllByRole('cell')[0]?.querySelector('[data-cell-line]')?.textContent,
+    );
+}
+
 async function sortBy(header: string): Promise<void> {
   const user = userEvent.setup();
   await user.click(within(table()).getByRole('button', { name: `Ordenar por ${header}` }));
@@ -164,7 +171,7 @@ async function sortBy(header: string): Promise<void> {
 describe('HoldingsTable — SPEC-015 AC-4', () => {
   it('opens largest-first, the order the domain folded the rows in', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
-    expect(column('Ativo')).toEqual(['HGLG11', 'ITSA4', 'CDBX']);
+    expect(codes()).toEqual(['HGLG11', 'ITSA4', 'CDBX']);
   });
 
   /**
@@ -181,7 +188,7 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
   ])('sorts descending by %s on the first click', async (header, expected) => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     await sortBy(header);
-    expect(column('Ativo')).toEqual(expected);
+    expect(codes()).toEqual(expected);
   });
 
   it.each([
@@ -192,21 +199,62 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     await sortBy(header);
     await sortBy(header);
-    expect(column('Ativo')).toEqual(expected);
+    expect(codes()).toEqual(expected);
   });
 
   it('toggles the column it opened on, rather than re-applying it', async () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
     await sortBy('Valor');
-    expect(column('Ativo')).toEqual(['CDBX', 'ITSA4', 'HGLG11']);
+    expect(codes()).toEqual(['CDBX', 'ITSA4', 'HGLG11']);
     await sortBy('Valor');
-    expect(column('Ativo')).toEqual(['HGLG11', 'ITSA4', 'CDBX']);
+    expect(codes()).toEqual(['HGLG11', 'ITSA4', 'CDBX']);
   });
 
-  it('sorts the text columns too', async () => {
+  /**
+   * SPEC-022 BR-022-41 — the class and sector moved under the asset and no
+   * longer sort, but the filter still finds a holding by either, as its
+   * placeholder says.
+   */
+  it.each([
+    ['logistica', ['HGLG11']],
+    ['Ações', ['ITSA4']],
+    ['compra', ['HGLG11']],
+  ])('filters by class, sector or watch state: %s', async (query, expected) => {
+    const user = userEvent.setup();
     render(<HoldingsTable rows={rows} labels={labels} />);
-    await sortBy('Classe');
-    expect(column('Classe')).toEqual(['Ações', 'CDB', 'FIIs']);
+    await user.type(screen.getByPlaceholderText(labels.filterPlaceholder), query);
+    expect(codes()).toEqual(expected);
+  });
+
+  it('shows the class and sector under the code', () => {
+    render(<HoldingsTable rows={rows} labels={labels} />);
+    expect(column('Ativo')[0]).toContain('FIIs · Logística');
+  });
+
+  it('shows the share under the value, and none where the share does not exist', () => {
+    render(<HoldingsTable rows={rows} labels={labels} />);
+    expect(column('Valor')).toEqual([
+      'R$ 1.000,0050,00% do total',
+      'R$ 600,0030,00% do total',
+      // CDBX: no share (a zero scope total) — no "— do total" either.
+      'R$ 400,00',
+    ]);
+  });
+
+  /**
+   * SPEC-022 BR-022-02 — Patrimônio leaves out the sector and the watch state,
+   * and with them their words from the filter.
+   */
+  it('leaves out the details a tab hides', async () => {
+    const user = userEvent.setup();
+    render(<HoldingsTable rows={rows} labels={labels} hidden={['sector', 'opportunityState']} />);
+    const ativo = column('Ativo');
+    expect(ativo[0]).toContain('FIIs');
+    expect(ativo[0]).not.toContain('Logística');
+    expect(ativo[0]).not.toContain('compra');
+    await user.type(screen.getByPlaceholderText(labels.filterPlaceholder), 'logistica');
+    // Nothing matches: the table gives way to the no-match state.
+    expect(screen.queryByRole('table')).toBeNull();
   });
 
   it('keeps a row with no figure at the bottom in **both** directions', async () => {
@@ -219,10 +267,10 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
 
     await sortBy('Preço médio');
-    expect(column('Ativo')).toEqual(['HGLG11', 'ITSA4', 'CDBX']);
+    expect(codes()).toEqual(['HGLG11', 'ITSA4', 'CDBX']);
 
     await sortBy('Preço médio');
-    expect(column('Ativo')).toEqual(['ITSA4', 'HGLG11', 'CDBX']);
+    expect(codes()).toEqual(['ITSA4', 'HGLG11', 'CDBX']);
   });
 
   it('BR-015-05/06: the concentration marker states the threshold and recommends nothing', () => {
@@ -285,10 +333,13 @@ describe('HoldingsTable — SPEC-015 AC-4', () => {
  * queryable; the E2E suite is what proves each is the one actually shown at
  * its own viewport.
  */
-function cardCodes(): (string | undefined)[] {
+function cardCodes(): (string | null | undefined)[] {
   return within(screen.getByRole('list'))
     .getAllByRole('listitem')
-    .map((item) => stripBadges(within(item).getAllByRole('definition')[0]?.textContent));
+    .map(
+      (item) =>
+        within(item).getAllByRole('definition')[0]?.querySelector('[data-cell-line]')?.textContent,
+    );
 }
 
 describe('HoldingsTable — sorting without column headers', () => {
@@ -302,14 +353,10 @@ describe('HoldingsTable — sorting without column headers', () => {
         .map((option) => option.textContent),
     ).toEqual([
       'Ativo',
-      'Classe',
-      'Setor',
-      'Estado',
       'Quantidade',
       'Preço médio',
       'Preço atual',
       'Valor',
-      'Participação',
       'Ganho não realizado',
     ]);
   });
@@ -353,10 +400,13 @@ describe('HoldingsTable — sorting without column headers', () => {
     render(<HoldingsTable rows={rows} labels={labels} />);
 
     // CDBX is a CDB: BR-018-02 gives it no market price to watch, so its
-    // Estado cell is empty rather than reading `unknown`, which would say
-    // "watched, but the price cannot be read" about an asset nobody can
+    // asset cell carries no state rather than reading `unknown`, which would
+    // say "watched, but the price cannot be read" about an asset nobody can
     // watch at all.
-    expect(column('Estado')).toEqual(['compra', 'sem cotação válida', '']);
+    const ativo = column('Ativo');
+    expect(ativo[0]).toContain('compra');
+    expect(ativo[1]).toContain('sem cotação válida');
+    expect(ativo[2]).toBe('CDBXCDB · Não classificado');
   });
 
   /**
@@ -398,6 +448,6 @@ describe('HoldingsTable — sorting without column headers', () => {
     expect(container.textContent).not.toContain('−R$');
     expect(container.querySelector('.text-negative, .text-positive')).toBeNull();
     // DL-022-07: the quantity and the share stay.
-    expect(screen.getAllByText('50,00%').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('50,00% do total').length).toBeGreaterThan(0);
   });
 });

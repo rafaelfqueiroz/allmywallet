@@ -16,6 +16,8 @@ import { ActionForm } from '@/components/patterns/action-form';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
 import { QueryLink } from '@/components/patterns/query-link';
 import { RowForms } from '@/components/patterns/row-forms';
+import { RowMenu, RowMenuSubmit } from '@/components/patterns/row-menu';
+import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { StateBadge } from '@/components/patterns/state-badge';
 import { Money } from '@/app/money';
 import { loadHideValues } from '@/app/hide-values';
@@ -36,8 +38,8 @@ import { Text } from '@/components/ui/text';
  * `DataTable` renders every cell twice (DS-28), so a form in a cell would post
  * its fields twice and repeat its ids. A rule's controls are therefore:
  *
- *  - **Silenciar / Excluir** — icon buttons that name a one-field form
- *    *outside* the table through their `form` attribute (`RowForms`, rendered
+ *  - **Silenciar / Excluir** — items of the row's "⋯" menu (`RowMenu`) that
+ *    submit a one-field form *outside* the table by id (`RowForms`, rendered
  *    under the table);
  *  - **Editar / Criar regra** — a link to `?rule=<asset>`, which opens the one
  *    rule editor above the tables (`page.tsx`). A rule's form is five fields;
@@ -156,13 +158,14 @@ export async function WatchedTable({ rows }: { readonly rows: readonly WatchRule
     { id: 'state', header: t('columnState'), kind: 'control', width: 14, sortable: true },
     // A price needs far fewer digits than the largest amount the default sizes for.
     { id: 'price', header: t('columnPrice'), kind: 'money', width: 15, sortable: true },
-    { id: 'limits', header: t('columnLimits'), kind: 'control', width: 26 },
+    { id: 'limits', header: t('columnLimits'), kind: 'control', width: 24 },
     { id: 'lastEmail', header: t('columnEmail'), kind: 'control', width: 17, sortable: true },
+    // SPEC-022 BR-022-41 — the three actions behind one "⋯", as Transações'
+    // rows (BR-022-40), so the table fits the panel at 1280 px (#245).
     {
       id: 'actions',
       header: t('columnActions'),
       kind: 'control',
-      width: '7rem',
       srOnlyHeader: true,
     },
   ];
@@ -222,40 +225,23 @@ export async function WatchedTable({ rows }: { readonly rows: readonly WatchRule
           </span>
         ),
         actions: (
-          // Icon buttons, as the ledger's row actions: the accessible name names
-          // the asset, and `title` shows it on hover.
-          <Cluster gap="xs" className="flex-nowrap">
-            <Button
-              type="submit"
-              form={`${MUTE_FORM}-${row.assetId}`}
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t(row.muted ? 'unmuteFor' : 'muteFor', { asset: code })}
-              title={t(row.muted ? 'unmute' : 'mute')}
-            >
+          // Each item says what it does; the trigger names the asset.
+          <RowMenu label={t('actionsFor', { asset: code })}>
+            <RowMenuSubmit form={`${MUTE_FORM}-${row.assetId}`}>
               {row.muted ? <Bell aria-hidden="true" /> : <BellOff aria-hidden="true" />}
-            </Button>
-            <Button asChild variant="ghost" size="icon-sm">
-              <QueryLink
-                set={{ rule: row.assetId }}
-                hash={RULE_EDITOR_ANCHOR}
-                aria-label={t('editFor', { asset: code })}
-                title={t('edit')}
-              >
+              {t(row.muted ? 'unmute' : 'mute')}
+            </RowMenuSubmit>
+            <DropdownMenuItem asChild>
+              <QueryLink set={{ rule: row.assetId }} hash={RULE_EDITOR_ANCHOR}>
                 <Pencil aria-hidden="true" />
+                {t('edit')}
               </QueryLink>
-            </Button>
-            <Button
-              type="submit"
-              form={`${DELETE_FORM}-${row.assetId}`}
-              variant="ghost"
-              size="icon-sm"
-              aria-label={t('deleteFor', { asset: code })}
-              title={t('delete')}
-            >
+            </DropdownMenuItem>
+            <RowMenuSubmit form={`${DELETE_FORM}-${row.assetId}`} destructive>
               <Trash2 aria-hidden="true" />
-            </Button>
-          </Cluster>
+              {t('delete')}
+            </RowMenuSubmit>
+          </RowMenu>
         ),
       },
     };

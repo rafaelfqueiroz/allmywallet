@@ -366,3 +366,142 @@ test.describe('the table standard: pages', () => {
     expect(await response.text()).toContain('12345678901');
   });
 });
+
+// ---------------------------------------------------------------------------
+// SPEC-022 BR-022-41 — the wide tables fit their panel at 1280 px (#245).
+// ---------------------------------------------------------------------------
+
+/** The largest figures a holding's columns are sized for (#245 Decision log #2). */
+const WIDE = { quantity: '123456', averageCost: '1234.56', price: '7890.12' } as const;
+
+const ALL_CLASSES = ['stock', 'fii', 'bdr', 'etf', 'tesouro_direto', 'cdb', 'lci', 'lca'];
+
+/**
+ * Every column filled at its widest: holdings near a billion reais with a
+ * concentration flag and a watch state on one, all eight asset classes in the
+ * history, a wallet with targets (equal weight), and a rule with a price.
+ */
+async function seedWideTenant(userId: string): Promise<{ walletId: string; range: string }> {
+  const codes = await seedHoldings(
+    userId,
+    ['WIDA', 'WIDB', 'WIDC'].map((code) => ({ code, ...WIDE })),
+  );
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    const { rows: assets } = await pool.query<{ id: string }>(
+      `SELECT id FROM assets WHERE code = ANY($1) ORDER BY code`,
+      [codes],
+    );
+    const walletId = randomUUID();
+    await pool.query(
+      `INSERT INTO wallets (id, user_id, name, target_mode) VALUES ($1, $2, 'Larga', 'equal_weight')`,
+      [walletId, userId],
+    );
+    for (const { id } of assets) {
+      await pool.query(
+        `INSERT INTO wallet_allocations (id, user_id, wallet_id, asset_id, quantity, cost_basis_at_allocation)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [randomUUID(), userId, walletId, id, WIDE.quantity, '152411040.00'],
+      );
+    }
+    await pool.query(
+      `INSERT INTO opportunity_rules (id, user_id, asset_id, lower_bound, upper_bound, lower_state, upper_state, default_state)
+       VALUES ($1, $2, $3, 9000, 12000, 'buy', 'sell', 'hold')`,
+      [randomUUID(), userId, assets[0]?.id],
+    );
+    await pool.query(
+      `INSERT INTO daily_valuation_snapshots
+         (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+       SELECT $1, (now() AT TIME ZONE 'America/Sao_Paulo')::date - d, 800000000, 1000, 0,
+              (SELECT jsonb_object_agg(class, '100000000') FROM unnest($2::text[]) AS class)
+         FROM generate_series(1, 12) AS d`,
+      [userId, ALL_CLASSES],
+    );
+    const { rows } = await pool.query<{ from: string; to: string }>(
+      `SELECT to_char((now() AT TIME ZONE 'America/Sao_Paulo')::date - 15, 'YYYY-MM-DD') AS from,
+              to_char((now() AT TIME ZONE 'America/Sao_Paulo')::date, 'YYYY-MM-DD') AS to`,
+    );
+    const span = rows[0];
+    if (span === undefined) throw new Error('no range');
+    return { walletId, range: `period=custom&from=${span.from}&to=${span.to}` };
+  } finally {
+    await pool.end();
+  }
+}
+
+test.describe('the table standard: wide tables fit the panel', () => {
+  test.beforeEach(({ page }) => {
+    test.skip(isMobile(page), 'below md the rows are cards, which have no width to overflow');
+  });
+
+  test('no table scrolls sideways at 1280 px, shown or hidden', async ({ signedIn }) => {
+    test.setTimeout(120_000);
+    const { page, userId } = signedIn;
+    const { walletId, range } = await seedWideTenant(userId);
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    // [path, the caption of the table that used to overflow there]
+    const SCREENS = [
+      ['/portfolio', 'Ativos do escopo selecionado'],
+      ['/portfolio/composition', 'Ativos do escopo selecionado'],
+      [`/reports?${range}`, 'Composição do patrimônio por classe de ativo, por data'],
+      // Carteiras: the comparison between wallets, then the one wallet's balance.
+      ['/portfolio/wallets', 'Comparação entre carteiras'],
+      [`/wallets/${walletId}/balance`, 'Meta, participação atual, desvio e distância'],
+      // Observar preços' rules (922 px) joins this list with #241, which
+      // replaces Configurações' side sub-navigation and gives its panels the
+      // full width; beside the sub-navigation the panel is 696 px.
+    ] as const;
+
+    for (const hidden of [false, true]) {
+      for (const [path, caption] of SCREENS) {
+        await page.goto(path);
+        const table = page.getByRole('table', { name: new RegExp(`^${caption}`) });
+        await expect(table).toBeVisible();
+        const overflow = await page.evaluate(() =>
+          [...document.querySelectorAll<HTMLElement>('[data-slot="table-container"]')]
+            .filter((container) => container.offsetParent !== null)
+            .map((container) => container.scrollWidth - container.clientWidth),
+        );
+        expect(overflow.length, `${path}: tables measured`).toBeGreaterThan(0);
+        expect(
+          Math.max(...overflow),
+          `${path}${hidden ? ' (hidden)' : ''}: a table scrolls sideways`,
+        ).toBeLessThanOrEqual(0);
+      }
+      if (!hidden) await setHidden(page, true);
+    }
+    await setHidden(page, false);
+  });
+
+  test('the merged cells carry what the columns did', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const { walletId, range } = await seedWideTenant(userId);
+
+    // Evolução patrimonial: one row per date and class, newest date first, each
+    // of the eight equal classes an eighth of the day.
+    await page.goto(`/reports?${range}`);
+    const composition = page.getByRole('table', {
+      name: 'Composição do patrimônio por classe de ativo, por data',
+    });
+    await expect(composition.getByRole('columnheader')).toHaveText([
+      /Data/,
+      /Classe de ativo/,
+      /Valor/,
+      /Participação/,
+    ]);
+    await expect(composition.getByRole('columnheader', { name: /Data/ })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    );
+    const first = composition.locator('tbody tr').first().getByRole('cell');
+    await expect(first.nth(2)).toHaveText('R$ 100.000.000,00');
+    await expect(first.nth(3)).toHaveText('12,50%');
+
+    // Carteiras: the quantity under the value, the count of cotas under the distance.
+    await page.goto(`/wallets/${walletId}/balance`);
+    const balance = page.getByRole('table', { name: /^Meta, participação atual/ });
+    await expect(balance.getByText('Qtd. 123.456').first()).toBeVisible();
+    await expect(balance.getByText(/cotas · aproximado$/).first()).toBeVisible();
+  });
+});
