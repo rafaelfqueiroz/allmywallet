@@ -3,6 +3,8 @@ import { audit, render, screen } from '@/components/test-utils';
 import { ValueChart } from './ValueChart';
 import { ContributionChart } from './ContributionChart';
 
+/** The tooltip's text is asserted in `chart-container.test.tsx`; these read the plot. */
+const TIP = { when: '', figures: {} };
 /**
  * SPEC-013 charts, SPEC-016 BR-016-16.
  *
@@ -18,14 +20,14 @@ import { ContributionChart } from './ContributionChart';
  */
 
 const POINTS = [
-  { date: '2026-03-01', value: 100000, estimated: false },
-  { date: '2026-03-31', value: 118500, estimated: true },
+  { date: '2026-03-01', value: 100000, estimated: false, tip: TIP },
+  { date: '2026-03-31', value: 118500, estimated: true, tip: TIP },
 ];
 
 const BARS = [
-  { month: '2026-01', amount: 1000 },
+  { month: '2026-01', amount: 1000, tip: TIP },
   // The month a bar chart must not hide: a net withdrawal.
-  { month: '2026-02', amount: -500 },
+  { month: '2026-02', amount: -500, tip: TIP },
 ];
 
 describe('ValueChart', () => {
@@ -84,9 +86,9 @@ describe('ValueChart', () => {
         title="Patrimônio ao longo do tempo"
         summary="De 100.000 a 118.500"
         points={[
-          { date: '2026-03-12', value: 100000, estimated: false },
-          { date: '2026-03-13', value: null, estimated: false, gap: true },
-          { date: '2026-03-16', value: 118500, estimated: false },
+          { date: '2026-03-12', value: 100000, estimated: false, tip: TIP },
+          { date: '2026-03-13', value: null, estimated: false, gap: true, tip: TIP },
+          { date: '2026-03-16', value: 118500, estimated: false, tip: TIP },
         ]}
       />,
     );

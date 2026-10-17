@@ -8,6 +8,7 @@ import {
   chartMarkProps,
   chartTooltipProps,
   valueChartProps,
+  type ChartTip,
 } from '@/components/charts/chart-container';
 
 /**
@@ -29,6 +30,8 @@ export interface IncomePoint {
   readonly month: string;
   readonly amount: number;
   readonly average: number | null;
+  /** SPEC-022 BR-022-38 — the tooltip's month and exact figures, formatted on the server. */
+  readonly tip: ChartTip;
 }
 
 export function IncomeChart({

@@ -12,7 +12,8 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';
 import { useHideValues } from '@/app/hide-values';
-import { concealSeries } from '@/app/chart-series';
+import { chartTip, concealSeries } from '@/app/chart-series';
+import { formatMonth } from '@/i18n/format';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
 import { Text } from '@/components/ui/text';
@@ -89,6 +90,18 @@ function EarningsBody({
       yearToDateAverage:
         month.kind === 'elapsed' ? Number(month.yearToDateAverage.toString()) : null,
       goal: goalAmountNumber,
+      tip: chartTip(
+        formatMonth(month.month),
+        month.kind === 'elapsed'
+          ? {
+              amount: month.amount,
+              cumulative: month.cumulative,
+              yearToDateAverage: month.yearToDateAverage,
+              goal: earnings.goalAmount,
+            }
+          : { goal: earnings.goalAmount },
+        masked,
+      ),
     })),
     ['amount', 'cumulative', 'yearToDateAverage', 'goal'],
     masked,

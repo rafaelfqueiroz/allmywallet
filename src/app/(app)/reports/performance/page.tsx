@@ -19,6 +19,8 @@ import { ReportEmptyState } from '@/app/(app)/reports/_components/ReportEmptySta
 import { ReportsFrame } from '@/app/(app)/reports/_components/ReportsFrame';
 import { tryUserId } from '@/lib/session';
 import { comparisonSeries } from '@/core/reporting/performance/comparison-series';
+import { Quantity } from '@/core/shared/money';
+import { formatBusinessDate, formatPercentPoints } from '@/i18n/format';
 import { loadPerformance } from '@/app/(app)/reports/performance/data';
 import { BenchmarkChart } from '@/app/(app)/reports/performance/_components/BenchmarkChart';
 import { PageShell } from '@/app/page-shell';
@@ -221,6 +223,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                   'portfolio',
                   ...report.value.benchmarks.filter((b) => b.line.ok).map((b) => b.benchmark),
                 ]}
+                names={{ portfolio: tr('chart.portfolio') }}
                 points={comparisonSeries(
                   report.value.twr.value.subPeriods,
                   report.value.benchmarks.flatMap((outcome) =>
@@ -233,6 +236,16 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                   ...Object.fromEntries(
                     [...row.benchmarks].map(([key, value]) => [key, Number(value.toString())]),
                   ),
+                  // SPEC-022 BR-022-38 — what the tooltip reads: each line's
+                  // cumulative return, from the decimal.
+                  tip: {
+                    when: formatBusinessDate(row.date),
+                    figures: Object.fromEntries(
+                      [['portfolio', row.portfolio] as const, ...row.benchmarks].map(
+                        ([key, level]) => [key, formatPercentPoints(level.minus(REBASED_START))],
+                      ),
+                    ),
+                  },
                 }))}
               />
             </Section>
@@ -530,6 +543,9 @@ async function HeadlineRate<T>({
   }
   return <Money value={pick(result.value)} kind="percent" signed />;
 }
+
+/** Every comparison line starts here — `comparisonSeries`'s base of 100. */
+const REBASED_START = Quantity.fromString('100');
 
 /** The three benchmark names are proper nouns, not translatable copy. */
 function benchmarkLabel(benchmark: Benchmark): string {

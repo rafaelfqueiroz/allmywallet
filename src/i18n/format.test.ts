@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { Money, Quantity } from '@/core/shared/money';
 import { BusinessDate } from '@/core/shared/clock';
 import {
+  formatAxisCurrency,
+  formatAxisPercentPoints,
   formatBusinessDate,
   formatCurrency,
   formatDate,
   formatDateTime,
+  formatMonth,
   formatPercent,
   formatQuantity,
 } from '@/i18n/format';
@@ -43,6 +46,43 @@ describe('formatCurrency', () => {
 
   it('keeps the non-breaking space, so the symbol never wraps away from the amount', () => {
     expect(formatCurrency(Money.fromString('1234.56'))).toContain(NBSP);
+  });
+});
+
+describe('formatAxisCurrency (SPEC-022 BR-022-38)', () => {
+  it('reads whole reais below one thousand', () => {
+    expect(plain(formatAxisCurrency(500))).toBe('R$ 500');
+    expect(plain(formatAxisCurrency(0))).toBe('R$ 0');
+    expect(plain(formatAxisCurrency(999.4))).toBe('R$ 999');
+  });
+
+  it('abbreviates thousands and millions with at most one decimal', () => {
+    expect(plain(formatAxisCurrency(1_500))).toBe('R$ 1,5 mil');
+    expect(plain(formatAxisCurrency(250_000))).toBe('R$ 250 mil');
+    expect(plain(formatAxisCurrency(1_234_567))).toBe('R$ 1,2 mi');
+  });
+
+  it('marks a withdrawal below the axis as negative', () => {
+    expect(plain(formatAxisCurrency(-1_500))).toBe('-R$ 1,5 mil');
+  });
+
+  it('keeps the non-breaking space after the symbol', () => {
+    expect(formatAxisCurrency(250_000)).toContain(NBSP);
+  });
+});
+
+describe('formatAxisPercentPoints', () => {
+  it('reads percentage points with a comma decimal', () => {
+    expect(formatAxisPercentPoints(4.5)).toBe('4,5%');
+    expect(formatAxisPercentPoints(-2)).toBe('-2%');
+    expect(formatAxisPercentPoints(0)).toBe('0%');
+  });
+});
+
+describe('formatMonth', () => {
+  it('names the month and the year in pt-BR', () => {
+    expect(formatMonth('2026-09')).toBe('setembro de 2026');
+    expect(formatMonth('2027-01')).toBe('janeiro de 2027');
   });
 });
 

@@ -19,7 +19,7 @@ import { loadPatrimonio } from '@/app/(app)/reports/patrimonio-data';
 import { basisOf, plot, toValueChartPoints } from '@/app/(app)/reports/value-series';
 import { ValueChart } from '@/app/(app)/reports/_components/ValueChart';
 import { ContributionChart } from '@/app/(app)/reports/_components/ContributionChart';
-import { StackedChart } from '@/app/(app)/reports/_components/StackedChart';
+import { StackedChart, type StackedChartRow } from '@/app/(app)/reports/_components/StackedChart';
 import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -27,7 +27,7 @@ import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';
 import { loadHideValues, useHideValues } from '@/app/hide-values';
-import { concealSeries } from '@/app/chart-series';
+import { chartTip, concealSeries } from '@/app/chart-series';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
@@ -45,7 +45,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { columnWidth } from '@/components/patterns/data-table-columns';
-import { formatBusinessDate } from '@/i18n/format';
+import { formatBusinessDate, formatMonth } from '@/i18n/format';
 import { NodeTable, type NodeColumn } from '@/components/patterns/node-table';
 import { ranksOf } from '@/lib/rank-keys';
 import { tableLabels, type ReportTableLabels } from '@/app/(app)/reports/_components/table-labels';
@@ -257,7 +257,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     // SPEC-021 BR-021-31: a gap day is plotted as a break; the
                     // table below states its figure under its own basis.
                     points={concealSeries(
-                      toValueChartPoints(history.series, closeGapDates),
+                      toValueChartPoints(history.series, closeGapDates, masked),
                       ['value'],
                       masked,
                     )}
@@ -311,6 +311,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     history.contributions.map((bar) => ({
                       month: bar.month,
                       amount: plot(bar.amount),
+                      tip: chartTip(formatMonth(bar.month), { amount: bar.amount }, masked),
                     })),
                     ['amount'],
                     masked,
@@ -615,10 +616,15 @@ function StackedComposition({
   // SPEC-022 BR-022-24 — a synchronous component, so the request-cached read.
   const masked = useHideValues();
   const rows = concealSeries(
-    days.map((day) => {
-      const row: Record<string, string | number> = { date: day.date };
+    days.map((day): StackedChartRow => {
+      const row: Record<string, number> = {};
       for (const band of day.bands) row[band.key] = plot(band.value);
-      return row;
+      const tip = chartTip(
+        formatBusinessDate(day.date),
+        Object.fromEntries(day.bands.map((band) => [band.key, band.value])),
+        masked,
+      );
+      return { ...row, date: day.date, tip };
     }),
     bands.map((band) => band.key),
     masked,

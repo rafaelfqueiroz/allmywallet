@@ -5,7 +5,6 @@
  * would not.
  *
  * Its own module, with no imports, because Client Components need it — the
- * charts and the holdings table — and `format.ts` pulls the request config and
- * the whole message catalogue in behind it.
+ * charts and the holdings table.
  */
 export const MASKED_CURRENCY = 'R$ ••••••';

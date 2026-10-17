@@ -1,6 +1,6 @@
 import type { Money, Quantity } from '@/core/shared/money';
 import type { BusinessDate } from '@/core/shared/clock';
-import { DEFAULT_LOCALE } from '@/i18n/request';
+import { DEFAULT_LOCALE } from '@/i18n/locale';
 import { MASKED_CURRENCY } from '@/i18n/masked';
 
 /**
@@ -77,10 +77,69 @@ export function formatPercent(fraction: Money | Quantity): string {
   return percentFormatter.format(Number(fraction.toString()));
 }
 
+/**
+ * SPEC-022 BR-022-38 — a money chart's **value-axis tick**, in abbreviated
+ * reais: "R$ 250 mil", "R$ 1,2 mi", and whole reais below one thousand.
+ *
+ * The one formatter here that takes a `number`, because a tick is a scale mark
+ * Recharts computes from the plotting coordinates — not a figure anybody reads
+ * as an amount. Every figure a chart shows — its tooltip — comes from the
+ * decimal on the server instead (`chartTip`, AR-09).
+ */
+const axisWholeFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
+  style: 'currency',
+  currency: 'BRL',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+const axisCompactFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
+  style: 'currency',
+  currency: 'BRL',
+  notation: 'compact',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
+
+export function formatAxisCurrency(coordinate: number): string {
+  return Math.abs(coordinate) < 1000
+    ? axisWholeFormatter.format(coordinate)
+    : axisCompactFormatter.format(coordinate);
+}
+
+/**
+ * A percentage-points axis tick — 4,5 renders as "4,5%". For the benchmark
+ * comparison, whose axis is a scale of returns, never money. Same reasoning as
+ * `formatAxisCurrency`: a tick is a scale mark, so a `number` is acceptable.
+ */
+const axisPointsFormatter = new Intl.NumberFormat(DEFAULT_LOCALE, {
+  maximumFractionDigits: 1,
+});
+
+export function formatAxisPercentPoints(coordinate: number): string {
+  return `${axisPointsFormatter.format(coordinate)}%`;
+}
+
 /** AR-29: business dates carry no time and no zone, so this is pure string work. */
 export function formatBusinessDate(date: BusinessDate): string {
   const [year, month, day] = date.split('-');
   return `${day}/${month}/${year}`;
+}
+
+/**
+ * A `YYYY-MM` month as a reader says it — "setembro de 2026". AR-29: a month
+ * is not a `BusinessDate`, so it is formatted as the first of the month in UTC,
+ * which no time zone can move into the month before.
+ */
+const monthFormatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, {
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+export function formatMonth(month: string): string {
+  const [year = '', index = ''] = month.split('-');
+  return monthFormatter.format(new Date(Date.UTC(Number(year), Number(index) - 1, 1)));
 }
 
 /**

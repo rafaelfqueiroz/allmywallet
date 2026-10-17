@@ -7,6 +7,7 @@ import {
   chartGridProps,
   chartTooltipProps,
   valueChartProps,
+  type ChartTip,
 } from '@/components/charts/chart-container';
 
 /**
@@ -28,6 +29,8 @@ export interface ContributionBar {
   readonly month: string;
   /** Plotting coordinate only. */
   readonly amount: number;
+  /** SPEC-022 BR-022-38 — the tooltip's month and exact amount, formatted on the server. */
+  readonly tip: ChartTip;
 }
 
 export function ContributionChart({

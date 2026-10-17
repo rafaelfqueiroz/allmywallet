@@ -5,8 +5,11 @@ import {
   ChartContainer,
   chartAxisProps,
   chartGridProps,
+  chartTipTooltip,
   chartTooltipProps,
+  type ChartTip,
 } from '@/components/charts/chart-container';
+import { formatAxisPercentPoints } from '@/i18n/format';
 
 /**
  * SPEC-012 BR-012-12 / DL-012-04 — the portfolio's cumulative return against
@@ -30,23 +33,36 @@ import {
  * authoritative returns are in the benchmark table beneath, rendered from
  * `Rate`. Same reasoning as `patrimonio/_components/ValueChart.tsx`, which has
  * the longer note.
+ *
+ * **SPEC-022 BR-022-38, in pt-BR percentages.** A level of 103,46 is read as
+ * what it means — a cumulative return of 3,46% since the period's start — so
+ * the axis ticks read the level less the base of 100, and the tooltip reads
+ * each line's return formatted on the server from the decimal (`tip`).
  */
 
 export interface ComparisonPoint {
   readonly date: string;
+  /** The tooltip's date and each line's cumulative return, formatted on the server. */
+  readonly tip: ChartTip;
   /** Rebased to 100 at the period's start. Plotting coordinate only. */
-  readonly [series: string]: string | number;
+  readonly [series: string]: string | number | ChartTip;
 }
+
+/** The level every line starts from — `comparisonSeries`'s `BASE`. */
+const BASE = 100;
 
 export function BenchmarkChart({
   points,
   series,
+  names,
   title,
   summary,
 }: {
   readonly points: readonly ComparisonPoint[];
   /** Line keys in render order; the first is the portfolio's own. */
   readonly series: readonly string[];
+  /** A line's name in the legend and the tooltip, where it is not its key. */
+  readonly names: Readonly<Partial<Record<string, string>>>;
   readonly title: string;
   readonly summary: React.ReactNode;
 }) {
@@ -55,14 +71,20 @@ export function BenchmarkChart({
       <LineChart data={[...points]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
         <CartesianGrid {...chartGridProps} />
         <XAxis dataKey="date" {...chartAxisProps} minTickGap={32} />
-        <YAxis {...chartAxisProps} width={64} domain={['auto', 'auto']} />
-        <Tooltip {...chartTooltipProps} />
+        <YAxis
+          {...chartAxisProps}
+          width={64}
+          domain={['auto', 'auto']}
+          tickFormatter={(level: number) => formatAxisPercentPoints(level - BASE)}
+        />
+        <Tooltip {...chartTooltipProps} {...chartTipTooltip()} />
         <Legend />
         {series.map((key, index) => (
           <Line
             key={key}
             type="monotone"
             dataKey={key}
+            name={names[key] ?? key}
             // The portfolio is `--chart-1` and thicker; benchmarks follow in
             // the palette. DL-05's redundant cue is carried by the legend and
             // by the table beneath, not by hue alone.

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { concealSeries } from '@/app/chart-series';
+import { chartTip, concealSeries } from '@/app/chart-series';
+import { Money } from '@/core/shared/money';
+import { formatCurrency } from '@/i18n/format';
 
 describe('concealSeries (SPEC-022 BR-022-24)', () => {
   const rows = [
@@ -38,5 +40,36 @@ describe('concealSeries (SPEC-022 BR-022-24)', () => {
     );
     expect(concealed).not.toContain('12345');
     expect(concealed).not.toContain('98765');
+  });
+});
+
+describe('chartTip (SPEC-022 BR-022-38)', () => {
+  it('carries the exact amount, with centavos, formatted from the decimal', () => {
+    // 0.1 + 0.2 is 0.30000000000000004 as a float; the decimal is exact.
+    const amount = Money.fromString('0.1').plus(Money.fromString('0.2'));
+    const tip = chartTip('30/09/2026', { value: amount }, false);
+
+    expect(tip.when).toBe('30/09/2026');
+    expect(tip.figures.value).toBe(formatCurrency(amount));
+    expect(tip.figures.value).toBe('R$\u00a00,30');
+  });
+
+  it('keeps centavos a large amount would lose on the axis', () => {
+    const tip = chartTip('30/09/2026', { value: Money.fromString('653491.42') }, false);
+    expect(tip.figures.value).toBe('R$\u00a0653.491,42');
+  });
+
+  it('gives a gap no figure', () => {
+    const tip = chartTip(
+      'setembro de 2026',
+      { amount: Money.fromString('10'), average: null },
+      false,
+    );
+    expect(tip.figures).toEqual({ amount: 'R$\u00a010,00' });
+  });
+
+  it('puts only the placeholder in the page while masked', () => {
+    const tip = chartTip('30/09/2026', { value: Money.fromString('653491.42') }, true);
+    expect(tip).toEqual({ when: '30/09/2026', figures: { value: 'R$\u00a0••••••' } });
   });
 });

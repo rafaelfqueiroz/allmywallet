@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PieChart } from 'recharts';
+import { DefaultTooltipContent, PieChart } from 'recharts';
 import { ChartContainer, valueChartProps } from '@/components/charts/chart-container';
 import { ChartLegend } from '@/components/charts/chart-legend';
 import { assetClassColor } from '@/components/charts/palette';
@@ -81,18 +81,100 @@ describe('ChartLegend', () => {
   });
 });
 
-describe('valueChartProps (SPEC-022 BR-022-24)', () => {
-  it('adds nothing when masking is off, so the shared props decide', () => {
-    expect(valueChartProps(false)).toEqual({ valueAxis: {}, valueTooltip: {} });
+describe('valueChartProps (SPEC-022 BR-022-38, BR-022-24)', () => {
+  const NBSP = '\u00a0';
+  const row = {
+    date: '2026-09-30',
+    value: 653_491.42,
+    tip: { when: '30/09/2026', figures: { value: `R$${NBSP}653.491,42` } },
+  };
+  const item = (dataKey: string) => ({ dataKey, payload: row }) as never;
+
+  it('reads the axis in abbreviated reais', () => {
+    const { valueAxis } = valueChartProps(false);
+    expect(valueAxis.tickFormatter?.(250_000, 0)).toBe(`R$${NBSP}250${NBSP}mil`);
+    expect(valueAxis.tickFormatter?.(500, 0)).toBe(`R$${NBSP}500`);
   });
 
-  it('labels every tick with the placeholder and keeps only the series name in the tooltip', () => {
-    const { valueAxis, valueTooltip } = valueChartProps(true);
-
-    expect(valueAxis.tickFormatter?.(123_456.78, 0)).toBe('R$\u00a0••••••');
-    expect(valueTooltip.formatter?.(123_456.78, 'Patrimônio', {} as never, 0, [])).toEqual([
-      'R$\u00a0••••••',
+  it('reads the tooltip from the point’s server-formatted figure, never the coordinate', () => {
+    const { valueTooltip } = valueChartProps(false);
+    expect(valueTooltip.formatter?.(653_491.42, 'Patrimônio', item('value'), 0, [])).toEqual([
+      `R$${NBSP}653.491,42`,
       'Patrimônio',
     ]);
+  });
+
+  it('drops the name of a chart’s only, unnamed series', () => {
+    const { valueTooltip } = valueChartProps(false);
+    expect(
+      valueTooltip.formatter?.(653_491.42, 'value', item('value'), 0, [item('value')]),
+    ).toEqual([`R$${NBSP}653.491,42`, undefined]);
+  });
+
+  it('heads the tooltip with the point’s date', () => {
+    const { valueTooltip } = valueChartProps(false);
+    expect(valueTooltip.labelFormatter?.('2026-09-30', [item('value')])).toBe('30/09/2026');
+  });
+
+  it('labels every tick and every figure with the placeholder while masked, keeping names and dates', () => {
+    const { valueAxis, valueTooltip } = valueChartProps(true);
+
+    expect(valueAxis.tickFormatter?.(123_456.78, 0)).toBe(`R$${NBSP}••••••`);
+    expect(valueTooltip.formatter?.(80, 'Patrimônio', item('value'), 0, [])).toEqual([
+      `R$${NBSP}••••••`,
+      'Patrimônio',
+    ]);
+    expect(valueTooltip.labelFormatter?.('2026-09-30', [item('value')])).toBe('30/09/2026');
+  });
+});
+
+/**
+ * The tooltip as Recharts paints it, from the props `valueChartProps` hands it
+ * — the date heading the point and the server-formatted figure beside the
+ * series' name.
+ */
+describe('a money chart’s tooltip (SPEC-022 BR-022-38)', () => {
+  const row = {
+    month: '2026-09',
+    amount: 1284.1,
+    average: 1100.5,
+    tip: {
+      when: 'setembro de 2026',
+      figures: { amount: 'R$\u00a01.284,10', average: 'R$\u00a01.100,50' },
+    },
+  };
+  const payload = [
+    { dataKey: 'amount', name: 'Proventos', value: 1284.1, payload: row },
+    { dataKey: 'average', name: 'Média de 12 meses', value: 1100.5, payload: row },
+  ];
+
+  function Tip({ masked }: { readonly masked: boolean }) {
+    return (
+      <DefaultTooltipContent
+        label="2026-09"
+        payload={payload as never}
+        {...valueChartProps(masked).valueTooltip}
+      />
+    );
+  }
+
+  it('reads the date and each series’ exact amount with centavos', () => {
+    const { container } = render(<Tip masked={false} />);
+    const text = container.textContent?.replaceAll('\u00a0', ' ');
+
+    expect(text).toContain('setembro de 2026');
+    expect(text).toContain('Proventos : R$ 1.284,10');
+    expect(text).toContain('Média de 12 meses : R$ 1.100,50');
+    // Never the coordinate.
+    expect(text).not.toContain('1284.1');
+  });
+
+  it('keeps the date and the names and hides every figure while masked', () => {
+    const { container } = render(<Tip masked />);
+    const text = container.textContent?.replaceAll('\u00a0', ' ');
+
+    expect(text).toContain('setembro de 2026');
+    expect(text).toContain('Proventos : R$ ••••••');
+    expect(text).not.toContain('1.284,10');
   });
 });
