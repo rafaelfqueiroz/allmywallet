@@ -1,6 +1,6 @@
 import type * as React from 'react';
 import type { BusinessDate } from '@/core/shared/clock';
-import { Badge } from '@/components/ui/badge';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 
 /**
  * SPEC-007 BR-007-06 (amended 2026-09-21) / SPEC-005 BR-005-20d — marks a
@@ -15,7 +15,9 @@ import { Badge } from '@/components/ui/badge';
  *    average over a lot that may mix estimates and exact buys, so no single
  *    close date is true of it.
  *
- * `label` and the two explanation builders arrive pre-translated (AR-44),
+ * The badge reads "Custo estimado" and opens its explanation from an info icon
+ * (SPEC-022 BR-022-32, `EstimateMarker`). The two explanation builders arrive
+ * pre-translated (AR-44),
  * which keeps this a plain, synchronous component: the three states —
  * hidden, shown with a close date, shown carried — are directly
  * unit-testable with no `next-intl` server machinery in the test.
@@ -23,8 +25,6 @@ import { Badge } from '@/components/ui/badge';
 export interface TransactionCostEstimateMarkerProps {
   readonly costIsEstimate: boolean;
   readonly estimateCloseDate: BusinessDate | null;
-  /** Translated text (AR-44) — the visible badge. */
-  readonly label: string;
   /** `t('...closeExplanation', { date })`, already substituted. */
   readonly closeExplanation: (date: BusinessDate) => string;
   /** `t('...carriedExplanation')`. */
@@ -35,19 +35,20 @@ export interface TransactionCostEstimateMarkerProps {
 export function TransactionCostEstimateMarker({
   costIsEstimate,
   estimateCloseDate,
-  label,
   closeExplanation,
   carriedExplanation,
   className,
 }: TransactionCostEstimateMarkerProps): React.JSX.Element | null {
   if (!costIsEstimate) return null;
 
-  const title =
+  const explanation =
     estimateCloseDate === null ? carriedExplanation : closeExplanation(estimateCloseDate);
 
   return (
-    <Badge variant="outline" title={title} className={className}>
-      {label}
-    </Badge>
+    <EstimateMarker
+      kind="cost"
+      explanation={explanation}
+      {...(className === undefined ? {} : { className })}
+    />
   );
 }

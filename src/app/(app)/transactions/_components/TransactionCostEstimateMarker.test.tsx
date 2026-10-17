@@ -10,13 +10,13 @@ import { TransactionCostEstimateMarker } from './TransactionCostEstimateMarker';
 describe('TransactionCostEstimateMarker', () => {
   const closeExplanation = (date: BusinessDate) => `Preço estimado pelo fechamento de ${date}`;
   const carriedExplanation = 'Custo herdado de uma posição com preço estimado';
+  const icon = () => screen.getByRole('button', { name: 'Instruções sobre Custo estimado' });
 
   it('hidden: an ordinary transaction shows no marker', () => {
     const { container } = render(
       <TransactionCostEstimateMarker
         costIsEstimate={false}
         estimateCloseDate={null}
-        label="Estimado"
         closeExplanation={closeExplanation}
         carriedExplanation={carriedExplanation}
       />,
@@ -29,14 +29,12 @@ describe('TransactionCostEstimateMarker', () => {
       <TransactionCostEstimateMarker
         costIsEstimate
         estimateCloseDate={BusinessDate.of('2024-02-22')}
-        label="Estimado"
         closeExplanation={closeExplanation}
         carriedExplanation={carriedExplanation}
       />,
     );
-    const badge = screen.getByText('Estimado');
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveAttribute('title', 'Preço estimado pelo fechamento de 2024-02-22');
+    expect(screen.getByText('Custo estimado')).toBeInTheDocument();
+    expect(icon()).toHaveAccessibleDescription('Preço estimado pelo fechamento de 2024-02-22');
   });
 
   it('shown, carried wording: a transfer or conversion leg from an estimated source lot', () => {
@@ -44,13 +42,11 @@ describe('TransactionCostEstimateMarker', () => {
       <TransactionCostEstimateMarker
         costIsEstimate
         estimateCloseDate={null}
-        label="Estimado"
         closeExplanation={closeExplanation}
         carriedExplanation={carriedExplanation}
       />,
     );
-    const badge = screen.getByText('Estimado');
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveAttribute('title', carriedExplanation);
+    expect(screen.getByText('Custo estimado')).toBeInTheDocument();
+    expect(icon()).toHaveAccessibleDescription(carriedExplanation);
   });
 });

@@ -84,7 +84,6 @@ interface PageProps {
 
 export default async function CompositionPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
-  const tCommon = await getTranslations('common');
   const tc = await getTranslations('composicao');
   const tp = await getTranslations('portfolio');
   // SPEC-018 BR-018-19: the badge reuses the rules screen's own state labels rather
@@ -184,7 +183,7 @@ export default async function CompositionPage({ searchParams }: PageProps) {
             )}
             <HoldingsTable
               rows={holdingRows(report.rows, watchStates, t, tc, tw, masked)}
-              labels={holdingsTableLabels(report, t, tc, tCommon)}
+              labels={holdingsTableLabels(report, t, tc)}
             />
           </Section>
 

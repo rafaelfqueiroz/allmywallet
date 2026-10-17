@@ -2,7 +2,7 @@ import { getTranslations } from 'next-intl/server';
 import type { Money as MoneyValue } from '@/core/shared/money';
 import { Money } from '@/app/money';
 import { Cluster } from '@/components/layout/cluster';
-import { Badge } from '@/components/ui/badge';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 
 /**
  * A market value with SPEC-009's estimate marker beside it, when any figure
@@ -11,10 +11,9 @@ import { Badge } from '@/components/ui/badge';
  *
  * One component for every value Portfólio totals — the headline, a class card,
  * a wallet's row and the comparison's total — so none of them can show an
- * accrued CDB as if it were a quote. The label is `common.estimated` and sits
- * beside the figure it qualifies (BR-022-32, DESIGN.md "One concept, one
- * wording"); the explanation says it is the *value* that was estimated, which
- * keeps it distinct from the cost estimate (`CostEstimateMarker`).
+ * accrued CDB as if it were a quote. The marker reads "Valor estimado" and sits
+ * beside the figure it qualifies (BR-022-32, DL-022-19), distinct from the
+ * "Custo estimado" a cost carries; its explanation opens from an info icon.
  */
 export async function EstimatedValue({
   value,
@@ -29,14 +28,11 @@ export async function EstimatedValue({
   if (!estimated) return <Money value={value} />;
 
   const t = await getTranslations('reports');
-  const tCommon = await getTranslations('common');
 
   return (
     <Cluster gap="sm" align="baseline" {...(justify ? { justify } : {})}>
       <Money value={value} />
-      <Badge variant="outline" title={t('estimate.explanation')}>
-        {tCommon('estimated')}
-      </Badge>
+      <EstimateMarker kind="value" explanation={t('estimate.totalExplanation')} />
     </Cluster>
   );
 }

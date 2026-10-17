@@ -4,6 +4,7 @@ import { formatBusinessDate } from '@/i18n/format';
 import { Badge } from '@/components/ui/badge';
 import { Cluster } from '@/components/layout/cluster';
 import { InfoTip } from '@/components/patterns/info-tip';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 
 /**
  * SPEC-009 AC-3/AC-9/AC-11 — **how the total above was priced**, at portfolio
@@ -54,13 +55,8 @@ export async function ValuationMarkers({ markers }: { readonly markers: Markers 
 
   if (markers.accrued) {
     badges.push(
-      <Marker
-        key="accrued"
-        id="marker-accrued"
-        variant="neutral"
-        label={t('accrued.badge')}
-        explanation={t('accrued.explanation')}
-      />,
+      // SPEC-022 BR-022-32 — the same "Valor estimado" every other value reads.
+      <EstimateMarker key="accrued" kind="value" explanation={t('accrued.explanation')} />,
     );
   }
 

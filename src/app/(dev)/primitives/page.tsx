@@ -13,6 +13,7 @@ import { FileUpload } from '@/components/patterns/file-upload';
 import { RouteTabs } from '@/components/patterns/route-tabs';
 import { ScopeSelector } from '@/components/patterns/scope-selector';
 import { StateBadge } from '@/components/patterns/state-badge';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { SubNav } from '@/components/patterns/sub-nav';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
@@ -120,6 +121,7 @@ export default async function PrimitivesPage() {
 
   const t = await getTranslations('common');
   const vocabulary = await getTranslations('vocabulary');
+  const tReports = await getTranslations('reports');
 
   return (
     // The page's own header is the `PageHeader` demo (BR-022-14): scope
@@ -153,7 +155,7 @@ export default async function PrimitivesPage() {
           ))}
         </Cluster>
         {/* SPEC-022 BR-022-31/32 — status badges with their dot, the watch
-            states, and the one wording for an estimated value. */}
+            states, and the two estimate markers (BR-022-32). */}
         <Cluster gap="sm">
           {STATUS_VARIANTS.map((variant) => (
             <Badge key={variant} variant={variant} dot>
@@ -163,7 +165,8 @@ export default async function PrimitivesPage() {
           {WATCH_STATES.map((state) => (
             <StateBadge key={state} state={state} label={vocabulary('precoMedio')} />
           ))}
-          <Badge variant="outline">{t('estimated')}</Badge>
+          <EstimateMarker kind="value" explanation={tReports('estimate.explanation')} />
+          <EstimateMarker kind="cost" explanation={tReports('markers.costEstimated.explanation')} />
         </Cluster>
       </Section>
 

@@ -39,3 +39,14 @@
   margin-right: 0.25rem;
   vertical-align: middle;
 }
+
+/*
+ * An estimate marker's info icon is a 24px touch target in a 16px layout box
+ * (`EstimateMarker`), and its focus ring sits outside that. The cell box clips
+ * at its padding edge, so it gets room above and below — given back by a
+ * negative margin, so the row's height does not change.
+ */
+[data-slot='table-cell-text']:has([data-slot='estimate-marker']) {
+  padding-block: 0.375rem;
+  margin-block: -0.375rem;
+}

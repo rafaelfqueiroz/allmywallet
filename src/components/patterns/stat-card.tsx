@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Stack } from '@/components/layout/stack';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CardLink, type CardLinkTarget } from '@/components/patterns/summary-card';
+import { InfoTip } from '@/components/patterns/info-tip';
 
 /**
  * A single headline figure — patrimônio, rentabilidade no período, proventos
@@ -20,6 +21,12 @@ export type StatCardProps = Omit<React.ComponentProps<typeof Card>, 'title'> & {
   value: React.ReactNode;
   /** Secondary context — a comparison period, a caveat about degraded data. */
   hint?: React.ReactNode;
+  /**
+   * SPEC-022 BR-022-39 — what the figure measures, behind an info icon beside
+   * the label (BR-022-20): open on hover, focus and tap, and the icon's
+   * accessible description. `id` must be unique on the page.
+   */
+  info?: { readonly id: string; readonly text: string };
   /**
    * SPEC-022 BR-022-07 — the destination that owns this figure's detail, as
    * the card's footer row. Pinned to the bottom so a row of cards keeps its
@@ -39,6 +46,7 @@ export function StatCard({
   label,
   value,
   hint,
+  info,
   link,
   inset = false,
   className,
@@ -54,7 +62,24 @@ export function StatCard({
       <CardContent className="flex flex-1 flex-col gap-4">
         <dl className="flex-1">
           <Stack gap="xs">
-            <dt className="text-sm text-muted-foreground">{label}</dt>
+            {info ? (
+              <dt className="flex items-center gap-1 text-sm text-muted-foreground">
+                <span id={`${info.id}-label`}>{label}</span>
+                <InfoTip
+                  id={info.id}
+                  label={label}
+                  labelledBy={`${info.id}-label`}
+                  describedBy={`${info.id}-explanation`}
+                >
+                  {info.text}
+                </InfoTip>
+                <span id={`${info.id}-explanation`} hidden>
+                  {info.text}
+                </span>
+              </dt>
+            ) : (
+              <dt className="text-sm text-muted-foreground">{label}</dt>
+            )}
             <dd className="text-2xl font-semibold">{value}</dd>
             {hint && <dd className="text-xs text-muted-foreground">{hint}</dd>}
           </Stack>

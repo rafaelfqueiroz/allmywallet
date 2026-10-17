@@ -19,7 +19,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { Note } from '@/components/patterns/note';
 import { Money } from '@/app/money';
-import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
@@ -79,7 +79,6 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
   // `reports.markers.costEstimated`, the same catalogue entry every other
   // Custo/preço médio surface reads, rather than a transactions-scoped copy.
   const tReports = await getTranslations('reports');
-  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -264,21 +263,23 @@ export default async function DeleteTransactionPage({ params }: PageProps) {
                     <Cluster gap="sm" justify="end" align="baseline">
                       <Money value={impact.value.currentPosition.averageCost} />
                       {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
-                      <CostEstimateMarker
-                        shown={impact.value.currentCostEstimated}
-                        label={tCommon('estimated')}
-                        title={tReports('markers.costEstimated.explanation')}
-                      />
+                      {impact.value.currentCostEstimated && (
+                        <EstimateMarker
+                          kind="cost"
+                          explanation={tReports('markers.costEstimated.explanation')}
+                        />
+                      )}
                     </Cluster>
                   </TableCell>
                   <TableCell className="py-row text-right tabular-nums">
                     <Cluster gap="sm" justify="end" align="baseline">
                       <Money value={impact.value.projectedPosition.averageCost} />
-                      <CostEstimateMarker
-                        shown={impact.value.projectedCostEstimated}
-                        label={tCommon('estimated')}
-                        title={tReports('markers.costEstimated.explanation')}
-                      />
+                      {impact.value.projectedCostEstimated && (
+                        <EstimateMarker
+                          kind="cost"
+                          explanation={tReports('markers.costEstimated.explanation')}
+                        />
+                      )}
                     </Cluster>
                   </TableCell>
                 </TableRow>

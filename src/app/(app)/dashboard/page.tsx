@@ -15,7 +15,7 @@ import { loadWatchOpportunities } from '@/app/(app)/watch/data';
 import { PageShell } from '@/app/page-shell';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
-import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { Money } from '@/app/money';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
@@ -230,7 +230,6 @@ async function Headline({
 }) {
   const t = await getTranslations('dashboard');
   const tp = await getTranslations('portfolio.patrimonio');
-  const tCommon = await getTranslations('common');
   const tReports = await getTranslations('reports');
   const { result, ratio } = portfolio.result;
 
@@ -251,14 +250,16 @@ async function Headline({
         value={
           <Cluster gap="sm" align="baseline">
             <Money value={portfolio.costBasis} />
-            <CostEstimateMarker
-              shown={portfolio.costEstimated}
-              label={tCommon('estimated')}
-              title={tReports('markers.costEstimated.explanation')}
-            />
+            {portfolio.costEstimated && (
+              <EstimateMarker
+                kind="cost"
+                explanation={tReports('markers.costEstimated.explanation')}
+              />
+            )}
           </Cluster>
         }
         hint={tp('costHint')}
+        info={{ id: 'applied-value-info', text: tp('costExplanation') }}
         link={{ href: '/transactions', label: t('cost.link') }}
       />
       <StatCard

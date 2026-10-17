@@ -9,6 +9,7 @@ import { Text } from '@/components/ui/text';
 import { CellLabel } from '@/components/patterns/cell-label';
 import { Stack } from '@/components/layout/stack';
 import { MoneyMask } from '@/components/patterns/money-mask';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 
 /**
  * SPEC-015 BR-015-02 / AC-4 — "the table sorts by every column, ascending and
@@ -118,11 +119,10 @@ export interface HoldingsTableLabels {
   readonly caption: string;
   readonly concentrated: string;
   readonly concentratedTitle: string;
-  readonly estimated: string;
-  readonly estimatedTitle: string;
-  /** SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12. */
-  readonly costEstimated: string;
-  readonly costEstimatedTitle: string;
+  /** SPEC-022 BR-022-32 — behind the "Valor estimado" marker's info icon. */
+  readonly estimateExplanation: string;
+  /** SPEC-007 BR-007-06 (amended 2026-09-21) / DL-007-12 — behind "Custo estimado". */
+  readonly costEstimateExplanation: string;
   /** A template — "Ordenar por {column}". */
   readonly sortBy: string;
   /** The card rendering's sort control, for viewports with no column headers. */
@@ -296,9 +296,7 @@ export function HoldingsTable({
               <CellText cell={row.original.averagePrice} />
             </Text>
             {row.original.costEstimated && (
-              <Badge variant="outline" title={labels.costEstimatedTitle}>
-                {labels.costEstimated}
-              </Badge>
+              <EstimateMarker kind="cost" explanation={labels.costEstimateExplanation} />
             )}
           </Stack>
         ),
@@ -326,9 +324,7 @@ export function HoldingsTable({
             </Text>
             {/* BR-022-32: the marker under the figure it qualifies, before the share. */}
             {row.original.estimated && (
-              <Badge variant="outline" title={labels.estimatedTitle}>
-                {labels.estimated}
-              </Badge>
+              <EstimateMarker kind="value" explanation={labels.estimateExplanation} />
             )}
             {/* A share of a zero total does not exist (`Cell.rank`). */}
             {row.original.share.rank !== undefined && (

@@ -306,3 +306,40 @@ test('the value chart’s tooltip reads the date and the exact amount its table 
   await expect(bandTip).toContainText(/Ações\s*:\s*R\$\s*1\.00\d,37/);
   await expect(bandTip).not.toContainText('—');
 });
+
+/**
+ * SPEC-022 BR-022-39 (DL-022-20) — two invested figures, two names. Portfólio's
+ * cost of holdings is "Valor aplicado"; Relatórios' net money put in is
+ * "Aportes líquidos". Each opens an explanation that names the other and why
+ * the two differ.
+ */
+test('Valor aplicado and Aportes líquidos each explain themselves', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  await seedHoldings(userId, [{ code: 'APORTE', quantity: '100', averageCost: '10', price: '10' }]);
+
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    await pool.query(
+      `INSERT INTO daily_valuation_snapshots
+         (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+       VALUES ($1, (now() AT TIME ZONE 'America/Sao_Paulo')::date - 5, 1000, 1000, 0, $2)`,
+      [userId, JSON.stringify({ stock: '1000' })],
+    );
+  } finally {
+    await pool.end();
+  }
+
+  await page.goto('/portfolio');
+  await expect(
+    page.locator('[data-slot="stat-card"]').filter({ hasText: 'Valor aplicado' }).first(),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Instruções sobre Valor aplicado' }).click();
+  await expect(page.getByRole('note')).toContainText('quantidade × preço médio');
+  await expect(page.getByRole('note')).toContainText('bonificações');
+
+  await page.goto('/reports');
+  await expect(page.getByText('Total investido')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Instruções sobre Aportes líquidos' }).click();
+  await expect(page.getByRole('note')).toContainText('Compras menos vendas');
+  await expect(page.getByRole('note')).toContainText('valor aplicado');
+});

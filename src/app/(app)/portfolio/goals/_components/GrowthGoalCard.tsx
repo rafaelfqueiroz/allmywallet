@@ -10,6 +10,7 @@ import {
 import { AchievedMarker } from '@/app/(app)/portfolio/goals/_components/AchievedMarker';
 import { EditDeleteForms } from '@/app/(app)/portfolio/goals/_components/GoalEditDeleteForms';
 import { Section } from '@/components/patterns/section';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';
@@ -18,7 +19,6 @@ import { chartTip, concealSeries } from '@/app/chart-series';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
-import { Badge } from '@/components/ui/badge';
 import { Text } from '@/components/ui/text';
 import { formatBusinessDate } from '@/i18n/format';
 import { NodeTable, type NodeColumn, type NodeRow } from '@/components/patterns/node-table';
@@ -82,7 +82,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
         ? t('growth.table.priceUnavailable')
         : t('growth.table.unavailable')
       : point.estimated
-        ? tCommon('estimated')
+        ? tCommon('valueEstimated')
         : t('growth.table.observed');
   const seriesColumns: NodeColumn[] = [
     { id: 'date', header: t('growth.table.date'), kind: 'date', sortable: true },
@@ -106,7 +106,14 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
               {t('growth.table.unavailableShort')}
             </Text>
           ),
-        status,
+        // SPEC-022 BR-022-32 — an estimated day carries the marker and its
+        // explanation; the label text stays the sort key.
+        status:
+          point.kind === 'available' && point.estimated ? (
+            <EstimateMarker kind="value" explanation={t('growth.estimatedHint')} />
+          ) : (
+            status
+          ),
       },
     };
   });
@@ -192,9 +199,7 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
             />
             {hasEstimated && (
               <Cluster gap="sm">
-                <Badge variant="outline" title={t('growth.estimatedHint')}>
-                  {t('growth.estimatedBadge')}
-                </Badge>
+                <EstimateMarker kind="value" explanation={t('growth.estimatedHint')} />
               </Cluster>
             )}
           </Stack>

@@ -18,7 +18,7 @@ import { Money } from '@/app/money';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
-import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
@@ -256,7 +256,6 @@ async function ComparisonTable({
 }) {
   const tp = await getTranslations('portfolio');
   const t = await getTranslations('reports');
-  const tCommon = await getTranslations('common');
 
   const value = ranksOf(rows, (row) => row.slice?.totals.value ?? null);
   const cost = ranksOf(rows, (row) => row.slice?.totals.costBasis ?? null);
@@ -330,11 +329,9 @@ async function ComparisonTable({
             <Cluster gap="sm" justify="end" align="baseline">
               <Money value={totals.costBasis} />
               {/* SPEC-007 BR-007-06 / DL-007-12 — never hidden. */}
-              <CostEstimateMarker
-                shown={totals.costEstimated}
-                label={tCommon('estimated')}
-                title={t('markers.costEstimated.explanation')}
-              />
+              {totals.costEstimated && (
+                <EstimateMarker kind="cost" explanation={t('markers.costEstimated.explanation')} />
+              )}
             </Cluster>
           ),
         result: totals === null ? dash : <Money value={unrealizedResult(totals).result} signed />,
@@ -358,7 +355,7 @@ async function ComparisonTable({
       sort={{ id: 'value', desc: true }}
       pagination={paginated}
       {...(paginated ? { filterPlaceholder: tp('wallets.filterPlaceholder') } : {})}
-      {...(total === null ? {} : { totals: comparisonTotals(total, tp, t, tCommon) })}
+      {...(total === null ? {} : { totals: comparisonTotals(total, tp, t) })}
     />
   );
 }
@@ -374,7 +371,7 @@ type Translate = Awaited<ReturnType<typeof getTranslations>>;
  * and one asset split across two wallets is in both, so a column total would
  * be a sum that is not the portfolio's count.
  */
-function comparisonTotals(total: ReportTotals, tp: Translate, t: Translate, tCommon: Translate) {
+function comparisonTotals(total: ReportTotals, tp: Translate, t: Translate) {
   const { result } = unrealizedResult(total);
   return {
     label: tp('wallets.total'),
@@ -383,11 +380,9 @@ function comparisonTotals(total: ReportTotals, tp: Translate, t: Translate, tCom
       cost: (
         <Cluster gap="sm" justify="end" align="baseline">
           <Money value={total.costBasis} />
-          <CostEstimateMarker
-            shown={total.costEstimated}
-            label={tCommon('estimated')}
-            title={t('markers.costEstimated.explanation')}
-          />
+          {total.costEstimated && (
+            <EstimateMarker kind="cost" explanation={t('markers.costEstimated.explanation')} />
+          )}
         </Cluster>
       ),
       result: <Money value={result} signed />,

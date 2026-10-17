@@ -2,7 +2,7 @@ import { useTranslations } from 'next-intl';
 import type { PositionState } from '@/core/positions/position-state';
 import { Section } from '@/components/patterns/section';
 import { Money } from '@/app/money';
-import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
@@ -53,16 +53,12 @@ export function DeletionDownstreamImpact({ rows }: DeletionDownstreamImpactProps
   const tTable = useTranslations('transactions.table');
   // Same catalogue entry every Custo/preço médio surface reads (DL-007-12).
   const tReports = useTranslations('reports');
-  const tCommon = useTranslations('common');
   if (rows.length === 0) return null;
 
-  const marker = (shown: boolean) => (
-    <CostEstimateMarker
-      shown={shown}
-      label={tCommon('estimated')}
-      title={tReports('markers.costEstimated.explanation')}
-    />
-  );
+  const marker = (shown: boolean) =>
+    shown && (
+      <EstimateMarker kind="cost" explanation={tReports('markers.costEstimated.explanation')} />
+    );
 
   return (
     <Section title={t('downstreamTitle')}>
