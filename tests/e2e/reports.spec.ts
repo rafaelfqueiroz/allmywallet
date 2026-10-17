@@ -290,4 +290,19 @@ test('the value chart’s tooltip reads the date and the exact amount its table 
     .locator('tr, li')
     .filter({ visible: true, hasText: (await when.textContent()) ?? '' });
   await expect(row).toContainText((await figure.textContent()) ?? '');
+
+  // The other two money charts on the page: every series reads a figure.
+  const contributions = page.getByRole('img', { name: 'Aportes por mês' });
+  await contributions.locator('.recharts-bar-rectangle path').first().hover();
+  const barTip = contributions.locator('.recharts-tooltip-wrapper');
+  await expect(barTip.locator('.recharts-tooltip-label')).toHaveText(/^[a-zç]+ de \d{4}$/);
+  await expect(barTip).toContainText(/R\$\s*[\d.]+,\d{2}/);
+  await expect(barTip).not.toContainText('—');
+
+  const stacked = page.getByRole('img', { name: 'Composição ao longo do tempo' });
+  await stacked.hover();
+  const bandTip = stacked.locator('.recharts-tooltip-wrapper');
+  await expect(bandTip.locator('.recharts-tooltip-label')).toHaveText(/^\d{2}\/\d{2}\/\d{4}$/);
+  await expect(bandTip).toContainText(/Ações\s*:\s*R\$\s*1\.00\d,37/);
+  await expect(bandTip).not.toContainText('—');
 });

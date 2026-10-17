@@ -214,6 +214,25 @@ test('a wallet shows its growth and earnings goals on separate charts (AC-1), re
   ).toBeVisible();
   await expect(page.getByRole('table', { name: 'Valores do gráfico de proventos' })).toBeVisible();
 
+  // SPEC-022 BR-022-38 — each series in each tooltip reads its exact amount;
+  // an em dash is a series whose figure the server did not label.
+  const growth = page.getByRole('img', { name: 'Evolução de Construir patrimônio' });
+  await growth.hover();
+  const growthTip = growth.locator('.recharts-tooltip-wrapper');
+  await expect(growthTip.locator('.recharts-tooltip-label')).toHaveText(/^\d{2}\/\d{2}\/\d{4}$/);
+  await expect(growthTip).toContainText(/R\$\s*1\.000,00/);
+  await expect(growthTip).toContainText(/R\$\s*5\.000,00/);
+  await expect(growthTip).not.toContainText('—');
+
+  const income = page.getByRole('img', { name: /^Proventos de Renda mensal em \d{4}$/ });
+  await income.locator('.recharts-bar-rectangle path').first().hover();
+  const incomeTip = income.locator('.recharts-tooltip-wrapper');
+  await expect(incomeTip.locator('.recharts-tooltip-label')).toHaveText(/^[a-zç]+ de \d{4}$/);
+  await expect(incomeTip).toContainText(/R\$\s*200,00/);
+  await expect(incomeTip).toContainText(/R\$\s*150,00/);
+  await expect(incomeTip).not.toContainText('—');
+  await page.mouse.move(0, 0);
+
   const results = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
