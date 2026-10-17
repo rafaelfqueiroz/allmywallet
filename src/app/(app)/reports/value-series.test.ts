@@ -25,7 +25,9 @@ const GAPS: ReadonlySet<string> = new Set(['2026-03-13']);
 
 describe('toValueChartPoints', () => {
   it('plots a gap day as null — a break — and every other day at its value', () => {
-    expect(toValueChartPoints(SERIES, GAPS)).toEqual([
+    expect(
+      toValueChartPoints(SERIES, GAPS, false).map(({ tip: _tip, ...geometry }) => geometry),
+    ).toEqual([
       { date: '2026-03-12', value: 3720, estimated: false, gap: false },
       { date: '2026-03-13', value: null, estimated: false, gap: true },
       { date: '2026-03-16', value: 3865, estimated: true, gap: false },
@@ -33,7 +35,24 @@ describe('toValueChartPoints', () => {
   });
 
   it('with no gaps, nothing is nulled', () => {
-    expect(toValueChartPoints(SERIES, new Set()).map((p) => p.value)).toEqual([3720, 3510, 3865]);
+    expect(toValueChartPoints(SERIES, new Set(), false).map((p) => p.value)).toEqual([
+      3720, 3510, 3865,
+    ]);
+  });
+
+  // SPEC-022 BR-022-38 — the tooltip reads the date and the exact amount.
+  it('labels each point with its date and its amount formatted from the decimal', () => {
+    expect(toValueChartPoints(SERIES, GAPS, false).map((p) => p.tip)).toEqual([
+      { when: '12/03/2026', figures: { value: 'R$\u00a03.720,00' } },
+      // A gap has no figure: the tooltip names nothing it does not plot.
+      { when: '13/03/2026', figures: {} },
+      { when: '16/03/2026', figures: { value: 'R$\u00a03.865,00' } },
+    ]);
+  });
+
+  it('labels every figure with the placeholder while masked', () => {
+    const [first] = toValueChartPoints(SERIES, GAPS, true);
+    expect(first?.tip.figures).toEqual({ value: 'R$\u00a0••••••' });
   });
 });
 

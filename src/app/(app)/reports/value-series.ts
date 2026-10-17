@@ -1,6 +1,8 @@
 import type { Money } from '@/core/shared/money';
 import type { ValuePoint } from '@/core/reporting/portfolio-value/ports';
 import type { ValueChartPoint } from '@/app/(app)/reports/_components/ValueChart';
+import { chartTip } from '@/app/chart-series';
+import { formatBusinessDate } from '@/i18n/format';
 
 /**
  * SPEC-013 / SPEC-021 BR-021-31 — how a snapshot point is *presented*, kept
@@ -28,13 +30,15 @@ export function basisOf(point: ValuePoint, gapDates: ReadonlySet<string>): Value
 /**
  * The server/client boundary for chart geometry. `Money` never crosses it —
  * see `ValueChart.tsx`'s header. Every figure a user *reads* is rendered from
- * `Money` on the server, in the summaries and the table.
+ * `Money` on the server: in the summaries, the table, and each point's tooltip
+ * (`chartTip`, SPEC-022 BR-022-38).
  */
 export const plot = (value: Money): number => Number(value.toString());
 
 export function toValueChartPoints(
   series: readonly ValuePoint[],
   gapDates: ReadonlySet<string>,
+  masked: boolean,
 ): ValueChartPoint[] {
   return series.map((point) => {
     const gap = gapDates.has(point.date);
@@ -43,6 +47,7 @@ export function toValueChartPoints(
       value: gap ? null : plot(point.value),
       estimated: point.estimated,
       gap,
+      tip: chartTip(formatBusinessDate(point.date), { value: gap ? null : point.value }, masked),
     };
   });
 }

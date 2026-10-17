@@ -7,6 +7,7 @@ import {
   chartGridProps,
   chartTooltipProps,
   valueChartProps,
+  type ChartTip,
 } from '@/components/charts/chart-container';
 
 /**
@@ -32,8 +33,15 @@ export interface StackedChartBand {
   readonly color: string;
 }
 
-/** One row per date, with one plotting coordinate per band key. */
-export type StackedChartRow = Readonly<Record<string, string | number>>;
+/**
+ * One row per date, with one plotting coordinate per band key, and the
+ * tooltip's date and exact figure per band (SPEC-022 BR-022-38).
+ */
+export type StackedChartRow = {
+  readonly date: string;
+  readonly tip: ChartTip;
+  readonly [band: string]: string | number | ChartTip;
+};
 
 export function StackedChart({
   masked,

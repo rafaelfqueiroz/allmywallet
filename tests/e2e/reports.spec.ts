@@ -227,3 +227,67 @@ test('Evolução patrimonial lists the daily history as a paginated table', asyn
   await expect(history.getByText(/\b\d{4}-\d{2}-\d{2}\b/)).toHaveCount(0);
   await expect(history.getByRole('button', { name: 'Página 2' })).toBeVisible();
 });
+
+/**
+ * SPEC-022 BR-022-38 — the value chart reads reais. Its axis is abbreviated
+ * ("R$ 1 mil"), and its tooltip reads the point's `dd/mm/yyyy` and the exact
+ * amount with centavos: the same figure the history table lists for that date,
+ * formatted from the decimal rather than from the coordinate the chart plots.
+ */
+test('the value chart’s tooltip reads the date and the exact amount its table lists', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+  await seedHoldings(userId, [{ code: 'TIPS', quantity: '100', averageCost: '10', price: '10' }]);
+
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    // Centavos on every day, so a rounded or float-formatted figure cannot match.
+    await pool.query(
+      `INSERT INTO daily_valuation_snapshots
+         (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+       SELECT $1, (now() AT TIME ZONE 'America/Sao_Paulo')::date - d, 1000.37 + d, 1000, 0,
+              jsonb_build_object('stock', (1000.37 + d)::text)
+         FROM generate_series(1, 6) AS d`,
+      [userId],
+    );
+    const { rows } = await pool.query<{ from: string; to: string }>(
+      `SELECT to_char((now() AT TIME ZONE 'America/Sao_Paulo')::date - 6, 'YYYY-MM-DD') AS from,
+              to_char((now() AT TIME ZONE 'America/Sao_Paulo')::date - 1, 'YYYY-MM-DD') AS to`,
+    );
+    const range = rows[0];
+    if (range === undefined) throw new Error('no range');
+    await page.goto(`/reports?period=custom&from=${range.from}&to=${range.to}`);
+  } finally {
+    await pool.end();
+  }
+
+  const chart = page.getByRole('img', { name: 'Patrimônio ao longo do tempo' });
+  await expect(chart).toBeVisible();
+  // The value axis, in abbreviated reais — never the bare coordinate.
+  await expect(chart.getByText(/^R\$\s*\d+(,\d)?\s*mil$/).first()).toBeVisible();
+
+  const surface = chart.locator('svg.recharts-surface').first();
+  await surface.scrollIntoViewIfNeeded();
+  const box = await surface.boundingBox();
+  if (box === null) throw new Error('the chart has no box');
+  // `hover` scrolls the chart into view; the point is a recent day, so its
+  // date is on the table's first page.
+  await surface.hover({ position: { x: box.width * 0.6, y: box.height / 2 } });
+
+  const tooltip = chart.locator('.recharts-tooltip-wrapper');
+  const when = tooltip.locator('.recharts-tooltip-label');
+  const figure = tooltip.locator('.recharts-tooltip-item-value');
+  await expect(when).toHaveText(/^\d{2}\/\d{2}\/\d{4}$/);
+  await expect(figure).toHaveText(/^R\$\s*1\.00\d,37$/);
+
+  const history = page
+    .locator('[data-slot="data-table"]')
+    .filter({ has: page.getByText(/^Mostrando 1–\d+ de \d+ datas$/) })
+    .last();
+  // A table row on a wide screen, a card on a narrow one (DS-28).
+  const row = history
+    .locator('tr, li')
+    .filter({ visible: true, hasText: (await when.textContent()) ?? '' });
+  await expect(row).toContainText((await figure.textContent()) ?? '');
+});

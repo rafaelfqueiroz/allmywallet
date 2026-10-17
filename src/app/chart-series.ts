@@ -1,3 +1,7 @@
+import type { Money } from '@/core/shared/money';
+import type { ChartTip } from '@/components/charts/chart-container';
+import { currencyText } from '@/i18n/format';
+
 /**
  * SPEC-022 BR-022-24/25 — a chart's coordinates, with the amounts taken out.
  *
@@ -48,4 +52,24 @@ export function concealSeries<Row extends object>(
     }
     return next;
   });
+}
+
+/**
+ * SPEC-022 BR-022-38 — a point's tooltip text, formatted here, on the server,
+ * from the decimal (AR-09): the exact amount with centavos, never the
+ * coordinate the chart plots. `null` — a gap, a month not yet elapsed — has no
+ * figure. Masked, every figure is the placeholder (BR-022-24), so the amounts
+ * reach the HTML no more through the tooltip than through the coordinates.
+ */
+export function chartTip(
+  when: string,
+  amounts: Readonly<Record<string, Money | null>>,
+  masked: boolean,
+): ChartTip {
+  const text = currencyText(masked);
+  const figures: Record<string, string> = {};
+  for (const [key, amount] of Object.entries(amounts)) {
+    if (amount !== null) figures[key] = text(amount);
+  }
+  return { when, figures };
 }

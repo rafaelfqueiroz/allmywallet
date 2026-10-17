@@ -7,6 +7,7 @@ import {
   chartGridProps,
   chartTooltipProps,
   valueChartProps,
+  type ChartTip,
 } from '@/components/charts/chart-container';
 
 /**
@@ -35,6 +36,8 @@ export interface ValueChartPoint {
   readonly value: number | null;
   readonly estimated: boolean;
   readonly gap?: boolean;
+  /** SPEC-022 BR-022-38 — the tooltip's date and exact amount, formatted on the server. */
+  readonly tip: ChartTip;
 }
 
 export function ValueChart({

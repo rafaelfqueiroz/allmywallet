@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { render } from '@/components/test-utils';
 import { ValueChart } from './ValueChart';
 
+/** The tooltip's text is asserted in `chart-container.test.tsx`; these read the plot. */
+const TIP = { when: '', figures: {} };
 /**
  * SPEC-021 BR-021-31 — a gap day is a *break* in the value line, never a
  * bridge between its neighbours.
@@ -43,10 +45,10 @@ describe('ValueChart geometry (SPEC-021 BR-021-31)', () => {
         title="Patrimônio"
         summary="—"
         points={[
-          { date: '2026-03-12', value: 3720, estimated: false },
-          { date: '2026-03-13', value: 3510, estimated: false },
-          { date: '2026-03-16', value: 3865, estimated: false },
-          { date: '2026-03-17', value: 3865, estimated: false },
+          { date: '2026-03-12', value: 3720, estimated: false, tip: TIP },
+          { date: '2026-03-13', value: 3510, estimated: false, tip: TIP },
+          { date: '2026-03-16', value: 3865, estimated: false, tip: TIP },
+          { date: '2026-03-17', value: 3865, estimated: false, tip: TIP },
         ]}
       />,
     );
@@ -60,11 +62,11 @@ describe('ValueChart geometry (SPEC-021 BR-021-31)', () => {
         title="Patrimônio"
         summary="—"
         points={[
-          { date: '2026-03-12', value: 3720, estimated: false },
-          { date: '2026-03-13', value: 3510, estimated: false },
-          { date: '2026-03-16', value: null, estimated: false, gap: true },
-          { date: '2026-03-17', value: 3865, estimated: false },
-          { date: '2026-03-18', value: 3900, estimated: false },
+          { date: '2026-03-12', value: 3720, estimated: false, tip: TIP },
+          { date: '2026-03-13', value: 3510, estimated: false, tip: TIP },
+          { date: '2026-03-16', value: null, estimated: false, gap: true, tip: TIP },
+          { date: '2026-03-17', value: 3865, estimated: false, tip: TIP },
+          { date: '2026-03-18', value: 3900, estimated: false, tip: TIP },
         ]}
       />,
     );

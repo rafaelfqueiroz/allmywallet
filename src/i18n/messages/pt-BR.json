@@ -1426,7 +1426,8 @@
     },
     "chart": {
       "title": "Seu portfólio x os índices",
-      "description": "Todas as linhas começam em 100 no início do período. A distância entre elas é o quanto seu portfólio ficou à frente ou atrás.",
+      "portfolio": "Seu portfólio",
+      "description": "Todas as linhas começam em 0% no início do período. A distância entre elas é o quanto seu portfólio ficou à frente ou atrás.",
       "summary": "Comparação da rentabilidade acumulada do portfólio com a dos índices selecionados. Os números exatos estão na tabela abaixo."
     }
   },

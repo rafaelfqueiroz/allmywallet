@@ -19,7 +19,8 @@ import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';
 import { loadHideValues } from '@/app/hide-values';
-import { concealSeries } from '@/app/chart-series';
+import { chartTip, concealSeries } from '@/app/chart-series';
+import { formatMonth } from '@/i18n/format';
 import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Grid } from '@/components/layout/grid';
@@ -144,6 +145,11 @@ export default async function EarningsPage({ searchParams }: PageProps) {
                     amount: Number(month.amount.toString()),
                     average:
                       month.movingAverage === null ? null : Number(month.movingAverage.toString()),
+                    tip: chartTip(
+                      formatMonth(month.month),
+                      { amount: month.amount, average: month.movingAverage },
+                      masked,
+                    ),
                   })),
                   ['amount', 'average'],
                   masked,

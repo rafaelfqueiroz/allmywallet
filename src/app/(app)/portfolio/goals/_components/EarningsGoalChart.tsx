@@ -8,6 +8,7 @@ import {
   chartMarkProps,
   chartTooltipProps,
   valueChartProps,
+  type ChartTip,
 } from '@/components/charts/chart-container';
 
 /**
@@ -46,6 +47,8 @@ export interface EarningsChartPoint {
   readonly yearToDateAverage: number | null;
   /** The goal amount, repeated at every month so the reference line is flat. */
   readonly goal: number;
+  /** SPEC-022 BR-022-38 — the tooltip's month and exact figures, formatted on the server. */
+  readonly tip: ChartTip;
 }
 
 export function EarningsGoalChart({

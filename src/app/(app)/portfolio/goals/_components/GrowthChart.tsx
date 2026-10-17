@@ -7,6 +7,7 @@ import {
   chartGridProps,
   chartTooltipProps,
   valueChartProps,
+  type ChartTip,
 } from '@/components/charts/chart-container';
 
 /**
@@ -39,6 +40,8 @@ export interface GrowthChartPoint {
   readonly value: number | null;
   /** The goal amount, repeated at every point so the line it draws is flat. */
   readonly goal: number;
+  /** SPEC-022 BR-022-38 — the tooltip's date and exact figures, formatted on the server. */
+  readonly tip: ChartTip;
 }
 
 export function GrowthChart({

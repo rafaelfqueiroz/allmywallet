@@ -259,3 +259,33 @@ test('shows the monthly proventos as a table beside the chart', async ({ signedI
   await expect(monthly).toBeVisible();
   await expect(monthly).toContainText(/R\$\s*120,00/);
 });
+
+/**
+ * SPEC-022 BR-022-38 — the monthly chart reads reais: its tooltip names the
+ * month as a reader says it and the exact amount with centavos, the figure the
+ * table lists for that month.
+ */
+test('the monthly chart’s tooltip reads the month and the exact amount', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  const [code] = await seedHoldings(userId, [
+    { code: 'TIPM', quantity: '100', averageCost: '10', price: '40' },
+  ]);
+  await seedEarning(userId, String(code), { amount: '120.37', payDate: EARLY });
+
+  await page.goto(`/reports/earnings?${TWELVE_MONTHS}`);
+
+  const chart = page.getByRole('img', { name: 'Proventos mês a mês' });
+  await expect(chart).toBeVisible();
+  const bar = chart.locator('.recharts-bar-rectangle path').first();
+  await bar.hover();
+
+  const tooltip = chart.locator('.recharts-tooltip-wrapper');
+  await expect(tooltip.locator('.recharts-tooltip-label')).toHaveText(/^[a-zç]+ de \d{4}$/);
+  await expect(tooltip).toContainText(/Recebido no mês\s*:\s*R\$\s*120,37/);
+
+  const monthly = page
+    .locator('[data-slot="data-table"]')
+    .filter({ has: page.getByText(/^Mostrando 1–\d+ de \d+ meses$/) })
+    .first();
+  await expect(monthly).toContainText(/R\$\s*120,37/);
+});

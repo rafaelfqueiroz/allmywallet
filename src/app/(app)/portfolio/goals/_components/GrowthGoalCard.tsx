@@ -14,7 +14,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';
 import { loadHideValues } from '@/app/hide-values';
-import { concealSeries } from '@/app/chart-series';
+import { chartTip, concealSeries } from '@/app/chart-series';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
@@ -48,6 +48,11 @@ export async function GrowthGoalCard({ goalView }: { readonly goalView: GoalView
       date: point.date,
       value: point.kind === 'available' ? Number(point.value.toString()) : null,
       goal: Number(growth.goalAmount.toString()),
+      tip: chartTip(
+        formatBusinessDate(point.date),
+        { value: point.kind === 'available' ? point.value : null, goal: growth.goalAmount },
+        masked,
+      ),
     })),
     ['value', 'goal'],
     masked,
