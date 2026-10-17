@@ -130,6 +130,35 @@ describe('truncating text inside a flex container or a badge', () => {
     );
   });
 
+  // An `EstimateMarker`'s explanation copy is `hidden`: not what the cell reads as.
+  it('leaves text under `hidden` out of the full text', async () => {
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(100);
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockImplementation(function (this: Element) {
+      return this.matches('[data-cell-line]') ? 400 : 100;
+    });
+    const user = userEvent.setup();
+    render(
+      table(() => (
+        <CellLabel
+          badge={
+            <span>
+              Valor estimado<span hidden>Calculado pelo indexador contratado.</span>
+            </span>
+          }
+        >
+          {LONG}
+        </CellLabel>
+      )),
+    );
+    const cell = inTable().getByText(LONG).closest<HTMLElement>('[data-slot="table-cell-text"]')!;
+    await user.click(cell);
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="popover-content"]')?.textContent).toBe(
+        `${LONG} Valor estimado`,
+      ),
+    );
+  });
+
   it('adds no tab stop when the line and the badge both fit', () => {
     render(
       table(() => <CellLabel badge={<Badge variant="outline">Estimado</Badge>}>XP</CellLabel>),

@@ -29,7 +29,6 @@ import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Money } from '@/app/money';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CellLabel } from '@/components/patterns/cell-label';
 import { Note } from '@/components/patterns/note';
@@ -49,6 +48,7 @@ import {
 } from '@/components/ui/table';
 import { columnWidth } from '@/components/patterns/data-table-columns';
 import { NodeTable, type NodeColumn } from '@/components/patterns/node-table';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { ranksOf } from '@/lib/rank-keys';
 import { tableLabels, type ReportTableLabels } from '@/app/(app)/reports/_components/table-labels';
 
@@ -90,7 +90,6 @@ function RateCell({ rate }: { readonly rate: Rate | null }) {
 export default async function PerformancePage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
   const tr = await getTranslations('rentabilidade');
-  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -334,8 +333,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
                   contribution: tr('contribution.columnContribution'),
                   gain: tr('contribution.columnGain'),
                   total: t('table.total'),
-                  estimated: tCommon('estimated'),
-                  estimateExplanation: t('estimate.explanation'),
+                  estimateExplanation: t('estimate.totalExplanation'),
                 }}
                 labelOf={(key) => resolveGroupLabel(key, report.value.groupNames, t)}
                 table={tableLabels(t, {
@@ -369,14 +367,7 @@ function ContributionTable({
 }: {
   readonly contribution: ContributionReport;
   readonly labels: Record<
-    | 'group'
-    | 'weight'
-    | 'ownReturn'
-    | 'contribution'
-    | 'gain'
-    | 'total'
-    | 'estimated'
-    | 'estimateExplanation',
+    'group' | 'weight' | 'ownReturn' | 'contribution' | 'gain' | 'total' | 'estimateExplanation',
     string
   >;
   readonly labelOf: (key: GroupKey) => string;
@@ -408,9 +399,7 @@ function ContributionTable({
           <Cluster gap="sm" align="baseline">
             <span>{labels.total}</span>
             {contribution.estimated ? (
-              <Badge variant="outline" title={labels.estimateExplanation}>
-                {labels.estimated}
-              </Badge>
+              <EstimateMarker kind="value" explanation={labels.estimateExplanation} />
             ) : null}
           </Cluster>
         ),
@@ -431,9 +420,7 @@ function ContributionTable({
               <CellLabel
                 badge={
                   group.estimated ? (
-                    <Badge variant="outline" title={labels.estimateExplanation}>
-                      {labels.estimated}
-                    </Badge>
+                    <EstimateMarker kind="value" explanation={labels.estimateExplanation} />
                   ) : null
                 }
               >

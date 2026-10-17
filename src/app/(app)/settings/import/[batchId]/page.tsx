@@ -98,7 +98,7 @@ export default async function ImportBatchDetailPage({
   const { batchId: rawBatchId } = await params;
   const query = await searchParams;
   const t = await getTranslations('import');
-  const tCommon = await getTranslations('common');
+  const tReports = await getTranslations('reports');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -245,7 +245,7 @@ export default async function ImportBatchDetailPage({
             price: (chunks) => (masked ? <MoneyMask /> : chunks),
           }),
     closeMissingReason: offer.close === null ? t('subscriptionOffer.closeMissing') : null,
-    estimateBadge: tCommon('estimated'),
+    estimateExplanation: tReports('markers.costEstimated.explanation'),
     resolve: t('subscriptionOffer.resolve'),
     keep: t('subscriptionOffer.keep'),
   });

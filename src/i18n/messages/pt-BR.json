@@ -137,7 +137,6 @@
         "explanation": "{count, plural, one {# posição não pôde ser precificada e entra no total pelo custo de aquisição} other {# posições não puderam ser precificadas e entram no total pelo custo de aquisição}}. Para essa parte, o número acima não é uma avaliação de mercado."
       },
       "accrued": {
-        "badge": "Inclui renda fixa acruada",
         "explanation": "Parte do total é calculada a partir do indexador contratado, não observada em um mercado. É um número real, só não é um preço."
       },
       "carried": {
@@ -249,7 +248,8 @@
     "patrimonio": {
       "value": "Patrimônio",
       "cost": "Valor aplicado",
-      "costHint": "Custo pelo preço médio",
+      "costHint": "Custo dos ativos em carteira, pelo preço médio",
+      "costExplanation": "Quanto custaram os ativos que você tem hoje: quantidade × preço médio. Pode ser maior que os aportes líquidos, porque o lucro de uma venda reinvestido aumenta o custo sem dinheiro novo — e bonificações também entram no custo.",
       "result": "Resultado não realizado",
       "resultOnCost": "sobre o valor aplicado",
       "resultNoRatio": "Sem valor aplicado para comparar",
@@ -309,7 +309,8 @@
     "empty": "Nada por aqui ainda",
     "skipToContent": "Pular para o conteúdo",
     "retry": "Tentar novamente",
-    "estimated": "Estimado",
+    "valueEstimated": "Valor estimado",
+    "costEstimated": "Custo estimado",
     "hiddenValue": "Valor oculto"
   },
   "field": {
@@ -382,7 +383,7 @@
     "GOAL_KIND_IMMUTABLE": "O tipo de uma meta não pode ser alterado depois de criada. Exclua esta meta e crie uma nova do tipo desejado.",
     "GOAL_BASIS_IMMUTABLE": "A forma de medir uma meta de crescimento não pode ser alterada depois de criada.",
     "GOAL_PERIOD_IMMUTABLE": "O período de uma meta de proventos não pode ser alterado depois de criada.",
-    "GROWTH_GOAL_REQUIRES_BASIS": "Uma meta de crescimento precisa dizer se mede valor investido ou valor atual.",
+    "GROWTH_GOAL_REQUIRES_BASIS": "Uma meta de crescimento precisa dizer se mede valor aplicado ou valor atual.",
     "EARNINGS_GOAL_REQUIRES_PERIOD": "Uma meta de proventos precisa dizer se é mensal ou anual.",
     "GOAL_BASIS_NOT_APPLICABLE": "Este campo é só para metas de crescimento.",
     "GOAL_PERIOD_NOT_APPLICABLE": "Este campo é só para metas de proventos.",
@@ -882,14 +883,14 @@
       "quantity": "Quantidade",
       "value": "Valor",
       "costBasis": "Custo",
-      "costEstimated": "Custo estimado",
       "total": "Total",
       "share": "Participação",
       "yes": "Sim",
       "no": "Não"
     },
     "estimate": {
-      "explanation": "Valor estimado, não observado no mercado. Pode vir do custo de aquisição ou do indexador contratado."
+      "explanation": "Calculado pelo indexador contratado — por exemplo, 110% do CDI — e não por um preço de mercado. É assim que a renda fixa sem negociação diária é avaliada. Sem contrato ou sem nenhum preço, o ativo aparece pelo custo de aquisição.",
+      "totalExplanation": "Parte deste valor não vem de um preço de mercado: renda fixa calculada pelo indexador contratado — por exemplo, 110% do CDI — ou um ativo sem nenhum preço, avaliado pelo custo de aquisição."
     },
     "empty": {
       "portfolioTitle": "Nenhum investimento por aqui ainda",
@@ -930,7 +931,7 @@
         "ipca_spread": "IPCA + juros"
       },
       "costEstimated": {
-        "explanation": "O custo desta posição inclui uma aquisição cujo preço a B3 não informa — foi estimado pelo preço de fechamento no dia em que os ativos foram creditados, e assim permanece até a posição ser encerrada."
+        "explanation": "O custo inclui uma subscrição cujo preço a B3 não informa. Usamos o fechamento do dia em que os ativos foram creditados, até a posição ser encerrada."
       }
     },
     "attentionTitle": "Precisam de atenção",
@@ -1111,7 +1112,7 @@
     "markers": {
       "costEstimated": {
         "closeExplanation": "Preço estimado pelo fechamento de {date}. A B3 não informa o preço da subscrição — o custo usa o preço de fechamento no dia em que os ativos foram creditados.",
-        "carriedExplanation": "Custo herdado de uma posição com preço estimado."
+        "carriedExplanation": "Custo herdado de uma posição que inclui uma subscrição, cujo preço a B3 não informa."
       }
     }
   },
@@ -1252,14 +1253,16 @@
     "unavailable": "Indisponível",
     "headline": {
       "currentValue": "Patrimônio atual",
-      "totalInvested": "Total investido",
+      "totalInvested": "Aportes líquidos",
+      "totalInvestedHint": "Dinheiro que entrou menos o que saiu",
+      "totalInvestedExplanation": "Compras menos vendas desde a primeira transação registrada; uma transferência só conta, pelo custo, quando traz ativos de fora ou os leva para fora. Mede quanto você colocou do próprio bolso; o ganho deste relatório é o patrimônio menos este valor. Pode ser menor que o valor aplicado do Portfólio, porque o lucro de uma venda reinvestido e as bonificações aumentam o custo sem dinheiro novo.",
       "absoluteGain": "Ganho",
       "gain": "Ganho %",
       "notApplicable": "—"
     },
     "walletScope": {
       "title": "Não guardamos histórico separado por carteira",
-      "body": "O histórico diário do seu patrimônio é gravado para o portfólio inteiro, sem separar quanto cabia a cada carteira em cada dia. E como a atribuição de ativos a carteiras não guarda histórico, aplicar a divisão de hoje aos dias passados reescreveria o passado toda vez que você remanejasse um ativo. Por isso o gráfico ao longo do tempo, a origem do crescimento, os aportes por mês, a composição histórica e o total investido não aparecem quando o escopo é uma carteira. Mostrar aqui os números do portfólio inteiro daria um resultado que parece certo e não é. O patrimônio atual acima é só desta carteira e está correto."
+      "body": "O histórico diário do seu patrimônio é gravado para o portfólio inteiro, sem separar quanto cabia a cada carteira em cada dia. E como a atribuição de ativos a carteiras não guarda histórico, aplicar a divisão de hoje aos dias passados reescreveria o passado toda vez que você remanejasse um ativo. Por isso o gráfico ao longo do tempo, a origem do crescimento, os aportes por mês, a composição histórica e os aportes líquidos não aparecem quando o escopo é uma carteira. Mostrar aqui os números do portfólio inteiro daria um resultado que parece certo e não é. O patrimônio atual acima é só desta carteira e está correto."
     },
     "granularity": {
       "daily": "Um ponto por dia",
@@ -1271,8 +1274,7 @@
       "summary": "Patrimônio do início ao fim do período"
     },
     "estimated": {
-      "badge": "Parte do período usa valores estimados",
-      "hint": "Inclui renda fixa acruada, não observada no mercado"
+      "explanation": "Parte do período usa valores que não vêm de um preço de mercado: renda fixa calculada pelo indexador contratado, ou um ativo sem nenhum preço, avaliado pelo custo de aquisição."
     },
     "gap": {
       "badge": "Dias sem cotação de fechamento aparecem como falhas no gráfico"
@@ -1561,11 +1563,11 @@
     "namePlaceholder": "Ex.: Independência financeira",
     "amountLabel": "Valor (R$)",
     "createGrowthTitle": "Novo objetivo de crescimento",
-    "createGrowthDescription": "Quanto você quer ter construído nesta carteira — em valor investido ou em valor de mercado.",
+    "createGrowthDescription": "Quanto você quer ter construído nesta carteira — em valor aplicado ou em valor de mercado.",
     "createEarningsTitle": "Novo objetivo de proventos",
     "createEarningsDescription": "Quanto você quer que esta carteira pague — por mês ou por ano.",
     "basisLabel": "Medir por",
-    "basisInvested": "Valor investido",
+    "basisInvested": "Valor aplicado",
     "basisCurrentValue": "Valor atual",
     "periodLabel": "Período",
     "periodMonthly": "Mensal",
@@ -1590,7 +1592,6 @@
       "chartGoal": "Objetivo",
       "valueLineLabel": "Valor",
       "goalLineLabel": "Objetivo",
-      "estimatedBadge": "Parte do período usa valores estimados",
       "estimatedHint": "Inclui valores calculados, não observados no mercado: renda fixa acruada, ou uma posição sem preço no dia, avaliada pelo custo.",
       "table": {
         "caption": "Valores do gráfico de evolução",

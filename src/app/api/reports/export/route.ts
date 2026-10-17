@@ -77,10 +77,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     quantity: t('table.quantity'),
     value: t('table.value'),
     costBasis: t('table.costBasis'),
-    // SPEC-007 BR-007-06 / DL-007-12 — never `table.estimated`, which is
-    // SPEC-009's unrelated valuation estimate.
-    costEstimated: t('table.costEstimated'),
-    estimated: tCommon('estimated'),
+    // SPEC-022 BR-022-32 — the same two labels the screen shows: the cost
+    // estimate (SPEC-007 BR-007-06) and SPEC-009's valuation estimate.
+    costEstimated: tCommon('costEstimated'),
+    estimated: tCommon('valueEstimated'),
     unassigned: t('group.unassigned'),
     notClassified: t('group.notClassified'),
     yes: t('table.yes'),

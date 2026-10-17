@@ -78,7 +78,6 @@ export function holdingsTableLabels(
   report: CompositionReport,
   t: Translate,
   tc: Translate,
-  tCommon: Translate,
 ): HoldingsTableLabels {
   return {
     code: tc('holdings.code'),
@@ -93,10 +92,8 @@ export function holdingsTableLabels(
     concentratedTitle: tc('concentration.explanation', {
       threshold: report.concentration.thresholdPct,
     }),
-    estimated: tCommon('estimated'),
-    estimatedTitle: t('estimate.explanation'),
-    costEstimated: tCommon('estimated'),
-    costEstimatedTitle: t('markers.costEstimated.explanation'),
+    estimateExplanation: t('estimate.explanation'),
+    costEstimateExplanation: t('markers.costEstimated.explanation'),
     sortBy: tc('holdings.sortBy', { column: '{column}' }),
     sortField: tc('holdings.sortField'),
     sortAscending: tc('holdings.sortAscending'),

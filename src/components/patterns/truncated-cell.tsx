@@ -9,10 +9,16 @@ import { useTipInteraction } from '@/components/patterns/use-tip-interaction';
 /**
  * What a cell reads as in full: its text nodes, one space between each, so two
  * lines stacked in a cell ("PETR4" over "Petrobras") do not run together.
+ * Text under `hidden` is not on screen — an `EstimateMarker`'s copy of its
+ * explanation, there for the icon's accessible description — so it is not
+ * part of what the cell reads as.
  */
 function fullText(element: HTMLElement): string {
   const parts: string[] = [];
-  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) =>
+      node.parentElement?.closest('[hidden]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     const text = node.textContent?.trim();
     if (text) parts.push(text);

@@ -4,7 +4,7 @@ import { ActionForm } from '@/components/patterns/action-form';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { Text } from '@/components/ui/text';
 
 /**
@@ -31,7 +31,8 @@ export interface SubscriptionOfferLabels {
   readonly priceHint: ReactNode | null;
   /** Present only without a stored close: why "Resolver como subscrição" is disabled. */
   readonly closeMissingReason: string | null;
-  readonly estimateBadge: string;
+  /** Behind the "Custo estimado" marker's info icon (SPEC-022 BR-022-32). */
+  readonly estimateExplanation: string;
   readonly resolve: string;
   readonly keep: string;
 }
@@ -62,7 +63,7 @@ export function SubscriptionOfferPanel({
           <Text as="span" size="xs">
             {labels.priceHint}
           </Text>
-          <Badge variant="outline">{labels.estimateBadge}</Badge>
+          <EstimateMarker kind="cost" explanation={labels.estimateExplanation} />
         </Cluster>
       ) : (
         <Text as="span" size="xs" tone="muted">

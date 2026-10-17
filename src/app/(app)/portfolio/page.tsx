@@ -23,7 +23,7 @@ import { loadHideValues } from '@/app/hide-values';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { ErrorState } from '@/components/patterns/error-state';
-import { CostEstimateMarker } from '@/components/patterns/cost-estimate-marker';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 import { StatCard } from '@/components/patterns/stat-card';
 import { Note } from '@/components/patterns/note';
 import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
@@ -66,7 +66,6 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
   const t = await getTranslations('reports');
   const tc = await getTranslations('composicao');
   const tw = await getTranslations('watch');
-  const tCommon = await getTranslations('common');
   const userId = await tryUserId();
 
   if (userId === undefined) {
@@ -146,7 +145,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
             )}
             <HoldingsTable
               rows={holdingRows(report.rows, new Map(), t, tc, tw, masked)}
-              labels={holdingsTableLabels(report, t, tc, tCommon)}
+              labels={holdingsTableLabels(report, t, tc)}
               hidden={['sector', 'opportunityState']}
             />
           </Section>
@@ -167,7 +166,6 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
 async function Headline({ report }: { readonly report: CompositionReport }) {
   const tp = await getTranslations('portfolio');
   const t = await getTranslations('reports');
-  const tCommon = await getTranslations('common');
 
   const { result, ratio } = unrealizedResult(report.total);
   const classes = report.breakdown.length;
@@ -183,14 +181,13 @@ async function Headline({ report }: { readonly report: CompositionReport }) {
         value={
           <Cluster gap="sm" align="baseline">
             <Money value={report.total.costBasis} />
-            <CostEstimateMarker
-              shown={report.total.costEstimated}
-              label={tCommon('estimated')}
-              title={t('markers.costEstimated.explanation')}
-            />
+            {report.total.costEstimated && (
+              <EstimateMarker kind="cost" explanation={t('markers.costEstimated.explanation')} />
+            )}
           </Cluster>
         }
         hint={tp('patrimonio.costHint')}
+        info={{ id: 'applied-value-info', text: tp('patrimonio.costExplanation') }}
       />
       <StatCard
         label={tp('patrimonio.result')}

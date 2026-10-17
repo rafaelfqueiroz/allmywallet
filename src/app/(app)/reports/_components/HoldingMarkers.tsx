@@ -2,6 +2,7 @@ import { getTranslations } from 'next-intl/server';
 import type { ReportHolding } from '@/core/reporting/ports';
 import { Badge } from '@/components/ui/badge';
 import { Cluster } from '@/components/layout/cluster';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
 
 /**
  * SPEC-009 AC-3, AC-9 and AC-11 — how a single holding was priced, said on the
@@ -35,7 +36,6 @@ import { Cluster } from '@/components/layout/cluster';
  */
 export async function HoldingMarkers({ holding }: { readonly holding: ReportHolding }) {
   const t = await getTranslations('reports.markers');
-  const tCommon = await getTranslations('common');
 
   const markers: React.ReactNode[] = [];
 
@@ -49,22 +49,19 @@ export async function HoldingMarkers({ holding }: { readonly holding: ReportHold
   }
 
   if (holding.estimated && holding.basis !== null) {
-    // AC-9: the basis, on hover. Not a tooltip component — a `title` survives
-    // a print, a screen reader and a page with JavaScript disabled, and this
-    // is explanatory text rather than an interaction.
+    // AC-9: the basis, behind the marker's info icon — open on hover, focus
+    // and tap, and the icon's accessible description (SPEC-022 BR-022-32).
     markers.push(
-      <Badge
+      <EstimateMarker
         key="estimated"
-        variant="outline"
-        title={t('estimated.basis', {
+        kind="value"
+        explanation={t('estimated.basis', {
           indexer: t(`indexer.${holding.basis.indexer}`),
           rate: holding.basis.ratePercent,
           days: holding.basis.businessDays,
           through: holding.basis.throughDate,
         })}
-      >
-        {tCommon('estimated')}
-      </Badge>,
+      />,
     );
   }
 

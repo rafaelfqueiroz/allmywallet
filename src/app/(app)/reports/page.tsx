@@ -47,6 +47,8 @@ import {
 import { columnWidth } from '@/components/patterns/data-table-columns';
 import { formatBusinessDate, formatMonth } from '@/i18n/format';
 import { NodeTable, type NodeColumn } from '@/components/patterns/node-table';
+import { EstimateMarker } from '@/components/patterns/estimate-marker';
+import { EstimatedValue } from '@/app/(app)/portfolio/_components/EstimatedValue';
 import { ranksOf } from '@/lib/rank-keys';
 import { tableLabels, type ReportTableLabels } from '@/app/(app)/reports/_components/table-labels';
 
@@ -187,11 +189,17 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
           <Grid cols={4}>
             <StatCard
               label={tp('headline.currentValue')}
-              value={<Money value={report.headline.currentValue} />}
-              hint={history?.series.at(-1)?.estimated ? tp('estimated.hint') : undefined}
+              value={
+                <EstimatedValue
+                  value={report.headline.currentValue}
+                  estimated={history?.series.at(-1)?.estimated === true}
+                />
+              }
             />
             <StatCard
               label={tp('headline.totalInvested')}
+              hint={tp('headline.totalInvestedHint')}
+              info={{ id: 'net-contributions-info', text: tp('headline.totalInvestedExplanation') }}
               value={
                 invested === null ? (
                   <Unavailable label={tp('unavailable')} />
@@ -265,7 +273,7 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                   {history.series.some((point) => point.estimated) && (
                     // BR-013-07 / DL-013-04: the marker sits with the chart, not in
                     // a footnote read once and forgotten.
-                    <Badge variant="outline">{tp('estimated.badge')}</Badge>
+                    <EstimateMarker kind="value" explanation={tp('estimated.explanation')} />
                   )}
                   {history.series.some((point) => closeGapDates.has(point.date)) && (
                     // SPEC-021 BR-021-31: the break in the line says *where*; this says *why*.
@@ -395,7 +403,8 @@ export default async function PatrimonioPage({ searchParams }: PageProps) {
                     value: tp('table.value'),
                     basis: tp('table.basis'),
                     observed: tp('table.observed'),
-                    estimated: tCommon('estimated'),
+                    estimated: tCommon('valueEstimated'),
+                    estimateExplanation: t('estimate.totalExplanation'),
                     gap: tp('table.gap'),
                   }}
                   table={tableLabels(t, { caption: tp('table.title'), noun: tp('table.noun') })}
@@ -550,7 +559,17 @@ function SeriesTable({
 }: {
   points: readonly ValuePoint[];
   gapDates: ReadonlySet<string>;
-  labels: Record<'caption' | 'date' | 'value' | 'basis' | 'observed' | 'estimated' | 'gap', string>;
+  labels: Record<
+    | 'caption'
+    | 'date'
+    | 'value'
+    | 'basis'
+    | 'observed'
+    | 'estimated'
+    | 'estimateExplanation'
+    | 'gap',
+    string
+  >;
   table: ReportTableLabels;
 }) {
   const columns: NodeColumn[] = [
@@ -570,12 +589,20 @@ function SeriesTable({
       sort={{ id: 'date', desc: true }}
       rows={points.map((point, index) => {
         // SPEC-021 BR-021-31: a carried-forward gap day is never "observed".
-        const basis = labels[basisOf(point, gapDates)];
+        const kind = basisOf(point, gapDates);
+        const basis = labels[kind];
         return {
           cells: {
             date: formatBusinessDate(point.date),
             value: <Money value={point.value} />,
-            basis,
+            // SPEC-022 BR-022-32 — the marker and its explanation; the label
+            // text stays the sort key.
+            basis:
+              kind === 'estimated' ? (
+                <EstimateMarker kind="value" explanation={labels.estimateExplanation} />
+              ) : (
+                basis
+              ),
           },
           keys: { date: point.date, value: valueRanks[index], basis },
         };

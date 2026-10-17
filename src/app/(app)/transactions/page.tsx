@@ -246,7 +246,6 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
  */
 async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
   const t = await getTranslations('transactions');
-  const tCommon = await getTranslations('common');
   const tType = await getTranslations('import.transactionType');
   const tx = item.transaction;
 
@@ -280,7 +279,6 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
           <TransactionCostEstimateMarker
             costIsEstimate={tx.costIsEstimate}
             estimateCloseDate={tx.estimateCloseDate}
-            label={tCommon('estimated')}
             closeExplanation={(date) => t('markers.costEstimated.closeExplanation', { date })}
             carriedExplanation={t('markers.costEstimated.carriedExplanation')}
           />
