@@ -157,19 +157,29 @@ test.describe('Configurações › Importar', () => {
       .click();
     await expect(page).toHaveURL(/\/settings\/import\/[0-9a-f-]{36}$/);
     await expect(page.getByText('Não foi possível processar este arquivo')).toBeVisible();
-    await page.getByRole('link', { name: 'Histórico de importações' }).click();
+    // BR-022-16: a batch is not a task — Importar stays the current section,
+    // and the way back sits on the pill row.
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Seções de Configurações' })
+        .getByRole('link', { name: 'Importar' }),
+    ).toHaveAttribute('aria-current', 'page');
+    await page
+      .locator('[data-slot="settings-tasks"]')
+      .getByRole('link', { name: 'Voltar para Histórico' })
+      .click();
     await expect(page).toHaveURL(/\/settings\/import\/history/);
   });
 
-  test('Configurações lists Importar in its sub-navigation, and the sidebar no longer does', async ({
+  test('Configurações lists Importar in its tabs, and the sidebar no longer does', async ({
     signedIn,
     viewport,
   }) => {
     const { page } = signedIn;
     await page.goto('/settings/import/parameters');
 
-    const subNav = page.getByRole('navigation', { name: 'Seções de Configurações' });
-    await expect(subNav.getByRole('link', { name: 'Importar' })).toHaveAttribute(
+    const sections = page.getByRole('navigation', { name: 'Seções de Configurações' });
+    await expect(sections.getByRole('link', { name: 'Importar' })).toHaveAttribute(
       'aria-current',
       'page',
     );

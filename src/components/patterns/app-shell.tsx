@@ -219,8 +219,8 @@ function NavLink({
       // page". Styling the active item without it makes the state sighted-only.
       {...(active ? { 'aria-current': 'page' as const } : {})}
       {...(collapsed ? { title: label } : {})}
-      // SPEC-022 BR-022-33 — the same treatment as the sub-navigation and the
-      // route tabs: one class list, so "current" cannot look different here.
+      // SPEC-022 BR-022-33 — one class list for the sidebar's items, so
+      // "current" cannot look different from one to the next.
       className={cn(navItemClassName(active), collapsed && 'justify-center')}
     >
       <Icon className="size-4 shrink-0" aria-hidden="true" />

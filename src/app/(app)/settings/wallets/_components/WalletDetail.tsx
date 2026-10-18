@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import {
   allocateAction,
@@ -37,7 +36,8 @@ import { formatQuantity } from '@/i18n/format';
  * balancing and its goals.
  *
  * Not a tab of Carteiras (BR-022-15): it is one wallet, one task per section,
- * reached from the list and left through "Voltar às carteiras".
+ * reached from the list and left through "Voltar para Minhas carteiras", which
+ * its page puts on Configurações' pill row (BR-022-16).
  */
 export async function WalletDetail({ detail }: { readonly detail: WalletDetailData }) {
   const t = await getTranslations('wallets');
@@ -87,15 +87,6 @@ export async function WalletDetail({ detail }: { readonly detail: WalletDetailDa
 
   return (
     <Stack gap="lg">
-      <div>
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/settings/wallets">
-            <ArrowLeft aria-hidden />
-            {t('walletDetailBack')}
-          </Link>
-        </Button>
-      </div>
-
       {/* SPEC-022 BR-022-37 — the standard form, as the "Editar carteira" frame
           draws it: the wallet's name heads its panel, the links to its
           balancing and goals sit beside it, and Excluir carteira closes it at

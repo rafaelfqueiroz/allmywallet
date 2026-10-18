@@ -5,7 +5,7 @@ import { loadWalletDetail } from '@/app/(app)/wallets/data';
 import { WalletDetail } from '@/app/(app)/settings/wallets/_components/WalletDetail';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
+import { SettingsBackLink, SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
@@ -40,7 +40,9 @@ export default async function WalletDetailPage({
   if (detail === null) notFound();
 
   return (
-    <SettingsFrame>
+    <SettingsFrame
+      tasks={<SettingsBackLink href="/settings/wallets">{t('walletDetailBack')}</SettingsBackLink>}
+    >
       <WalletDetail detail={detail} />
     </SettingsFrame>
   );

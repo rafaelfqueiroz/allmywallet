@@ -1,9 +1,9 @@
 import { cn } from '@/lib/utils';
 
 /**
- * What every navigation surface — the sidebar, the vertical sub-navigation and
- * the route tabs — agrees on, so "which one is current" and "what does current
- * look like" are answered once (SPEC-022 BR-022-33, DESIGN.md DS-27/DS-48).
+ * What every navigation surface — the sidebar and the route tabs — agrees on
+ * about "which one is current", and what the sidebar's current item looks like,
+ * answered once (SPEC-022 BR-022-33, DESIGN.md DS-27/DS-48).
  */
 
 /**

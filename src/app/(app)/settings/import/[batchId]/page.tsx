@@ -1,6 +1,4 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { ImportBatchId } from '@/core/shared/ids';
 import { positionKeyString } from '@/core/positions/replay';
@@ -43,7 +41,7 @@ import {
   BATCH_STATUS_VARIANT,
   typeDetected,
 } from '@/app/(app)/settings/import/_components/batch-status';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
+import { SettingsBackLink, SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { allocateAction } from '@/app/(app)/wallets/actions';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
@@ -73,9 +71,10 @@ import { NodeTable, type NodeRow } from '@/components/patterns/node-table';
  *
  * SPEC-022 BR-022-05/18 (#211) — one batch's page under Configurações ›
  * Importar, reached from Histórico; it was `/import/[batchId]`, which
- * redirects here (BR-022-08). Not a tab, so it has its own header with the way
- * back. Its rows render as tables: a row is an asset, a movement and a date,
- * read across, and the decision about it sits at the end of the same line.
+ * redirects here (BR-022-08). Not a task, so its way back to Histórico sits
+ * where the task tabs would (BR-022-16). Its rows render as tables: a row is
+ * an asset, a movement and a date, read across, and the decision about it sits
+ * at the end of the same line.
  * Each is a server-paged `DataTable` (DS-66, through `NodeTable`): 10, 25 or 50
  * rows a page, kept in the URL under a prefix of its own (`row-pages.ts`), so a
  * file of thousands of mirrored settlements is not one page of thousands of
@@ -434,16 +433,9 @@ export default async function ImportBatchDetailPage({
   });
 
   return (
-    <SettingsFrame>
-      <div>
-        <Button asChild variant="ghost" size="sm">
-          <Link href={IMPORT_HISTORY_PATH}>
-            <ArrowLeft aria-hidden />
-            {t('detailBack')}
-          </Link>
-        </Button>
-      </div>
-
+    <SettingsFrame
+      tasks={<SettingsBackLink href={IMPORT_HISTORY_PATH}>{t('detailBack')}</SettingsBackLink>}
+    >
       {/* SPEC-022 BR-022-36 — the batch itself is a panel: its type as the
           title, its status beside it, the counts inside, and commit/cancel in
           the footer. */}

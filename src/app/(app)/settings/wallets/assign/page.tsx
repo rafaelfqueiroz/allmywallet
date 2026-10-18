@@ -4,7 +4,6 @@ import { AssignQueue } from '@/app/(app)/settings/wallets/_components/AssignQueu
 import { WalletsSection } from '@/app/(app)/settings/wallets/_components/WalletsSection';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
@@ -46,17 +45,15 @@ export default async function AssignAssetsPage({ searchParams }: PageProps) {
   ]);
 
   return (
-    <SettingsFrame>
-      <WalletsSection>
-        <AssignQueue
-          walletChoices={wallets.map((wallet) => ({ id: wallet.id, name: wallet.name }))}
-          pending={pending}
-          standingRules={standingRules}
-          unbalanced={unbalanced}
-          labels={labels}
-          resolve={resolve}
-        />
-      </WalletsSection>
-    </SettingsFrame>
+    <WalletsSection>
+      <AssignQueue
+        walletChoices={wallets.map((wallet) => ({ id: wallet.id, name: wallet.name }))}
+        pending={pending}
+        standingRules={standingRules}
+        unbalanced={unbalanced}
+        labels={labels}
+        resolve={resolve}
+      />
+    </WalletsSection>
   );
 }

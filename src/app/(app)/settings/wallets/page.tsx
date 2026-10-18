@@ -4,7 +4,6 @@ import { WalletList } from '@/app/(app)/settings/wallets/_components/WalletList'
 import { WalletsSection } from '@/app/(app)/settings/wallets/_components/WalletsSection';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
@@ -32,10 +31,8 @@ export default async function WalletsSettingsPage() {
   const rows = await loadWalletList(userId);
 
   return (
-    <SettingsFrame>
-      <WalletsSection>
-        <WalletList rows={rows} />
-      </WalletsSection>
-    </SettingsFrame>
+    <WalletsSection>
+      <WalletList rows={rows} />
+    </WalletsSection>
   );
 }

@@ -30,6 +30,14 @@ import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
  * must not smuggle one task's filters into another, whose defaults differ
  * (the reports' own rule, BR-011-04).
  *
+ * **`variant="pill"`** is the second row of a destination whose sections have
+ * tasks of their own — Configurações (BR-022-16, DL-022-18): the sections are
+ * the main tabs, each section's tasks are pills beneath them. Smaller, on a
+ * `muted` track, the current one raised on the `card` fill — so the two
+ * rows never read as one strip, and the current pill differs from the focused
+ * one the same way (a fill, never a ring). Same links, same `aria-current`, one
+ * URL per tab.
+ *
  * The strip scrolls inside its own container when the tabs outgrow a narrow
  * screen, so a long label never becomes a horizontal scroll of the page
  * (BR-016-12).
@@ -59,8 +67,31 @@ export type RouteTabsProps = {
   readonly tabs: readonly RouteTab[];
   /** Query parameters copied from the current URL onto every tab's href. */
   readonly preserveParams?: readonly string[];
+  /** `main` — a destination's tabs; `pill` — a section's tasks beneath them. */
+  readonly variant?: 'main' | 'pill';
   readonly className?: string;
 };
+
+const STRIP = {
+  main: { nav: 'overflow-x-auto border-b', list: 'flex min-w-max gap-1' },
+  pill: {
+    nav: 'max-w-full overflow-x-auto rounded-lg bg-muted',
+    list: 'flex min-w-max gap-1 p-1',
+  },
+} as const;
+
+const TAB = {
+  main: {
+    base: 'h-10 rounded-t-md border-b-2 px-3',
+    active: 'border-primary font-medium text-foreground',
+    inactive: 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+  },
+  pill: {
+    base: 'h-8 rounded-md px-3 font-medium',
+    active: 'bg-card text-foreground shadow-xs',
+    inactive: 'text-muted-foreground hover:bg-accent hover:text-foreground',
+  },
+} as const;
 
 export function RouteTabs(props: RouteTabsProps) {
   // `useSearchParams` bails a static page out to client rendering up to the
@@ -84,42 +115,44 @@ function TabStrip({
   label,
   tabs,
   preserveParams,
+  variant = 'main',
   className,
   params,
 }: RouteTabsProps & { readonly params: { get(name: string): string | null } }) {
   const pathname = usePathname();
+  const tab = TAB[variant];
 
   return (
     <nav
       aria-label={label}
       data-slot="route-tabs"
-      className={cn('overflow-x-auto border-b', className)}
+      data-variant={variant}
+      className={cn(STRIP[variant].nav, className)}
     >
-      <ul className="flex min-w-max gap-1">
-        {tabs.map((tab) => {
+      <ul className={STRIP[variant].list}>
+        {tabs.map((item) => {
           const active =
-            isPathActive(pathname, tab.href, tab.exact) ||
-            (tab.alsoActiveOn ?? []).some((path) => isPathActive(pathname, path));
+            isPathActive(pathname, item.href, item.exact) ||
+            (item.alsoActiveOn ?? []).some((path) => isPathActive(pathname, path));
 
           return (
-            <li key={tab.href}>
+            <li key={item.href}>
               <Link
-                href={hrefWithParams(tab.href, params, preserveParams)}
+                href={hrefWithParams(item.href, params, preserveParams)}
                 {...(active ? { 'aria-current': 'page' as const } : {})}
                 className={cn(
-                  'inline-flex h-10 items-center rounded-t-md border-b-2 px-3 text-sm whitespace-nowrap outline-none',
+                  'inline-flex items-center text-sm whitespace-nowrap outline-none',
+                  tab.base,
                   // Inset: the strip scrolls horizontally on a phone, and a
                   // scroll container clips anything drawn outside its box —
                   // an outset ring lost its top edge on every tab. For the same
                   // reason the underline sits on the border rather than over it
                   // (no negative margin to overflow by a pixel).
                   'focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset',
-                  active
-                    ? 'border-primary font-medium text-foreground'
-                    : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+                  active ? tab.active : tab.inactive,
                 )}
               >
-                {tab.label}
+                {item.label}
               </Link>
             </li>
           );

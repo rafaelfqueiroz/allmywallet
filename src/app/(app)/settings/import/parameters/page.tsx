@@ -3,7 +3,6 @@ import { ImportSection } from '@/app/(app)/settings/import/_components/ImportSec
 import { ParameterSection } from '@/app/parameter-form';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
@@ -29,10 +28,8 @@ export default async function ImportParametersPage() {
   }
 
   return (
-    <SettingsFrame>
-      <ImportSection>
-        <ParameterSection surface="settings.import" />
-      </ImportSection>
-    </SettingsFrame>
+    <ImportSection>
+      <ParameterSection surface="settings.import" />
+    </ImportSection>
   );
 }

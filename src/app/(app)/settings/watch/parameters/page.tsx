@@ -3,7 +3,6 @@ import { WatchSection } from '@/app/(app)/settings/watch/_components/WatchSectio
 import { ParameterSection } from '@/app/parameter-form';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
@@ -29,10 +28,8 @@ export default async function WatchParametersPage() {
   }
 
   return (
-    <SettingsFrame>
-      <WatchSection>
-        <ParameterSection surface="settings.watch" />
-      </WatchSection>
-    </SettingsFrame>
+    <WatchSection>
+      <ParameterSection surface="settings.watch" />
+    </WatchSection>
   );
 }

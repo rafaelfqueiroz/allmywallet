@@ -223,7 +223,11 @@ test.describe('SPEC-018 — Observar preços', () => {
       { code: 'VALE', quantity: '50', averageCost: '60.00', price: '65.00' },
     ]);
     await page.goto('/settings/watch');
-    await expect(page.getByRole('heading', { name: 'Observar preços' })).toBeVisible();
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Seções de Configurações' })
+        .getByRole('link', { name: 'Observar preços' }),
+    ).toHaveAttribute('aria-current', 'page');
 
     // TS-27 / SPEC-016 BR-016-15 — and DL-018-06 specifically: the states are
     // colour *and* label, so a contrast or name failure here is the acceptance
@@ -431,7 +435,7 @@ test.describe('SPEC-018 — Observar preços', () => {
     await expect(lowerState).toHaveValue('sell');
   });
 
-  test('Configurações lists Observar preços in its sub-navigation, and the sidebar no longer does', async ({
+  test('Configurações lists Observar preços in its tabs, and the sidebar no longer does', async ({
     signedIn,
     viewport,
   }) => {
@@ -442,8 +446,8 @@ test.describe('SPEC-018 — Observar preços', () => {
     await expect(
       page.getByLabel('Intervalo mínimo entre e-mails (horas)', { exact: true }),
     ).toBeVisible();
-    const subNav = page.getByRole('navigation', { name: 'Seções de Configurações' });
-    await expect(subNav.getByRole('link', { name: 'Observar preços' })).toHaveAttribute(
+    const sections = page.getByRole('navigation', { name: 'Seções de Configurações' });
+    await expect(sections.getByRole('link', { name: 'Observar preços' })).toHaveAttribute(
       'aria-current',
       'page',
     );
