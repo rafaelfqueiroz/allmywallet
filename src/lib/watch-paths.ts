@@ -13,6 +13,13 @@
 export const WATCH_RULES_PATH = '/settings/watch';
 export const WATCH_PARAMETERS_PATH = '/settings/watch/parameters';
 
+/**
+ * The rules tab's list of held assets with no rule yet — where a rule starts
+ * (each row's "Criar regra"), so it is where "Nova regra" lands.
+ */
+export const WATCH_AVAILABLE_ANCHOR = 'ativos-sem-regra';
+export const WATCH_NEW_RULE_PATH = `${WATCH_RULES_PATH}#${WATCH_AVAILABLE_ANCHOR}`;
+
 /** The element id a rule's row carries on the rules tab — the target of "Ver regra". */
 export function watchRuleAnchor(assetId: string): string {
   return `regra-${assetId}`;

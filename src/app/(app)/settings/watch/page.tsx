@@ -1,6 +1,7 @@
 import { getTranslations } from 'next-intl/server';
 import type { OpportunityState } from '@/core/opportunity/ports';
 import { tryUserId } from '@/lib/session';
+import { WATCH_AVAILABLE_ANCHOR } from '@/lib/watch-paths';
 import { loadWatchView } from '@/app/(app)/watch/data';
 import { createRuleAction, updateRuleAction } from '@/app/(app)/watch/actions';
 import { RuleForm, type RuleFormLabels } from '@/app/(app)/settings/watch/_components/RuleForm';
@@ -12,7 +13,6 @@ import {
   WatchedTable,
 } from '@/app/(app)/settings/watch/_components/WatchTables';
 import { WatchSection } from '@/app/(app)/settings/watch/_components/WatchSection';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { PageShell } from '@/app/page-shell';
 import { Section } from '@/components/patterns/section';
 import { EmptyState } from '@/components/patterns/empty-state';
@@ -98,115 +98,118 @@ export default async function WatchPage({ searchParams }: PageProps) {
   );
 
   return (
-    <SettingsFrame>
-      <WatchSection>
-        <Stack gap="md">
-          {/*
-            BR-018-15 — the delay disclosure lives on this, the rule-configuration
-            screen, stated plainly rather than in a help page. BR-018-18/DL-018-01
-            — the two other disclosures this feature's every string must respect:
-            nothing below is the product's own judgement, and "compra" always
-            means adding to a position already held.
-          */}
-          <Note>{t('delayDisclosure', { minutes: view.delayMinutes })}</Note>
-          <Note>{t('notAdvice')}</Note>
-          <Note>{t('addNotOpenNote')}</Note>
-          {/*
-            BR-018-25 — opt-in is off by default, so for a new account every
-            state below is in-app only. Saying which it is stops the screen from
-            implying an email that will never arrive; `emailConsented` is read
-            from SPEC-004's own consent record, not a feature-local copy.
-          */}
-          <Note>{view.emailConsented ? t('emailOn') : t('emailOff')}</Note>
-        </Stack>
+    <WatchSection>
+      <Stack gap="md">
+        {/*
+          BR-018-15 — the delay disclosure lives on this, the rule-configuration
+          screen, stated plainly rather than in a help page. BR-018-18/DL-018-01
+          — the two other disclosures this feature's every string must respect:
+          nothing below is the product's own judgement, and "compra" always
+          means adding to a position already held.
+        */}
+        <Note>{t('delayDisclosure', { minutes: view.delayMinutes })}</Note>
+        <Note>{t('notAdvice')}</Note>
+        <Note>{t('addNotOpenNote')}</Note>
+        {/*
+          BR-018-25 — opt-in is off by default, so for a new account every
+          state below is in-app only. Saying which it is stops the screen from
+          implying an email that will never arrive; `emailConsented` is read
+          from SPEC-004's own consent record, not a feature-local copy.
+        */}
+        <Note>{view.emailConsented ? t('emailOn') : t('emailOff')}</Note>
+      </Stack>
 
-        {/* SPEC-022 BR-022-37 — the editor is the standard form, in its own
-            panel; masked, the panel holds only the way to reveal the values. */}
-        {editedRule !== undefined && masked ? (
-          <Section
-            id={RULE_EDITOR_ANCHOR}
-            className="scroll-mt-20"
-            title={t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })}
-            actions={
-              <Button asChild variant="ghost" size="sm">
-                <QueryLink drop={['rule']}>{t('closeEditor')}</QueryLink>
-              </Button>
-            }
-          >
-            {/* SPEC-022 BR-022-24: the thresholds would sit in the inputs. */}
-            <RevealValuesForm action={saveHideValuesAction} />
-          </Section>
-        ) : editedRule !== undefined ? (
-          <RuleForm
-            // Keyed by the asset: going straight from "Editar" on one rule
-            // to another keeps this component mounted, and its uncontrolled
-            // fields would carry the first rule's limits into the second's
-            // save (#246 review).
-            key={`edit-${editedRule.assetId}`}
-            action={updateRuleAction}
-            id={RULE_EDITOR_ANCHOR}
-            className="scroll-mt-20"
-            title={t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })}
-            cancel={closeEditor}
-            assetId={editedRule.assetId}
-            idPrefix={`edit-${editedRule.assetId}`}
-            labels={editLabels}
-            initial={{
-              lowerPrice: editedRule.lower?.price.toString(),
-              lowerState: editedRule.lower?.state,
-              upperPrice: editedRule.upper?.price.toString(),
-              upperState: editedRule.upper?.state,
-              defaultState: editedRule.defaultState,
-            }}
-          />
-        ) : (
-          newRuleFor !== undefined && (
-            <RuleForm
-              key={`create-${newRuleFor.assetId}`}
-              action={createRuleAction}
-              id={RULE_EDITOR_ANCHOR}
-              className="scroll-mt-20"
-              title={t('createTitle', { asset: `${newRuleFor.code} — ${newRuleFor.name}` })}
-              cancel={closeEditor}
-              assetId={newRuleFor.assetId}
-              idPrefix={`create-${newRuleFor.assetId}`}
-              labels={formLabels}
-            />
-          )
-        )}
-
+      {/* SPEC-022 BR-022-37 — the editor is the standard form, in its own
+          panel; masked, the panel holds only the way to reveal the values. */}
+      {editedRule !== undefined && masked ? (
         <Section
-          title={t('yourRulesTitle')}
-          // The delete control is an icon, so what it does is said here, once.
-          description={`${t('yourRulesDescription')} ${t('deleteHint')}`}
+          id={RULE_EDITOR_ANCHOR}
+          className="scroll-mt-20"
+          title={t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })}
+          actions={
+            <Button asChild variant="ghost" size="sm">
+              <QueryLink drop={['rule']}>{t('closeEditor')}</QueryLink>
+            </Button>
+          }
         >
-          {view.watched.length === 0 ? (
-            <EmptyState title={t('empty')} />
-          ) : (
-            <WatchedTable rows={view.watched} />
-          )}
+          {/* SPEC-022 BR-022-24: the thresholds would sit in the inputs. */}
+          <RevealValuesForm action={saveHideValuesAction} />
         </Section>
+      ) : editedRule !== undefined ? (
+        <RuleForm
+          // Keyed by the asset: going straight from "Editar" on one rule
+          // to another keeps this component mounted, and its uncontrolled
+          // fields would carry the first rule's limits into the second's
+          // save (#246 review).
+          key={`edit-${editedRule.assetId}`}
+          action={updateRuleAction}
+          id={RULE_EDITOR_ANCHOR}
+          className="scroll-mt-20"
+          title={t('editTitle', { asset: `${editedRule.code} — ${editedRule.name}` })}
+          cancel={closeEditor}
+          assetId={editedRule.assetId}
+          idPrefix={`edit-${editedRule.assetId}`}
+          labels={editLabels}
+          initial={{
+            lowerPrice: editedRule.lower?.price.toString(),
+            lowerState: editedRule.lower?.state,
+            upperPrice: editedRule.upper?.price.toString(),
+            upperState: editedRule.upper?.state,
+            defaultState: editedRule.defaultState,
+          }}
+        />
+      ) : (
+        newRuleFor !== undefined && (
+          <RuleForm
+            key={`create-${newRuleFor.assetId}`}
+            action={createRuleAction}
+            id={RULE_EDITOR_ANCHOR}
+            className="scroll-mt-20"
+            title={t('createTitle', { asset: `${newRuleFor.code} — ${newRuleFor.name}` })}
+            cancel={closeEditor}
+            assetId={newRuleFor.assetId}
+            idPrefix={`create-${newRuleFor.assetId}`}
+            labels={formLabels}
+          />
+        )
+      )}
 
-        {view.retained.length > 0 && (
-          <Section title={t('retainedTitle')} description={t('retainedDescription')}>
-            <RetainedTable rules={view.retained} />
-          </Section>
+      <Section
+        title={t('yourRulesTitle')}
+        // The delete control is an icon, so what it does is said here, once.
+        description={`${t('yourRulesDescription')} ${t('deleteHint')}`}
+      >
+        {view.watched.length === 0 ? (
+          <EmptyState title={t('empty')} />
+        ) : (
+          <WatchedTable rows={view.watched} />
         )}
+      </Section>
 
-        <Section title={t('availableTitle')} description={t('availableDescription')}>
-          {view.available.length === 0 ? (
-            <EmptyState title={t('availableEmpty')} />
-          ) : (
-            <AvailableTable assets={view.available} />
-          )}
+      {view.retained.length > 0 && (
+        <Section title={t('retainedTitle')} description={t('retainedDescription')}>
+          <RetainedTable rules={view.retained} />
         </Section>
+      )}
 
-        {view.ineligible.length > 0 && (
-          <Section title={t('ineligibleTitle')} description={t('ineligibleDescription')}>
-            <IneligibleTable assets={view.ineligible} />
-          </Section>
+      <Section
+        id={WATCH_AVAILABLE_ANCHOR}
+        className="scroll-mt-20"
+        title={t('availableTitle')}
+        description={t('availableDescription')}
+      >
+        {view.available.length === 0 ? (
+          <EmptyState title={t('availableEmpty')} />
+        ) : (
+          <AvailableTable assets={view.available} />
         )}
-      </WatchSection>
-    </SettingsFrame>
+      </Section>
+
+      {view.ineligible.length > 0 && (
+        <Section title={t('ineligibleTitle')} description={t('ineligibleDescription')}>
+          <IneligibleTable assets={view.ineligible} />
+        </Section>
+      )}
+    </WatchSection>
   );
 }

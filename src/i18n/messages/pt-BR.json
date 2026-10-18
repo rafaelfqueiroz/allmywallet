@@ -542,14 +542,13 @@
     "standingRuleCurrent": "Compras futuras vão para",
     "standingRuleSet": "Definir regra",
     "standingRuleClear": "Remover regra",
-    "walletDetailBack": "Voltar às carteiras",
+    "walletDetailBack": "Voltar para Minhas carteiras",
     "allocationsTitle": "Ativos atribuídos",
     "allocationsEmpty": "Nenhum ativo atribuído a esta carteira ainda.",
     "save": "Salvar alterações",
     "balanceLink": "Balanceamento",
     "goalsLink": "Metas",
     "needsAttentionBalanceOpen": "Ver balanceamento",
-    "sectionTitle": "Carteiras",
     "newWallet": "Nova carteira",
     "tabs": {
       "label": "Tarefas de Carteiras",
@@ -796,7 +795,6 @@
     },
     "fileHint": "Você pode enviar os três extratos de uma vez, ou um de cada vez — a ordem não importa.",
     "uploading": "Enviando…",
-    "sectionTitle": "Importar",
     "tabs": {
       "label": "Tarefas de Importar",
       "send": "Enviar",
@@ -804,7 +802,7 @@
       "parameters": "Parâmetros"
     },
     "extractTypeUnknown": "Não identificado",
-    "detailBack": "Histórico de importações",
+    "detailBack": "Voltar para Histórico",
     "history": {
       "caption": "Histórico de importações, com tipo de extrato, data de envio, situação e linhas lidas",
       "title": "{count, plural, one {# importação} other {# importações}}",
@@ -1658,7 +1656,6 @@
     }
   },
   "watch": {
-    "title": "Observar preços",
     "signedOut": "Entre na sua conta para ver suas regras de observação.",
     "tabs": {
       "label": "Tarefas de Observar preços",
@@ -1713,6 +1710,7 @@
     "defaultStateLabel": "Entre os dois limites, o preço significa",
     "boundsHint": "Defina ao menos um limite. O significado de cada limite é seu — \"abaixo de R$ 30\" pode ser compra para quem está comprando na baixa, ou venda para quem usa um stop-loss. Deixe um limite em branco para não defini-lo.",
     "create": "Criar regra",
+    "newRule": "Nova regra",
     "save": "Salvar alterações",
     "columnAsset": "Ativo",
     "columnState": "Estado",

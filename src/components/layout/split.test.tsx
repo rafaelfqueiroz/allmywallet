@@ -24,12 +24,6 @@ describe('Split', () => {
     );
     end.unmount();
 
-    const start = render(<Split side="start">x</Split>);
-    expect(start.container.querySelector('[data-slot="split"]')?.className).toContain(
-      '14rem_minmax(0,1fr)',
-    );
-    start.unmount();
-
     const even = render(<Split side="even">x</Split>);
     expect(even.container.querySelector('[data-slot="split"]')?.className).toContain(
       '@2xl:grid-cols-2',

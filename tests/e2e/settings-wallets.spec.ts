@@ -121,6 +121,11 @@ test.describe('Configurações › Carteiras', () => {
       'aria-current',
       'page',
     );
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Seções de Configurações' })
+        .getByRole('link', { name: 'Carteiras' }),
+    ).toHaveAttribute('aria-current', 'page');
     const name = page.getByLabel('Nome', { exact: true });
     await name.fill('   ');
     await page.getByLabel('Descrição', { exact: true }).fill('Para imprevistos');
@@ -146,6 +151,19 @@ test.describe('Configurações › Carteiras', () => {
     await expect(page.getByText('Nenhum ativo atribuído a esta carteira ainda.')).toBeVisible();
     // BR-022-05: no portfolio figure on a setup screen.
     await expect(page.locator('main')).not.toContainText(/R\$\s*\d/);
+    // BR-022-16: not a task, so Carteiras stays the current section and the
+    // way back sits where the task pills would.
+    await expect(
+      page
+        .getByRole('navigation', { name: 'Seções de Configurações' })
+        .getByRole('link', { name: 'Carteiras' }),
+    ).toHaveAttribute('aria-current', 'page');
+    await expect(tabs).toHaveCount(0);
+    await expect(
+      page
+        .locator('[data-slot="settings-tasks"]')
+        .getByRole('link', { name: 'Voltar para Minhas carteiras' }),
+    ).toHaveAttribute('href', '/settings/wallets');
 
     // Edit.
     // Enter saves: Excluir carteira comes first in the footer but submits a form

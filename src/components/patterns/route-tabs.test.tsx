@@ -153,3 +153,75 @@ describe('RouteTabs', () => {
     expect(await audit(container)).toHaveNoViolations();
   });
 });
+
+// SPEC-022 BR-022-16 (as amended, DL-022-18) — a section's tasks, as the
+// second row beneath the main tabs.
+describe('RouteTabs, pill variant', () => {
+  function Pills() {
+    return <RouteTabs variant="pill" label="Tarefas" tabs={tabs} />;
+  }
+
+  it('is the same navigation of links, one URL per tab, the current one aria-current', () => {
+    render(<Pills />);
+    const nav = screen.getByRole('navigation', { name: 'Tarefas' });
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('href')),
+    ).toEqual(['/reports', '/reports/patrimonio', '/reports/composition']);
+    expect(screen.getByRole('link', { name: 'Patrimônio' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByRole('link', { name: 'Visão geral' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('looks unlike the main tabs: a raised fill on a muted track, no underline', () => {
+    const { container } = render(
+      <>
+        <Tabs />
+        <Pills />
+      </>,
+    );
+    const [main, pill] = [...container.querySelectorAll('[data-slot="route-tabs"]')];
+    expect(main).toHaveAttribute('data-variant', 'main');
+    expect(pill).toHaveAttribute('data-variant', 'pill');
+    expect(pill?.className).toContain('bg-muted');
+    expect(pill?.className).not.toContain('border-b');
+
+    const [, mainActive] = within(main as HTMLElement).getAllByRole('link');
+    const [, pillActive] = within(pill as HTMLElement).getAllByRole('link');
+    expect(mainActive?.className).toContain('border-primary');
+    expect(pillActive?.className).not.toContain('border-');
+    expect(pillActive?.className).toContain('bg-card');
+    expect(pillActive?.className).not.toBe(mainActive?.className);
+  });
+
+  it('gives the current and the focused pill different treatments', () => {
+    render(<Pills />);
+    const active = screen.getByRole('link', { name: 'Patrimônio' }).className;
+    const inactive = screen.getByRole('link', { name: 'Composição' }).className;
+
+    // BR-022-33 / DS-48 — current is a fill, focus a ring, hover the neutral accent.
+    expect(active).toContain('bg-card');
+    expect(inactive).not.toContain('bg-card');
+    expect(active).toContain('focus-visible:ring-ring');
+    expect(inactive).toContain('focus-visible:ring-ring');
+    expect(inactive).toContain('hover:bg-accent');
+  });
+
+  it('is operable from the keyboard alone', async () => {
+    const user = userEvent.setup();
+    render(<Pills />);
+
+    await user.tab();
+    expect(screen.getByRole('link', { name: 'Visão geral' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('link', { name: 'Patrimônio' })).toHaveFocus();
+  });
+
+  it('has no axe violations', async () => {
+    const { container } = render(<Pills />);
+    expect(await audit(container)).toHaveNoViolations();
+  });
+});

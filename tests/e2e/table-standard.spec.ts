@@ -448,9 +448,9 @@ test.describe('the table standard: wide tables fit the panel', () => {
       // Carteiras: the comparison between wallets, then the one wallet's balance.
       ['/portfolio/wallets', 'Comparação entre carteiras'],
       [`/wallets/${walletId}/balance`, 'Meta, participação atual, desvio e distância'],
-      // Observar preços' rules (922 px) joins this list with #241, which
-      // replaces Configurações' side sub-navigation and gives its panels the
-      // full width; beside the sub-navigation the panel is 696 px.
+      // Observar preços' rules (922 px) fit once Configurações' tabs replaced
+      // its side sub-navigation, beside which the panel was 696 px (#241).
+      ['/settings/watch', 'Regras de observação'],
     ] as const;
 
     for (const hidden of [false, true]) {

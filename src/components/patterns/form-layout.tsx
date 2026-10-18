@@ -55,7 +55,7 @@ export function FormPanel({
  * width that says something about its content it does not mean (#238).
  *
  * **The breakpoint is the container's** (DS-60): a panel beside a list, or
- * inside a sub-navigated destination, is narrower than the viewport, and a
+ * beside the application sidebar, is narrower than the viewport, and a
  * viewport breakpoint would put two fields side by side in 300px. Rows align
  * from the top, so an error under one field makes only that field taller
  * (BR-022-20/21).

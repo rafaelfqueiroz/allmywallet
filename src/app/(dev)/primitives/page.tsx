@@ -14,7 +14,6 @@ import { RouteTabs } from '@/components/patterns/route-tabs';
 import { ScopeSelector } from '@/components/patterns/scope-selector';
 import { StateBadge } from '@/components/patterns/state-badge';
 import { EstimateMarker } from '@/components/patterns/estimate-marker';
-import { SubNav } from '@/components/patterns/sub-nav';
 import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Grid } from '@/components/layout/grid';
@@ -44,7 +43,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Eye, Upload, Wallet } from 'lucide-react';
 import { DemoTable } from './_components/DemoTable';
 
 /**
@@ -170,9 +168,9 @@ export default async function PrimitivesPage() {
         </Cluster>
       </Section>
 
-      {/* SPEC-022 BR-022-15/16 — route tabs and the vertical sub-navigation.
-          The first tab and section point here, so each renders its active
-          state. */}
+      {/* SPEC-022 BR-022-15/16 — route tabs, main and pill (a section's tasks
+          beneath its tabs, as Configurações has them). The first of each
+          points here, so each renders its active state. */}
       <Section title={vocabulary('patrimonio')}>
         <RouteTabs
           label={vocabulary('patrimonio')}
@@ -182,13 +180,13 @@ export default async function PrimitivesPage() {
             { href: '/primitives/proventos', label: vocabulary('proventos') },
           ]}
         />
-        <SubNav
+        <RouteTabs
+          variant="pill"
           label={vocabulary('composicao')}
-          className="max-w-xs"
-          items={[
-            { href: '/primitives', label: vocabulary('patrimonio'), icon: <Wallet /> },
-            { href: '/primitives/importar', label: vocabulary('proventos'), icon: <Upload /> },
-            { href: '/primitives/observar', label: vocabulary('rentabilidade'), icon: <Eye /> },
+          tabs={[
+            { href: '/primitives', label: vocabulary('patrimonio') },
+            { href: '/primitives/importar', label: vocabulary('proventos') },
+            { href: '/primitives/observar', label: vocabulary('rentabilidade') },
           ]}
         />
       </Section>

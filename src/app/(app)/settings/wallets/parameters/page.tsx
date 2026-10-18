@@ -3,7 +3,6 @@ import { WalletsSection } from '@/app/(app)/settings/wallets/_components/Wallets
 import { ParameterSection } from '@/app/parameter-form';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 
 /**
@@ -29,10 +28,8 @@ export default async function WalletParametersPage() {
   }
 
   return (
-    <SettingsFrame>
-      <WalletsSection>
-        <ParameterSection surface="settings.wallets" />
-      </WalletsSection>
-    </SettingsFrame>
+    <WalletsSection>
+      <ParameterSection surface="settings.wallets" />
+    </WalletsSection>
   );
 }

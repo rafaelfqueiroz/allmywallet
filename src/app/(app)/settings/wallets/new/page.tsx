@@ -5,7 +5,6 @@ import { WalletList } from '@/app/(app)/settings/wallets/_components/WalletList'
 import { WalletsSection } from '@/app/(app)/settings/wallets/_components/WalletsSection';
 import { tryUserId } from '@/lib/session';
 import { PageShell } from '@/app/page-shell';
-import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { EmptyState } from '@/components/patterns/empty-state';
 import { Split } from '@/components/layout/split';
 
@@ -34,13 +33,11 @@ export default async function NewWalletPage() {
   const rows = await loadWalletList(userId);
 
   return (
-    <SettingsFrame>
-      <WalletsSection>
-        <Split side="end">
-          <WalletList rows={rows} />
-          <NewWalletPanel />
-        </Split>
-      </WalletsSection>
-    </SettingsFrame>
+    <WalletsSection>
+      <Split side="end">
+        <WalletList rows={rows} />
+        <NewWalletPanel />
+      </Split>
+    </WalletsSection>
   );
 }
