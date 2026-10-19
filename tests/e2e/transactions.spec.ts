@@ -39,6 +39,17 @@ function ledgerRow(page: Page, text: string) {
     .filter({ hasText: text });
 }
 
+/** A row's "⋯" button (SPEC-022 BR-022-40), named after the row it acts on. */
+function rowMenu(page: Page, text: string) {
+  return ledgerRow(page, text).getByRole('button', { name: /^Ações da transação de / });
+}
+
+/** Picks one of a row's actions from its "⋯" menu. */
+async function rowAction(page: Page, text: string, action: string): Promise<void> {
+  await rowMenu(page, text).click();
+  await page.getByRole('menuitem', { name: action, exact: true }).click();
+}
+
 /** Every transaction on the current page of the ledger, header excluded. */
 function ledgerRows(page: Page) {
   return isMobile(page)
@@ -252,8 +263,7 @@ test.describe('transaction management', () => {
 
     await page.goto('/transactions');
     // The manual HGLG11 buy: 10 quotas. Only that row's Editar is wanted.
-    const row = ledgerRow(page, 'HGLG11');
-    await row.getByRole('link', { name: 'Editar' }).click();
+    await rowAction(page, 'HGLG11', 'Editar');
 
     // The ledger has a "Quantidade" column of its own; read the form once it is there.
     await expect(page).toHaveURL(/\/edit$/);
@@ -317,8 +327,7 @@ test.describe('transaction management', () => {
     await seedLedger(userId);
 
     await page.goto('/transactions');
-    const row = ledgerRow(page, 'HGLG11');
-    await row.getByRole('link', { name: 'Excluir' }).click();
+    await rowAction(page, 'HGLG11', 'Excluir');
 
     await expect(page.getByRole('heading', { name: 'Excluir transação' })).toBeVisible();
     const impact = page.getByRole('table');
@@ -644,9 +653,14 @@ async function seedThirty(userId: string): Promise<void> {
   }
 }
 
-/** A broker name too long for its column, and the largest figure a ledger could show. */
+/**
+ * A broker name too long for its column, and the largest figures the ledger's
+ * columns are sized for (BR-022-40, #242 Decision log): a unit price of
+ * R$ 999.999,99 and a total of R$ 99.999.999,00.
+ */
 const LONG_BROKER = 'INTER DISTRIBUIDORA DE TÍTULOS E VALORES MOBILIÁRIOS LTDA';
-const THIRTEEN_DIGITS = '12345678901.23';
+const WIDEST_PRICE = '999999.99';
+const WIDEST_TOTAL = '99999999.00';
 
 async function seedExtremes(userId: string): Promise<void> {
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
@@ -671,9 +685,12 @@ async function seedExtremes(userId: string): Promise<void> {
       `INSERT INTO transactions
          (id, user_id, asset_id, institution_id, type, status, trade_date,
           quantity, unit_price, fees, total_value, natural_key, occurrence,
-          import_batch_id, is_manual)
-       VALUES ($1, $2, $3, $4, 'buy', 'active', '2026-03-02', 1, $5, 0, $5, 'e2e-extremes', 1, NULL, true)`,
-      [randomUUID(), userId, asset, institution, THIRTEEN_DIGITS],
+          import_batch_id, is_manual, is_user_modified, cost_is_estimate, estimate_close_date)
+       VALUES ($1, $2, $3, $4, 'subscription', 'unclassified', '2026-03-02', 100, $5, 0, $6,
+               'e2e-extremes', 1, NULL, true, true, true, '2026-03-02')`,
+      // Every cell at its widest: the longest status, an origin with "Editada",
+      // and "Custo estimado" under the price.
+      [randomUUID(), userId, asset, institution, WIDEST_PRICE, WIDEST_TOTAL],
     );
   } finally {
     await pool.end();
@@ -775,26 +792,31 @@ test.describe('the ledger table', () => {
         );
     const before = await headerWidths();
 
-    // Thirteen digits fit their column, on one line: not clipped, not wrapped.
-    const total = row.getByRole('cell', { name: 'R$ 12.345.678.901,23' }).last();
-    await expect(total).toBeVisible();
-    expect(await total.evaluate((cell) => cell.scrollWidth <= cell.clientWidth)).toBe(true);
-    expect(
-      await total.evaluate((cell) => cell.querySelector('span')?.getClientRects().length),
-    ).toBe(1);
+    // The widest figures fit their columns, on one line: not clipped, not wrapped.
+    for (const figure of ['R$ 999.999,99', 'R$ 99.999.999,00']) {
+      const cell = row.getByRole('cell').filter({ hasText: figure });
+      await expect(cell).toBeVisible();
+      expect(await cell.evaluate((td) => td.scrollWidth <= td.clientWidth), figure).toBe(true);
+      expect(
+        await cell.evaluate((td) => td.querySelector('span')?.getClientRects().length),
+        figure,
+      ).toBe(1);
+    }
 
-    // A broker name too long for its column ends in an ellipsis, and its full
-    // text opens on keyboard focus and on hover.
-    const broker = row.locator('[data-slot="table-cell-text"]', { hasText: LONG_BROKER });
-    expect(await broker.evaluate((cell) => cell.scrollWidth > cell.clientWidth)).toBe(true);
-    expect(await broker.evaluate((cell) => getComputedStyle(cell).textOverflow)).toBe('ellipsis');
+    // BR-022-40: a broker name too long for its column ends in an ellipsis under
+    // the asset, and the cell's full text opens on keyboard focus and on hover.
+    const asset = row.locator('[data-slot="table-cell-text"]', { hasText: LONG_BROKER });
+    const broker = asset.getByText(LONG_BROKER);
+    expect(await broker.evaluate((line) => line.scrollWidth > line.clientWidth)).toBe(true);
+    expect(await broker.evaluate((line) => getComputedStyle(line).textOverflow)).toBe('ellipsis');
     const tip = page.locator('[data-slot="popover-content"]');
-    await broker.focus();
-    await expect(tip).toHaveText(LONG_BROKER);
+    await asset.focus();
+    await expect(tip).toHaveText(`EXTR3 ${LONG_BROKER}`);
     await page.keyboard.press('Escape');
     await expect(tip).toHaveCount(0);
-    await broker.hover();
-    await expect(tip).toHaveText(LONG_BROKER);
+    await asset.hover();
+    await expect(tip).toHaveText(`EXTR3 ${LONG_BROKER}`);
+    await page.mouse.move(0, 0);
 
     // BR-022-24: hiding the amounts changes no column's width.
     await page.getByRole('button', { name: 'Ocultar valores', exact: true }).click();
@@ -813,6 +835,91 @@ test.describe('the ledger table', () => {
         `no horizontal page scroll at ${width}px`,
       ).toBe(true);
     }
+  });
+
+  /**
+   * SPEC-022 BR-022-40 — Transações fits the page at 1280 px: eight columns and
+   * the row menu, every cell at its widest, shown and hidden (BR-022-24).
+   */
+  test('fits the page at 1280 px without scrolling sideways', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    test.skip(isMobile(page), 'the table rendering is desktop-only');
+    await seedLedger(userId);
+    await seedExtremes(userId);
+    await page.setViewportSize({ width: 1280, height: 800 });
+
+    await page.goto('/transactions');
+    await expect(ledger(page).getByRole('columnheader')).toHaveText([
+      'Selecionar transação',
+      /Data/,
+      /Ativo/,
+      'Tipo',
+      /Quantidade/,
+      /Preço unitário/,
+      /Total/,
+      'Status',
+      'Ações',
+    ]);
+    for (const hidden of [false, true]) {
+      if (hidden) {
+        await page.getByRole('button', { name: 'Ocultar valores', exact: true }).click();
+        await expect(page.getByText('R$ ••••••').first()).toBeVisible();
+      }
+      const container = page.locator('[data-slot="table-container"]').filter({ visible: true });
+      expect(
+        await container.evaluate((element) => element.scrollWidth - element.clientWidth),
+        `the ledger scrolls sideways${hidden ? ' (hidden)' : ''}`,
+      ).toBeLessThanOrEqual(0);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  /**
+   * BR-022-40 — a row's actions are a "⋯" menu that works by keyboard; an
+   * imported row links back to its batch (BR-006-02), and Excluir still goes
+   * through the deletion's disclosure (BR-006-13).
+   */
+  test("a row's actions open from its menu by keyboard", async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const { batchId } = await seedLedger(userId);
+
+    await page.goto('/transactions');
+    // The manual row offers no import to go back to.
+    await rowMenu(page, 'HGLG11').focus();
+    await page.keyboard.press('Enter');
+    const menu = page.getByRole('menu');
+    await expect(menu.getByRole('menuitem')).toHaveText(['Editar', 'Excluir']);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(rowMenu(page, 'HGLG11')).toBeFocused();
+
+    // An imported row does, in the frame's order.
+    await rowMenu(page, 'PETR4').first().focus();
+    await page.keyboard.press('Enter');
+    await expect(menu.getByRole('menuitem')).toHaveText([
+      'Editar',
+      'Ver importação de origem',
+      'Excluir',
+    ]);
+    await expect(menu.getByRole('menuitem', { name: 'Ver importação de origem' })).toHaveAttribute(
+      'href',
+      new RegExp(batchId),
+    );
+    await page.keyboard.press('Escape');
+
+    // Excluir, reached with the arrow keys, opens the disclosure and deletes nothing.
+    await rowMenu(page, 'HGLG11').focus();
+    await page.keyboard.press('Enter');
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('End');
+    await expect(menu.getByRole('menuitem', { name: 'Excluir' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { name: 'Excluir transação' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Confirmar exclusão' })).toBeVisible();
   });
 
   /**
