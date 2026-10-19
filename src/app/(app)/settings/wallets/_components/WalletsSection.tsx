@@ -4,6 +4,7 @@ import { Plus } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { RouteTabs } from '@/components/patterns/route-tabs';
+import { WALLETS_SECTION, routeTabs } from '@/components/patterns/destination-tabs';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -21,6 +22,7 @@ import { Button } from '@/components/ui/button';
  */
 export async function WalletsSection({ children }: { readonly children: ReactNode }) {
   const t = await getTranslations('wallets');
+  const tAll = await getTranslations();
 
   return (
     <SettingsFrame
@@ -28,16 +30,7 @@ export async function WalletsSection({ children }: { readonly children: ReactNod
         <RouteTabs
           variant="pill"
           label={t('tabs.label')}
-          tabs={[
-            {
-              href: '/settings/wallets',
-              label: t('tabs.mine'),
-              exact: true,
-              alsoActiveOn: ['/settings/wallets/new'],
-            },
-            { href: '/settings/wallets/assign', label: t('tabs.assign') },
-            { href: '/settings/wallets/parameters', label: t('tabs.parameters') },
-          ]}
+          tabs={routeTabs(WALLETS_SECTION.tasks, tAll)}
         />
       }
       actions={

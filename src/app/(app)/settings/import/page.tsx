@@ -2,7 +2,7 @@ import { getTranslations } from 'next-intl/server';
 import { UploadForm } from '@/app/(app)/settings/import/_components/UploadForm';
 import { uploadExtractAction } from '@/app/(app)/import/actions';
 import { listImportBatches, loadImportFreshness } from '@/app/(app)/import/data';
-import { IMPORT_GUIDE_ANCHOR } from '@/app/(app)/import/paths';
+import { IMPORT_GUIDE_ANCHOR } from '@/lib/import-paths';
 import { tryUserId } from '@/lib/session';
 import { ExportGuide } from '@/app/(app)/settings/import/_components/ExportGuide';
 import { ImportSection } from '@/app/(app)/settings/import/_components/ImportSection';

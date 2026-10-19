@@ -24,7 +24,7 @@ import { Grid } from '@/components/layout/grid';
 import { Split } from '@/components/layout/split';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
-import { IMPORT_SEND_PATH } from '@/app/(app)/import/paths';
+import { IMPORT_SEND_PATH } from '@/lib/import-paths';
 
 /**
  * **The authenticated landing screen** (#98).

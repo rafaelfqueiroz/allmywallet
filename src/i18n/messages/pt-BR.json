@@ -87,6 +87,7 @@
     "settings": "Configurações",
     "appName": "AllMyWallet",
     "menu": "Navegação",
+    "breadcrumb": "Você está em",
     "openMenu": "Abrir menu",
     "collapseSidebar": "Recolher menu lateral",
     "expandSidebar": "Expandir menu lateral",

@@ -36,7 +36,7 @@ import {
 import { corporateEventRefusalKey } from '@/app/(app)/settings/import/[batchId]/_components/corporate-event-refusal';
 import { labelFor, resolveAssetLabels } from '@/app/(app)/wallets/data';
 import { loadWalletOptions, walletName } from '@/app/(app)/import/wallet-options';
-import { IMPORT_HISTORY_PATH } from '@/app/(app)/import/paths';
+import { IMPORT_HISTORY_PATH } from '@/lib/import-paths';
 import {
   BATCH_STATUS_VARIANT,
   typeDetected,

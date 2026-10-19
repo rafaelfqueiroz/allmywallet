@@ -10,7 +10,7 @@ import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
-import { importBatchPath } from '@/app/(app)/import/paths';
+import { importBatchPath } from '@/lib/import-paths';
 
 /**
  * SPEC-010 BR-010-12 — "purchases awaiting allocation appear in the same

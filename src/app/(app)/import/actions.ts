@@ -28,7 +28,7 @@ import { enqueue } from '@/lib/queue';
 import { requestSnapshotRebuild } from '@/lib/snapshot-rebuild';
 import { QUEUE } from '@/worker/queues';
 import { ClassifySchema } from '@/app/(app)/import/classify-schema';
-import { IMPORT_HISTORY_PATH, IMPORT_SEND_PATH, importBatchPath } from '@/app/(app)/import/paths';
+import { IMPORT_HISTORY_PATH, IMPORT_SEND_PATH, importBatchPath } from '@/lib/import-paths';
 
 /**
  * AR-32: each action validates input with Zod at the boundary (DV-07),

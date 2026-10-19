@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslations } from 'next-intl';
 import type { ImportBatchStatus } from '@/core/ingestion/ports';
-import { importBatchPath } from '@/app/(app)/import/paths';
+import { importBatchPath } from '@/lib/import-paths';
 import { BATCH_STATUS_VARIANT } from '@/app/(app)/settings/import/_components/batch-status';
 import { DataTable } from '@/components/patterns/data-table';
 import { EmptyState } from '@/components/patterns/empty-state';

@@ -11,6 +11,7 @@ import { Field } from '@/components/patterns/field';
 import { FormActions, FormGrid, FormPanel } from '@/components/patterns/form-layout';
 import { FileUpload } from '@/components/patterns/file-upload';
 import { RouteTabs } from '@/components/patterns/route-tabs';
+import { Breadcrumb } from '@/components/patterns/breadcrumb';
 import { ScopeSelector } from '@/components/patterns/scope-selector';
 import { StateBadge } from '@/components/patterns/state-badge';
 import { EstimateMarker } from '@/components/patterns/estimate-marker';
@@ -120,6 +121,7 @@ export default async function PrimitivesPage() {
   const t = await getTranslations('common');
   const vocabulary = await getTranslations('vocabulary');
   const tReports = await getTranslations('reports');
+  const tNav = await getTranslations('nav');
 
   return (
     // The page's own header is the `PageHeader` demo (BR-022-14): scope
@@ -170,8 +172,17 @@ export default async function PrimitivesPage() {
 
       {/* SPEC-022 BR-022-15/16 — route tabs, main and pill (a section's tasks
           beneath its tabs, as Configurações has them). The first of each
-          points here, so each renders its active state. */}
+          points here, so each renders its active state. Above them, the top
+          bar's breadcrumb (BR-022-09): two links, then the current page. */}
       <Section title={vocabulary('patrimonio')}>
+        <Breadcrumb
+          label={tNav('breadcrumb')}
+          items={[
+            { href: '/primitives', label: vocabulary('patrimonio') },
+            { href: '/primitives/composicao', label: vocabulary('composicao') },
+            { href: '/primitives/proventos', label: vocabulary('proventos') },
+          ]}
+        />
         <RouteTabs
           label={vocabulary('patrimonio')}
           tabs={[

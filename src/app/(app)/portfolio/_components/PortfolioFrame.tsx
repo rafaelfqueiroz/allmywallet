@@ -5,6 +5,7 @@ import { PARAM } from '@/lib/report-url-state';
 import { formatBusinessDate, formatDateTime } from '@/i18n/format';
 import { PageShell } from '@/app/page-shell';
 import { RouteTabs } from '@/components/patterns/route-tabs';
+import { PORTFOLIO_TABS, routeTabs } from '@/components/patterns/destination-tabs';
 import { ScopeSelector, type ScopeWallet } from '@/components/patterns/scope-selector';
 import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
@@ -24,7 +25,9 @@ import { Text } from '@/components/ui/text';
  *   the application menu carries it between the two
  *   destinations (#209, `navHref`).
  * - **Each tab has its own URL** (BR-022-15). Patrimônio is the destination's
- *   root, matched exactly so it is not also active under its siblings.
+ *   root, matched exactly so it is not also active under its siblings. The
+ *   tabs are `PORTFOLIO_TABS`, which the top bar's breadcrumb names too
+ *   (BR-022-09, #254).
  */
 export interface Freshness {
   readonly valuationAsOf: BusinessDate;
@@ -50,6 +53,7 @@ export async function PortfolioFrame({
   readonly children: ReactNode;
 }) {
   const t = await getTranslations('portfolio');
+  const tAll = await getTranslations();
 
   return (
     <PageShell
@@ -61,12 +65,7 @@ export async function PortfolioFrame({
       <RouteTabs
         label={t('tabs.label')}
         preserveParams={[PARAM.wallet]}
-        tabs={[
-          { href: '/portfolio', label: t('tabs.patrimonio'), exact: true },
-          { href: '/portfolio/composition', label: t('tabs.composicao') },
-          { href: '/portfolio/wallets', label: t('tabs.carteiras') },
-          { href: '/portfolio/goals', label: t('tabs.metas') },
-        ]}
+        tabs={routeTabs(PORTFOLIO_TABS, tAll)}
       />
       {freshness && <FreshnessLine freshness={freshness} />}
       {children}

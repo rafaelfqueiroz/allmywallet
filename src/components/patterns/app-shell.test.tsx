@@ -10,6 +10,12 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(pathname.search),
 }));
 
+/**
+ * The sidebar's links. Scoped because the breadcrumb (BR-022-09) names the
+ * destination too, and on `/portfolio/composition` both say "Portfólio".
+ */
+const menu = () => within(screen.getByRole('navigation', { name: 'Navegação' }));
+
 describe('AppShell', () => {
   it('renders one navigation landmark with every destination', () => {
     pathname.current = '/portfolio';
@@ -32,15 +38,15 @@ describe('AppShell', () => {
     pathname.current = '/portfolio';
     render(<AppShell>conteúdo</AppShell>);
 
-    expect(screen.getByRole('link', { name: 'Portfólio' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Transações' })).not.toHaveAttribute('aria-current');
+    expect(menu().getByRole('link', { name: 'Portfólio' })).toHaveAttribute('aria-current', 'page');
+    expect(menu().getByRole('link', { name: 'Transações' })).not.toHaveAttribute('aria-current');
   });
 
   it('keeps a nested route marked against its section', () => {
     pathname.current = '/portfolio/wallets';
     render(<AppShell>conteúdo</AppShell>);
 
-    expect(screen.getByRole('link', { name: 'Portfólio' })).toHaveAttribute('aria-current', 'page');
+    expect(menu().getByRole('link', { name: 'Portfólio' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('does not mark a section whose href is merely a string prefix', () => {
@@ -83,7 +89,7 @@ describe('AppShell', () => {
 
     // The label goes visually hidden, not away — an icon-only link with no
     // accessible name is unusable with a screen reader.
-    expect(screen.getByRole('link', { name: 'Portfólio' })).toBeInTheDocument();
+    expect(menu().getByRole('link', { name: 'Portfólio' })).toBeInTheDocument();
   });
 
   it('opens the mobile drawer and closes it on navigation', async () => {
@@ -159,6 +165,53 @@ describe('AppShell', () => {
       const { container } = render(
         <AppShell account={<button type="button">Conta</button>}>conteúdo</AppShell>,
       );
+      expect(await audit(container)).toHaveNoViolations();
+    });
+  });
+
+  // SPEC-022 BR-022-09 (amended, DL-022-27) — `breadcrumbFor` holds the rule;
+  // this is the wiring.
+  describe('the breadcrumb (SPEC-022 BR-022-09)', () => {
+    it('names the page from the path, at the start of the top bar', () => {
+      pathname.current = '/settings/import/history';
+      render(<AppShell>conteúdo</AppShell>);
+
+      const crumb = within(screen.getByRole('banner')).getByRole('navigation', {
+        name: 'Você está em',
+      });
+      expect(
+        within(crumb)
+          .getAllByRole('listitem')
+          .map((item) => item.textContent),
+      ).toEqual(['Configurações', 'Importar', 'Histórico']);
+      expect(within(crumb).getByRole('link', { name: 'Importar' })).toHaveAttribute(
+        'href',
+        '/settings/import',
+      );
+      expect(within(crumb).getByText('Histórico')).toHaveAttribute('aria-current', 'page');
+    });
+
+    // BR-022-09: below `md` the brand and the menu button hold the slot.
+    it('is hidden below md', () => {
+      pathname.current = '/dashboard';
+      render(<AppShell>conteúdo</AppShell>);
+
+      expect(screen.getByRole('navigation', { name: 'Você está em' })).toHaveClass(
+        'hidden',
+        'md:block',
+      );
+    });
+
+    it('renders no trail on a page the frame does not know', () => {
+      pathname.current = '/primitives';
+      render(<AppShell>conteúdo</AppShell>);
+
+      expect(screen.queryByRole('navigation', { name: 'Você está em' })).toBeNull();
+    });
+
+    it('has no axe violations', async () => {
+      pathname.current = '/portfolio/composition';
+      const { container } = render(<AppShell>conteúdo</AppShell>);
       expect(await audit(container)).toHaveNoViolations();
     });
   });

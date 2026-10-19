@@ -2,9 +2,10 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
-import { WATCH_NEW_RULE_PATH, WATCH_PARAMETERS_PATH, WATCH_RULES_PATH } from '@/lib/watch-paths';
+import { WATCH_NEW_RULE_PATH } from '@/lib/watch-paths';
 import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { RouteTabs } from '@/components/patterns/route-tabs';
+import { WATCH_SECTION, routeTabs } from '@/components/patterns/destination-tabs';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -21,6 +22,7 @@ import { Button } from '@/components/ui/button';
  */
 export async function WatchSection({ children }: { readonly children: ReactNode }) {
   const t = await getTranslations('watch');
+  const tAll = await getTranslations();
 
   return (
     <SettingsFrame
@@ -28,10 +30,7 @@ export async function WatchSection({ children }: { readonly children: ReactNode 
         <RouteTabs
           variant="pill"
           label={t('tabs.label')}
-          tabs={[
-            { href: WATCH_RULES_PATH, label: t('tabs.rules'), exact: true },
-            { href: WATCH_PARAMETERS_PATH, label: t('tabs.parameters') },
-          ]}
+          tabs={routeTabs(WATCH_SECTION.tasks, tAll)}
         />
       }
       actions={

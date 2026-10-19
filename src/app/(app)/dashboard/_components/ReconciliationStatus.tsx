@@ -5,7 +5,7 @@ import { SummaryCard } from '@/components/patterns/summary-card';
 import { Stack } from '@/components/layout/stack';
 import { Badge } from '@/components/ui/badge';
 import { Text } from '@/components/ui/text';
-import { IMPORT_SEND_PATH, importBatchPath } from '@/app/(app)/import/paths';
+import { IMPORT_SEND_PATH, importBatchPath } from '@/lib/import-paths';
 
 /**
  * SPEC-005 BR-005-26 — "portfolio reconciliation status (`reconciled` /

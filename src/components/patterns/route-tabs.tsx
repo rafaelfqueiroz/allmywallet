@@ -4,7 +4,7 @@ import { Suspense, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
+import { hrefWithParams, isTabActive } from '@/components/patterns/nav-link';
 
 /**
  * SPEC-022 BR-022-15 — a destination with more than one task presents them as
@@ -131,9 +131,7 @@ function TabStrip({
     >
       <ul className={STRIP[variant].list}>
         {tabs.map((item) => {
-          const active =
-            isPathActive(pathname, item.href, item.exact) ||
-            (item.alsoActiveOn ?? []).some((path) => isPathActive(pathname, path));
+          const active = isTabActive(pathname, item);
 
           return (
             <li key={item.href}>
