@@ -6,6 +6,9 @@
  * redirect — builds its URL here, so the next move is one edit.
  *
  * Plain strings and no `next/*` import, so a Client Component can use it too.
+ * In `lib/` beside `watch-paths.ts` since #254: the shell's breadcrumb
+ * (`components/patterns/destination-tabs.ts`) is built from these paths, and
+ * nothing below `app/` imports from it.
  */
 export const IMPORT_SEND_PATH = '/settings/import';
 export const IMPORT_HISTORY_PATH = '/settings/import/history';

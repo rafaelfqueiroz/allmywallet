@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { NAV_ITEMS, navHref, type NavItem } from '@/components/patterns/nav-items';
 import { isPathActive, navItemClassName } from '@/components/patterns/nav-link';
+import { Breadcrumb } from '@/components/patterns/breadcrumb';
+import { breadcrumbFor } from '@/components/patterns/breadcrumbs';
 
 /**
  * DL-10/DL-11 — the application frame. One navigation definition, rendered two
@@ -23,8 +25,9 @@ import { isPathActive, navItemClassName } from '@/components/patterns/nav-link';
  *
  * **The top bar (SPEC-022 BR-022-09)** sits above the content at every width.
  * Its right-hand side holds `topBarActions` — the slot the masking toggle
- * (BR-022-24, #206) fills — and `account`, the account menu. Below `md` it
- * also carries the drawer button and the product name.
+ * (BR-022-24, #206) fills — and `account`, the account menu. Its start holds
+ * the breadcrumb from `md` up (DL-022-27, #254), and below `md` the drawer
+ * button and the product name in its place.
  *
  * Both are slots rather than imports: `AppShell` is a design-system pattern
  * (DS-02, "a primitive knows nothing about the domain") and stays testable
@@ -113,6 +116,7 @@ export function AppShell({
             </Dialog>
             <Brand />
           </div>
+          <TopBarBreadcrumb />
           <div className="ml-auto flex items-center gap-2">
             {topBarActions}
             {account}
@@ -171,6 +175,42 @@ function Items({
         />
       ))}
     </nav>
+  );
+}
+
+/**
+ * BR-022-09 (amended) — the breadcrumb, read from the path rather than from the
+ * page: the shell is in the layout, and the path is the one thing a layout and
+ * its page always agree on, so a client-side tab switch updates it with no
+ * reload (unlike the masking state, #229). Hidden below `md`, where the brand
+ * and the menu button hold the slot. Same Suspense shape as `NavList`: the
+ * fallback is the trail without the carried scope.
+ */
+function TopBarBreadcrumb() {
+  return (
+    <Suspense fallback={<Trail params={NO_PARAMS} />}>
+      <ConnectedTrail />
+    </Suspense>
+  );
+}
+
+function ConnectedTrail() {
+  return <Trail params={useSearchParams()} />;
+}
+
+function Trail({ params }: { readonly params: { get(name: string): string | null } }) {
+  const t = useTranslations();
+  const pathname = usePathname();
+
+  return (
+    <Breadcrumb
+      label={t('nav.breadcrumb')}
+      className="hidden md:block"
+      items={breadcrumbFor(pathname, params).map((crumb) => ({
+        href: crumb.href,
+        label: t(crumb.labelKey),
+      }))}
+    />
   );
 }
 

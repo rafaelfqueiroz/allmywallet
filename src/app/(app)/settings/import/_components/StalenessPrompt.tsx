@@ -3,7 +3,7 @@ import { Note } from '@/components/patterns/note';
 import { Stack } from '@/components/layout/stack';
 import { Text } from '@/components/ui/text';
 import { Button } from '@/components/ui/button';
-import { IMPORT_GUIDE_ANCHOR } from '@/app/(app)/import/paths';
+import { IMPORT_GUIDE_ANCHOR } from '@/lib/import-paths';
 
 /**
  * SPEC-005 BR-005-28 — the refresh prompt, when the last custody import is

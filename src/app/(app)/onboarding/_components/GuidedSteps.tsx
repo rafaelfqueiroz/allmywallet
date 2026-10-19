@@ -11,7 +11,7 @@ import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 import { Note } from '@/components/patterns/note';
-import { importBatchPath } from '@/app/(app)/import/paths';
+import { importBatchPath } from '@/lib/import-paths';
 
 /**
  * SPEC-020 BR-020-04 — "the guided sequence is: export the three extracts →

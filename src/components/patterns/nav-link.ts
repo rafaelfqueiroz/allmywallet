@@ -20,6 +20,27 @@ export function isPathActive(pathname: string, href: string, exact = false): boo
 }
 
 /**
+ * DS-27/DS-64 — is this tab current on `pathname`? Its own href on DS-27's
+ * boundary (exactly, for a tab that is the root of its siblings), or one of
+ * the further paths it stays current on. One answer for `RouteTabs` and the
+ * top bar's breadcrumb (BR-022-09), so a lit tab and the crumb that names it
+ * cannot disagree.
+ */
+export function isTabActive(
+  pathname: string,
+  tab: {
+    readonly href: string;
+    readonly exact?: boolean;
+    readonly alsoActiveOn?: readonly string[];
+  },
+): boolean {
+  return (
+    isPathActive(pathname, tab.href, tab.exact) ||
+    (tab.alsoActiveOn ?? []).some((path) => isPathActive(pathname, path))
+  );
+}
+
+/**
  * The look of one item in a list of destinations (BR-022-33, DS-48).
  *
  * Active is a **fill** (`nav-active`); keyboard focus is a **ring** (`ring`) —

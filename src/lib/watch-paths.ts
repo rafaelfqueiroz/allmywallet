@@ -5,10 +5,10 @@
  * Dashboard's watch-state card, the opportunity e-mail, the revalidation after a
  * rule changes — is built here, so the next move is one edit.
  *
- * In `lib/` rather than beside the route, unlike `(app)/import/paths.ts`: the
- * e-mail adapters link to a rule too, and `adapters/` may not import from
- * `app/` (eslint `import/no-restricted-paths`). Plain strings and no `next/*`
- * import, so a Client Component can use it as well.
+ * In `lib/` rather than beside the route: the e-mail adapters link to a rule
+ * too, and `adapters/` may not import from `app/` (eslint
+ * `import/no-restricted-paths`). Plain strings and no `next/*` import, so a
+ * Client Component can use it as well.
  */
 export const WATCH_RULES_PATH = '/settings/watch';
 export const WATCH_PARAMETERS_PATH = '/settings/watch/parameters';

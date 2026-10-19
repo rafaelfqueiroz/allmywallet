@@ -42,7 +42,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { CellLabel } from '@/components/patterns/cell-label';
 import { RowMenu } from '@/components/patterns/row-menu';
-import { importBatchPath } from '@/app/(app)/import/paths';
+import { importBatchPath } from '@/lib/import-paths';
 
 /**
  * SPEC-006 BR-006-07/08/09/10/02/03 — the transaction ledger's own surface.

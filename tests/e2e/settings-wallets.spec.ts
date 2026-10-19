@@ -241,10 +241,10 @@ test.describe('Configurações › Carteiras', () => {
     // Configurações is the current destination (BR-022-01); the sidebar is
     // a drawer on a phone, which the navigation spec covers.
     if (!isMobile(viewport?.width)) {
-      await expect(page.getByRole('link', { name: 'Configurações' })).toHaveAttribute(
-        'aria-current',
-        'page',
-      );
+      // The sidebar's item: the breadcrumb (BR-022-09) links "Configurações" too.
+      await expect(
+        page.locator('[data-slot="app-sidebar"]').getByRole('link', { name: 'Configurações' }),
+      ).toHaveAttribute('aria-current', 'page');
     }
 
     // BR-022-18: the queue is a table, and its forms are not in it — the asset

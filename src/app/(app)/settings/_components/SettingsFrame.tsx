@@ -3,9 +3,8 @@ import Link from 'next/link';
 import { ChevronLeft } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { PageShell } from '@/app/page-shell';
-import { IMPORT_SEND_PATH } from '@/app/(app)/import/paths';
-import { WATCH_RULES_PATH } from '@/lib/watch-paths';
 import { RouteTabs } from '@/components/patterns/route-tabs';
+import { SETTINGS_SECTIONS, routeTabs } from '@/components/patterns/destination-tabs';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 
@@ -28,6 +27,8 @@ import { Button } from '@/components/ui/button';
  *   its way back on that row instead.
  * - **The section's primary action** ("Nova carteira", "Nova regra") sits at
  *   the end of the pill row (`actions`), as the frames draw it.
+ * - **The sections and their tasks are `destination-tabs.ts`'**, which the top
+ *   bar's breadcrumb names too (BR-022-09, #254).
  */
 export async function SettingsFrame({
   tasks,
@@ -41,17 +42,11 @@ export async function SettingsFrame({
   readonly children: ReactNode;
 }) {
   const t = await getTranslations('settings');
+  const tAll = await getTranslations();
 
   return (
     <PageShell title={t('title')} description={t('description')}>
-      <RouteTabs
-        label={t('navLabel')}
-        tabs={[
-          { href: '/settings/wallets', label: t('sections.wallets') },
-          { href: IMPORT_SEND_PATH, label: t('sections.import') },
-          { href: WATCH_RULES_PATH, label: t('sections.watch') },
-        ]}
-      />
+      <RouteTabs label={t('navLabel')} tabs={routeTabs(SETTINGS_SECTIONS, tAll)} />
       <Cluster justify="between" gap="sm" data-slot="settings-tasks">
         {tasks}
         {actions}

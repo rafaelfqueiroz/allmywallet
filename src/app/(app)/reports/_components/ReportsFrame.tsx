@@ -3,6 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { PARAM } from '@/lib/report-url-state';
 import { PageShell } from '@/app/page-shell';
 import { RouteTabs } from '@/components/patterns/route-tabs';
+import { REPORTS_TABS, routeTabs } from '@/components/patterns/destination-tabs';
 import { ScopeSelector, type ScopeWallet } from '@/components/patterns/scope-selector';
 
 /**
@@ -24,7 +25,8 @@ import { ScopeSelector, type ScopeWallet } from '@/components/patterns/scope-sel
  *   state — Rentabilidade's `earnings` — stays behind.
  * - **Each tab has its own URL** (BR-022-15). Evolução patrimonial is the
  *   destination's root, matched exactly so it is not also active under its
- *   siblings — the pattern Portfólio set with Patrimônio.
+ *   siblings — the pattern Portfólio set with Patrimônio. The tabs are
+ *   `REPORTS_TABS`, which the top bar's breadcrumb names too (BR-022-09).
  *
  * `description` is the tab's own: the header is shared, but what a tab
  * answers is not.
@@ -39,6 +41,7 @@ export async function ReportsFrame({
   readonly children: ReactNode;
 }) {
   const t = await getTranslations('reports');
+  const tAll = await getTranslations();
 
   return (
     <PageShell
@@ -49,11 +52,7 @@ export async function ReportsFrame({
       <RouteTabs
         label={t('links.label')}
         preserveParams={[PARAM.wallet, PARAM.period, PARAM.from, PARAM.to, PARAM.grouping]}
-        tabs={[
-          { href: '/reports', label: t('links.patrimonio'), exact: true },
-          { href: '/reports/performance', label: t('links.performance') },
-          { href: '/reports/earnings', label: t('links.proventos') },
-        ]}
+        tabs={routeTabs(REPORTS_TABS, tAll)}
       />
       {children}
     </PageShell>

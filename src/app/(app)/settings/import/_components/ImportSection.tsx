@@ -1,12 +1,8 @@
 import type { ReactNode } from 'react';
 import { getTranslations } from 'next-intl/server';
-import {
-  IMPORT_HISTORY_PATH,
-  IMPORT_PARAMETERS_PATH,
-  IMPORT_SEND_PATH,
-} from '@/app/(app)/import/paths';
 import { SettingsFrame } from '@/app/(app)/settings/_components/SettingsFrame';
 import { RouteTabs } from '@/components/patterns/route-tabs';
+import { IMPORT_SECTION, routeTabs } from '@/components/patterns/destination-tabs';
 
 /**
  * SPEC-022 BR-022-05/15/16, DL-022-12 — Configurações › **Importar**: one
@@ -22,6 +18,7 @@ import { RouteTabs } from '@/components/patterns/route-tabs';
  */
 export async function ImportSection({ children }: { readonly children: ReactNode }) {
   const t = await getTranslations('import');
+  const tAll = await getTranslations();
 
   return (
     <SettingsFrame
@@ -29,11 +26,7 @@ export async function ImportSection({ children }: { readonly children: ReactNode
         <RouteTabs
           variant="pill"
           label={t('tabs.label')}
-          tabs={[
-            { href: IMPORT_SEND_PATH, label: t('tabs.send'), exact: true },
-            { href: IMPORT_HISTORY_PATH, label: t('tabs.history') },
-            { href: IMPORT_PARAMETERS_PATH, label: t('tabs.parameters') },
-          ]}
+          tabs={routeTabs(IMPORT_SECTION.tasks, tAll)}
         />
       }
     >
