@@ -13,6 +13,12 @@ import { cn } from '@/lib/utils';
  * page — plain text with `aria-current="page"` (DS-27). The separators are
  * decoration and hidden from assistive technology, which announces the list.
  *
+ * **Every crumb truncates, none overflows** (#261 review). At `md` with the
+ * sidebar expanded and a long account name the bar leaves the trail ~180 px,
+ * and a crumb that cannot shrink overflows its item and is drawn over the
+ * next. Each label is `min-w-0 truncate` within its item and carries its full
+ * text as a `title`; the accessible name is the full text either way.
+ *
  * Knows nothing about routes (DS-02): `AppShell` resolves the path to crumbs
  * (`breadcrumbs.ts`) and passes them translated.
  */
@@ -45,13 +51,14 @@ export function Breadcrumb({
             <li key={item.label} className="flex min-w-0 items-center gap-1">
               {index > 0 && <ChevronRight aria-hidden className="size-3.5 shrink-0" />}
               {last ? (
-                <span aria-current="page" className="truncate">
+                <span aria-current="page" title={item.label} className="min-w-0 truncate">
                   {item.label}
                 </span>
               ) : (
                 <Link
                   href={item.href}
-                  className="shrink-0 rounded-sm outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                  title={item.label}
+                  className="min-w-0 truncate rounded-sm outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
                 >
                   {item.label}
                 </Link>
