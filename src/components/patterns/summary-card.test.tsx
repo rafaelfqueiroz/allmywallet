@@ -92,15 +92,20 @@ describe('SummaryCard', () => {
   // truncate it and keep its box inside the cell.
   it('links an item by its own name, as a line a cell can truncate', () => {
     render(
-      <CardItemLink href="/settings/watch#regra-1" ariaLabel="ITSA4: ver regra">
-        ITSA4
-      </CardItemLink>,
+      <CardItemLink href="/settings/watch#regra-1" label="ITSA4" ariaLabel="ITSA4: ver regra" />,
     );
     const link = screen.getByRole('link', { name: 'ITSA4: ver regra' });
     expect(link).toHaveAttribute('href', '/settings/watch#regra-1');
     expect(link).toHaveTextContent('ITSA4');
     expect(link).toHaveAttribute('data-cell-line');
     expect(link.className).toContain('max-w-full');
+    // The cell clips at the link's edges, so its focus ring is drawn inside.
+    expect(link.className).toContain('focus-visible:ring-inset');
+  });
+
+  it("drops an item link's aria-label that does not begin with its text (WCAG 2.5.3)", () => {
+    render(<CardItemLink href="/x" label="ITSA4" ariaLabel="Ver regra de ITSA4" />);
+    expect(screen.getByRole('link', { name: 'ITSA4' })).not.toHaveAttribute('aria-label');
   });
 
   it('has no axe violations', async () => {

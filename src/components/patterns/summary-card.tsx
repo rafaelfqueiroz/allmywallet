@@ -69,30 +69,25 @@ export function CardHeaderLink({ href, label, ariaLabel }: CardLinkTarget) {
  * An item's own name as the link to its detail, inside a card — the watch
  * card's asset code, which opens its rule (#243). It keeps the text's colour
  * and weight, as the frame draws a table's first column, and shows itself a
- * link on hover and focus. Like the links above, no padding of its own.
+ * link on hover and focus. Like the links above, no padding of its own, and
+ * the same label-in-name rule for `ariaLabel` (WCAG 2.5.3).
  *
  * A line of its own (`data-cell-line`, an inline block): in a table cell too
  * narrow for it, it ends in an ellipsis with the cell's tooltip (DS-67) and
  * its box stays inside the cell, so a pointer on the next column never lands
- * on it; anywhere else it wraps like text.
+ * on it; anywhere else it wraps like text. Its focus ring is drawn **inside**
+ * its box (`ring-inset`): the cell clips at the link's own edges, so a ring
+ * outside them was cut to a sliver (WCAG 2.4.7, #243 review).
  */
-export function CardItemLink({
-  href,
-  ariaLabel,
-  children,
-}: {
-  readonly href: string;
-  readonly ariaLabel?: string;
-  readonly children: React.ReactNode;
-}) {
+export function CardItemLink({ href, label, ariaLabel }: CardLinkTarget) {
   return (
     <Link
       href={href}
-      {...(ariaLabel === undefined ? {} : { 'aria-label': ariaLabel })}
+      {...accessibleName(label, ariaLabel)}
       data-cell-line
-      className="inline-block max-w-full rounded-sm align-bottom font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="inline-block max-w-full rounded-sm align-bottom font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
     >
-      {children}
+      {label}
     </Link>
   );
 }

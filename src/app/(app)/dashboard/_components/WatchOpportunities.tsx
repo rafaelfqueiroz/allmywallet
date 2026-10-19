@@ -63,8 +63,8 @@ export async function WatchOpportunities({
    * Widths sized for the Dashboard's narrow column (DS-67 lets a table pass
    * its own), measured in the app's font: a B3 code, a price to R$ 9.999,99,
    * the trigger with its sign, and the state's one-word badge. They sum to
-   * about 390px, which the column's 27rem floor holds (`Split side="aside"`);
-   * a narrower container scrolls the table rather than collapsing a column.
+   * about 390px, which the column's 27rem floor holds (`Split side="aside"`)
+   * wherever the two columns sit side by side.
    */
   const columns: readonly NodeColumn[] = [
     { id: 'asset', header: t('columns.asset'), kind: 'text', width: 7 },
@@ -80,10 +80,9 @@ export async function WatchOpportunities({
         // WCAG 2.5.3 — the name begins with the visible code.
         <CardItemLink
           href={watchRulePath(item.assetId)}
+          label={item.code}
           ariaLabel={t('ruleLinkLabel', { assetCode: item.code })}
-        >
-          {item.code}
-        </CardItemLink>
+        />
       ),
       price: <Money value={item.price} />,
       trigger: <Trigger item={item} t={t} />,
