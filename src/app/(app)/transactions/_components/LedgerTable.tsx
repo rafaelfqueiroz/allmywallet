@@ -63,8 +63,9 @@ const HEADER_KEYS = {
 
 /**
  * The columns the repository can order by (`TransactionSortKey`). `institution`
- * is a sort key with no column of its own since BR-022-40: a URL naming it still
- * sorts, and no header offers it.
+ * is a sort key with no column of its own since BR-022-40: no header offers it,
+ * and a URL naming it still sorts — through every page, because the table keeps
+ * every `TransactionSortKey` in its links (`urlSortIds`, #255 review).
  */
 const SORTABLE: ReadonlySet<string> = new Set(TRANSACTION_SORT_KEYS);
 
@@ -73,26 +74,29 @@ const SORTABLE: ReadonlySet<string> = new Set(TRANSACTION_SORT_KEYS);
  * default width, and the widths this table sets itself. Eight columns and the
  * menu share a 944 px panel at 1280 px, where `1ch` is ~8.8 px, so every column
  * is sized for what it holds rather than for its kind's default. They take
- * ~926 px, which leaves room for a classic 15 px scrollbar (#242 Decision log):
+ * ~919 px, which leaves room for a classic 15 px scrollbar (#242 Decision log):
  *
  * - the date is `09/10/2026`, under 9ch;
  * - the asset truncates, and so does its broker under it;
- * - the type fits "Bonificação" and "Amortização"; longer types truncate;
- * - the quantity fits `1.234.567,89` and `12.345,6789`;
+ * - the type fits "Bonificação", "Amortização" and "Grupamento"; longer types
+ *   truncate;
+ * - the quantity fits the eight decimal places `formatQuantity` allows,
+ *   `1.234,12345678` (#255 review), and `1.234.567,89`;
  * - the unit price is sized for "Custo estimado" (BR-007-06), the widest thing
  *   under a price (~125 px), which leaves room for `R$ 99.999.999,99`;
  * - the total fits `R$ 99.999.999,99` — Portfólio sizes a whole holding's value
  *   for ten times that (#245), but one transaction is not a holding;
  * - the status fits "● Substituída", with the origin and "Editada" each on a
  *   line under it; "● Não classificada" truncates, with the full text on demand;
- * - the checkbox needs 2.5rem, and the row menu is one icon button.
+ * - the checkbox needs 2.25rem (a 16 px box and the cell's padding), and the row
+ *   menu is one icon button.
  */
 const KINDS: Readonly<Record<LedgerColumn, { kind: ColumnKind; width?: ColumnWidth }>> = {
-  select: { kind: 'control', width: '2.5rem' },
-  tradeDate: { kind: 'date', width: 10 },
-  asset: { kind: 'text', width: 12 },
-  type: { kind: 'text', width: 11 },
-  quantity: { kind: 'number', width: 10 },
+  select: { kind: 'control', width: '2.25rem' },
+  tradeDate: { kind: 'date', width: 9.5 },
+  asset: { kind: 'text', width: 10 },
+  type: { kind: 'text', width: 10 },
+  quantity: { kind: 'number', width: 13 },
   unitPrice: { kind: 'money', width: 14.5 },
   totalValue: { kind: 'money', width: 14 },
   status: { kind: 'badge', width: 11 },
@@ -155,6 +159,7 @@ export function LedgerTable({
         server={{ total, rowId: (row) => row.id }}
         caption={t('table.caption')}
         sortable
+        urlSortIds={TRANSACTION_SORT_KEYS}
         initialSorting={[defaultSort]}
         sortLabel={(column) => t('table.sortBy', { column })}
         sortControlLabels={{

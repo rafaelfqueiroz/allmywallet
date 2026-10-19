@@ -665,6 +665,7 @@ async function seedThirty(userId: string): Promise<void> {
 const LONG_BROKER = 'INTER DISTRIBUIDORA DE TÍTULOS E VALORES MOBILIÁRIOS LTDA';
 const WIDEST_PRICE = '999999.99';
 const WIDEST_TOTAL = '99999999.00';
+const WIDEST_QUANTITY = '1234.12345678';
 
 async function seedExtremes(userId: string): Promise<void> {
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
@@ -695,6 +696,24 @@ async function seedExtremes(userId: string): Promise<void> {
       // Every cell at its widest: the longest status, an origin with "Editada",
       // and "Custo estimado" under the price.
       [randomUUID(), userId, asset, institution, WIDEST_PRICE, WIDEST_TOTAL],
+    );
+    // The widest quantity `formatQuantity` writes: eight decimal places (#255 review).
+    const fractional = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO assets (id, code, name, class) VALUES ($1, 'EXTQ3', 'Extremos fração', 'stock')
+         ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id`,
+        [randomUUID()],
+      )
+    ).rows[0]!.id;
+    await pool.query(
+      `INSERT INTO transactions
+         (id, user_id, asset_id, institution_id, type, status, trade_date,
+          quantity, unit_price, fees, total_value, natural_key, occurrence,
+          import_batch_id, is_manual)
+       VALUES ($1, $2, $3, $4, 'buy', 'active', '2026-03-01', $5, 1, 0, $5,
+               'e2e-extremes-fraction', 1, NULL, true)`,
+      [randomUUID(), userId, fractional, institution, WIDEST_QUANTITY],
     );
   } finally {
     await pool.end();
@@ -797,8 +816,12 @@ test.describe('the ledger table', () => {
     const before = await headerWidths();
 
     // The widest figures fit their columns, on one line: not clipped, not wrapped.
-    for (const figure of ['R$ 999.999,99', 'R$ 99.999.999,00']) {
-      const cell = row.getByRole('cell').filter({ hasText: figure });
+    for (const [code, figure] of [
+      ['EXTR3', 'R$ 999.999,99'],
+      ['EXTR3', 'R$ 99.999.999,00'],
+      ['EXTQ3', '1.234,12345678'],
+    ] as const) {
+      const cell = ledgerRow(page, code).getByRole('cell').filter({ hasText: figure });
       await expect(cell).toBeVisible();
       expect(await cell.evaluate((td) => td.scrollWidth <= td.clientWidth), figure).toBe(true);
       expect(
@@ -928,6 +951,26 @@ test.describe('the ledger table', () => {
     await page.keyboard.press('Enter');
     await expect(page.getByRole('heading', { name: 'Excluir transação' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Confirmar exclusão' })).toBeVisible();
+  });
+
+  /**
+   * #255 review — the institution sort has no column since BR-022-40, and the
+   * query still orders by it. Its page links keep it, so the second page
+   * continues the order the first one showed.
+   */
+  test('keeps a sort by institution from page to page', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    await seedThirty(userId);
+    await seedLedger(userId);
+
+    await page.goto('/transactions?sort=institution%3Aasc&size=10');
+    await expect(ledgerRows(page)).toHaveCount(10);
+    await page
+      .getByRole('navigation', { name: 'Paginação' })
+      .getByRole('link', { name: 'Página 2' })
+      .click();
+    await expect(page).toHaveURL(/[?&]page=2(&|$)/);
+    await expect(page).toHaveURL(/[?&]sort=institution%3Aasc(&|$)/);
   });
 
   /**
