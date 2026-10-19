@@ -3,6 +3,7 @@ import { ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { listTransactions } from '@/core/ledger/list-transactions';
 import type { TransactionListItem } from '@/core/ledger/ports';
+import { FIXED_INCOME_CLASSES } from '@/core/valuation/holdings';
 import { formatBusinessDate } from '@/i18n/format';
 import {
   LEDGER_TABLE_URL_OPTIONS,
@@ -239,6 +240,13 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   );
 }
 
+/** SPEC-022 BR-022-31 — each ledger status as a status badge, in the frame's colours. */
+const STATUS_VARIANT = {
+  active: 'success',
+  unclassified: 'warning',
+  superseded: 'neutral',
+} as const satisfies Record<TransactionListItem['transaction']['status'], string>;
+
 /**
  * One ledger row, rendered on the server cell by cell (see `LedgerTable` for
  * why the cells arrive finished).
@@ -247,13 +255,6 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
  * `superseded` in colours of their own rather than hidden or blended in — the
  * row still shows its real figures, but its status is never ambiguous.
  */
-/** SPEC-022 BR-022-31 — each ledger status as a status badge, in the frame's colours. */
-const STATUS_VARIANT = {
-  active: 'success',
-  unclassified: 'warning',
-  superseded: 'neutral',
-} as const satisfies Record<TransactionListItem['transaction']['status'], string>;
-
 async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
   const t = await getTranslations('transactions');
   const tType = await getTranslations('import.transactionType');
@@ -266,8 +267,15 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
       select: <RowSelect id={tx.id} label={t('bulk.select')} />,
       tradeDate: <span className="whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</span>,
       // BR-022-40: the broker sits under the asset, each line ending in its own
-      // ellipsis; the full text opens from the cell (BR-022-18).
-      asset: <CellLabel detail={item.institutionName ?? '—'}>{item.assetCode}</CellLabel>,
+      // ellipsis; the full text opens from the cell (BR-022-18). A CDB, LCI or
+      // LCA leads with its name: its code is B3's opaque `Código` (#242 Decision log).
+      asset: (
+        <CellLabel detail={item.institutionName ?? '—'}>
+          {(FIXED_INCOME_CLASSES as ReadonlySet<string>).has(item.assetClass)
+            ? item.assetName
+            : item.assetCode}
+        </CellLabel>
+      ),
       // No `whitespace-nowrap`: the table cell is already one line and truncates
       // (BR-022-18), and in the card a long name has to be able to wrap.
       type: <span>{tType(tx.type)}</span>,
@@ -297,14 +305,14 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
               link back to the batch is the row menu's "Ver importação de origem". */}
           <Text as="span" size="xs" tone="muted" data-cell-line>
             {t(tx.importBatchId === null ? 'provenance.manual' : 'provenance.imported')}
-            {/* BR-006-16: a human corrected this row since it was imported. */}
-            {tx.isUserModified && (
-              <>
-                {' · '}
-                <span title={t('modifiedExplanation')}>{t('modified')}</span>
-              </>
-            )}
           </Text>
+          {/* BR-006-16: a human corrected this row. A line of its own: beside the
+              origin it would be the part the column cuts. */}
+          {tx.isUserModified && (
+            <Text as="span" size="xs" tone="muted" data-cell-line title={t('modifiedExplanation')}>
+              {t('modified')}
+            </Text>
+          )}
         </Stack>
       ),
       /*

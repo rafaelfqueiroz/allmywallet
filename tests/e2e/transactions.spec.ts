@@ -253,7 +253,8 @@ test.describe('transaction management', () => {
 
     await expect(page).toHaveURL(/\/transactions$/);
     const table = ledger(page);
-    await expect(table.getByText('CDB-BANCO-X-2030')).toHaveCount(1);
+    // BR-022-40: a CDB leads with its name — B3's code for one is opaque.
+    await expect(table.getByText('CDB Banco X 2030')).toHaveCount(1);
     await expect(table.getByText('Manual')).toHaveCount(1);
   });
 
@@ -275,7 +276,10 @@ test.describe('transaction management', () => {
     const updated = ledgerRow(page, 'HGLG11');
     await expect(updated).toContainText('25');
     // BR-006-16: a human decided this value, and a re-import must not revert it.
-    await expect(updated.getByText('Editada')).toBeVisible();
+    // Shown whole, on a line of its own — not cut by the column (BR-022-40).
+    const modified = updated.getByText('Editada', { exact: true });
+    await expect(modified).toBeVisible();
+    expect(await modified.evaluate((line) => line.scrollWidth <= line.clientWidth)).toBe(true);
   });
 
   /**
@@ -839,14 +843,18 @@ test.describe('the ledger table', () => {
 
   /**
    * SPEC-022 BR-022-40 — Transações fits the page at 1280 px: eight columns and
-   * the row menu, every cell at its widest, shown and hidden (BR-022-24).
+   * the row menu, every cell at its widest, shown and hidden (BR-022-24). Also
+   * 15 px narrower: headless Chromium hides its scrollbars, and a desktop
+   * browser with classic scrollbars gives the page 1265 px at 1280.
    */
-  test('fits the page at 1280 px without scrolling sideways', async ({ signedIn }) => {
+  test('fits the page at 1280 px without scrolling sideways, classic scrollbars included', async ({
+    signedIn,
+  }) => {
     const { page, userId } = signedIn;
     test.skip(isMobile(page), 'the table rendering is desktop-only');
     await seedLedger(userId);
     await seedExtremes(userId);
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1265, height: 800 });
 
     await page.goto('/transactions');
     await expect(ledger(page).getByRole('columnheader')).toHaveText([

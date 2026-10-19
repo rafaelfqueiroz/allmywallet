@@ -72,8 +72,8 @@ const SORTABLE: ReadonlySet<string> = new Set(TRANSACTION_SORT_KEYS);
  * SPEC-022 BR-022-18/40 — each column's kind, which decides its alignment and
  * default width, and the widths this table sets itself. Eight columns and the
  * menu share a 944 px panel at 1280 px, where `1ch` is ~8.8 px, so every column
- * is sized for what it holds rather than for its kind's default (#242 Decision
- * log):
+ * is sized for what it holds rather than for its kind's default. They take
+ * ~926 px, which leaves room for a classic 15 px scrollbar (#242 Decision log):
  *
  * - the date is `09/10/2026`, under 9ch;
  * - the asset truncates, and so does its broker under it;
@@ -83,8 +83,8 @@ const SORTABLE: ReadonlySet<string> = new Set(TRANSACTION_SORT_KEYS);
  *   under a price (~125 px), which leaves room for `R$ 99.999.999,99`;
  * - the total fits `R$ 99.999.999,99` — Portfólio sizes a whole holding's value
  *   for ten times that (#245), but one transaction is not a holding;
- * - the status fits "● Substituída" and "Importada" under it; "Não classificada"
- *   and "Importada · Editada" truncate, with the full text on demand;
+ * - the status fits "● Substituída", with the origin and "Editada" each on a
+ *   line under it; "● Não classificada" truncates, with the full text on demand;
  * - the checkbox needs 2.5rem, and the row menu is one icon button.
  */
 const KINDS: Readonly<Record<LedgerColumn, { kind: ColumnKind; width?: ColumnWidth }>> = {
@@ -93,7 +93,7 @@ const KINDS: Readonly<Record<LedgerColumn, { kind: ColumnKind; width?: ColumnWid
   asset: { kind: 'text', width: 12 },
   type: { kind: 'text', width: 11 },
   quantity: { kind: 'number', width: 10 },
-  unitPrice: { kind: 'money', width: 15 },
+  unitPrice: { kind: 'money', width: 14.5 },
   totalValue: { kind: 'money', width: 14 },
   status: { kind: 'badge', width: 11 },
   actions: { kind: 'control' },
