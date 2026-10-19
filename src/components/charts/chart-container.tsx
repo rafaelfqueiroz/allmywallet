@@ -6,9 +6,15 @@ import {
   ResponsiveContainer,
   type TooltipProps,
   type TooltipValueType,
+  type XAxisProps,
   type YAxisProps,
 } from 'recharts';
-import { formatAxisCurrency } from '@/i18n/format';
+import {
+  formatAxisCurrency,
+  formatAxisDayMonth,
+  formatAxisMonth,
+  formatAxisMonthYear,
+} from '@/i18n/format';
 import { MASKED_CURRENCY } from '@/i18n/masked';
 import { cn } from '@/lib/utils';
 
@@ -88,6 +94,38 @@ export const chartAxisProps = {
   tickLine: false,
   axisLine: false,
 } as const;
+
+/**
+ * SPEC-022 BR-022-42 — DS-33 for a **daily** series' `XAxis`, spread after
+ * `chartAxisProps`: it ticks as "nov/25", never as the `2026-09-30` key.
+ *
+ * Only the first point of each month is a tick, so a month's label is printed
+ * once rather than at every point Recharts would space out by `minTickGap`
+ * (which still thins the month ticks on a multi-year range). A range spanning
+ * fewer than `MONTH_TICKS_FROM` months would carry one or two ticks that way,
+ * so it ticks by day as "30/09" and leaves Recharts to space them.
+ */
+const MONTH_TICKS_FROM = 3;
+
+export function dateAxisProps(
+  points: readonly { readonly date: string }[],
+): Pick<XAxisProps, 'ticks' | 'tickFormatter'> {
+  const ticks: string[] = [];
+  for (const { date } of points) {
+    if (ticks.at(-1)?.slice(0, 7) !== date.slice(0, 7)) ticks.push(date);
+  }
+  return ticks.length < MONTH_TICKS_FROM
+    ? { tickFormatter: formatAxisDayMonth }
+    : { ticks, tickFormatter: formatAxisMonthYear };
+}
+
+/**
+ * SPEC-022 BR-022-42 — DS-33 for a **monthly** series' `XAxis`: "set", never
+ * `2026-09`. The tooltip keeps the month and year (BR-022-38).
+ */
+export const monthAxisProps = {
+  tickFormatter: formatAxisMonth,
+} as const satisfies Pick<XAxisProps, 'tickFormatter'>;
 
 export const chartGridProps = {
   stroke: 'var(--color-border)',

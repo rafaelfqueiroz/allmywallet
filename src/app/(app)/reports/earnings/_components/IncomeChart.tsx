@@ -7,6 +7,7 @@ import {
   chartGridProps,
   chartMarkProps,
   chartTooltipProps,
+  monthAxisProps,
   valueChartProps,
   type ChartTip,
 } from '@/components/charts/chart-container';
@@ -55,7 +56,7 @@ export function IncomeChart({
     <ChartContainer title={title} summary={summary} height={260}>
       <ComposedChart data={[...points]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
         <CartesianGrid {...chartGridProps} />
-        <XAxis dataKey="month" {...chartAxisProps} minTickGap={24} />
+        <XAxis dataKey="month" {...chartAxisProps} {...monthAxisProps} minTickGap={24} />
         <YAxis {...chartAxisProps} {...valueAxis} width={72} />
         <Tooltip {...chartTooltipProps} {...valueTooltip} />
         <Bar

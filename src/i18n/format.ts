@@ -143,6 +143,37 @@ export function formatMonth(month: string): string {
 }
 
 /**
+ * SPEC-022 BR-022-42 — a chart's **date-axis tick**, never an ISO key (SPEC-016
+ * BR-016-18). Pure string work on the point's `YYYY-MM-DD` or `YYYY-MM` key
+ * (AR-29); only the month's name goes through `Intl`, at the first of the
+ * month in UTC as `formatMonth` does. `Intl` abbreviates pt-BR months with a
+ * full stop ("nov."), which the approved frame does not draw.
+ */
+const axisMonthFormatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, {
+  month: 'short',
+  timeZone: 'UTC',
+});
+
+/** "2026-09" or "2026-09-30" → "set". A monthly series' tick. */
+export function formatAxisMonth(key: string): string {
+  const [year = '', index = ''] = key.split('-');
+  return axisMonthFormatter
+    .format(new Date(Date.UTC(Number(year), Number(index) - 1, 1)))
+    .replace(/\.$/, '');
+}
+
+/** "2025-11-30" → "nov/25". A daily series' tick. */
+export function formatAxisMonthYear(key: string): string {
+  return `${formatAxisMonth(key)}/${key.slice(2, 4)}`;
+}
+
+/** "2026-09-30" → "30/09". A daily series too short to tick by month. */
+export function formatAxisDayMonth(date: string): string {
+  const [, month, day] = date.split('-');
+  return `${day}/${month}`;
+}
+
+/**
  * An instant as `dd/mm/yyyy` in the business time zone — for "Atualizada em",
  * where the day matters and the hour does not. Never `toLocaleDateString`
  * inline (AR-47).

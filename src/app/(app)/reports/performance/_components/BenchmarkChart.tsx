@@ -7,6 +7,7 @@ import {
   chartGridProps,
   chartTipTooltip,
   chartTooltipProps,
+  dateAxisProps,
   type ChartTip,
 } from '@/components/charts/chart-container';
 import { formatAxisPercentPoints } from '@/i18n/format';
@@ -70,7 +71,7 @@ export function BenchmarkChart({
     <ChartContainer title={title} summary={summary} height={320}>
       <LineChart data={[...points]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
         <CartesianGrid {...chartGridProps} />
-        <XAxis dataKey="date" {...chartAxisProps} minTickGap={32} />
+        <XAxis dataKey="date" {...chartAxisProps} {...dateAxisProps(points)} minTickGap={32} />
         <YAxis
           {...chartAxisProps}
           width={64}

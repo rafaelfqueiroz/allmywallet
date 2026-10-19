@@ -3,6 +3,9 @@ import { Money, Quantity } from '@/core/shared/money';
 import { BusinessDate } from '@/core/shared/clock';
 import {
   formatAxisCurrency,
+  formatAxisDayMonth,
+  formatAxisMonth,
+  formatAxisMonthYear,
   formatAxisPercentPoints,
   formatBusinessDate,
   formatCurrency,
@@ -83,6 +86,30 @@ describe('formatMonth', () => {
   it('names the month and the year in pt-BR', () => {
     expect(formatMonth('2026-09')).toBe('setembro de 2026');
     expect(formatMonth('2027-01')).toBe('janeiro de 2027');
+  });
+});
+
+describe('chart date-axis ticks (SPEC-022 BR-022-42)', () => {
+  it('ticks a daily series as month and year', () => {
+    expect(formatAxisMonthYear('2025-11-30')).toBe('nov/25');
+    expect(formatAxisMonthYear('2026-01-02')).toBe('jan/26');
+  });
+
+  it('ticks a monthly series as the month alone', () => {
+    expect(formatAxisMonth('2026-09')).toBe('set');
+    expect(formatAxisMonth('2026-05')).toBe('mai');
+    expect(formatAxisMonth('2026-12-31')).toBe('dez');
+  });
+
+  it('drops the full stop Intl puts after an abbreviated month', () => {
+    for (let month = 1; month <= 12; month += 1) {
+      const key = `2026-${String(month).padStart(2, '0')}`;
+      expect(formatAxisMonth(key)).toMatch(/^[a-zç]{3}$/);
+    }
+  });
+
+  it('ticks a short daily range as day and month', () => {
+    expect(formatAxisDayMonth('2026-09-30')).toBe('30/09');
   });
 });
 

@@ -6,6 +6,7 @@ import {
   chartAxisProps,
   chartGridProps,
   chartTooltipProps,
+  dateAxisProps,
   valueChartProps,
   type ChartTip,
 } from '@/components/charts/chart-container';
@@ -65,7 +66,7 @@ export function ValueChart({
           </linearGradient>
         </defs>
         <CartesianGrid {...chartGridProps} />
-        <XAxis dataKey="date" {...chartAxisProps} minTickGap={32} />
+        <XAxis dataKey="date" {...chartAxisProps} {...dateAxisProps(points)} minTickGap={32} />
         <YAxis {...chartAxisProps} {...valueAxis} width={72} />
         <Tooltip {...chartTooltipProps} {...valueTooltip} />
         <Area

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DefaultTooltipContent, PieChart } from 'recharts';
-import { ChartContainer, valueChartProps } from '@/components/charts/chart-container';
+import {
+  ChartContainer,
+  dateAxisProps,
+  monthAxisProps,
+  valueChartProps,
+} from '@/components/charts/chart-container';
 import { ChartLegend } from '@/components/charts/chart-legend';
 import { assetClassColor } from '@/components/charts/palette';
 import { audit, render, screen } from '@/components/test-utils';
@@ -176,5 +181,37 @@ describe('a money chart’s tooltip (SPEC-022 BR-022-38)', () => {
     expect(text).toContain('setembro de 2026');
     expect(text).toContain('Proventos : R$ ••••••');
     expect(text).not.toContain('1.284,10');
+  });
+});
+
+describe('date axes (SPEC-022 BR-022-42)', () => {
+  const days = (from: string, to: string): { date: string }[] => {
+    const out: { date: string }[] = [];
+    for (let d = new Date(`${from}T00:00:00Z`); d <= new Date(`${to}T00:00:00Z`);) {
+      out.push({ date: d.toISOString().slice(0, 10) });
+      d = new Date(d.getTime() + 86_400_000);
+    }
+    return out;
+  };
+
+  it('ticks a daily series once per month, as month and year', () => {
+    const { ticks, tickFormatter } = dateAxisProps(days('2025-11-15', '2026-02-10'));
+    expect(ticks).toEqual(['2025-11-15', '2025-12-01', '2026-01-01', '2026-02-01']);
+    expect(ticks?.map((tick, index) => tickFormatter?.(tick, index))).toEqual([
+      'nov/25',
+      'dez/25',
+      'jan/26',
+      'fev/26',
+    ]);
+  });
+
+  it('ticks a range of under three months by day, leaving the spacing to Recharts', () => {
+    const props = dateAxisProps(days('2026-08-20', '2026-09-30'));
+    expect(props.ticks).toBeUndefined();
+    expect(props.tickFormatter?.('2026-09-30', 0)).toBe('30/09');
+  });
+
+  it('ticks a monthly series as the month alone', () => {
+    expect(monthAxisProps.tickFormatter('2026-09')).toBe('set');
   });
 });

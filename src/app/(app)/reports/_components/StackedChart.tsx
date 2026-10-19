@@ -6,6 +6,7 @@ import {
   chartAxisProps,
   chartGridProps,
   chartTooltipProps,
+  dateAxisProps,
   valueChartProps,
   type ChartTip,
 } from '@/components/charts/chart-container';
@@ -64,7 +65,7 @@ export function StackedChart({
     <ChartContainer title={title} summary={summary} height={320}>
       <AreaChart data={[...rows]} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
         <CartesianGrid {...chartGridProps} />
-        <XAxis dataKey="date" {...chartAxisProps} minTickGap={32} />
+        <XAxis dataKey="date" {...chartAxisProps} {...dateAxisProps(rows)} minTickGap={32} />
         <YAxis {...chartAxisProps} {...valueAxis} width={72} />
         <Tooltip {...chartTooltipProps} {...valueTooltip} />
         <Legend />

@@ -265,7 +265,9 @@ test('shows the monthly proventos as a table beside the chart', async ({ signedI
  * month as a reader says it and the exact amount with centavos, the figure the
  * table lists for that month.
  */
-test('the monthly chart’s tooltip reads the month and the exact amount', async ({ signedIn }) => {
+test('the monthly chart’s axis reads months and its tooltip the exact amount', async ({
+  signedIn,
+}) => {
   const { page, userId } = signedIn;
   const [code] = await seedHoldings(userId, [
     { code: 'TIPM', quantity: '100', averageCost: '10', price: '40' },
@@ -276,6 +278,12 @@ test('the monthly chart’s tooltip reads the month and the exact amount', async
 
   const chart = page.getByRole('img', { name: 'Proventos mês a mês' });
   await expect(chart).toBeVisible();
+  // SPEC-022 BR-022-42 — the month axis reads "set", never the `2026-09` key.
+  const ticks = chart.locator('.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value');
+  await expect(ticks.first()).toHaveText(/^[a-zç]{3}$/);
+  for (const label of await ticks.allTextContents()) expect(label).toMatch(/^[a-zç]{3}$/);
+  await expect(chart).not.toContainText(/\d{4}-\d{2}/);
+
   const bar = chart.locator('.recharts-bar-rectangle path').first();
   await bar.hover();
 
