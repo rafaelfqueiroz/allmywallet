@@ -19,24 +19,27 @@ import { LedgerSelection } from '@/app/(app)/transactions/_components/LedgerSele
  *
  * **Every cell arrives rendered.** The page builds each cell on the server —
  * `Money` with the account's masking applied (BR-022-24), the provenance link,
- * the estimate marker — and hands this component finished nodes. Nothing here
+ * the estimate marker, the row menu — and hands this component finished nodes. Nothing here
  * formats a figure, so no `Money` or `Quantity` crosses the client boundary as
  * a number (AR-06–AR-10), and no cell can disagree with the CSV export's
  * formatting. This component owns only the columns: their headers, their
  * order, which of them sort, and what each holds (`KINDS`).
  */
 
+/**
+ * SPEC-022 BR-022-40 — eight columns and the row menu, down from eleven: the
+ * broker sits under the asset, the origin under the status, and the row actions
+ * in a "⋯" menu (DL-022-22).
+ */
 export const LEDGER_COLUMNS = [
   'select',
   'tradeDate',
   'asset',
   'type',
-  'institution',
   'quantity',
   'unitPrice',
   'totalValue',
   'status',
-  'provenance',
   'actions',
 ] as const;
 
@@ -52,37 +55,52 @@ const HEADER_KEYS = {
   tradeDate: 'date',
   asset: 'asset',
   type: 'type',
-  institution: 'institution',
   quantity: 'quantity',
   unitPrice: 'unitPrice',
   totalValue: 'total',
   status: 'status',
-  provenance: 'provenance',
 } as const satisfies Partial<Record<LedgerColumn, string>>;
 
-/** The columns the repository can order by (`TransactionSortKey`). */
+/**
+ * The columns the repository can order by (`TransactionSortKey`). `institution`
+ * is a sort key with no column of its own since BR-022-40: no header offers it,
+ * and a URL naming it still sorts — through every page, because the table keeps
+ * every `TransactionSortKey` in its links (`urlSortIds`, #255 review).
+ */
 const SORTABLE: ReadonlySet<string> = new Set(TRANSACTION_SORT_KEYS);
 
 /**
- * SPEC-022 BR-022-18 — each column's kind, which decides its alignment and
- * default width, and the widths this table sets itself: the row actions are two
- * icon buttons. The unit price's cost-estimate marker (BR-007-06) sits beside the
- * figure and wraps under it when the column is full — the column is sized for the
- * figure, never for the marker. Restructuring the columns so the ledger fits without scrolling is BR-022-40
- * (#242), not this.
+ * SPEC-022 BR-022-18/40 — each column's kind, which decides its alignment and
+ * default width, and the widths this table sets itself. Eight columns and the
+ * menu share a 944 px panel at 1280 px, where `1ch` is ~8.8 px, so every column
+ * is sized for what it holds rather than for its kind's default. They take
+ * ~919 px, which leaves room for a classic 15 px scrollbar (#242 Decision log):
+ *
+ * - the date is `09/10/2026`, under 9ch;
+ * - the asset truncates, and so does its broker under it;
+ * - the type fits "Bonificação", "Amortização" and "Grupamento"; longer types
+ *   truncate;
+ * - the quantity fits the eight decimal places `formatQuantity` allows,
+ *   `1.234,12345678` (#255 review), and `1.234.567,89`;
+ * - the unit price is sized for "Custo estimado" (BR-007-06), the widest thing
+ *   under a price (~125 px), which leaves room for `R$ 99.999.999,99`;
+ * - the total fits `R$ 99.999.999,99` — Portfólio sizes a whole holding's value
+ *   for ten times that (#245), but one transaction is not a holding;
+ * - the status fits "● Substituída", with the origin and "Editada" each on a
+ *   line under it; "● Não classificada" truncates, with the full text on demand;
+ * - the checkbox needs 2.25rem (a 16 px box and the cell's padding), and the row
+ *   menu is one icon button.
  */
 const KINDS: Readonly<Record<LedgerColumn, { kind: ColumnKind; width?: ColumnWidth }>> = {
-  select: { kind: 'control' },
-  tradeDate: { kind: 'date' },
-  asset: { kind: 'text', width: 20 },
-  type: { kind: 'text', width: 14 },
-  institution: { kind: 'text', width: 18 },
-  quantity: { kind: 'number' },
-  unitPrice: { kind: 'money' },
-  totalValue: { kind: 'money' },
-  status: { kind: 'badge' },
-  provenance: { kind: 'badge', width: 20 },
-  actions: { kind: 'control', width: '5.5rem' },
+  select: { kind: 'control', width: '2.25rem' },
+  tradeDate: { kind: 'date', width: 9.5 },
+  asset: { kind: 'text', width: 10 },
+  type: { kind: 'text', width: 10 },
+  quantity: { kind: 'number', width: 13 },
+  unitPrice: { kind: 'money', width: 14.5 },
+  totalValue: { kind: 'money', width: 14 },
+  status: { kind: 'badge', width: 11 },
+  actions: { kind: 'control' },
 };
 
 export interface LedgerTableProps {
@@ -141,6 +159,7 @@ export function LedgerTable({
         server={{ total, rowId: (row) => row.id }}
         caption={t('table.caption')}
         sortable
+        urlSortIds={TRANSACTION_SORT_KEYS}
         initialSorting={[defaultSort]}
         sortLabel={(column) => t('table.sortBy', { column })}
         sortControlLabels={{

@@ -580,7 +580,15 @@ describe('DataTable — server-paged', () => {
     },
   ];
 
-  function Ledger({ data = page2, total = 27 }: { data?: Entry[]; total?: number }) {
+  function Ledger({
+    data = page2,
+    total = 27,
+    urlSortIds,
+  }: {
+    data?: Entry[];
+    total?: number;
+    urlSortIds?: readonly string[];
+  }) {
     return (
       <DataTable
         columns={entryColumns}
@@ -588,6 +596,7 @@ describe('DataTable — server-paged', () => {
         server={{ total, rowId: (row) => row.id }}
         caption="Transações"
         sortable
+        {...(urlSortIds ? { urlSortIds } : {})}
         initialSorting={[{ id: 'code', desc: true }]}
         sortLabel={(column) => `Ordenar por ${column}`}
         pageSizeOptions={[25, 50]}
@@ -641,6 +650,34 @@ describe('DataTable — server-paged', () => {
     expect(within(table).getByRole('columnheader', { name: 'Ordenar por Ativo' })).toHaveAttribute(
       'aria-sort',
       'descending',
+    );
+  });
+
+  it('keeps a sort with no column through its page links, when the URL may name it', () => {
+    // #255 review: the ledger's institution sort lost its column (BR-022-40).
+    // The server orders by it, so a page link that dropped it would page
+    // through a different order than the rows on screen.
+    nav.search = 'sort=institution%3Aasc&page=2';
+    const { unmount } = render(<Ledger urlSortIds={['code', 'total', 'institution']} />);
+    let pager = screen.getByRole('navigation', { name: 'Paginação' });
+    expect(within(pager).getByRole('link', { name: 'Página 1' })).toHaveAttribute(
+      'href',
+      '/posicoes?sort=institution%3Aasc',
+    );
+    // No header offers it, and none claims to be the order.
+    const table = screen.getByRole('table');
+    expect(within(table).queryByRole('link', { name: /institution/ })).not.toBeInTheDocument();
+    expect(
+      within(table).getByRole('columnheader', { name: 'Ordenar por Ativo' }),
+    ).not.toHaveAttribute('aria-sort', 'descending');
+    unmount();
+
+    // Without the list, the URL may name only the sortable columns.
+    render(<Ledger />);
+    pager = screen.getByRole('navigation', { name: 'Paginação' });
+    expect(within(pager).getByRole('link', { name: 'Página 1' })).toHaveAttribute(
+      'href',
+      '/posicoes',
     );
   });
 

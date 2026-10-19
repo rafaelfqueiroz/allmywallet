@@ -206,6 +206,15 @@ export type DataTableProps<TData> = {
    * share a page number. Without it: `sort`, `page`, `size`, `q`.
    */
   paramPrefix?: string;
+  /**
+   * Server mode: every sort a URL may name, when the query can order by more
+   * than the sortable columns. Without it, the sortable columns' ids. A sort
+   * that has no column (the ledger's institution since BR-022-40, #255 review)
+   * must still be accepted, or the next page link drops it and the reader pages
+   * through a different order than the rows on screen. Only a column's header
+   * offers a sort; this list only decides what a link may keep.
+   */
+  urlSortIds?: readonly string[];
   /** Shown when a filter matches nothing. Catalogue default otherwise. */
   noResults?: ReactNode;
   /**
@@ -292,18 +301,20 @@ function urlOptions<TData>({
   pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
   defaultPageSize = DEFAULT_PAGE_SIZE,
   paramPrefix,
+  urlSortIds,
 }: DataTableProps<TData>): TableUrlOptions {
   const first = initialSorting?.[0];
   return {
     ...(paramPrefix ? { prefix: paramPrefix } : {}),
     pageSizeOptions,
-    sortableIds: sortable
-      ? columns.flatMap((column) => {
+    sortableIds: !sortable
+      ? []
+      : (urlSortIds ??
+        columns.flatMap((column) => {
           const id = columnId(column);
           // A column that opted out cannot be named by a link either.
           return id === undefined || column.enableSorting === false ? [] : [id];
-        })
-      : [],
+        })),
     defaults: {
       sort: first ? { id: first.id, desc: first.desc } : null,
       pageSize: pageSizeOptions.includes(defaultPageSize)

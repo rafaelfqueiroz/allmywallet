@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { Pencil, Trash2 } from 'lucide-react';
+import { ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { listTransactions } from '@/core/ledger/list-transactions';
 import type { TransactionListItem } from '@/core/ledger/ports';
+import { FIXED_INCOME_CLASSES } from '@/core/valuation/holdings';
 import { formatBusinessDate } from '@/i18n/format';
 import {
   LEDGER_TABLE_URL_OPTIONS,
@@ -38,6 +39,9 @@ import { Cluster } from '@/components/layout/cluster';
 import { Text } from '@/components/ui/text';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { CellLabel } from '@/components/patterns/cell-label';
+import { RowMenu } from '@/components/patterns/row-menu';
 import { importBatchPath } from '@/app/(app)/import/paths';
 
 /**
@@ -236,13 +240,20 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   );
 }
 
+/** SPEC-022 BR-022-31 — each ledger status as a status badge, in the frame's colours. */
+const STATUS_VARIANT = {
+  active: 'success',
+  unclassified: 'warning',
+  superseded: 'neutral',
+} as const satisfies Record<TransactionListItem['transaction']['status'], string>;
+
 /**
  * One ledger row, rendered on the server cell by cell (see `LedgerTable` for
  * why the cells arrive finished).
  *
- * BR-006-03: `active` renders plainly; `unclassified` and `superseded` carry a
- * visible badge rather than being hidden or blended in — the row still shows
- * its real figures, but its status is never ambiguous.
+ * BR-006-03: every status carries a visible badge, `unclassified` and
+ * `superseded` in colours of their own rather than hidden or blended in — the
+ * row still shows its real figures, but its status is never ambiguous.
  */
 async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
   const t = await getTranslations('transactions');
@@ -255,24 +266,23 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
       // One selection across the table and the card copy (PR #234 review P1).
       select: <RowSelect id={tx.id} label={t('bulk.select')} />,
       tradeDate: <span className="whitespace-nowrap">{formatBusinessDate(tx.tradeDate)}</span>,
+      // BR-022-40: the broker sits under the asset, each line ending in its own
+      // ellipsis; the full text opens from the cell (BR-022-18). A CDB, LCI or
+      // LCA leads with its name: its code is B3's opaque `Código` (#242 Decision log).
       asset: (
-        <Stack gap="none">
-          {/* BR-022-18: each line ends in its own ellipsis in a narrow column. */}
-          <Text as="span" weight="medium" className="truncate">
-            {item.assetCode}
-          </Text>
-          <Text as="span" size="xs" tone="muted" className="truncate">
-            {item.assetName}
-          </Text>
-        </Stack>
+        <CellLabel detail={item.institutionName ?? '—'}>
+          {(FIXED_INCOME_CLASSES as ReadonlySet<string>).has(item.assetClass)
+            ? item.assetName
+            : item.assetCode}
+        </CellLabel>
       ),
-      // No `whitespace-nowrap` on these two: the table cell is already one line and
-      // truncates (BR-022-18), and in the card a long name has to be able to wrap.
+      // No `whitespace-nowrap`: the table cell is already one line and truncates
+      // (BR-022-18), and in the card a long name has to be able to wrap.
       type: <span>{tType(tx.type)}</span>,
-      institution: <span>{item.institutionName ?? '—'}</span>,
       quantity: <Money value={tx.quantity} kind="quantity" />,
       unitPrice: (
-        <Cluster gap="sm" justify="end" align="baseline">
+        // BR-022-40: the marker sits under the price it qualifies.
+        <Stack gap="xs" align="end">
           <Money value={tx.unitPrice} />
           {/* SPEC-007 BR-007-06 / SPEC-005 BR-005-20d — never hidden: this
               is the transaction whose own price is the estimate. */}
@@ -282,67 +292,66 @@ async function ledgerRow(item: TransactionListItem): Promise<LedgerRow> {
             closeExplanation={(date) => t('markers.costEstimated.closeExplanation', { date })}
             carriedExplanation={t('markers.costEstimated.carriedExplanation')}
           />
-        </Cluster>
+        </Stack>
       ),
       totalValue: <Money value={tx.totalValue} />,
-      status:
-        tx.status === 'active' ? (
-          <Text as="span" size="sm" tone="muted">
+      // BR-022-40: status and origin share one cell, the origin under the badge.
+      status: (
+        <Stack gap="xs" align="start" className="min-w-0">
+          <Badge dot variant={STATUS_VARIANT[tx.status]}>
             {t(`status.${tx.status}`)}
+          </Badge>
+          {/* BR-006-02: provenance is visible in the UI, not merely stored. The
+              link back to the batch is the row menu's "Ver importação de origem". */}
+          <Text as="span" size="xs" tone="muted" data-cell-line>
+            {t(tx.importBatchId === null ? 'provenance.manual' : 'provenance.imported')}
           </Text>
-        ) : (
-          <Badge variant="outline">{t(`status.${tx.status}`)}</Badge>
-        ),
-      provenance: (
-        <Cluster gap="xs" align="center">
-          {/* BR-006-02: provenance is visible in the UI, not merely stored —
-              and, for an imported row, links back to the batch it came from,
-              which is what makes a figure "explainable back to its source". */}
-          {tx.importBatchId === null ? (
-            <Badge variant="secondary">{t('provenance.manual')}</Badge>
-          ) : (
-            <Badge variant="secondary" asChild>
-              <Link href={importBatchPath(tx.importBatchId)}>{t('provenance.imported')}</Link>
-            </Badge>
-          )}
-          {/* BR-006-16: a human corrected this row since it was imported. */}
+          {/* BR-006-16: a human corrected this row. A line of its own: beside the
+              origin it would be the part the column cuts. */}
           {tx.isUserModified && (
-            <Badge variant="outline" title={t('modifiedExplanation')}>
+            <Text as="span" size="xs" tone="muted" data-cell-line title={t('modifiedExplanation')}>
               {t('modified')}
-            </Badge>
+            </Text>
           )}
-        </Cluster>
+        </Stack>
       ),
       /*
         BR-006-12/13 as links rather than buttons: both lead to a page that
         asks something before it writes — the edit form, and the deletion's
-        mandatory disclosure of what will be recalculated. A link also keeps
-        them out of the bulk form's submission entirely.
+        mandatory disclosure of what will be recalculated, which Excluir still
+        goes through. A link also keeps them out of the bulk form's submission.
+        BR-022-40: behind one "⋯" button, so three actions take one control's
+        width.
       */
       actions: (
-        // Icon buttons, as the prototype's row actions: eleven columns of
-        // text actions do not fit the content width. The accessible name is
-        // the word, and `title` shows it on hover.
-        <Cluster gap="xs" className="flex-nowrap">
-          <Button asChild variant="ghost" size="icon-sm">
-            <Link
-              href={`/transactions/${tx.id}/edit`}
-              aria-label={t('edit.action')}
-              title={t('edit.action')}
-            >
+        <RowMenu
+          label={t('table.actionsFor', {
+            asset: item.assetCode,
+            date: formatBusinessDate(tx.tradeDate),
+          })}
+        >
+          <DropdownMenuItem asChild>
+            <Link href={`/transactions/${tx.id}/edit`}>
               <Pencil aria-hidden="true" />
+              {t('edit.action')}
             </Link>
-          </Button>
-          <Button asChild variant="ghost" size="icon-sm">
-            <Link
-              href={`/transactions/${tx.id}/delete`}
-              aria-label={t('delete.action')}
-              title={t('delete.action')}
-            >
+          </DropdownMenuItem>
+          {tx.importBatchId !== null && (
+            <DropdownMenuItem asChild>
+              <Link href={importBatchPath(tx.importBatchId)}>
+                <ExternalLink aria-hidden="true" />
+                {t('table.viewImport')}
+              </Link>
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild variant="destructive">
+            <Link href={`/transactions/${tx.id}/delete`}>
               <Trash2 aria-hidden="true" />
+              {t('delete.action')}
             </Link>
-          </Button>
-        </Cluster>
+          </DropdownMenuItem>
+        </RowMenu>
       ),
     },
   };
