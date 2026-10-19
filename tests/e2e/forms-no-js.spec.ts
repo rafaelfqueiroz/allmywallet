@@ -183,9 +183,10 @@ test.describe('BR-022-37 — the standard form posts without JavaScript', () => 
       await page.getByLabel('Preço unitário', { exact: true }).fill('1.000,00');
       await page.getByRole('button', { name: 'Registrar transação' }).click();
       await expect(page).toHaveURL(/\/transactions$/);
-      // The asset filter's <option> carries the code too; the row is what counts.
+      // The asset filter's <option> carries the name too; the row is what counts.
+      // A CDB's row leads with its name (SPEC-022 BR-022-40, #242).
       await expect(
-        page.getByText('CDB-SEM-JS', { exact: true }).filter({ visible: true }).first(),
+        page.getByText('CDB sem script', { exact: true }).filter({ visible: true }).first(),
       ).toBeVisible();
     });
   });
