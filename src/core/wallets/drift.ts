@@ -81,12 +81,20 @@ export interface DriftReport {
  * here. The absent-quote case follows the same logic in reverse: with the
  * session open and no intraday quote at all, whatever priced this holding is
  * at least a day old, which is past any cadence.
+ *
+ * **The age is the entry's, `fetched_at` — never the quote's own `quoted_at`**
+ * (BR-008-15, #259). The free tier delays every quote by about 30 minutes
+ * (PRD R5) against a default cadence of 30, so measuring `quoted_at` made
+ * every asset unusable for the whole of every session, however recently the
+ * worker had refreshed it. `fetched_at` is also what Observar preços judges an
+ * intraday quote by (`core/opportunity/evaluate.ts`), so the two screens
+ * cannot disagree about one quote (SPEC-018 BR-018-14).
  */
 export interface PriceFreshness {
   /** SPEC-009: nothing could price this holding and it sits at cost. */
   readonly priceUnavailable: boolean;
-  /** SPEC-008 `latest_quotes.quoted_at`, or `null` when there is no intraday quote. */
-  readonly quotedAt: Date | null;
+  /** SPEC-008 `latest_quotes.fetched_at`, or `null` when there is no intraday quote. */
+  readonly fetchedAt: Date | null;
   readonly sessionOpen: boolean;
   /** The resolved `quotes.cadence_minutes` (SPEC-002), including a runtime degradation. */
   readonly cadenceMinutes: number;
@@ -95,12 +103,12 @@ export interface PriceFreshness {
 
 export function isPriceUsable(freshness: PriceFreshness): boolean {
   if (freshness.priceUnavailable) return false;
-  if (freshness.quotedAt === null) return !freshness.sessionOpen;
+  if (freshness.fetchedAt === null) return !freshness.sessionOpen;
   return !isQuoteStale(
     freshness.sessionOpen,
     freshness.cadenceMinutes,
     freshness.now,
-    freshness.quotedAt,
+    freshness.fetchedAt,
   );
 }
 

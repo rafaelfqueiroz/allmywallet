@@ -109,7 +109,7 @@ export async function loadWalletBalances(userId: UserId): Promise<WalletBalances
 
       const holdings = query.value.report.groups.flatMap((group) => group.holdings);
       const assetIds = [...new Set(holdings.map((holding) => holding.assetId))];
-      const quotedAt = await latestQuotedAtByAsset(tx, assetIds);
+      const fetchedAt = await latestFetchedAtByAsset(tx, assetIds);
 
       const sessionOpen = new B3TradingCalendar().isSessionOpen(now);
       const holdingsByWallet = groupByWallet(holdings, (holding) => ({
@@ -121,7 +121,7 @@ export async function loadWalletBalances(userId: UserId): Promise<WalletBalances
         // the four facts it needs and decides nothing itself.
         priceUsable: isPriceUsable({
           priceUnavailable: holding.needsAttention === NeedsAttentionReason.PRICE_UNAVAILABLE,
-          quotedAt: quotedAt.get(holding.assetId) ?? null,
+          fetchedAt: fetchedAt.get(holding.assetId) ?? null,
           sessionOpen,
           cadenceMinutes: cadence.value,
           now,
@@ -168,7 +168,9 @@ function groupByWallet(
 }
 
 /**
- * SPEC-008 — when each asset's intraday quote was last taken.
+ * SPEC-008 BR-008-15 — when each asset's intraday quote was last fetched: the
+ * entry's age, which is what staleness measures. Not `quoted_at`, which the
+ * free tier's ~30-minute delay puts past the cadence all session (#259).
  *
  * Per asset rather than the single high-water mark
  * `DrizzleReportDataPort.latestQuoteAt` returns, because BR-017-21 is a
@@ -186,14 +188,14 @@ function groupByWallet(
  * `latest_quotes` is overwritten on every refresh (BR-008-10), so one row per
  * asset is all there is.
  */
-async function latestQuotedAtByAsset(
+async function latestFetchedAtByAsset(
   tx: Tx,
   assetIds: readonly AssetId[],
 ): Promise<ReadonlyMap<AssetId, Date>> {
   if (assetIds.length === 0) return new Map();
   const rows = await tx
-    .select({ assetId: latestQuotes.assetId, quotedAt: latestQuotes.quotedAt })
+    .select({ assetId: latestQuotes.assetId, fetchedAt: latestQuotes.fetchedAt })
     .from(latestQuotes)
     .where(inArray(latestQuotes.assetId, [...assetIds]));
-  return new Map(rows.map((row) => [AssetId.of(row.assetId), row.quotedAt]));
+  return new Map(rows.map((row) => [AssetId.of(row.assetId), row.fetchedAt]));
 }
