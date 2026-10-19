@@ -308,6 +308,46 @@ test('the value chart’s tooltip reads the date and the exact amount its table 
 });
 
 /**
+ * SPEC-022 BR-022-42 — a daily chart's date axis reads pt-BR months ("nov/25"),
+ * once per month, and never the ISO key the point carries (SPEC-016 BR-016-18).
+ */
+test('the value chart’s date axis reads months, never an ISO date', async ({ signedIn }) => {
+  const { page, userId } = signedIn;
+  await seedHoldings(userId, [{ code: 'TIPX', quantity: '100', averageCost: '10', price: '10' }]);
+
+  const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+  try {
+    await pool.query(
+      `INSERT INTO daily_valuation_snapshots
+         (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+       SELECT $1, (now() AT TIME ZONE 'America/Sao_Paulo')::date - d, 1000 + d, 1000, 0,
+              jsonb_build_object('stock', (1000 + d)::text)
+         FROM generate_series(1, 120) AS d`,
+      [userId],
+    );
+    const { rows } = await pool.query<{ from: string; to: string }>(
+      `SELECT to_char((now() AT TIME ZONE 'America/Sao_Paulo')::date - 120, 'YYYY-MM-DD') AS from,
+              to_char((now() AT TIME ZONE 'America/Sao_Paulo')::date - 1, 'YYYY-MM-DD') AS to`,
+    );
+    const range = rows[0];
+    if (range === undefined) throw new Error('no range');
+    await page.goto(`/reports?period=custom&from=${range.from}&to=${range.to}`);
+  } finally {
+    await pool.end();
+  }
+
+  const chart = page.getByRole('img', { name: 'Patrimônio ao longo do tempo' });
+  const ticks = chart.locator('.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value');
+  await expect(ticks.first()).toBeVisible();
+  const labels = await ticks.allTextContents();
+  expect(labels.length).toBeGreaterThan(1);
+  for (const label of labels) expect(label).toMatch(/^[a-zç]{3}\/\d{2}$/);
+  // A month's label is printed once, not at every point Recharts spaces out.
+  expect(new Set(labels).size).toBe(labels.length);
+  await expect(chart).not.toContainText(/\d{4}-\d{2}/);
+});
+
+/**
  * SPEC-022 BR-022-39 (DL-022-20) — two invested figures, two names. Portfólio's
  * cost of holdings is "Valor aplicado"; Relatórios' net money put in is
  * "Aportes líquidos". Each opens an explanation that names the other and why
