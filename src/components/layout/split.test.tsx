@@ -32,7 +32,8 @@ describe('Split', () => {
 
     const aside = render(<Split side="aside">x</Split>);
     expect(aside.container.querySelector('[data-slot="split"]')?.className).toContain(
-      'minmax(0,3fr)_minmax(0,2fr)',
+      // #243 — 3:2, the narrow column never under the frame's ~430px.
+      '@3xl:grid-cols-[minmax(0,3fr)_minmax(27rem,2fr)]',
     );
   });
 

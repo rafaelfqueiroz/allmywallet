@@ -2,7 +2,7 @@
  * SPEC-022 BR-022-05/16 (#211) — where Configurações › Importar lives, written
  * once. Importar moved from `/import` (BR-022-08 redirects the old paths, see
  * `src/lib/legacy-redirects.ts`), and every screen that links to an import —
- * the Painel, Transações' provenance link, the onboarding guide, the post-upload
+ * the Dashboard, Transações' provenance link, the onboarding guide, the post-upload
  * redirect — builds its URL here, so the next move is one edit.
  *
  * Plain strings and no `next/*` import, so a Client Component can use it too.

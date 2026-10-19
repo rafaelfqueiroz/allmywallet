@@ -33,10 +33,10 @@ const listItemVariants = cva('', {
       false: '',
     },
     /**
-     * An item a link elsewhere points at (`#id`) — the Painel's "Ver regra",
+     * An item a link elsewhere points at (`#id`) — the Dashboard's "Ver regra",
      * an e-mail's link to a rule (#212). It clears the top bar when scrolled
      * to. The ring follows CSS `:target`, which a full page load sets (the
-     * e-mail) and a client-side navigation does not (the Painel's `Link`, whose
+     * e-mail) and a client-side navigation does not (the Dashboard's `Link`, whose
      * `pushState` leaves `:target` alone): there the scroll alone shows it.
      */
     linkTarget: {

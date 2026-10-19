@@ -25,7 +25,7 @@ import { IMPORT_SEND_PATH, importBatchPath } from '@/app/(app)/import/paths';
  * variant is redundant with its text in all three states, and the count is in
  * the text rather than implied by a colour's intensity.
  *
- * **A Painel card (SPEC-022 BR-022-07, #213).** The status sits beside the
+ * **A Dashboard card (SPEC-022 BR-022-07, #213).** The status sits beside the
  * heading as a semantic status badge (BR-022-31); the card links to the one
  * screen that owns the detail — the batch's per-asset comparison, or the
  * import that would produce one.

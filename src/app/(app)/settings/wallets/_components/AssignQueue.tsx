@@ -32,7 +32,7 @@ export const RESOLVE_ANCHOR = 'resolver';
 /**
  * SPEC-010 BR-010-12/13/14 — Configurações › Carteiras › **Atribuir ativos**:
  * the "Precisa de atenção" queue with its resolve forms, and the standing rules
- * with the way to remove each. This is where the Painel's "Distribuir" items
+ * with the way to remove each. This is where the Dashboard's "Distribuir" items
  * land (SPEC-020 BR-020-18).
  *
  * It lists **names, links and allocated quantities** — setup data. The

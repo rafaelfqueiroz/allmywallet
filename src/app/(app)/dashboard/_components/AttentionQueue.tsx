@@ -36,7 +36,7 @@ import { importBatchPath } from '@/app/(app)/import/paths';
  * and this queue was always the "is there anything for me to do?" surface a
  * missing fixed-income rate belongs in.
  *
- * **A Painel card (SPEC-022 BR-022-07, #213)**: the first items, the total as
+ * **A Dashboard card (SPEC-022 BR-022-07, #213)**: the first items, the total as
  * a count beside the heading, and a link to the rest. What each item says is
  * #215's to change; this owns the card around it.
  */

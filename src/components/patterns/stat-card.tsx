@@ -30,7 +30,8 @@ export type StatCardProps = Omit<React.ComponentProps<typeof Card>, 'title'> & {
   /**
    * SPEC-022 BR-022-07 — the destination that owns this figure's detail, as
    * the card's footer row. Pinned to the bottom so a row of cards keeps its
-   * links on one line whatever each hint's length.
+   * links on one line whatever each hint's length, under a hairline that runs
+   * edge to edge like every panel's footer (BR-022-36, #243).
    */
   link?: CardLinkTarget;
   /**
@@ -84,8 +85,12 @@ export function StatCard({
             {hint && <dd className="text-xs text-muted-foreground">{hint}</dd>}
           </Stack>
         </dl>
-        {link && <CardLink {...link} />}
       </CardContent>
+      {link && (
+        <div data-slot="card-footer" className="border-t px-(--card-spacing) py-3">
+          <CardLink {...link} />
+        </div>
+      )}
     </Card>
   );
 }

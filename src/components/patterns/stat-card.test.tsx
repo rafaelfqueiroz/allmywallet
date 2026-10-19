@@ -25,6 +25,17 @@ describe('StatCard', () => {
     expect(screen.getByRole('note')).toHaveTextContent(TEXT);
   });
 
+  // SPEC-022 BR-022-07/36 (#243) — the link is the card's footer, a direct
+  // child of the card, so its hairline runs edge to edge.
+  it('links to its destination from a footer row', () => {
+    const { container } = render(
+      <StatCard label="Patrimônio" value="R$ 1,00" link={{ href: '/portfolio', label: 'Ver' }} />,
+    );
+    const footer = container.querySelector('[data-slot="card-footer"]');
+    expect(footer?.parentElement).toHaveAttribute('data-slot', 'stat-card');
+    expect(footer).toContainElement(screen.getByRole('link', { name: 'Ver' }));
+  });
+
   it('has no axe violations with an info icon', async () => {
     const { baseElement } = render(
       <StatCard label="Valor aplicado" value="R$ 10,00" info={{ id: 'applied', text: TEXT }} />,

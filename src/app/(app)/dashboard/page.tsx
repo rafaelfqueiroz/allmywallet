@@ -44,9 +44,9 @@ import { IMPORT_SEND_PATH } from '@/app/(app)/import/paths';
  * module's header for why, and `tests/structural/reports-read-snapshots.test.ts`
  * for the check that keeps it true (SPEC-016 BR-016-07a, blocking).
  *
- * **A summary hub (SPEC-022 BR-022-07, #213).** The Painel summarises and
+ * **A summary hub (SPEC-022 BR-022-07, #213).** The Dashboard summarises and
  * links; it owns no detail of its own. Every card names the destination that
- * owns its detail — Portfólio, Transações, the import batch, Configurações.
+ * owns its detail — Portfólio, the import batch, Configurações.
  * `tests/structural/dashboard-reads-the-summary.test.ts` keeps its figures
  * coming from the two loaders above and nothing else.
  *
@@ -234,6 +234,8 @@ async function Headline({
   const { result, ratio } = portfolio.result;
 
   return (
+    // The frame draws four panels (#243); the fourth, Proventos do mês, is
+    // #233's, which turns this row to four columns when it lands.
     <Grid cols={3} gap="md">
       <StatCard
         label={t('value.label')}
@@ -243,7 +245,7 @@ async function Headline({
            `ValuationMarkers` on why one badge covering all of them told some
            users a false reason for a true warning. */
         hint={<ValuationMarkers markers={portfolio.markers} />}
-        link={{ href: '/portfolio', label: t('value.link') }}
+        link={{ href: '/portfolio', label: t('value.link'), ariaLabel: t('value.linkLabel') }}
       />
       <StatCard
         label={tp('cost')}
@@ -260,7 +262,9 @@ async function Headline({
         }
         hint={tp('costHint')}
         info={{ id: 'applied-value-info', text: tp('costExplanation') }}
-        link={{ href: '/transactions', label: t('cost.link') }}
+        // #243 — the frame's "Ver no Portfólio": Patrimônio leads with this
+        // same figure (BR-022-39), so its detail is there, not in the ledger.
+        link={{ href: '/portfolio', label: t('cost.link'), ariaLabel: t('cost.linkLabel') }}
       />
       <StatCard
         label={tp('result')}

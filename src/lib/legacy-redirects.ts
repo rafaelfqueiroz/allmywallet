@@ -88,7 +88,7 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
    * #210 — Configurações › Carteiras (BR-022-05). A wallet's setup page is
    * `/settings/wallets/:walletId`; the assignment queue, which #208 had put
    * under Portfólio › Carteiras › Configurar, is its "Atribuir ativos" tab.
-   * E-mails and the Painel's "Distribuir" items linked to both.
+   * E-mails and the Dashboard's "Distribuir" items linked to both.
    */
   {
     source: '/wallets/:walletId',
@@ -108,7 +108,7 @@ export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
   /*
    * #211 — Configurações › Importar (BR-022-05/16). `/import` was upload and
    * history on one page; it lands on Enviar, the tab that answers "import a
-   * file", which links to Histórico. A batch keeps its id. The Painel, the
+   * file", which links to Histórico. A batch keeps its id. The Dashboard, the
    * onboarding guide and Transações' provenance link pointed at both.
    */
   {

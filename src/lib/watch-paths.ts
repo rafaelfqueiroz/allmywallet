@@ -2,7 +2,7 @@
  * SPEC-022 BR-022-05/07 (#212) — where Configurações › Observar preços lives,
  * written once. The rules moved from `/watch` (BR-022-08 redirects the old
  * path, see `src/lib/legacy-redirects.ts`), and every link to a rule — the
- * Painel's watch-state card, the opportunity e-mail, the revalidation after a
+ * Dashboard's watch-state card, the opportunity e-mail, the revalidation after a
  * rule changes — is built here, so the next move is one edit.
  *
  * In `lib/` rather than beside the route, unlike `(app)/import/paths.ts`: the

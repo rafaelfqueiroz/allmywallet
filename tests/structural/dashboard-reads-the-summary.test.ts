@@ -3,7 +3,7 @@ import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * SPEC-022 BR-022-07 / SPEC-016 BR-016-02 (#213) — the Painel **summarises**;
+ * SPEC-022 BR-022-07 / SPEC-016 BR-016-02 (#213) — the Dashboard **summarises**;
  * it computes nothing and reads nothing of its own.
  *
  * Its figures come from three loaders: `dashboard/data.ts` (which folds the
@@ -48,7 +48,7 @@ function importsOf(source: string): string[] {
   return [...source.matchAll(/from\s+'([^']+)'/g)].map((match) => match[1] ?? '');
 }
 
-describe('the Painel reads the dashboard summary only (SPEC-022 BR-022-07, SPEC-016 BR-016-02)', () => {
+describe('the Dashboard reads the dashboard summary only (SPEC-022 BR-022-07, SPEC-016 BR-016-02)', () => {
   const renderers = [...files(ROUTE)];
 
   it('scans the page and its cards', () => {

@@ -41,7 +41,7 @@ describe('PageShell', () => {
 
   // SPEC-022 BR-022-14: one width, and no prop or class to choose another.
   it('renders one maximum width and one left edge for every page', () => {
-    const { unmount } = render(<PageShell title="Painel">conteúdo</PageShell>);
+    const { unmount } = render(<PageShell title="Dashboard">conteúdo</PageShell>);
     const first = screen.getByRole('main').className;
     unmount();
 

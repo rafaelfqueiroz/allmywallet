@@ -18,7 +18,7 @@ import { hrefWithParams, isPathActive } from '@/components/patterns/nav-link';
  *
  * **Only routes that exist are listed (DS-26)** — a navigation menu whose item
  * 404s is worse than a shorter menu. SPEC-022 BR-022-01's five destinations
- * (Painel, Portfólio, Relatórios, Transações, Configurações) therefore arrive
+ * (Dashboard, Portfólio, Relatórios, Transações, Configurações) therefore arrive
  * one at a time, each with the issue that makes its route real (#208 Portfólio,
  * #209 Relatórios, #210 Configurações), and the items they absorb leave in the
  * same change. Importar and Observar preços moved under Configurações with

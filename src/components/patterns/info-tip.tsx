@@ -28,7 +28,7 @@ export interface InfoTipProps {
   /**
    * Id of an element holding the same text as the tip, as the icon's
    * accessible description. A `Field` describes its control instead; a tip
-   * explaining something that is not a control (a Painel marker badge, #213)
+   * explaining something that is not a control (a Dashboard marker badge, #213)
    * has nowhere else to put it, and a description on plain text is not read
    * by NVDA or JAWS in browse mode.
    */

@@ -34,13 +34,21 @@ const splitVariants = cva('grid grid-cols-1 items-start', {
       even: '@2xl:grid-cols-2',
       /**
        * A main column beside a narrower one that still holds lists of its
-       * own — the Painel's "Precisa da sua atenção" beside the B3 and watch
+       * own — the Dashboard's "Precisa da sua atenção" beside the B3 and watch
        * cards (#213, the prototype's 3:2). `end`'s fixed 20rem is a form's
        * width; a list row with a figure, a badge and a link needs more.
        * `@3xl` (48rem of content) splits from a ~1070px viewport beside the
        * sidebar, so a laptop at 125% zoom still gets two columns.
+       *
+       * The narrow column never drops below 27rem — the adjustment frame's
+       * ~430px (#243). At a 1280px viewport the 3:2 share alone is 349px of
+       * panel, and the watch card's four-column table (Ativo, Cotação,
+       * Gatilho, Estado) needs about 390px of it; without the floor its state
+       * badge, the card's whole point, scrolled out of view up to ~1200px.
+       * The main column keeps the rest: 312px at the breakpoint, 520px at
+       * 1280px.
        */
-      aside: '@3xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]',
+      aside: '@3xl:grid-cols-[minmax(0,3fr)_minmax(27rem,2fr)]',
     },
     gap: {
       md: 'gap-4',
