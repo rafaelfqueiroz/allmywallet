@@ -230,15 +230,27 @@ describe('isPriceUsable — BR-017-21’s three inputs', () => {
   const base = { priceUnavailable: false, sessionOpen: true, cadenceMinutes: 30, now: NOW };
 
   it('refuses a holding nothing could price, whatever the quote table says', () => {
-    expect(isPriceUsable({ ...base, priceUnavailable: true, quotedAt: new Date(NOW) })).toBe(false);
+    expect(isPriceUsable({ ...base, priceUnavailable: true, fetchedAt: new Date(NOW) })).toBe(
+      false,
+    );
   });
 
   it('accepts a quote inside the cadence during an open session', () => {
-    expect(isPriceUsable({ ...base, quotedAt: new Date('2026-08-26T13:45:00Z') })).toBe(true);
+    expect(isPriceUsable({ ...base, fetchedAt: new Date('2026-08-26T13:45:00Z') })).toBe(true);
+  });
+
+  /**
+   * #259 — the free tier's quote is ~30 minutes old the moment it is fetched
+   * (PRD R5). Its own `quoted_at` is not the entry's age; a quote refreshed
+   * five minutes ago is fresh whatever instant it describes.
+   */
+  it('judges the entry by when it was fetched, not by the instant it quotes', () => {
+    const delayed = { ...base, fetchedAt: new Date('2026-08-26T13:55:00Z') };
+    expect(isPriceUsable(delayed)).toBe(true);
   });
 
   it('refuses a quote older than the cadence during an open session', () => {
-    expect(isPriceUsable({ ...base, quotedAt: new Date('2026-08-26T13:00:00Z') })).toBe(false);
+    expect(isPriceUsable({ ...base, fetchedAt: new Date('2026-08-26T13:00:00Z') })).toBe(false);
   });
 
   /**
@@ -252,7 +264,7 @@ describe('isPriceUsable — BR-017-21’s three inputs', () => {
       isPriceUsable({
         ...base,
         sessionOpen: false,
-        quotedAt: new Date('2026-08-21T20:00:00Z'),
+        fetchedAt: new Date('2026-08-21T20:00:00Z'),
       }),
     ).toBe(true);
   });
@@ -260,18 +272,18 @@ describe('isPriceUsable — BR-017-21’s three inputs', () => {
   it('refuses an asset with no intraday quote at all while the session is open', () => {
     // Whatever priced this holding is a close, and a close during an open
     // session is at least a day old — past any cadence.
-    expect(isPriceUsable({ ...base, quotedAt: null })).toBe(false);
+    expect(isPriceUsable({ ...base, fetchedAt: null })).toBe(false);
   });
 
   it('accepts an asset with no intraday quote outside the session', () => {
-    expect(isPriceUsable({ ...base, sessionOpen: false, quotedAt: null })).toBe(true);
+    expect(isPriceUsable({ ...base, sessionOpen: false, fetchedAt: null })).toBe(true);
   });
 
   it('honours a degraded cadence rather than a hard-coded 30 minutes', () => {
     // BR-008-22: under budget pressure the poller steps out to 60 or 120
     // minutes, and a quote that is fresh *for that cadence* must stay usable.
-    const quotedAt = new Date('2026-08-26T13:15:00Z');
-    expect(isPriceUsable({ ...base, quotedAt })).toBe(false);
-    expect(isPriceUsable({ ...base, cadenceMinutes: 120, quotedAt })).toBe(true);
+    const fetchedAt = new Date('2026-08-26T13:15:00Z');
+    expect(isPriceUsable({ ...base, fetchedAt })).toBe(false);
+    expect(isPriceUsable({ ...base, cadenceMinutes: 120, fetchedAt })).toBe(true);
   });
 });
