@@ -24,7 +24,7 @@ export function appOrigin(): string {
 
 /**
  * SPEC-022 BR-022-07/08 (#212) — the rule an opportunity e-mail is about, on
- * Configurações › Observar preços. Built from the same path helper the Painel
+ * Configurações › Observar preços. Built from the same path helper the Dashboard
  * links with, so the e-mail and the screen cannot name different places.
  */
 export function opportunityRuleUrl(assetId: string): string {

@@ -13,7 +13,7 @@ import { resetLedger, resetOpportunity, resetUsers } from '../support/reset';
 import { seedUser } from '../support/users';
 
 /**
- * SPEC-022 BR-022-07 (#212) — the Painel's watch-state card, against real
+ * SPEC-022 BR-022-07 (#212) — the Dashboard's watch-state card, against real
  * Postgres: held assets in a buy or sell state, read from SPEC-018's existing
  * evaluation, and **no provider request** behind a render (BR-018-11).
  *
@@ -29,7 +29,7 @@ import { seedUser } from '../support/users';
  * TS-03/TS-34: `assets` and `latest_quotes` are global rows, truncated in both
  * `beforeAll` and `afterAll`.
  */
-describe('#212 — the Painel watch-state card (integration)', () => {
+describe('#212 — the Dashboard watch-state card (integration)', () => {
   let database: TestDatabase;
   let pool: Pool;
   /** The app role's connection to the container — the reads under test, RLS on. */

@@ -52,7 +52,7 @@ export async function ContractTermsForm({
         footer: (
           <FormActions
             cancel={
-              // The page is reached from the Painel's rate gate; Cancelar returns there.
+              // The page is reached from the Dashboard's rate gate; Cancelar returns there.
               <Button asChild variant="outline">
                 <Link href="/dashboard">{t('cancel')}</Link>
               </Button>

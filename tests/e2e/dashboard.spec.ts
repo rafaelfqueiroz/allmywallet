@@ -103,7 +103,7 @@ test.describe('the dashboard', () => {
     await signedIn.page.goto('/');
 
     await expect(signedIn.page).toHaveURL(/\/dashboard$/);
-    await expect(signedIn.page.getByRole('heading', { level: 1, name: 'Painel' })).toBeVisible();
+    await expect(signedIn.page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
   });
 
   /**
@@ -316,10 +316,11 @@ test.describe('the dashboard', () => {
 
     const links: readonly (readonly [ReturnType<typeof page.locator>, string, RegExp])[] = [
       [stat('Patrimônio').getByRole('link'), 'Ver no Portfólio', /\/portfolio$/],
-      [stat('Valor aplicado').getByRole('link'), 'Ver em Transações', /\/transactions$/],
+      // #243 — the frame's links: Valor aplicado's detail is Portfólio's too.
+      [stat('Valor aplicado').getByRole('link'), 'Ver no Portfólio', /\/portfolio$/],
       [
         stat('Resultado não realizado').getByRole('link'),
-        'Ver em Composição',
+        'Ver composição',
         /\/portfolio\/composition$/,
       ],
       [

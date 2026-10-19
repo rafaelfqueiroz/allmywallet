@@ -14,7 +14,7 @@ import { db, type Database } from '@/db/client';
 import { withTenant } from '@/db/tenant';
 
 /**
- * SPEC-018 — the read model behind the watch rules (`/settings/watch`) and the Painel card, in the shape of
+ * SPEC-018 — the read model behind the watch rules (`/settings/watch`) and the Dashboard card, in the shape of
  * `src/app/(app)/wallets/data.ts`. AR-31: the page (a Server Component) calls
  * `loadWatchView` directly; nothing here decides anything `core/opportunity`
  * hasn't already decided — `evaluateRule` and `canCarryRule` are called, not
@@ -220,7 +220,7 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
 
 /**
  * Every rule on an asset the user holds now, evaluated (BR-018-12/16) — the
- * one read behind both the Composição badge and the Painel's watch-state card.
+ * one read behind both the Composição badge and the Dashboard's watch-state card.
  *
  * Narrower than `loadWatchView` above: that function also builds the
  * "available" and "ineligible" lists, resolves consent and reads the
@@ -235,7 +235,7 @@ export async function loadWatchView(userId: UserId): Promise<WatchView> {
  *
  * Rules whose position has closed are excluded (BR-018-03: they are
  * deactivated and retained), so a holding that no longer exists cannot put a
- * badge on a row, or a line on the Painel, that no longer exists either.
+ * badge on a row, or a line on the Dashboard, that no longer exists either.
  */
 async function evaluateHeldRules(
   userId: UserId,
@@ -328,7 +328,7 @@ export async function loadWatchStates(
   return new Map(rows.map((row) => [row.assetId, row.evaluated.state]));
 }
 
-/** One line of the Painel's watch-state card: a held asset in a buy or sell state. */
+/** One line of the Dashboard's watch-state card: a held asset in a buy or sell state. */
 export interface WatchOpportunity {
   readonly assetId: AssetId;
   readonly code: string;
@@ -359,7 +359,7 @@ export interface WatchOpportunities {
 }
 
 /**
- * SPEC-022 BR-022-07 — the Painel's card listing held assets currently in a
+ * SPEC-022 BR-022-07 — the Dashboard's card listing held assets currently in a
  * buy or sell state (SPEC-018). It reads the existing evaluation and adds
  * nothing to it: no state is decided here, and no quote is requested.
  */

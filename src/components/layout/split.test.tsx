@@ -34,6 +34,10 @@ describe('Split', () => {
     expect(aside.container.querySelector('[data-slot="split"]')?.className).toContain(
       'minmax(0,3fr)_minmax(0,2fr)',
     );
+    // #243 — the frame's ~430px narrow column, from a container that has it.
+    expect(aside.container.querySelector('[data-slot="split"]')?.className).toContain(
+      '@4xl:grid-cols-[minmax(0,3fr)_minmax(27rem,2fr)]',
+    );
   });
 
   it('has no axe violations', async () => {

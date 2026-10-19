@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SummaryCard } from '@/components/patterns/summary-card';
+import { CardItemLink, SummaryCard } from '@/components/patterns/summary-card';
 import { Badge } from '@/components/ui/badge';
 import { audit, render, screen } from '@/components/test-utils';
 
@@ -61,6 +61,22 @@ describe('SummaryCard', () => {
   it('renders no footer row without a link', () => {
     const { container } = render(<SummaryCard title="Precisa da sua atenção">x</SummaryCard>);
     expect(container.querySelector('[data-slot="card-link"]')).toBeNull();
+    expect(container.querySelector('[data-slot="section-footer"]')).toBeNull();
+  });
+
+  // SPEC-022 BR-022-36 (#243) — a panel: the link is its footer, under a
+  // hairline that runs edge to edge, not a row inside the body's padding.
+  it('is a panel whose footer holds the link', () => {
+    const { container } = render(
+      <SummaryCard title="T" link={{ href: '/x', label: 'Ver' }}>
+        x
+      </SummaryCard>,
+    );
+    const panel = container.querySelector('[data-slot="summary-card"]');
+    expect(panel).toHaveAttribute('data-variant', 'panel');
+    const footer = container.querySelector('[data-slot="section-footer"]');
+    expect(footer?.parentElement).toBe(panel);
+    expect(footer).toContainElement(screen.getByRole('link', { name: 'Ver' }));
   });
 
   it('shows a focus ring on its link (DS-06)', () => {
@@ -70,6 +86,21 @@ describe('SummaryCard', () => {
       </SummaryCard>,
     );
     expect(screen.getByRole('link', { name: 'Ver' }).className).toContain('focus-visible:ring');
+  });
+
+  // #243 — the watch card's asset code: its own line, so a table cell can
+  // truncate it and keep its box inside the cell.
+  it('links an item by its own name, as a line a cell can truncate', () => {
+    render(
+      <CardItemLink href="/settings/watch#regra-1" ariaLabel="ITSA4: ver regra">
+        ITSA4
+      </CardItemLink>,
+    );
+    const link = screen.getByRole('link', { name: 'ITSA4: ver regra' });
+    expect(link).toHaveAttribute('href', '/settings/watch#regra-1');
+    expect(link).toHaveTextContent('ITSA4');
+    expect(link).toHaveAttribute('data-cell-line');
+    expect(link.className).toContain('max-w-full');
   });
 
   it('has no axe violations', async () => {

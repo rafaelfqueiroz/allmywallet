@@ -9,7 +9,7 @@ import { dataTableByCaption, expectPageSizeSurvivesReload } from './support/page
 
 /**
  * SPEC-018 — Observar preços, over the real stack: Configurações › Observar
- * preços (SPEC-022 BR-022-05, #212), and the Painel's watch-state card
+ * preços (SPEC-022 BR-022-05, #212), and the Dashboard's watch-state card
  * (BR-022-07).
  *
  * ---------------------------------------------------------------------------
@@ -239,11 +239,11 @@ test.describe('SPEC-018 — Observar preços', () => {
   });
 
   /**
-   * SPEC-022 BR-022-07 — the Painel lists held assets in a buy or sell state,
+   * SPEC-022 BR-022-07 — the Dashboard lists held assets in a buy or sell state,
    * each linking to its rule. Two holdings: one under its buy bound, and one
    * whose rule reads hold, which the card must leave out.
    */
-  test('a rule in a buy state is on the Painel, and links to its rule', async ({ signedIn }) => {
+  test('a rule in a buy state is on the Dashboard, and links to its rule', async ({ signedIn }) => {
     const { page, userId } = signedIn;
     const [buyCode, holdCode] = await seedHoldings(userId, [
       { code: 'ITSA', quantity: '100', averageCost: '9.00', price: '10.86' },
@@ -260,13 +260,19 @@ test.describe('SPEC-018 — Observar preços', () => {
     const card = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Em zona de compra ou venda' }) });
-    const line = card.getByRole('listitem').filter({ hasText: buyCode });
+    // #243 — a small table (a table row from md up, a card row below it).
+    const rows = card.locator('tbody tr, li').filter({ visible: true });
+    const line = rows.filter({ hasText: buyCode });
     // DL-018-06 — the state is a label, not only a colour.
     await expect(line.locator('[data-slot="state-badge"]')).toHaveText('compra');
-    await expect(line).toContainText('seu limite de compra de');
-    await expect(card.getByRole('listitem').filter({ hasText: holdCode })).toHaveCount(0);
+    // BR-018-18 — the user's own bound, inclusive, and the quote beside it.
+    await expect(line).toContainText('≤');
+    await expect(line).toContainText('no ou abaixo do seu limite de');
+    await expect(line).toContainText('R$ 11,00');
+    await expect(line).toContainText('R$ 10,86');
+    await expect(rows.filter({ hasText: holdCode })).toHaveCount(0);
 
-    await card.getByRole('link', { name: `Ver regra de ${buyCode}` }).click();
+    await card.getByRole('link', { name: `${buyCode}: ver regra` }).click();
     await expect(page).toHaveURL(new RegExp(`/settings/watch#regra-${assetId}$`));
     await expect(page.locator(`[id="regra-${assetId}"]`)).toContainText(buyCode);
     // SPEC-022 BR-022-07 — the rule the link names is marked on arrival, in
@@ -279,10 +285,10 @@ test.describe('SPEC-018 — Observar preços', () => {
   });
 
   /**
-   * SPEC-022 BR-022-18 / DS-65 — the Painel's card summarises: five at most,
+   * SPEC-022 BR-022-18 / DS-65 — the Dashboard's card summarises: five at most,
    * and a link to Observar preços for the rest, where they page.
    */
-  test('the Painel card lists five opportunities and links to the full list', async ({
+  test('the Dashboard card lists five opportunities and links to the full list', async ({
     signedIn,
   }) => {
     const { page, userId } = signedIn;
@@ -294,7 +300,7 @@ test.describe('SPEC-018 — Observar preços', () => {
     const card = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: 'Em zona de compra ou venda' }) });
-    await expect(card.getByRole('listitem')).toHaveCount(5);
+    await expect(card.locator('tbody tr, li').filter({ visible: true })).toHaveCount(5);
     await card.getByRole('link', { name: /^Ver todos os 12 em Observar preços/ }).click();
     await expect(page).toHaveURL(/\/settings\/watch$/);
   });
@@ -302,7 +308,7 @@ test.describe('SPEC-018 — Observar preços', () => {
   /**
    * SPEC-022 BR-018-18 — the rules are a table that pages, with its page size
    * in the URL, and a link to a rule on a later page still lands on it: the
-   * Painel's "Ver regra" and an e-mail sent before this table paged carry the
+   * Dashboard's "Ver regra" and an e-mail sent before this table paged carry the
    * anchor alone.
    */
   test('the rules page, and keep the page size through a reload', async ({ signedIn }) => {

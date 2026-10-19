@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/patterns/page-header';
  * #33 replaced five accidental max-widths with three named ones (`narrow`,
  * `default`, `wide`). That stopped the drift but kept the choice, and the
  * choice is what the 2026-10-09 walkthrough measured: Relatórios began about
- * 426px from the edge and Painel about 574px, because each screen picked a
+ * 426px from the edge and Dashboard about 574px, because each screen picked a
  * different width and `mx-auto` centred it. Peer destinations whose left edge
  * moves as you switch between them read as different products.
  *

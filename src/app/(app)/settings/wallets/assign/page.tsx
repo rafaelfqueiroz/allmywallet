@@ -10,7 +10,7 @@ import { EmptyState } from '@/components/patterns/empty-state';
  * SPEC-022 BR-022-05/15 — Configurações › Carteiras › **Atribuir ativos**:
  * what the user has to decide — purchases whose wallet was ambiguous
  * (SPEC-010 BR-010-12), wallets out of balance (SPEC-017 BR-017-17) — and the
- * standing rules (BR-010-14). The Painel's "Distribuir" items resolve here.
+ * standing rules (BR-010-14). The Dashboard's "Distribuir" items resolve here.
  *
  * `?resolve=<asset>` names the queue row whose forms are open (BR-022-18: the
  * queue is a table, and a table holds no form — see `AssignQueue`).

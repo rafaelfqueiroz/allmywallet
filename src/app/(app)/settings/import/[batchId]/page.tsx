@@ -638,7 +638,7 @@ export default async function ImportBatchDetailPage({
           title={t('reconciliationTitle')}
           actions={
             // SPEC-022 BR-022-31 — an open divergence is a warning, never the
-            // loss or destructive colour (DS-05), as on the Painel
+            // loss or destructive colour (DS-05), as on the Dashboard
             // (`ReconciliationStatus.tsx`). Divergences all accepted since are
             // no longer open, so they fall back to neutral.
             <Badge

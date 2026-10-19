@@ -77,7 +77,7 @@ export type DashboardPortfolio =
       readonly value: Money;
       readonly markers: ValuationMarkers;
       /**
-       * SPEC-022 BR-022-07 — the Painel's other headline figures, the ones
+       * SPEC-022 BR-022-07 — the Dashboard's other headline figures, the ones
        * Portfólio › Patrimônio leads with: *valor aplicado* and the unrealised
        * result over it. Both are the same report's own totals (`costBasis`,
        * and BR-015-08's subtraction through `unrealizedResult`), so the two

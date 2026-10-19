@@ -80,7 +80,7 @@
     }
   },
   "nav": {
-    "dashboard": "Painel",
+    "dashboard": "Dashboard",
     "portfolio": "Portfólio",
     "transactions": "Transações",
     "reports": "Relatórios",
@@ -125,11 +125,12 @@
     "privacyLink": "Ir para Privacidade"
   },
   "dashboard": {
-    "title": "Painel",
-    "signedOut": "Entre na sua conta para ver seu painel.",
+    "title": "Dashboard",
+    "signedOut": "Entre na sua conta para ver o seu Dashboard.",
     "value": {
       "label": "Patrimônio",
-      "link": "Ver no Portfólio"
+      "link": "Ver no Portfólio",
+      "linkLabel": "Ver no Portfólio: patrimônio"
     },
     "markers": {
       "attention": {
@@ -214,13 +215,22 @@
       "title": "Em zona de compra ou venda",
       "rulesLink": "Regras",
       "rulesLinkLabel": "Regras de observação de preços",
-      "price": "cotação",
-      "bound": "{boundSide, select, lower {no ou abaixo do} other {no ou acima do}} seu limite de {stateLabel} de",
-      "between": "entre os seus limites, na faixa que você definiu como \"{stateLabel}\"",
+      "caption": "Ativos em zona de compra ou venda pelas suas regras",
+      "noun": "ativos",
+      "columns": {
+        "asset": "Ativo",
+        "price": "Cotação",
+        "trigger": "Gatilho",
+        "state": "Estado"
+      },
+      "trigger": {
+        "lower": "no ou abaixo do seu limite de",
+        "upper": "no ou acima do seu limite de",
+        "between": "entre os limites"
+      },
       "seeAll": "Ver todos os {count} em Observar preços",
       "seeAllLabel": "Ver todos os {count} em Observar preços, a lista completa de regras",
-      "ruleLink": "Ver regra",
-      "ruleLinkLabel": "Ver regra de {assetCode}",
+      "ruleLinkLabel": "{assetCode}: ver regra",
       "emptyNoRules": "Você ainda não tem regras de observação de preços.",
       "empty": "Nenhum ativo observado está em compra ou venda pelas suas regras agora.",
       "emptyWithUnknown": "Nenhum ativo observado com cotação válida está em compra ou venda pelas suas regras agora.",
@@ -228,10 +238,11 @@
       "notAdvice": "Cada estado vem de uma regra sua; a AllMyWallet não recomenda comprar nem vender."
     },
     "cost": {
-      "link": "Ver em Transações"
+      "link": "Ver no Portfólio",
+      "linkLabel": "Ver no Portfólio: valor aplicado"
     },
     "result": {
-      "link": "Ver em Composição"
+      "link": "Ver composição"
     }
   },
   "portfolio": {
@@ -1732,10 +1743,10 @@
   },
   "onboarding": {
     "title": "Primeiros passos",
-    "description": "O caminho do primeiro extrato até um painel com o seu portfólio de verdade.",
+    "description": "O caminho do primeiro extrato até um Dashboard com o seu portfólio de verdade.",
     "signedOut": "Entre na sua conta para ver o guia de primeiros passos.",
     "dismiss": "Dispensar o guia",
-    "queueNote": "Itens que precisam da sua atenção — como uma taxa de renda fixa não informada — aparecem no painel, na lista \"Precisa da sua atenção\".",
+    "queueNote": "Itens que precisam da sua atenção — como uma taxa de renda fixa não informada — aparecem no Dashboard, na lista \"Precisa da sua atenção\".",
     "steps": {
       "export": {
         "title": "1. Exporte os três extratos",
@@ -1762,8 +1773,8 @@
     },
     "done": {
       "title": "Pronto — seu portfólio está importado",
-      "description": "A partir de agora, o painel mostra o seu patrimônio de verdade.",
-      "dashboardLink": "Ir para o painel",
+      "description": "A partir de agora, o Dashboard mostra o seu patrimônio de verdade.",
+      "dashboardLink": "Ir para o Dashboard",
       "walletLink": "Criar minha primeira carteira (opcional)"
     },
     "guide": {

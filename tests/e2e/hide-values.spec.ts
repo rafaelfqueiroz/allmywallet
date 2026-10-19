@@ -158,7 +158,7 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
 
     // SPEC-018 — a rule with a threshold, so the watch row's bound and the
     // edit form's input both carry an amount. Above the R$ 40 price, so the
-    // rule reads buy and the Painel's watch-state card shows both amounts too
+    // rule reads buy and the Dashboard's watch-state card shows both amounts too
     // (SPEC-022 BR-022-07, #212).
     await pool.query(
       `INSERT INTO opportunity_rules (id, user_id, asset_id, lower_bound, lower_state, default_state)
@@ -167,7 +167,7 @@ async function seedPortfolio(userId: string): Promise<Seeded> {
     );
 
     const batchId = await seedPreviewedImportBatch(userId);
-    // Past the first run, so Painel shows the portfolio rather than the guide.
+    // Past the first run, so Dashboard shows the portfolio rather than the guide.
     await dismissOnboarding(userId);
     const fixedIncome = await seedHeldFixedIncomeWithMissingRate(userId, 'CDBMASK');
 
@@ -271,7 +271,7 @@ test('with masking on, no page sends an amount, and the choice follows the accou
   expect(goals).toMatch(GOAL_INPUT);
   // The rule's form is the editor `?rule=` opens (SPEC-022 BR-022-18: no form in a table).
   expect(await html(page, `/settings/watch?rule=${seeded.ruleAssetId}`)).toMatch(RULE_INPUT);
-  // The Painel's watch-state card: the rule's threshold, beside its quote.
+  // The Dashboard's watch-state card: the rule's threshold, beside its quote.
   expect(amountsIn(await html(page, '/dashboard'))).toContain('45,00');
   expect(await html(page, `/transactions/${seeded.transactionId}/edit`)).toMatch(PRICE_INPUT);
 

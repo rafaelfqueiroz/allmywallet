@@ -11,7 +11,7 @@ import { expectPageSizeSurvivesReload } from './support/page-size';
  * SPEC-022 BR-022-05/15/16/20/21 and SPEC-010 BR-010-03/07/09/12/13 —
  * Configurações › Carteiras, driven the way a person uses it: create a wallet,
  * edit it, assign a held asset from its own page, see the asset on it, delete
- * it; and resolve a pending allocation reached from the Painel.
+ * it; and resolve a pending allocation reached from the Dashboard.
  *
  * Holdings are seeded rather than imported: what is proven here is the setup
  * surface, and a held, unassigned position is its precondition.
@@ -221,7 +221,7 @@ test.describe('Configurações › Carteiras', () => {
     await expect(page.getByText('Você ainda não criou nenhuma carteira.')).toBeVisible();
   });
 
-  test('a pending allocation reached from the Painel is resolved on Atribuir ativos', async ({
+  test('a pending allocation reached from the Dashboard is resolved on Atribuir ativos', async ({
     signedIn,
     viewport,
   }) => {

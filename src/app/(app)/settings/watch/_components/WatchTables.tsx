@@ -46,7 +46,7 @@ import { Text } from '@/components/ui/text';
  *    it is not a cell's content.
  *
  * **Deep links** (SPEC-022 BR-022-07): a rule's row carries `id=regra-<asset>`
- * (`rowAnchor`). The Painel's "Ver regra" and the opportunity e-mail link to
+ * (`rowAnchor`). The Dashboard's "Ver regra" and the opportunity e-mail link to
  * it with the anchor alone, and the table pages to the row, scrolls to it and
  * marks it — a rule on page 3 is where the link must land.
  * ---------------------------------------------------------------------------
@@ -176,7 +176,7 @@ export async function WatchedTable({ rows }: { readonly rows: readonly WatchRule
     const code = row.code;
     return {
       id: row.assetId,
-      // SPEC-022 BR-022-07 — the target of the Painel's "Ver regra" and of the
+      // SPEC-022 BR-022-07 — the target of the Dashboard's "Ver regra" and of the
       // opportunity e-mail's link, so the rule it names is marked on arrival.
       anchor: watchRuleAnchor(row.assetId),
       keys: {
