@@ -81,10 +81,21 @@ describe('SPEC-016 FR-8.29 — the dashboard at reference scale (nightly, adviso
           .from(schema.positions);
         // AR-15: shared reference data, readable on the same handle.
         const [quotes] = await tx.select({ total: sql<number>`count(*)::int` }).from(priceQuotes);
+        // #233 — the proventos the Proventos card reads: the as-of month so
+        // far, and the whole month before it.
+        const [earnings] = await tx
+          .select({
+            current: sql<number>`count(*) filter (where ${schema.transactions.tradeDate} >= date_trunc('month', ${REFERENCE_AS_OF_DATE}::date) and ${schema.transactions.tradeDate} <= ${REFERENCE_AS_OF_DATE}::date)::int`,
+            previous: sql<number>`count(*) filter (where ${schema.transactions.tradeDate} >= date_trunc('month', ${REFERENCE_AS_OF_DATE}::date) - interval '1 month' and ${schema.transactions.tradeDate} < date_trunc('month', ${REFERENCE_AS_OF_DATE}::date))::int`,
+          })
+          .from(schema.transactions)
+          .where(sql`${schema.transactions.type} in ('dividend', 'jcp', 'rendimento')`);
         return {
           transactions: transactions?.total ?? 0,
           positions: positions?.total ?? 0,
           quotes: quotes?.total ?? 0,
+          earningsCurrent: earnings?.current ?? 0,
+          earningsPrevious: earnings?.previous ?? 0,
         };
       },
       database,
@@ -125,6 +136,20 @@ describe('SPEC-016 FR-8.29 — the dashboard at reference scale (nightly, adviso
       throw new Error(
         'reference price history is empty — the dashboard would be measured against a portfolio ' +
           'nothing can price. Re-run `pnpm db:seed:reference`.',
+      );
+    }
+
+    /*
+     * #233 — without proventos in both of the Proventos card's months, its two
+     * earnings reads are empty index scans and the budget says nothing about
+     * them. A database seeded before the proventos existed is exactly this
+     * case; the seeder adds them on its next run.
+     */
+    if (counts.earningsCurrent === 0 || counts.earningsPrevious === 0) {
+      throw new Error(
+        `reference proventos are missing (${counts.earningsCurrent} in the as-of month, ` +
+          `${counts.earningsPrevious} in the month before) — the dashboard's earnings reads ` +
+          'would be measured against nothing. Re-run `pnpm db:seed:reference`.',
       );
     }
   }, 300_000);

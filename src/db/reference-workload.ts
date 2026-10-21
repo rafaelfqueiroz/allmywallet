@@ -108,6 +108,9 @@ export function generateReferenceAssets(
 
 export type ReferenceTransactionKind = 'buy' | 'sell';
 
+/** SPEC-014's three recurring provento types — see `generateReferenceEarnings`. */
+export type ReferenceEarningKind = 'dividend' | 'jcp' | 'rendimento';
+
 /**
  * A structural descriptor, not the real domain `Transaction`. See the module
  * doc: keeping this plain is what keeps generation a pure function of the
@@ -115,7 +118,7 @@ export type ReferenceTransactionKind = 'buy' | 'sell';
  */
 export interface ReferenceTransaction {
   readonly ticker: string;
-  readonly kind: ReferenceTransactionKind;
+  readonly kind: ReferenceTransactionKind | ReferenceEarningKind;
   readonly date: BusinessDate;
   readonly quantity: number;
   readonly unitPriceCents: number;
@@ -208,7 +211,115 @@ export function generateReferenceTransactions(
 
 export interface ReferenceWorkload {
   readonly assets: readonly ReferenceAsset[];
+  /** BR-016-01's 10,000 — buys and sells only. */
   readonly transactions: readonly ReferenceTransaction[];
+  /** The proventos those holdings paid — see `generateReferenceEarnings`. */
+  readonly earnings: readonly ReferenceTransaction[];
+}
+
+/**
+ * Which classes pay what, and on which day of which months. Three schedules,
+ * because the Earnings report and the Dashboard's Proventos card fold by type
+ * and by month, and a single monthly stream would exercise neither the type
+ * split nor a month with nothing in it:
+ *
+ *  - FIIs pay a *rendimento* every month, on the 1st — so the as-of date,
+ *    2026-01-01, is itself a pay date, and the Dashboard's "this month so
+ *    far" window is never empty at reference scale;
+ *  - stocks and BDRs pay a *dividend* each quarter, on the 15th;
+ *  - stocks pay *JCP* twice a year, on the 28th.
+ */
+const EARNING_SCHEDULE: readonly {
+  readonly kind: ReferenceEarningKind;
+  readonly classes: readonly ReferenceAssetClass[];
+  readonly months: readonly number[];
+  readonly day: number;
+}[] = [
+  {
+    kind: 'rendimento',
+    classes: ['fii'],
+    months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    day: 1,
+  },
+  { kind: 'dividend', classes: ['acao', 'bdr'], months: [3, 6, 9, 12], day: 15 },
+  { kind: 'jcp', classes: ['acao'], months: [6, 12], day: 28 },
+];
+
+/**
+ * SPEC-016 BR-016-01 / #233 — **the proventos the reference holdings paid.**
+ *
+ * Before these, the workload held only buys and sells, so every budget that
+ * reads earnings — the Dashboard's Proventos card, the Earnings report —
+ * measured an empty index scan: green, and a statement about nothing (#233's
+ * review, Decision log #6). The same failure the price history above was
+ * added to close.
+ *
+ * **Paid on what is held, never on what is not.** Each payment walks the
+ * trades in date order and pays on the quantity held at the close of its pay
+ * date; a ticker holding nothing is paid nothing. A provento on a position
+ * the ledger says was sold would be a row SPEC-014's yield on cost and
+ * attribution could never reconcile — a fixture no report could be right
+ * about.
+ *
+ * **On top of BR-016-01's 10,000, not inside them.** The trades are unchanged
+ * — same seed, same stream, same positions — so every budget already measured
+ * against them stays comparable, and the proventos are a separate,
+ * deterministic stream from a seed offset of their own, like the quotes.
+ * `quantity` is the held quantity and `unitPriceCents` the amount per share,
+ * so `computeTotalValue` gives the payment exactly as it gives a trade.
+ */
+export function generateReferenceEarnings(
+  assets: readonly ReferenceAsset[] = generateReferenceAssets(),
+  trades: readonly ReferenceTransaction[] = generateReferenceTransactions(assets),
+): readonly ReferenceTransaction[] {
+  const rng = mulberry32(REFERENCE_SEED ^ 0x0e47_0001);
+
+  interface Payment {
+    readonly ticker: string;
+    readonly kind: ReferenceEarningKind;
+    readonly date: BusinessDate;
+  }
+  const payments: Payment[] = [];
+  const [startYear] = REFERENCE_START_DATE.split('-').map(Number) as [number];
+  const [endYear] = REFERENCE_AS_OF_DATE.split('-').map(Number) as [number];
+  for (let year = startYear; year <= endYear; year++) {
+    for (const schedule of EARNING_SCHEDULE) {
+      for (const month of schedule.months) {
+        const date = BusinessDate.of(
+          `${year}-${String(month).padStart(2, '0')}-${String(schedule.day).padStart(2, '0')}`,
+        );
+        if (date < REFERENCE_START_DATE || date > REFERENCE_AS_OF_DATE) continue;
+        for (const asset of assets) {
+          if (!schedule.classes.includes(asset.assetClass)) continue;
+          payments.push({ ticker: asset.ticker, kind: schedule.kind, date });
+        }
+      }
+    }
+  }
+  // Date order, then the schedule's own order — stable, so the stream is a
+  // pure function of the seed.
+  payments.sort((a, b) => BusinessDate.compare(a.date, b.date));
+
+  const held = new Map<string, number>();
+  let next = 0;
+  const earnings: ReferenceTransaction[] = [];
+  for (const payment of payments) {
+    // Every trade up to and including the pay date counts.
+    for (; next < trades.length; next++) {
+      const trade = trades[next];
+      if (trade === undefined || trade.date > payment.date) break;
+      const sign = trade.kind === 'sell' ? -1 : 1;
+      held.set(trade.ticker, (held.get(trade.ticker) ?? 0) + sign * trade.quantity);
+    }
+
+    // Drawn for every scheduled payment, held or not, so the amounts do not
+    // shift when one ticker's holding changes.
+    const perShareCents = 5 + Math.floor(rng() * 96);
+    const quantity = held.get(payment.ticker) ?? 0;
+    if (quantity <= 0) continue;
+    earnings.push({ ...payment, quantity, unitPriceCents: perShareCents });
+  }
+  return earnings;
 }
 
 /**
@@ -315,7 +426,7 @@ export function generateReferenceQuotes(
 export function generateReferenceWorkload(): ReferenceWorkload {
   const assets = generateReferenceAssets();
   const transactions = generateReferenceTransactions(assets);
-  return { assets, transactions };
+  return { assets, transactions, earnings: generateReferenceEarnings(assets, transactions) };
 }
 
 /**
@@ -337,6 +448,8 @@ export function referenceTransactionRows(
   referenceTransactions: readonly ReferenceTransaction[],
   assetIds: ReadonlyMap<string, AssetId>,
   userId: UserId,
+  /** Keeps two streams' keys apart: the trades are `ref`, the proventos `ref-earning`. */
+  keyPrefix = 'ref',
 ): (typeof transactions.$inferInsert)[] {
   return referenceTransactions.map((transaction, index) => {
     const assetId = assetIds.get(transaction.ticker);
@@ -379,7 +492,7 @@ export function referenceTransactionRows(
         tradeDate,
         quantity,
         unitPrice,
-      })}|ref-${index}`,
+      })}|${keyPrefix}-${index}`,
       occurrence: 1,
       importBatchId: null,
       isManual: false,

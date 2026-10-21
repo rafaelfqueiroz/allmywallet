@@ -47,6 +47,8 @@ describe('SPEC-006 — the transaction list at reference scale (nightly, advisor
   const userId = UserId.of(REFERENCE_USER_ID);
   let pool: Pool;
   let db: ReturnType<typeof drizzle<typeof schema>>;
+  /** The ledger as seeded: the 10,000 trades and, since #233, their proventos. */
+  let total = 0;
 
   beforeAll(async () => {
     const url = process.env.DATABASE_URL;
@@ -56,7 +58,7 @@ describe('SPEC-006 — the transaction list at reference scale (nightly, advisor
     pool = new Pool({ connectionString: url, max: 4 });
     db = drizzle(pool, { schema });
 
-    const total = await withTenant(
+    total = await withTenant(
       userId,
       async (tx) => {
         const [row] = await tx
@@ -111,10 +113,11 @@ describe('SPEC-006 — the transaction list at reference scale (nightly, advisor
 
   it('serves a deep page within budget', async () => {
     // OFFSET grows linearly with the page, and this is where that shows: the
-    // last page of 10.000 rows is the worst case the current LIMIT/OFFSET
-    // scheme has, and the number to watch if keyset pagination ever becomes
-    // necessary.
-    const lastPage = Math.ceil(REFERENCE_TRANSACTION_COUNT / 50);
+    // last page of the seeded ledger is the worst case the current
+    // LIMIT/OFFSET scheme has, and the number to watch if keyset pagination
+    // ever becomes necessary. The counted total, not the 10,000 trades: the
+    // proventos (#233) are rows on the same list.
+    const lastPage = Math.ceil(total / 50);
     const samples = await measure(() => listAt(lastPage));
     const p95 = percentile(samples, 0.95);
     console.info(`[budget] transaction list, page ${lastPage}: p95 ${p95.toFixed(1)}ms`);

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { db, closePool } from '@/db/client';
 import { assets, transactions, users } from '@/db/schema';
 import { latestQuotes, priceQuotes } from '@/db/schema/market';
@@ -23,7 +23,8 @@ import {
 
 /**
  * `pnpm db:seed:reference` (package.json) — SPEC-016 TS-23's reference
- * workload: 100 assets, 10.000 transactions, 5 years of history, seeded for
+ * workload: 100 assets, 10.000 transactions, 5 years of history — plus the
+ * proventos those holdings paid (#233, `generateReferenceEarnings`) — seeded for
  * the fixed reference tenant so `nightly.yml` measures every budget against a
  * named scale (BR-016-01) rather than against whatever happens to be in the
  * database.
@@ -90,14 +91,43 @@ export async function seedReferenceWorkload(): Promise<ReferenceWorkload> {
       // Idempotent, and cheap to check: the nightly job seeds before every
       // measurement, and re-inserting would both fail on the natural-key
       // constraint and change the scale the budgets are stated against.
-      const [row] = await tx.select({ total: sql<number>`count(*)::int` }).from(transactions);
-      if ((row?.total ?? 0) >= REFERENCE_TRANSACTION_COUNT) return 0;
+      //
+      // Per stream, not in total: a database seeded before the proventos
+      // existed (#233) holds the 10,000 trades and nothing else, and a single
+      // count would call it complete and never add them.
+      const countOf = async (types: readonly string[]): Promise<number> => {
+        const [row] = await tx
+          .select({ total: sql<number>`count(*)::int` })
+          .from(transactions)
+          .where(inArray(transactions.type, [...types]));
+        return row?.total ?? 0;
+      };
 
-      const rows = referenceTransactionRows(workload.transactions, assetIds, userId);
-      for (let start = 0; start < rows.length; start += INSERT_CHUNK) {
-        await tx.insert(transactions).values(rows.slice(start, start + INSERT_CHUNK));
+      const streams = [
+        {
+          rows: workload.transactions,
+          types: ['buy', 'sell'],
+          expected: REFERENCE_TRANSACTION_COUNT,
+          keyPrefix: 'ref',
+        },
+        {
+          rows: workload.earnings,
+          types: ['dividend', 'jcp', 'rendimento'],
+          expected: workload.earnings.length,
+          keyPrefix: 'ref-earning',
+        },
+      ];
+
+      let inserted = 0;
+      for (const stream of streams) {
+        if ((await countOf(stream.types)) >= stream.expected) continue;
+        const rows = referenceTransactionRows(stream.rows, assetIds, userId, stream.keyPrefix);
+        for (let start = 0; start < rows.length; start += INSERT_CHUNK) {
+          await tx.insert(transactions).values(rows.slice(start, start + INSERT_CHUNK));
+        }
+        inserted += rows.length;
       }
-      return rows.length;
+      return inserted;
     },
     db,
   );
@@ -106,6 +136,7 @@ export async function seedReferenceWorkload(): Promise<ReferenceWorkload> {
     {
       assets: workload.assets.length,
       transactions: workload.transactions.length,
+      earnings: workload.earnings.length,
       quotes,
       inserted: seeded,
       userId: hashUserId(userId),
