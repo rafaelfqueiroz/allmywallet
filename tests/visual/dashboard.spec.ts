@@ -78,6 +78,18 @@ const ASSET_IDS = [BUY.id, SELL.id, HOLD.id, CDB.id];
 /** A fixed Posição date, so the B3 card's "Posição de …" is the same every run. */
 const POSICAO_AS_OF = '2026-10-16';
 
+/*
+ * AR-29 — the valuation compares a quote's **São Paulo** date with São Paulo's
+ * today (`core/valuation/listed.ts`). `now() - 30 min` between 00:00 and 00:29
+ * there is yesterday, which carries the price forward and adds "Preço mais
+ * antigo" to the Patrimônio card; `CURRENT_DATE` is the database's own zone,
+ * UTC in CI, which is tomorrow from 21:00. So the quote is clamped to São
+ * Paulo's midnight and the close is dated by São Paulo's calendar.
+ */
+const SAO_PAULO_TODAY = `(now() AT TIME ZONE 'America/Sao_Paulo')::date`;
+const QUOTED_AT = `GREATEST(now() - interval '30 minutes',
+  date_trunc('day', now() AT TIME ZONE 'America/Sao_Paulo') AT TIME ZONE 'America/Sao_Paulo')`;
+
 async function seedDashboard(userId: string): Promise<void> {
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
   try {
@@ -99,7 +111,7 @@ async function seedDashboard(userId: string): Promise<void> {
       // and every rule evaluates against a known price.
       await pool.query(
         `INSERT INTO latest_quotes (asset_id, price, quoted_at, fetched_at, source)
-         VALUES ($1, $2, now() - interval '30 minutes', now(), 'visual-seed')
+         VALUES ($1, $2, ${QUOTED_AT}, now(), 'visual-seed')
          ON CONFLICT (asset_id) DO UPDATE
            SET price = EXCLUDED.price, quoted_at = EXCLUDED.quoted_at,
                fetched_at = EXCLUDED.fetched_at, source = EXCLUDED.source`,
@@ -107,7 +119,7 @@ async function seedDashboard(userId: string): Promise<void> {
       );
       await pool.query(
         `INSERT INTO price_quotes (asset_id, date, close, source)
-         VALUES ($1, CURRENT_DATE, $2, 'visual-seed')
+         VALUES ($1, ${SAO_PAULO_TODAY}, $2, 'visual-seed')
          ON CONFLICT (asset_id, date) DO UPDATE SET close = EXCLUDED.close`,
         [holding.id, holding.price],
       );
