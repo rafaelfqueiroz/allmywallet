@@ -63,6 +63,7 @@ Recorded here so the specs and the guidelines cannot silently disagree:
 | SPEC-003 | BR-003-09 | "Managed secret store" made concrete: **root-only `.env` on the VPS** + GitHub Actions secrets |
 | SPEC-012 | AC-14, AC-16 | **Wallet scope is current composition, not history.** TWR, XIRR, "% do CDI", real return and the shadow portfolio are *unavailable* at wallet scope and say so; the contribution table and the pure index lines are correct there. Decided in [#50](https://github.com/rafaelfqueiroz/allmywallet/issues/50) |
 | SPEC-013 | BR-013-05 | Same cause: the stacked series answers `asset_class` only, and names the dimension it cannot decompose along |
+| SPEC-016 | BR-016-01 | **The 10,000 transactions are trades; the proventos they pay come on top** (~1,400 rows: monthly FII *rendimentos*, quarterly dividends, half-yearly JCP, on held quantities only). Without them every earnings read was measured against an empty scan. The trades are unchanged, so earlier measurements stay comparable. Decided in [#233](https://github.com/rafaelfqueiroz/allmywallet/issues/233) |
 
 SPEC-003 BR-003-04 — isolation tests blocking — stands unchanged.
 

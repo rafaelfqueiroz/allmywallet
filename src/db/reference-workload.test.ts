@@ -12,6 +12,7 @@ import {
   REFERENCE_TRANSACTION_COUNT,
   centsToDecimalString,
   generateReferenceAssets,
+  generateReferenceEarnings,
   generateReferenceTransactions,
   generateReferenceWorkload,
   referenceTransactionRows,
@@ -154,6 +155,16 @@ describe('referenceTransactionRows', () => {
     );
   });
 
+  it('keeps the trades’ and the proventos’ keys apart when both are seeded', () => {
+    const rows = [
+      ...referenceTransactionRows(workload.transactions, assetIds, userId, 'ref'),
+      ...referenceTransactionRows(workload.earnings, assetIds, userId, 'ref-earning'),
+    ];
+    expect(new Set(rows.map((row) => `${row.naturalKey}|${row.occurrence ?? 1}`)).size).toBe(
+      rows.length,
+    );
+  });
+
   it('is a pure function of the workload, so a re-seed writes the same keys', () => {
     // Ids differ (they are generated), but the keys the unique constraint sees
     // must not — otherwise a re-run is not idempotent in the way the seeder's
@@ -200,11 +211,21 @@ describe('the generated ledger is one SPEC-007 can actually replay', () => {
         AssetId.of(`0192${String(index).padStart(4, '0')}-0000-7000-8000-000000000001`),
       ]),
     );
-    const rows = referenceTransactionRows(
-      workload.transactions,
-      assetIds,
-      UserId.of('00000000-0000-7000-8000-000000000001'),
-    );
+    // #233 — the proventos too: `pnpm positions:rebuild` replays every row
+    // the seeder wrote, not only the trades.
+    const rows = [
+      ...referenceTransactionRows(
+        workload.transactions,
+        assetIds,
+        UserId.of('00000000-0000-7000-8000-000000000001'),
+      ),
+      ...referenceTransactionRows(
+        workload.earnings,
+        assetIds,
+        UserId.of('00000000-0000-7000-8000-000000000001'),
+        'ref-earning',
+      ),
+    ];
 
     const replayed = replayPositions(
       rows.map((row) => ({
@@ -234,5 +255,82 @@ describe('the generated ledger is one SPEC-007 can actually replay', () => {
       expect(next, `${transaction.ticker} on ${transaction.date}`).toBeGreaterThanOrEqual(0);
       held.set(transaction.ticker, next);
     }
+  });
+});
+
+/**
+ * #233 — the proventos the reference holdings paid, so the Dashboard's
+ * Proventos card and the Earnings report are measured against income rather
+ * than against an empty index scan.
+ */
+describe('generateReferenceEarnings', () => {
+  const workload = generateReferenceWorkload();
+  const classOf = new Map(workload.assets.map((asset) => [asset.ticker, asset.assetClass]));
+
+  it('adds to the 10,000 trades without changing them', () => {
+    expect(workload.transactions).toHaveLength(REFERENCE_TRANSACTION_COUNT);
+    expect(JSON.stringify(workload.transactions)).toBe(
+      JSON.stringify(generateReferenceTransactions()),
+    );
+    expect(workload.earnings.length).toBeGreaterThan(1_000);
+  });
+
+  it('is deterministic — TS-23', () => {
+    expect(JSON.stringify(generateReferenceEarnings())).toBe(
+      JSON.stringify(generateReferenceEarnings()),
+    );
+  });
+
+  it('pays each type on its own classes and days', () => {
+    for (const earning of workload.earnings) {
+      const assetClass = classOf.get(earning.ticker);
+      const day = earning.date.slice(8);
+      if (earning.kind === 'rendimento') {
+        expect([assetClass, day]).toEqual(['fii', '01']);
+      } else if (earning.kind === 'dividend') {
+        expect(['acao', 'bdr']).toContain(assetClass);
+        expect(day).toBe('15');
+      } else {
+        expect([earning.kind, assetClass, day]).toEqual(['jcp', 'acao', '28']);
+      }
+    }
+  });
+
+  it('pays only on what is held at the close of the pay date, and exactly that quantity', () => {
+    const trades = workload.transactions;
+    const held = new Map<string, number>();
+    let next = 0;
+    for (const earning of workload.earnings) {
+      for (; next < trades.length; next++) {
+        const trade = trades[next];
+        if (trade === undefined || trade.date > earning.date) break;
+        held.set(
+          trade.ticker,
+          (held.get(trade.ticker) ?? 0) + (trade.kind === 'sell' ? -1 : 1) * trade.quantity,
+        );
+      }
+      expect(earning.quantity, `${earning.ticker} on ${earning.date}`).toBe(
+        held.get(earning.ticker),
+      );
+      expect(earning.quantity).toBeGreaterThan(0);
+      expect(earning.unitPriceCents).toBeGreaterThan(0);
+    }
+  });
+
+  it('stays inside the reference window, in date order', () => {
+    const dates = workload.earnings.map((earning) => earning.date);
+    expect([...dates].sort()).toEqual(dates);
+    expect(BusinessDate.isBefore(dates[0] ?? REFERENCE_START_DATE, REFERENCE_START_DATE)).toBe(
+      false,
+    );
+    expect(BusinessDate.isAfter(dates.at(-1) ?? REFERENCE_AS_OF_DATE, REFERENCE_AS_OF_DATE)).toBe(
+      false,
+    );
+  });
+
+  it('pays in both of the Dashboard’s months at the as-of date (2026-01 so far, 2025-12)', () => {
+    // FIIs pay on the 1st, so 2026-01-01 — the as-of date — is a pay date.
+    expect(workload.earnings.some((earning) => earning.date === REFERENCE_AS_OF_DATE)).toBe(true);
+    expect(workload.earnings.some((earning) => earning.date.startsWith('2025-12'))).toBe(true);
   });
 });

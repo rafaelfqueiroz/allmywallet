@@ -79,7 +79,7 @@ Cross-tenant leakage is PRD risk R6: low likelihood, severe impact, and **invisi
 | **TS-20** | Synthetic B3 extracts are **generated** by a builder producing structurally faithful `.xlsx` files: real column names and layout, invented data. |
 | **TS-21** | Generated extracts cover the awkward cases deliberately: leading metadata rows, reordered columns, unknown movement types, two genuine identical same-day trades, and a CPF field — so CPF stripping is testable. |
 | **TS-22** | Domain fixtures use builders with sensible defaults (`aTransaction().buy().of('PETR4').quantity(100)`), so a test states only what it cares about. |
-| **TS-23** | The SPEC-016 reference workload — 100 assets, 10,000 transactions, 5 years — is generated deterministically from a fixed seed, so performance numbers are comparable across runs. |
+| **TS-23** | The SPEC-016 reference workload — 100 assets, 10,000 transactions, 5 years, plus the proventos those holdings pay — is generated deterministically from a fixed seed, so performance numbers are comparable across runs. |
 | **TS-24** | `pnpm db:seed` produces a realistic demo tenant for manual testing. It is never run against production. |
 
 ## 6. E2E scope
