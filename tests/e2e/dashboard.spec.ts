@@ -64,6 +64,34 @@ async function seedCommittedPosicaoBatch(
   }
 }
 
+/**
+ * #233 — the app's own calendar: `Clock.today()` is the São Paulo date, which
+ * the database's `CURRENT_DATE` (UTC) is not for three hours every evening.
+ * The month the cards compare is derived from this, never from the database.
+ */
+function saoPauloToday(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+}
+
+/** The last day of the month before `today`'s, `YYYY-MM-DD`. */
+function previousMonthEnd(today: string): string {
+  const [year, month] = today.split('-').map(Number) as [number, number];
+  // Day 0 of this month is the last day of the previous one, in UTC.
+  return new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10);
+}
+
+function monthName(date: string): string {
+  const [year, month] = date.split('-').map(Number) as [number, number];
+  return new Intl.DateTimeFormat('pt-BR', { month: 'long', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(year, month - 1, 1)),
+  );
+}
+
+function brDate(date: string): string {
+  const [year, month, day] = date.split('-');
+  return `${day}/${month}/${year}`;
+}
+
 /** Moves one seeded asset's only prices `days` back, so it is carried forward. */
 async function ageQuote(code: string, days: number): Promise<void> {
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
@@ -313,6 +341,10 @@ test.describe('the dashboard', () => {
     await expect(stat('Patrimônio')).toContainText('R$ 250,00');
     await expect(stat('Valor aplicado')).toContainText('R$ 200,00');
     await expect(stat('Resultado não realizado')).toContainText('R$ 50,00');
+    // #233 — nothing received yet: said, not R$ 0,00.
+    const proventos = stat(`Proventos em ${monthName(saoPauloToday())}`);
+    await expect(proventos).toContainText('Nenhum ainda');
+    await expect(proventos.locator('[data-slot="money"]')).toHaveCount(0);
 
     const links: readonly (readonly [ReturnType<typeof page.locator>, string, RegExp])[] = [
       [stat('Patrimônio').getByRole('link'), 'Ver no Portfólio', /\/portfolio$/],
@@ -322,6 +354,12 @@ test.describe('the dashboard', () => {
         stat('Resultado não realizado').getByRole('link'),
         'Ver composição',
         /\/portfolio\/composition$/,
+      ],
+      // #233 — opened on this month so far, the period the card totals.
+      [
+        proventos.getByRole('link'),
+        'Ver em Relatórios › Proventos',
+        /\/reports\/earnings\?period=custom&from=\d{4}-\d{2}-01&to=\d{4}-\d{2}-\d{2}$/,
       ],
       [
         card('Conferência com a B3').getByRole('link'),
@@ -344,6 +382,70 @@ test.describe('the dashboard', () => {
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       await page.goto('/dashboard');
     }
+  });
+
+  /**
+   * #233 — the period changes under Patrimônio and Proventos, with their sign.
+   *
+   * Hand-computed: 10 × R$ 25,00 = R$ 250,00 today against R$ 200,00 at the
+   * previous month's close → +R$ 50,00, +25,00 %. Proventos R$ 30,00 this
+   * month against R$ 40,00 last month → −R$ 10,00, −25,00 %.
+   */
+  test('the month-over-month changes render with their sign', async ({ signedIn }) => {
+    const { page, userId } = signedIn;
+    const [code] = await seedHoldings(userId, [
+      { code: 'MOM', quantity: '10', averageCost: '20.00', price: '25.00' },
+    ]);
+    await seedCommittedPosicaoBatch(userId, []);
+
+    const today = saoPauloToday();
+    const monthEnd = previousMonthEnd(today);
+    const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
+    try {
+      await pool.query(
+        `INSERT INTO daily_valuation_snapshots
+           (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+         VALUES ($1, $2, '200', '200', '40', '{}'::jsonb)`,
+        [userId, monthEnd],
+      );
+      for (const [payDate, unitPrice] of [
+        [today, '3.00'],
+        [monthEnd, '4.00'],
+      ] as const) {
+        await pool.query(
+          `INSERT INTO transactions (id, user_id, asset_id, institution_id, type, status,
+             trade_date, quantity, unit_price, fees, total_value, ratio, natural_key,
+             occurrence, import_batch_id, is_manual, is_user_modified)
+           SELECT $1, $2, id, NULL, 'dividend', 'active', $3, 10, $4, 0, 10 * $4::numeric, NULL,
+                  $5, 1, NULL, true, false
+             FROM assets WHERE code = $6`,
+          [randomUUID(), userId, payDate, unitPrice, `e2e-mom|${payDate}`, code],
+        );
+      }
+    } finally {
+      await pool.end();
+    }
+
+    await page.goto('/dashboard');
+
+    const stat = (label: string) =>
+      page
+        .locator('[data-slot="stat-card"]')
+        .filter({ has: page.locator('dt').getByText(label, { exact: true }) });
+
+    const value = stat('Patrimônio').locator('[data-slot="month-change"]');
+    await expect(value).toContainText('+25,00%');
+    await expect(value).toContainText('(+R$ 50,00)');
+    await expect(value).toContainText(`vs. ${brDate(monthEnd)}`);
+    await expect(value.locator('[data-sign="positive"]')).toHaveCount(2);
+
+    const proventos = stat(`Proventos em ${monthName(today)}`);
+    await expect(proventos.locator('dd').first()).toHaveText('R$ 30,00');
+    const earnings = proventos.locator('[data-slot="month-change"]');
+    await expect(earnings).toContainText('−25,00%');
+    await expect(earnings).toContainText('(−R$ 10,00)');
+    await expect(earnings).toContainText(`vs. ${monthName(monthEnd)}`);
+    await expect(earnings.locator('[data-sign="negative"]')).toHaveCount(2);
   });
 
   /**

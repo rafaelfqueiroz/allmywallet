@@ -131,7 +131,9 @@
     "value": {
       "label": "Patrimônio",
       "link": "Ver no Portfólio",
-      "linkLabel": "Ver no Portfólio: patrimônio"
+      "linkLabel": "Ver no Portfólio: patrimônio",
+      "against": "vs. {date}",
+      "noMonthEnd": "Sem fechamento de mês anterior para comparar"
     },
     "markers": {
       "attention": {
@@ -244,6 +246,15 @@
     },
     "result": {
       "link": "Ver composição"
+    },
+    "earnings": {
+      "label": "Proventos em {month}",
+      "against": "vs. {month}",
+      "noPrevious": "Nada recebido em {month} para comparar",
+      "noneYet": "Nenhum ainda",
+      "noneYetHint": "Os proventos aparecem aqui a partir do primeiro recebimento registrado.",
+      "link": "Ver em Relatórios › Proventos",
+      "linkLabel": "Ver em Relatórios › Proventos: proventos de {month}"
     }
   },
   "portfolio": {

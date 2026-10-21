@@ -2,14 +2,19 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Upload } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
-import type { DashboardFreshness, DashboardPortfolio } from '@/core/dashboard/summary';
-import { formatBusinessDate, formatDateTime } from '@/i18n/format';
+import type {
+  DashboardEarnings,
+  DashboardFreshness,
+  DashboardPortfolio,
+} from '@/core/dashboard/summary';
+import { formatBusinessDate, formatDateTime, formatMonthName } from '@/i18n/format';
 import { loadDashboard } from '@/app/(app)/dashboard/data';
 import { loadOnboardingStatus } from '@/app/(app)/onboarding/data';
 import { tryUserId } from '@/lib/session';
 import { AttentionQueue } from '@/app/(app)/dashboard/_components/AttentionQueue';
 import { ReconciliationStatus } from '@/app/(app)/dashboard/_components/ReconciliationStatus';
 import { ValuationMarkers } from '@/app/(app)/dashboard/_components/ValuationMarkers';
+import { MonthChange } from '@/app/(app)/dashboard/_components/MonthChange';
 import { WatchOpportunities } from '@/app/(app)/dashboard/_components/WatchOpportunities';
 import { loadWatchOpportunities } from '@/app/(app)/watch/data';
 import { PageShell } from '@/app/page-shell';
@@ -25,6 +30,7 @@ import { Split } from '@/components/layout/split';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 import { IMPORT_SEND_PATH } from '@/lib/import-paths';
+import { toQueryString } from '@/lib/report-url-state';
 
 /**
  * **The authenticated landing screen** (#98).
@@ -90,7 +96,7 @@ export default async function DashboardPage() {
     loadDashboard(userId),
     loadWatchOpportunities(userId),
   ]);
-  const { portfolio, freshness, reconciliation, attention, attentionTotal } = summary;
+  const { portfolio, earnings, freshness, reconciliation, attention, attentionTotal } = summary;
 
   /**
    * SPEC-020 BR-020-27 — before the first import there is nothing to reconcile
@@ -143,7 +149,7 @@ export default async function DashboardPage() {
       )}
 
       {portfolio.kind === 'valued' ? (
-        <Headline portfolio={portfolio} />
+        <Headline portfolio={portfolio} earnings={earnings} />
       ) : (
         /*
          * BR-020-27 — "a portfolio displayed as R$ 0,00 is a false claim; an
@@ -219,32 +225,49 @@ function freshnessLine(
 
 /**
  * The headline figures (BR-022-07), each linking to the destination that owns
- * its detail. The same three Portfólio › Patrimônio leads with, in its words
- * (`portfolio.patrimonio.*`, BR-022-32) — and the same report totals, so the
- * two screens cannot disagree (BR-013-12).
+ * its detail. The first three are the ones Portfólio › Patrimônio leads with,
+ * in its words (`portfolio.patrimonio.*`, BR-022-32) — and the same report
+ * totals, so the two screens cannot disagree (BR-013-12). The fourth is the
+ * month's *proventos* (#233), which Relatórios › Proventos owns.
  */
 async function Headline({
   portfolio,
+  earnings,
 }: {
   readonly portfolio: Extract<DashboardPortfolio, { kind: 'valued' }>;
+  readonly earnings: DashboardEarnings;
 }) {
   const t = await getTranslations('dashboard');
   const tp = await getTranslations('portfolio.patrimonio');
   const tReports = await getTranslations('reports');
   const { result, ratio } = portfolio.result;
+  const { sinceMonthEnd } = portfolio;
 
   return (
-    // The frame draws four panels (#243); the fourth, Proventos do mês, is
-    // #233's, which turns this row to four columns when it lands.
-    <Grid cols={3} gap="md">
+    <Grid cols={4} gap="md">
       <StatCard
         label={t('value.label')}
         value={<Money value={portfolio.value} />}
-        /* SPEC-009 AC-3/9/11 — *how* this was priced, where the figure is read
-           rather than in a footnote read once. Three separate facts: see
-           `ValuationMarkers` on why one badge covering all of them told some
-           users a false reason for a true warning. */
-        hint={<ValuationMarkers markers={portfolio.markers} />}
+        hint={
+          <Stack gap="xs">
+            {/* #233 — against the last month-end close, or the honest absence
+                of one (BR-020-27's spirit: no comparison against an implied zero). */}
+            {sinceMonthEnd.kind === 'available' ? (
+              <MonthChange
+                ratio={sinceMonthEnd.ratio}
+                change={sinceMonthEnd.change}
+                against={t('value.against', { date: formatBusinessDate(sinceMonthEnd.asOf) })}
+              />
+            ) : (
+              <span>{t('value.noMonthEnd')}</span>
+            )}
+            {/* SPEC-009 AC-3/9/11 — *how* this was priced, where the figure is
+                read rather than in a footnote read once. Three separate facts:
+                see `ValuationMarkers` on why one badge covering all of them
+                told some users a false reason for a true warning. */}
+            <ValuationMarkers markers={portfolio.markers} />
+          </Stack>
+        }
         link={{ href: '/portfolio', label: t('value.link'), ariaLabel: t('value.linkLabel') }}
       />
       <StatCard
@@ -282,6 +305,61 @@ async function Headline({
         // BR-015-08 — the result per asset is Composição's table.
         link={{ href: '/portfolio/composition', label: t('result.link') }}
       />
+      <EarningsCard earnings={earnings} />
     </Grid>
+  );
+}
+
+/**
+ * #233 / SPEC-014 — "Proventos em outubro", against the whole previous month.
+ *
+ * The link opens Relatórios › Proventos on **this month so far**, so the
+ * report's "Recebido no período" is the figure on this card rather than a
+ * year-to-date total that merely contains it.
+ */
+async function EarningsCard({ earnings }: { readonly earnings: DashboardEarnings }) {
+  const t = await getTranslations('dashboard');
+  const month = formatMonthName(earnings.month);
+  const href = `/reports/earnings${toQueryString(
+    {
+      period: { kind: 'custom', from: earnings.from, to: earnings.to },
+      scope: { kind: 'portfolio' },
+      grouping: 'asset_class',
+    },
+    'asset_class',
+  )}`;
+  const link = { href, label: t('earnings.link'), ariaLabel: t('earnings.linkLabel', { month }) };
+
+  if (earnings.kind === 'none_yet') {
+    // BR-020-27's spirit — before the first provento, R$ 0,00 would read as a
+    // month that paid nothing.
+    return (
+      <StatCard
+        label={t('earnings.label', { month })}
+        value={t('earnings.noneYet')}
+        hint={t('earnings.noneYetHint')}
+        link={link}
+      />
+    );
+  }
+
+  const previous = formatMonthName(earnings.previousMonth);
+  return (
+    <StatCard
+      label={t('earnings.label', { month })}
+      value={<Money value={earnings.amount} />}
+      hint={
+        earnings.ratio === null ? (
+          t('earnings.noPrevious', { month: previous })
+        ) : (
+          <MonthChange
+            ratio={earnings.ratio}
+            change={earnings.change}
+            against={t('earnings.against', { month: previous })}
+          />
+        )
+      }
+      link={link}
+    />
   );
 }
