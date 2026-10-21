@@ -2,7 +2,7 @@ import { BusinessDate } from '@/core/shared/clock';
 import type { AssetId, ImportBatchId } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { ReportQueryResult } from '@/core/reporting/base-query';
-import type { EarningRecord, ReportHolding } from '@/core/reporting/ports';
+import type { ReceivedEarning, ReportHolding } from '@/core/reporting/ports';
 import { daysInMonth, monthsBefore } from '@/core/reporting/period';
 import { totalReceived, yearOverYear } from '@/core/reporting/earnings/received';
 import { unrealizedResult, type UnrealizedResult } from '@/core/reporting/composition/result';
@@ -531,14 +531,15 @@ export interface DashboardSummaryInput {
    */
   readonly monthEnd: DailyValuationSnapshot | null;
   /**
-   * #233 — `listEarnings` over `dashboardMonths(today)`'s two windows: the
-   * Earnings report's own read, folded by its own `totalReceived`. At
-   * portfolio scope the report's attributed slices sum back to these payments
-   * (`earnings/report.ts`), so no allocation history is needed.
+   * #233 — `listEarningsReceived` over `dashboardMonths(today)`'s two
+   * windows: the Earnings report's own rows, folded by its own
+   * `totalReceived`. At portfolio scope the report's attributed slices sum
+   * back to these payments (`earnings/report.ts`), so neither the allocation
+   * history nor a leilão's held basis is needed.
    */
   readonly earnings: {
-    readonly current: readonly EarningRecord[];
-    readonly previous: readonly EarningRecord[];
+    readonly current: readonly ReceivedEarning[];
+    readonly previous: readonly ReceivedEarning[];
   };
   /**
    * BR-020-26 — whether the position cache holds a row for this tenant at all,

@@ -26,7 +26,8 @@ export function totalsByType(earnings: readonly EarningRecord[]): readonly TypeT
   }));
 }
 
-export function totalReceived(earnings: readonly EarningRecord[]): Money {
+/** Reads `amount` alone, so a `ReceivedEarning` (#233) sums the same way as a record. */
+export function totalReceived(earnings: readonly Pick<EarningRecord, 'amount'>[]): Money {
   return sumMoney(earnings.map((earning) => earning.amount));
 }
 

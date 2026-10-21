@@ -699,27 +699,36 @@ describe('#98 — the dashboard read model (integration)', () => {
 
   describe('month-over-month changes (#233)', () => {
     let sequence = 0;
-    async function seedDividend(payDate: string, unitPrice: string): Promise<void> {
+    async function seedTransaction(
+      type: 'dividend' | 'leilao_fracoes' | 'sell',
+      assetId: AssetId,
+      tradeDate: string,
+      unitPrice: string,
+      quantityText = '100',
+    ): Promise<void> {
       sequence += 1;
-      const quantity = Quantity.fromString('100');
+      const quantity = Quantity.fromString(quantityText);
       const price = Money.fromString(unitPrice);
       await migratorPool.query(
         `INSERT INTO transactions (id, user_id, asset_id, institution_id, type, status,
            trade_date, quantity, unit_price, fees, total_value, ratio, natural_key,
            occurrence, import_batch_id, is_manual, is_user_modified)
-         VALUES ($1,$2,$3,NULL,'dividend','active',$4,$5,$6,0,$7,NULL,$8,1,NULL,true,false)`,
+         VALUES ($1,$2,$3,NULL,$4,'active',$5,$6,$7,0,$8,NULL,$9,1,NULL,true,false)`,
         [
           TransactionId.generate(),
           userId,
-          petr,
-          payDate,
+          assetId,
+          type,
+          tradeDate,
           quantity.toString(),
           price.toString(),
-          computeTotalValue('dividend', quantity, price, Money.zero()).toString(),
-          `dash|${payDate}|${sequence}`,
+          computeTotalValue(type, quantity, price, Money.zero()).toString(),
+          `dash|${type}|${tradeDate}|${sequence}`,
         ],
       );
     }
+    const seedDividend = (payDate: string, unitPrice: string) =>
+      seedTransaction('dividend', petr, payDate, unitPrice);
 
     async function seedSnapshot(date: string, total: string, earningsToDate = '0'): Promise<void> {
       await migratorPool.query(
@@ -761,6 +770,25 @@ describe('#98 — the dashboard read model (integration)', () => {
         grouping: 'asset_class',
       });
       expect(report?.total.toDecimal().toFixed(8)).toBe(earnings.amount.toDecimal().toFixed(8));
+    });
+
+    /**
+     * #233 review — the Earnings report replays a leilão's asset ledger for
+     * its wallet-split basis (`listEarnings`), and throws when that ledger
+     * cannot replay. The Dashboard needs no split, so it must neither replay
+     * nor fall over: a sell with no buy before it is a ledger that does not
+     * replay, and the landing page still renders the month's total.
+     * Hand-computed: 0,5 × R$ 30,00 = R$ 15,00.
+     */
+    it('counts a leilão de frações without replaying its asset’s ledger', async () => {
+      await seedTransaction('sell', vale, '2026-02-10', '50.00', '10');
+      await seedTransaction('leilao_fracoes', vale, '2026-03-10', '30.00', '0.5');
+
+      const { summary } = await load();
+      const { earnings } = summary;
+      if (earnings.kind !== 'received') throw new Error('expected received proventos');
+
+      expect(earnings.amount.toDecimal().toFixed(2)).toBe('15.00');
     });
 
     it('says none yet before the first provento', async () => {

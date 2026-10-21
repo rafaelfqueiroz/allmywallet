@@ -139,11 +139,12 @@ export async function loadDashboard(
         // #233 — the Patrimônio card's "vs. 30/09": SPEC-013 BR-013-02's
         // opening snapshot for a period starting on the first of the month.
         port.findSnapshotBefore(months.current.from),
-        // #233 — the Proventos card: SPEC-014's own read, one calendar month
-        // each. An index scan over a month of earning rows, not a replay
-        // (BR-016-05).
-        port.listEarnings(months.current.from, months.current.to),
-        port.listEarnings(months.previous.from, months.previous.to),
+        // #233 — the Proventos card: SPEC-014's own rows, one calendar month
+        // each. `listEarningsReceived`, not `listEarnings`: the latter replays
+        // an asset's ledger for a leilão's wallet-split basis, which a
+        // portfolio total never uses (BR-016-05/07a).
+        port.listEarningsReceived(months.current.from, months.current.to),
+        port.listEarningsReceived(months.previous.from, months.previous.to),
       ]);
 
       /**
