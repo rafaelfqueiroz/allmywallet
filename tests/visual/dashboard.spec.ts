@@ -195,6 +195,31 @@ async function seedDashboard(userId: string): Promise<void> {
       ],
     );
 
+    // #233 — the month-end close and a provento in each month, so both period
+    // changes render. Dated by São Paulo's calendar, as the closes above are.
+    // Hand-computed: R$ 6.700,00 against R$ 6.560,00 → +R$ 140,00, +2,13 %;
+    // 100 × 0,90 = R$ 90,00 against 100 × 1,00 = R$ 100,00 → −R$ 10,00, −10,00 %.
+    const monthEnd = `(date_trunc('month', ${SAO_PAULO_TODAY}) - interval '1 day')::date`;
+    await pool.query(
+      `INSERT INTO daily_valuation_snapshots
+         (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+       VALUES ($1, ${monthEnd}, '6560', '6000', '100', '{}'::jsonb)`,
+      [userId],
+    );
+    for (const [payDate, unitPrice] of [
+      [SAO_PAULO_TODAY, '0.90'],
+      [monthEnd, '1.00'],
+    ] as const) {
+      await pool.query(
+        `INSERT INTO transactions (id, user_id, asset_id, institution_id, type, status,
+           trade_date, quantity, unit_price, fees, total_value, ratio, natural_key,
+           occurrence, import_batch_id, is_manual, is_user_modified)
+         VALUES ($1, $2, $3, NULL, 'dividend', 'active', ${payDate}, 100, $4, 0,
+                 100 * $4::numeric, NULL, $5, 1, NULL, true, false)`,
+        [randomUUID(), userId, BUY.id, unitPrice, `visual|${unitPrice}`],
+      );
+    }
+
     // SPEC-020 BR-020-16/18 — two rows left needing a decision.
     const rowsBatchId = randomUUID();
     await pool.query(
@@ -264,11 +289,34 @@ test('the populated Dashboard is unchanged', async ({ dashboard }) => {
   await expect(page.getByRole('link', { name: /^VSEL3/ })).toBeVisible();
   await expect(page.getByRole('link', { name: /^VHLD3/ })).toHaveCount(0);
 
+  await expect(page.getByText('(+R$ 140,00)')).toBeVisible();
+  await expect(page.getByText('R$ 90,00', { exact: true })).toBeVisible();
+
   // The freshness line — see the header on why it is pinned, not masked.
   await page.locator('[data-slot="page-header"] p').evaluate((line) => {
     line.textContent = (line.textContent ?? '')
       .replace(/\d{2}\/\d{2}\/\d{4}/g, '19/10/2026')
       .replace(/\d{2}:\d{2}/g, '14:30');
+  });
+  // #233 — the month names and the month-end date, pinned the same way: the
+  // frame's own October, so the cards do not reflow from month to month.
+  await page
+    .locator('[data-slot="stat-card"] dt span, [data-slot="stat-card"] dt')
+    .evaluateAll((labels) => {
+      for (const label of labels) {
+        if (label.children.length > 0) continue;
+        label.textContent = (label.textContent ?? '').replace(
+          /^Proventos em .+$/,
+          'Proventos em outubro',
+        );
+      }
+    });
+  await page.locator('[data-slot="month-change"] > span:last-child').evaluateAll((spans) => {
+    for (const span of spans) {
+      span.textContent = (span.textContent ?? '')
+        .replace(/\d{2}\/\d{2}\/\d{4}/, '30/09/2026')
+        .replace(/^vs\. [a-zç]+$/, 'vs. setembro');
+    }
   });
 
   await expect(page).toHaveScreenshot('dashboard.png', {

@@ -1,12 +1,20 @@
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { BusinessDate, FakeClock } from '@/core/shared/clock';
-import { UserId, WalletId, type AssetId, type InstitutionId } from '@/core/shared/ids';
-import { Money } from '@/core/shared/money';
+import {
+  TransactionId,
+  UserId,
+  WalletId,
+  type AssetId,
+  type InstitutionId,
+} from '@/core/shared/ids';
+import { Money, Quantity } from '@/core/shared/money';
+import { computeTotalValue } from '@/core/ledger/transaction';
 import { runReportQuery } from '@/core/reporting/base-query';
 import { buildPortfolioValueReport } from '@/core/reporting/portfolio-value/report';
 import { withReportPort } from '@/app/(app)/reports/data';
 import { loadDashboard } from '@/app/(app)/dashboard/data';
+import { loadEarnings } from '@/app/(app)/reports/earnings/data';
 import { applyMigrations, startTestDatabase, type TestDatabase } from '../support/postgres';
 import { seedAsset, seedInstitution } from '../support/ledger-fixtures';
 import { resetLedger, resetUsers, resetWallets } from '../support/reset';
@@ -80,7 +88,7 @@ describe('#98 — the dashboard read model (integration)', () => {
 
   beforeEach(async () => {
     await migratorPool.query(
-      'TRUNCATE positions, price_quotes, latest_quotes, import_rows, import_batches, ' +
+      'TRUNCATE transactions, positions, price_quotes, latest_quotes, import_rows, import_batches, ' +
         'wallet_allocation_events, wallet_allocations, wallet_asset_rules, wallets, ' +
         'fixed_income_contracts, daily_valuation_snapshots CASCADE',
     );
@@ -682,6 +690,142 @@ describe('#98 — the dashboard read model (integration)', () => {
       );
 
       expect((await load()).summary.attention).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // #233 — month-over-month changes under the headline figures
+  // -------------------------------------------------------------------------
+
+  describe('month-over-month changes (#233)', () => {
+    let sequence = 0;
+    async function seedTransaction(
+      type: 'dividend' | 'leilao_fracoes' | 'sell',
+      assetId: AssetId,
+      tradeDate: string,
+      unitPrice: string,
+      quantityText = '100',
+    ): Promise<void> {
+      sequence += 1;
+      const quantity = Quantity.fromString(quantityText);
+      const price = Money.fromString(unitPrice);
+      await migratorPool.query(
+        `INSERT INTO transactions (id, user_id, asset_id, institution_id, type, status,
+           trade_date, quantity, unit_price, fees, total_value, ratio, natural_key,
+           occurrence, import_batch_id, is_manual, is_user_modified)
+         VALUES ($1,$2,$3,NULL,$4,'active',$5,$6,$7,0,$8,NULL,$9,1,NULL,true,false)`,
+        [
+          TransactionId.generate(),
+          userId,
+          assetId,
+          type,
+          tradeDate,
+          quantity.toString(),
+          price.toString(),
+          computeTotalValue(type, quantity, price, Money.zero()).toString(),
+          `dash|${type}|${tradeDate}|${sequence}`,
+        ],
+      );
+    }
+    const seedDividend = (payDate: string, unitPrice: string) =>
+      seedTransaction('dividend', petr, payDate, unitPrice);
+
+    async function seedSnapshot(date: string, total: string, earningsToDate = '0'): Promise<void> {
+      await migratorPool.query(
+        `INSERT INTO daily_valuation_snapshots
+           (user_id, date, total_value, net_contributions, earnings_to_date, by_asset_class)
+         VALUES ($1, $2, $3, '0', $4, '{}'::jsonb)`,
+        [userId, date, total, earningsToDate],
+      );
+    }
+
+    /**
+     * Hand-computed, 100 shares each (TODAY is 2026-03-20):
+     *   March to date   05/03 × 0,75 = 75,00 · 20/03 × 0,50 = 50,00 → 125,00
+     *   February        01/02 × 1,00 = 100,00 · 28/02 × 0,60 = 60,00 → 160,00
+     *   change          125,00 − 160,00 = −35,00; −35 ÷ 160 = −0,21875
+     * 31/01 is in neither month and must not count.
+     *
+     * And the property, as for the headline: the card's figure **is** the
+     * Earnings report's "Recebido no período" for the period its link opens.
+     */
+    it('equals the Earnings report total for the month the card links to', async () => {
+      await seedDividend('2026-01-31', '9.99');
+      await seedDividend('2026-02-01', '1.00');
+      await seedDividend('2026-02-28', '0.60');
+      await seedDividend('2026-03-05', '0.75');
+      await seedDividend('2026-03-20', '0.50');
+
+      const { summary } = await load();
+      const { earnings } = summary;
+      if (earnings.kind !== 'received') throw new Error('expected received proventos');
+
+      expect(earnings.amount.toDecimal().toFixed(2)).toBe('125.00');
+      expect(earnings.change.toDecimal().toFixed(2)).toBe('-35.00');
+      expect(earnings.ratio?.toDecimal().toFixed(5)).toBe('-0.21875');
+
+      const { report } = await loadEarnings(userId, {
+        period: { kind: 'custom', from: earnings.from, to: earnings.to },
+        scope: { kind: 'portfolio' },
+        grouping: 'asset_class',
+      });
+      expect(report?.total.toDecimal().toFixed(8)).toBe(earnings.amount.toDecimal().toFixed(8));
+    });
+
+    /**
+     * #233 review — the Earnings report replays a leilão's asset ledger for
+     * its wallet-split basis (`listEarnings`), and throws when that ledger
+     * cannot replay. The Dashboard needs no split, so it must neither replay
+     * nor fall over: a sell with no buy before it is a ledger that does not
+     * replay, and the landing page still renders the month's total.
+     * Hand-computed: 0,5 × R$ 30,00 = R$ 15,00.
+     */
+    it('counts a leilão de frações without replaying its asset’s ledger', async () => {
+      await seedTransaction('sell', vale, '2026-02-10', '50.00', '10');
+      await seedTransaction('leilao_fracoes', vale, '2026-03-10', '30.00', '0.5');
+
+      const { summary } = await load();
+      const { earnings } = summary;
+      if (earnings.kind !== 'received') throw new Error('expected received proventos');
+
+      expect(earnings.amount.toDecimal().toFixed(2)).toBe('15.00');
+    });
+
+    it('says none yet before the first provento', async () => {
+      expect((await load()).summary.earnings.kind).toBe('none_yet');
+    });
+
+    /**
+     * 28/02/2026 is a Saturday, so February's last close is the 27th; the
+     * snapshot inside March must not be taken for it. Hand-computed:
+     *   100 PETR4 × 38,42 = 3.842,00; 3.842 − 3.000 = +842,00;
+     *   842 ÷ 3.000 = 0,280666…
+     */
+    it('compares the headline with the last close before the month', async () => {
+      await seedPosition(petr, '100', '32.15', '3215');
+      await seedClose(petr, '2026-03-20', '38.42');
+      await seedSnapshot('2026-02-26', '2900');
+      await seedSnapshot('2026-02-27', '3000');
+      await seedSnapshot('2026-03-02', '3100');
+
+      const { summary } = await load();
+      if (summary.portfolio.kind !== 'valued') throw new Error('expected a valued portfolio');
+      const since = summary.portfolio.sinceMonthEnd;
+      if (since.kind !== 'available') throw new Error('expected a month-end comparison');
+
+      expect(since.asOf).toBe(BusinessDate.of('2026-02-27'));
+      expect(since.change.toDecimal().toFixed(2)).toBe('842.00');
+      expect(since.ratio?.toDecimal().toFixed(6)).toBe('0.280666');
+    });
+
+    it('has no month-end comparison when history starts inside the month', async () => {
+      await seedPosition(petr, '100', '32.15', '3215');
+      await seedClose(petr, '2026-03-20', '38.42');
+      await seedSnapshot('2026-03-02', '3100');
+
+      const { summary } = await load();
+
+      expect(summary.portfolio).toMatchObject({ sinceMonthEnd: { kind: 'none' } });
     });
   });
 });

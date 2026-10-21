@@ -1,9 +1,12 @@
-import type { BusinessDate } from '@/core/shared/clock';
+import { BusinessDate } from '@/core/shared/clock';
 import type { AssetId, ImportBatchId } from '@/core/shared/ids';
 import type { Money, Quantity } from '@/core/shared/money';
 import type { ReportQueryResult } from '@/core/reporting/base-query';
-import type { ReportHolding } from '@/core/reporting/ports';
+import type { ReceivedEarning, ReportHolding } from '@/core/reporting/ports';
+import { daysInMonth, monthsBefore } from '@/core/reporting/period';
+import { totalReceived, yearOverYear } from '@/core/reporting/earnings/received';
 import { unrealizedResult, type UnrealizedResult } from '@/core/reporting/composition/result';
+import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import { daysSinceImport, isImportStale } from '@/core/ingestion/staleness';
@@ -87,7 +90,105 @@ export type DashboardPortfolio =
       /** SPEC-007 DL-007-12 — any constituent cost is an estimate. */
       readonly costEstimated: boolean;
       readonly result: UnrealizedResult;
+      /** #233 — the *patrimônio* against the last month-end snapshot. */
+      readonly sinceMonthEnd: ValueSinceMonthEnd;
     };
+
+/**
+ * #233 / SPEC-022 BR-022-07 — "+2,14% (+R$ 13.689,37) vs. 30/09/2026" under
+ * the *patrimônio*: today's figure against the close of the previous month.
+ *
+ * Both ends are figures SPEC-013 already holds. `value` is the report's own
+ * total (BR-013-12), and the opening is `findSnapshotBefore` the first of the
+ * month — the snapshot SPEC-013 BR-013-02 opens a period with — so this is the
+ * Patrimônio line's growth from that close to its live endpoint. The change is
+ * in value, contributions included: it says how the figure above moved, not
+ * what the market did (that is SPEC-012's question, and Relatórios' screen).
+ *
+ * `none` before the first month-end snapshot — a tenant whose history begins
+ * this month has no close to compare against, and a "+100 %" from an implied
+ * zero would be arithmetic, not a fact (BR-020-27's spirit).
+ */
+export type ValueSinceMonthEnd =
+  | { readonly kind: 'none' }
+  | {
+      readonly kind: 'available';
+      /** The snapshot's own date — the last close on or before the month's end. */
+      readonly asOf: BusinessDate;
+      readonly change: Money;
+      /** `null` when the opening value is not positive — growth from zero is not a percentage. */
+      readonly ratio: Money | null;
+    };
+
+/**
+ * #233 / SPEC-014 — the current month's received *proventos*, against the
+ * previous month's, for "Proventos em outubro … −8,30% (−R$ 116,23) vs.
+ * setembro".
+ *
+ * **Calendar months, as the frame draws them**: the current month to today
+ * against the whole previous month. That is not BR-014-07's equal-length
+ * window, and is not meant to be — the card answers "how is this month going
+ * against last month", and links to Relatórios › Proventos for the report's
+ * own comparison.
+ *
+ * `none_yet` before the first *provento* (BR-020-27's spirit): "R$ 0,00 em
+ * outubro" to a user who has never received anything reads as a month that
+ * paid nothing, when there is no income history at all.
+ */
+export type DashboardEarnings = EarningsMonth &
+  (
+    | { readonly kind: 'none_yet' }
+    | {
+        readonly kind: 'received';
+        /** The Earnings report's own total for the month to date (BR-014-01). */
+        readonly amount: Money;
+        readonly previousMonth: string;
+        readonly change: Money;
+        /** `null` when the previous month paid nothing — growth from zero is not a percentage (BR-014-07). */
+        readonly ratio: Money | null;
+      }
+  );
+
+/**
+ * The month the card is about, and its range so far — the custom period the
+ * card's link opens Relatórios › Proventos on, so the report's "Recebido no
+ * período" is the figure the card shows.
+ */
+export interface EarningsMonth {
+  /** `YYYY-MM`. */
+  readonly month: string;
+  readonly from: BusinessDate;
+  readonly to: BusinessDate;
+}
+
+/** The two calendar months the Proventos card compares, resolved from `today`. */
+export interface DashboardMonths {
+  readonly current: EarningsMonth;
+  readonly previous: EarningsMonth;
+}
+
+/**
+ * The current month to `today`, and the whole month before it. AR-29:
+ * calendar arithmetic on the fields, through `period.ts`, never through `Date`.
+ *
+ * `current.from` is also the date the month-end snapshot precedes:
+ * `findSnapshotBefore(current.from)` is the last close of the previous month.
+ */
+export function dashboardMonths(today: BusinessDate): DashboardMonths {
+  const month = today.slice(0, 7);
+  const from = BusinessDate.of(`${month}-01`);
+  const previousFrom = monthsBefore(from, 1);
+  const previousMonth = previousFrom.slice(0, 7);
+  const [year, index] = previousMonth.split('-').map(Number) as [number, number];
+  return {
+    current: { month, from, to: today },
+    previous: {
+      month: previousMonth,
+      from: previousFrom,
+      to: BusinessDate.of(`${previousMonth}-${String(daysInMonth(year, index)).padStart(2, '0')}`),
+    },
+  };
+}
 
 /**
  * SPEC-009 AC-3/AC-9/AC-11 — **how this total was priced**, at portfolio grain.
@@ -378,6 +479,8 @@ export type MarkedHolding = Pick<
 
 export interface DashboardSummary {
   readonly portfolio: DashboardPortfolio;
+  /** #233 — the Proventos card. A fact about income, not holdings, so outside `portfolio`. */
+  readonly earnings: DashboardEarnings;
   readonly freshness: DashboardFreshness;
   readonly reconciliation: DashboardReconciliation;
   /** At most `ATTENTION_QUEUE_LIMIT` items — see `attentionQueue`. */
@@ -422,6 +525,22 @@ export interface DashboardSummaryInput {
   readonly lastImportAt: BusinessDate | null;
   /** The first date this tenant has a valuation snapshot for; `null` before any. */
   readonly earliestSnapshot: BusinessDate | null;
+  /**
+   * #233 — `findSnapshotBefore(dashboardMonths(today).current.from)`: the last
+   * close of the previous month, or `null` before the first one.
+   */
+  readonly monthEnd: DailyValuationSnapshot | null;
+  /**
+   * #233 — `listEarningsReceived` over `dashboardMonths(today)`'s two
+   * windows: the Earnings report's own rows, folded by its own
+   * `totalReceived`. At portfolio scope the report's attributed slices sum
+   * back to these payments (`earnings/report.ts`), so neither the allocation
+   * history nor a leilão's held basis is needed.
+   */
+  readonly earnings: {
+    readonly current: readonly ReceivedEarning[];
+    readonly previous: readonly ReceivedEarning[];
+  };
   /**
    * BR-020-26 — whether the position cache holds a row for this tenant at all,
    * **including one closed to zero**. The trace a manual-entry user leaves after
@@ -541,6 +660,7 @@ function portfolioOf(input: DashboardSummaryInput): DashboardPortfolio {
       costBasis: input.query.report.total.costBasis,
       costEstimated: input.query.report.total.costEstimated,
       result: unrealizedResult(input.query.report.total),
+      sinceMonthEnd: valueSinceMonthEnd(input.query.report.total.value, input.monthEnd),
     };
   }
   const hasHistory =
@@ -548,11 +668,54 @@ function portfolioOf(input: DashboardSummaryInput): DashboardPortfolio {
   return hasHistory ? { kind: 'no_holdings' } : { kind: 'onboarding' };
 }
 
+/**
+ * The ratio is `yearOverYear`'s, SPEC-014's "current against previous", so a
+ * non-positive base is `null` here for the same reason it is there.
+ */
+function valueSinceMonthEnd(
+  value: Money,
+  monthEnd: DailyValuationSnapshot | null,
+): ValueSinceMonthEnd {
+  if (monthEnd === null) return { kind: 'none' };
+  return {
+    kind: 'available',
+    asOf: monthEnd.date,
+    change: value.minus(monthEnd.totalValue),
+    ratio: yearOverYear(value, monthEnd.totalValue).change,
+  };
+}
+
+/**
+ * "Before the first *provento*" is read without another query: nothing this
+ * month, nothing last month, and nothing in the month-end snapshot's running
+ * `earningsToDate` (SPEC-009) — which holds every *provento* up to that close.
+ */
+function earningsOf(input: DashboardSummaryInput): DashboardEarnings {
+  const months = dashboardMonths(input.today);
+  const { current, previous } = input.earnings;
+  const everReceived =
+    current.length > 0 ||
+    previous.length > 0 ||
+    (input.monthEnd?.earningsToDate.isPositive() ?? false);
+  if (!everReceived) return { kind: 'none_yet', ...months.current };
+
+  const growth = yearOverYear(totalReceived(current), totalReceived(previous));
+  return {
+    kind: 'received',
+    ...months.current,
+    amount: growth.current,
+    previousMonth: months.previous.month,
+    change: growth.current.minus(growth.previous),
+    ratio: growth.change,
+  };
+}
+
 export function buildDashboardSummary(input: DashboardSummaryInput): DashboardSummary {
   const attention = attentionQueue(input);
 
   return {
     portfolio: portfolioOf(input),
+    earnings: earningsOf(input),
     freshness: {
       valuationAsOf: input.query.asOf,
       quotedAt: input.quotedAt,

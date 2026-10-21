@@ -12,6 +12,7 @@ import {
   formatDate,
   formatDateTime,
   formatMonth,
+  formatMonthName,
   formatPercent,
   formatQuantity,
 } from '@/i18n/format';
@@ -86,6 +87,15 @@ describe('formatMonth', () => {
   it('names the month and the year in pt-BR', () => {
     expect(formatMonth('2026-09')).toBe('setembro de 2026');
     expect(formatMonth('2027-01')).toBe('janeiro de 2027');
+  });
+});
+
+describe('formatMonthName (#233)', () => {
+  it('names the month alone, in lower case as pt-BR writes it', () => {
+    expect(formatMonthName('2026-10')).toBe('outubro');
+    expect(formatMonthName('2026-09')).toBe('setembro');
+    // The first of the month in UTC: no time zone moves it into December.
+    expect(formatMonthName('2027-01')).toBe('janeiro');
   });
 });
 

@@ -143,6 +143,22 @@ export function formatMonth(month: string): string {
 }
 
 /**
+ * A `YYYY-MM` month's name alone — "setembro". For a sentence that already
+ * fixes the year, as the Dashboard's "Proventos em outubro … vs. setembro"
+ * does by being about the current month (#233). Same UTC anchoring as
+ * `formatMonth`.
+ */
+const monthNameFormatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, {
+  month: 'long',
+  timeZone: 'UTC',
+});
+
+export function formatMonthName(month: string): string {
+  const [year = '', index = ''] = month.split('-');
+  return monthNameFormatter.format(new Date(Date.UTC(Number(year), Number(index) - 1, 1)));
+}
+
+/**
  * SPEC-022 BR-022-42 — a chart's **date-axis tick**, never an ISO key (SPEC-016
  * BR-016-18). Pure string work on the point's `YYYY-MM-DD` or `YYYY-MM` key
  * (AR-29); only the month's name goes through `Intl`, at the first of the

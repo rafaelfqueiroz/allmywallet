@@ -7,6 +7,7 @@ import type {
   AllocationEvent,
   AssetDescriptor,
   EarningRecord,
+  ReceivedEarning,
   DailyValuationSnapshot,
   ReportAllocation,
   ReportDataPort,
@@ -183,6 +184,17 @@ export class FakeReportDataPort implements ReportDataPort {
 
   async listEarnings(from: BusinessDate, to: BusinessDate): Promise<readonly EarningRecord[]> {
     this.calls.push(`listEarnings:${from}:${to}`);
+    return (this.data.earnings ?? []).filter(
+      (earning) =>
+        !BusinessDate.isBefore(earning.payDate, from) && !BusinessDate.isAfter(earning.payDate, to),
+    );
+  }
+
+  async listEarningsReceived(
+    from: BusinessDate,
+    to: BusinessDate,
+  ): Promise<readonly ReceivedEarning[]> {
+    this.calls.push(`listEarningsReceived:${from}:${to}`);
     return (this.data.earnings ?? []).filter(
       (earning) =>
         !BusinessDate.isBefore(earning.payDate, from) && !BusinessDate.isAfter(earning.payDate, to),

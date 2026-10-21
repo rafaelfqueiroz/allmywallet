@@ -378,6 +378,17 @@ export interface ReportDataPort {
    */
   listEarnings(from: BusinessDate, to: BusinessDate): Promise<readonly EarningRecord[]>;
   /**
+   * SPEC-014 BR-014-01 at **portfolio** scope — the same rows as
+   * `listEarnings`, without the leilão held basis (#233 review).
+   *
+   * `heldQuantity` exists only to split a leilão between wallets
+   * (BR-014-12). A reader that folds the portfolio's total never splits, so it
+   * has no use for the bounded replay that derives it — and the Dashboard,
+   * which reads this, must not depend on any ledger replaying at all
+   * (SPEC-016 BR-016-05/07a).
+   */
+  listEarningsReceived(from: BusinessDate, to: BusinessDate): Promise<readonly ReceivedEarning[]>;
+  /**
    * SPEC-014 BR-014-12 — every allocation change up to and including `upTo`,
    * oldest first, for reconstructing what each wallet held when a provento was
    * paid. Bounded by the period's end because nothing after it can affect what
@@ -423,7 +434,7 @@ export type EarningType = (typeof EARNING_TYPES)[number];
  * row type cannot silently change what a report means, and so the structural
  * check that reporting never imports the ledger stays true.
  */
-interface EarningRecordFields {
+export interface EarningRecordFields {
   readonly assetId: AssetId;
   /** BR-011-03: institution is a grouping dimension, and income groups by it too. */
   readonly institutionId: InstitutionId | null;
@@ -476,6 +487,11 @@ export interface FractionAuctionRecord extends EarningRecordFields {
 
 /** One provento, as the report reads it. */
 export type EarningRecord = SharePaymentRecord | FractionAuctionRecord;
+
+/** A provento as paid: what BR-014-01's total sums, with no wallet-split basis. */
+export interface ReceivedEarning extends EarningRecordFields {
+  readonly type: EarningType;
+}
 
 /**
  * SPEC-014 BR-014-12 — one recorded allocation state.

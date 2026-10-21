@@ -17,6 +17,7 @@ import type {
   AssetDescriptor,
   EarningRecord,
   EarningType,
+  ReceivedEarning,
   DailyValuationSnapshot,
   ReportAllocation,
   ReportDataPort,
@@ -324,6 +325,30 @@ export class DrizzleReportDataPort implements ReportDataPort {
    * and DL-014-04 ask for and what matches the user's bank statement.
    */
   async listEarnings(from: BusinessDate, to: BusinessDate): Promise<readonly EarningRecord[]> {
+    const received = await this.listEarningsReceived(from, to);
+
+    // No leilão in the window reads nothing more: the repository returns
+    // before querying for an empty asset list.
+    const heldOn = await this.heldOnPayDate(
+      received.filter((row) => row.type === 'leilao_fracoes').map((row) => row.assetId),
+      to,
+    );
+
+    return received.map((earning): EarningRecord =>
+      earning.type === 'leilao_fracoes'
+        ? { ...earning, type: earning.type, heldQuantity: heldOn(earning.assetId, earning.payDate) }
+        : { ...earning, type: earning.type },
+    );
+  }
+
+  /**
+   * #233 review — `listEarnings`' rows without the leilão held basis, for a
+   * portfolio-scope total (see the port). One index scan; never a replay.
+   */
+  async listEarningsReceived(
+    from: BusinessDate,
+    to: BusinessDate,
+  ): Promise<readonly ReceivedEarning[]> {
     const rows = await this.tx
       .select({
         assetId: transactions.assetId,
@@ -344,26 +369,14 @@ export class DrizzleReportDataPort implements ReportDataPort {
       )
       .orderBy(asc(transactions.tradeDate));
 
-    // No leilão in the window reads nothing more: the repository returns
-    // before querying for an empty asset list.
-    const heldOn = await this.heldOnPayDate(
-      rows.filter((row) => row.type === 'leilao_fracoes').map((row) => AssetId.of(row.assetId)),
-      to,
-    );
-
-    return rows.map((row): EarningRecord => {
-      const fields = {
-        assetId: AssetId.of(row.assetId),
-        institutionId: row.institutionId === null ? null : InstitutionId.of(row.institutionId),
-        payDate: row.tradeDate as BusinessDate,
-        amount: row.totalValue,
-        quantity: row.quantity,
-      };
-      const type = row.type as EarningType;
-      return type === 'leilao_fracoes'
-        ? { ...fields, type, heldQuantity: heldOn(fields.assetId, fields.payDate) }
-        : { ...fields, type };
-    });
+    return rows.map((row): ReceivedEarning => ({
+      assetId: AssetId.of(row.assetId),
+      institutionId: row.institutionId === null ? null : InstitutionId.of(row.institutionId),
+      type: row.type as EarningType,
+      payDate: row.tradeDate as BusinessDate,
+      amount: row.totalValue,
+      quantity: row.quantity,
+    }));
   }
 
   /**

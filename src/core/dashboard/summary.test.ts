@@ -3,7 +3,8 @@ import { BusinessDate } from '@/core/shared/clock';
 import { ImportBatchId, type AssetId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { runReportQuery, type ReportQueryResult } from '@/core/reporting/base-query';
-import type { ReportAllocation } from '@/core/reporting/ports';
+import type { EarningRecord, ReportAllocation } from '@/core/reporting/ports';
+import type { DailyValuationSnapshot } from '@/core/valuation/ports';
 import {
   FakeReportDataPort,
   anAsset,
@@ -22,6 +23,7 @@ import type { PendingAllocation } from '@/core/wallets/pending';
 import {
   ATTENTION_QUEUE_LIMIT,
   buildDashboardSummary,
+  dashboardMonths,
   reconciliationStatus,
   type AssetLabel,
   type DashboardSummaryInput,
@@ -91,6 +93,8 @@ function input(overrides: Partial<DashboardSummaryInput> & { query: ReportQueryR
     delayMinutes: 30,
     lastImportAt: day('2026-09-10'),
     earliestSnapshot: null,
+    monthEnd: null,
+    earnings: { current: [] as readonly EarningRecord[], previous: [] as readonly EarningRecord[] },
     hasEverHeldAnything: false,
     thresholdDays: 30,
     today: TODAY,
@@ -816,5 +820,230 @@ describe('needs attention (BR-010-12)', () => {
         reason: 'no_wallet',
       },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #233 — month-over-month changes under the headline figures
+// ---------------------------------------------------------------------------
+
+function aSnapshot(date: string, total: string, earningsToDate = '0'): DailyValuationSnapshot {
+  return {
+    date: day(date),
+    totalValue: money(total),
+    netContributions: money('0'),
+    marketFlows: money('0'),
+    earningsToDate: money(earningsToDate),
+    byAssetClass: new Map([['stock', money(total)]]),
+    hasEstimates: false,
+  };
+}
+
+function aPayment(payDate: string, amount: string): EarningRecord {
+  return {
+    assetId: PETR,
+    institutionId: institutionIdOf('1'),
+    type: 'dividend',
+    payDate: day(payDate),
+    amount: money(amount),
+    quantity: qty('100'),
+  };
+}
+
+describe('the two calendar months (#233)', () => {
+  it('is the month to today and the whole month before it', () => {
+    expect(dashboardMonths(day('2026-09-12'))).toEqual({
+      current: { month: '2026-09', from: day('2026-09-01'), to: day('2026-09-12') },
+      previous: { month: '2026-08', from: day('2026-08-01'), to: day('2026-08-31') },
+    });
+  });
+
+  it('crosses a year boundary in January', () => {
+    expect(dashboardMonths(day('2027-01-04')).previous).toEqual({
+      month: '2026-12',
+      from: day('2026-12-01'),
+      to: day('2026-12-31'),
+    });
+  });
+
+  it('ends a leap February on the 29th', () => {
+    expect(dashboardMonths(day('2028-03-01')).previous.to).toBe(day('2028-02-29'));
+  });
+
+  it('is a single day on the first of the month', () => {
+    expect(dashboardMonths(day('2026-10-01')).current).toEqual({
+      month: '2026-10',
+      from: day('2026-10-01'),
+      to: day('2026-10-01'),
+    });
+  });
+});
+
+describe('patrimônio since the last month-end (#233, SPEC-013 BR-013-02)', () => {
+  /**
+   * The approved frame's own figures. Hand-computed:
+   *   653.491,42 − 639.802,05 = +13.689,37
+   *   13.689,37 ÷ 639.802,05 = 0,021396… → "+2,14 %"
+   */
+  it('is today’s report total against the month-end snapshot', async () => {
+    const query = await queryFor([
+      { assetId: PETR, quantity: qty('100'), value: money('653491.42'), costBasis: money('1') },
+    ]);
+
+    const summary = buildDashboardSummary(
+      input({ query, monthEnd: aSnapshot('2026-08-31', '639802.05') }),
+    );
+    if (summary.portfolio.kind !== 'valued') throw new Error('expected a valued portfolio');
+    const since = summary.portfolio.sinceMonthEnd;
+    if (since.kind !== 'available') throw new Error('expected a month-end comparison');
+
+    expect(since.asOf).toBe(day('2026-08-31'));
+    expect(since.change.toDecimal().toFixed(2)).toBe('13689.37');
+    expect(since.ratio?.equals(money('13689.37').dividedBy(money('639802.05').toDecimal()))).toBe(
+      true,
+    );
+    // As the screen rounds it (Intl, half-up): Money itself truncates (AR-09).
+    expect(Number(since.ratio?.toString()).toFixed(4)).toBe('0.0214');
+  });
+
+  it('dates the comparison by the snapshot, when the month’s last close is earlier', async () => {
+    // A gap at the end of August: the last close before September is the 28th.
+    // Hand-computed: 1.000 − 1.250 = −250; −250 ÷ 1.250 = −0,2.
+    const query = await queryFor([
+      { assetId: PETR, quantity: qty('100'), value: money('1000'), costBasis: money('1') },
+    ]);
+
+    const summary = buildDashboardSummary(
+      input({ query, monthEnd: aSnapshot('2026-08-28', '1250') }),
+    );
+
+    expect(summary.portfolio).toMatchObject({
+      sinceMonthEnd: { kind: 'available', asOf: day('2026-08-28') },
+    });
+    if (summary.portfolio.kind !== 'valued') throw new Error('expected a valued portfolio');
+    const since = summary.portfolio.sinceMonthEnd;
+    if (since.kind !== 'available') throw new Error('expected a month-end comparison');
+    expect(since.change.equals(money('-250'))).toBe(true);
+    expect(since.ratio?.equals(money('-0.2'))).toBe(true);
+  });
+
+  it('says there is no month-end yet rather than comparing against zero', async () => {
+    const query = await queryFor([
+      { assetId: PETR, quantity: qty('100'), value: money('1000'), costBasis: money('1') },
+    ]);
+
+    const summary = buildDashboardSummary(input({ query, monthEnd: null }));
+
+    expect(summary.portfolio).toMatchObject({ sinceMonthEnd: { kind: 'none' } });
+  });
+
+  it('carries the change but no percentage from a month-end worth nothing', async () => {
+    const query = await queryFor([
+      { assetId: PETR, quantity: qty('100'), value: money('1000'), costBasis: money('1') },
+    ]);
+
+    const summary = buildDashboardSummary(input({ query, monthEnd: aSnapshot('2026-08-31', '0') }));
+    if (summary.portfolio.kind !== 'valued') throw new Error('expected a valued portfolio');
+    const since = summary.portfolio.sinceMonthEnd;
+    if (since.kind !== 'available') throw new Error('expected a month-end comparison');
+
+    expect(since.change.equals(money('1000'))).toBe(true);
+    expect(since.ratio).toBeNull();
+  });
+});
+
+describe('proventos this month (#233, SPEC-014 BR-014-01)', () => {
+  /**
+   * The approved frame's own figures. Hand-computed:
+   *   this month  784,10 + 500,00 = 1.284,10
+   *   last month  900,33 + 500,00 = 1.400,33
+   *   change      1.284,10 − 1.400,33 = −116,23
+   *   ratio       −116,23 ÷ 1.400,33 = −0,083002… → "−8,30 %"
+   */
+  it('totals this month and compares it with the whole of last month', async () => {
+    const query = await queryFor([]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        earnings: {
+          current: [aPayment('2026-09-05', '784.10'), aPayment('2026-09-12', '500.00')],
+          previous: [aPayment('2026-08-01', '900.33'), aPayment('2026-08-31', '500.00')],
+        },
+      }),
+    );
+    const { earnings } = summary;
+    if (earnings.kind !== 'received') throw new Error('expected received proventos');
+
+    expect(earnings.month).toBe('2026-09');
+    expect(earnings.from).toBe(day('2026-09-01'));
+    expect(earnings.to).toBe(TODAY);
+    expect(earnings.previousMonth).toBe('2026-08');
+    expect(earnings.amount.toDecimal().toFixed(2)).toBe('1284.10');
+    expect(earnings.change.toDecimal().toFixed(2)).toBe('-116.23');
+    expect(earnings.ratio?.equals(money('-116.23').dividedBy(money('1400.33').toDecimal()))).toBe(
+      true,
+    );
+    expect(Number(earnings.ratio?.toString()).toFixed(4)).toBe('-0.0830');
+  });
+
+  it('says none yet, not R$ 0,00, before the first provento', async () => {
+    const summary = buildDashboardSummary(input({ query: await queryFor([]) }));
+
+    expect(summary.earnings).toEqual({
+      kind: 'none_yet',
+      month: '2026-09',
+      from: day('2026-09-01'),
+      to: TODAY,
+    });
+  });
+
+  it('says none yet when the month-end snapshot has received nothing either', async () => {
+    const summary = buildDashboardSummary(
+      input({ query: await queryFor([]), monthEnd: aSnapshot('2026-08-31', '1000', '0') }),
+    );
+
+    expect(summary.earnings.kind).toBe('none_yet');
+  });
+
+  it('shows a real zero once proventos were received in an earlier month', async () => {
+    // Nothing in August or September, R$ 300,00 before that: the zero is true.
+    const summary = buildDashboardSummary(
+      input({ query: await queryFor([]), monthEnd: aSnapshot('2026-08-31', '1000', '300') }),
+    );
+    const { earnings } = summary;
+    if (earnings.kind !== 'received') throw new Error('expected received proventos');
+
+    expect(earnings.amount.isZero()).toBe(true);
+    expect(earnings.change.isZero()).toBe(true);
+    expect(earnings.ratio).toBeNull();
+  });
+
+  it('reports a month that paid nothing after one that did as −100 %', async () => {
+    const summary = buildDashboardSummary(
+      input({
+        query: await queryFor([]),
+        earnings: { current: [], previous: [aPayment('2026-08-15', '100')] },
+      }),
+    );
+    const { earnings } = summary;
+    if (earnings.kind !== 'received') throw new Error('expected received proventos');
+
+    expect(earnings.change.equals(money('-100'))).toBe(true);
+    expect(earnings.ratio?.equals(money('-1'))).toBe(true);
+  });
+
+  it('gives no percentage against a previous month that paid nothing (BR-014-07)', async () => {
+    const summary = buildDashboardSummary(
+      input({
+        query: await queryFor([]),
+        earnings: { current: [aPayment('2026-09-03', '50')], previous: [] },
+      }),
+    );
+    const { earnings } = summary;
+    if (earnings.kind !== 'received') throw new Error('expected received proventos');
+
+    expect(earnings.change.equals(money('50'))).toBe(true);
+    expect(earnings.ratio).toBeNull();
   });
 });

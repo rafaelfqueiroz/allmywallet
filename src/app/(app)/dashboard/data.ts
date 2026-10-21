@@ -5,6 +5,7 @@ import { runReportQuery } from '@/core/reporting/base-query';
 import { listPendingAllocations } from '@/core/wallets/pending';
 import {
   buildDashboardSummary,
+  dashboardMonths,
   type AssetLabel,
   type DashboardSummary,
   type ReconciliationSource,
@@ -86,6 +87,7 @@ export async function loadDashboard(
   clock: Clock = new SystemClock(),
 ): Promise<DashboardData> {
   const today = clock.today();
+  const months = dashboardMonths(today);
 
   return withTenant(
     userId,
@@ -113,6 +115,9 @@ export async function loadDashboard(
         delayMinutes,
         thresholdDays,
         onboarding,
+        monthEnd,
+        currentEarnings,
+        previousEarnings,
       ] = await Promise.all([
         batches.listCommitted(),
         rows.countNeedsAttentionByBatch(),
@@ -131,6 +136,15 @@ export async function loadDashboard(
         // SPEC-020 BR-020-16/19 — counts only (no ledger replay), same as
         // every other read on this screen.
         onboardingFacts.readFacts(),
+        // #233 — the Patrimônio card's "vs. 30/09": SPEC-013 BR-013-02's
+        // opening snapshot for a period starting on the first of the month.
+        port.findSnapshotBefore(months.current.from),
+        // #233 — the Proventos card: SPEC-014's own rows, one calendar month
+        // each. `listEarningsReceived`, not `listEarnings`: the latter replays
+        // an asset's ledger for a leilão's wallet-split basis, which a
+        // portfolio total never uses (BR-016-05/07a).
+        port.listEarningsReceived(months.current.from, months.current.to),
+        port.listEarningsReceived(months.previous.from, months.previous.to),
       ]);
 
       /**
@@ -185,6 +199,8 @@ export async function loadDashboard(
           delayMinutes: delayMinutes.value,
           lastImportAt,
           earliestSnapshot,
+          monthEnd,
+          earnings: { current: currentEarnings, previous: previousEarnings },
           hasEverHeldAnything,
           thresholdDays: thresholdDays.value,
           today,
