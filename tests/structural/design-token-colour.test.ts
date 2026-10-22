@@ -146,6 +146,8 @@ const TEXT_PAIRS = [
   ['--primary', '--background'],
   ['--nav-active-foreground', '--nav-active'],
   ['--destructive-foreground', '--destructive'],
+  // DS-70 — `destructive-outline`'s text on the form panel.
+  ['--destructive', '--card'],
   ['--positive', '--card'],
   ['--negative', '--card'],
   ['--success', '--success-surface'],
@@ -176,6 +178,10 @@ describe('design token colour', () => {
           expect(contrast(theme, '--input', bg)).toBeGreaterThanOrEqual(3);
         },
       );
+
+      it('a destructive-outline boundary (--destructive) reaches 3:1 on --card (WCAG 1.4.11, DS-70)', () => {
+        expect(contrast(theme, '--destructive', '--card')).toBeGreaterThanOrEqual(3);
+      });
 
       for (const [deficiency, matrix] of Object.entries(DEFICIENCIES)) {
         it.each(['--positive', '--negative', '--progress'])(

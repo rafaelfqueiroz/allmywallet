@@ -158,7 +158,7 @@ export function WalletForm({
                       id={`${idPrefix}-delete`}
                       type="submit"
                       form={deleteFormId}
-                      variant="destructive"
+                      variant="destructive-outline"
                       disabled={deleting}
                       aria-describedby={deleteHintId}
                     >

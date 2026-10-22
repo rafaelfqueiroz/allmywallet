@@ -297,7 +297,10 @@ describe('WalletForm — the standard form (BR-022-37)', () => {
       />,
     );
     const left = container.querySelector('[data-slot=form-actions-destructive]')!;
-    expect(left).toContainElement(screen.getByRole('button', { name: 'Excluir carteira' }));
+    const remove = screen.getByRole('button', { name: 'Excluir carteira' });
+    expect(left).toContainElement(remove);
+    // DS-70: beside a primary, the destructive action is outlined, as the frame draws it.
+    expect(remove).toHaveAttribute('data-variant', 'destructive-outline');
     const right = container.querySelector('[data-slot=form-actions-main]')!;
     expect(
       Array.from(right.querySelectorAll('a, button')).map((element) => element.textContent),

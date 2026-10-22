@@ -44,7 +44,7 @@ export function EditDeleteForms({
   const masked = useHideValues();
   const deleteFormId = `goal-delete-${goalId}`;
   const deleteButton = (
-    <Button type="submit" form={deleteFormId} variant="destructive">
+    <Button type="submit" form={deleteFormId} variant="destructive-outline">
       {t('delete')}
     </Button>
   );
