@@ -458,7 +458,7 @@ export default async function ImportBatchDetailPage({
                 canCancel ? (
                   <form action={cancelBatchAction}>
                     <input type="hidden" name="batchId" value={batch.id} />
-                    <Button type="submit" variant="destructive">
+                    <Button type="submit" variant="destructive-outline">
                       {t('cancel')}
                     </Button>
                   </form>

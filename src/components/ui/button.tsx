@@ -25,8 +25,16 @@ const buttonVariants = cva(
           'bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground',
         ghost:
           'hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50',
+        // SPEC-022 DL-022-24 — two destructive treatments, as the frames draw
+        // them (DS-70). `destructive` is the components frame's solid fill: a
+        // confirmation whose primary action is itself the destructive one.
+        // `destructive-outline` is the "Editar carteira" frame's: a secondary
+        // destructive action alone at the left of a form footer (BR-022-37).
+        // Both keep the shared focus ring, as the components frame draws it.
         destructive:
-          'bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40',
+          'bg-destructive text-destructive-foreground hover:bg-[color-mix(in_oklch,var(--destructive),var(--foreground)_12%)]',
+        'destructive-outline':
+          'border-destructive bg-card text-destructive hover:bg-destructive/10 aria-expanded:bg-destructive/10',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

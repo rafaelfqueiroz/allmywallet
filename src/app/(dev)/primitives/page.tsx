@@ -80,6 +80,7 @@ const BUTTON_VARIANTS = [
   'secondary',
   'ghost',
   'destructive',
+  'destructive-outline',
   'link',
 ] as const;
 const BADGE_VARIANTS = [
@@ -261,7 +262,7 @@ export default async function PrimitivesPage() {
           footer={
             <FormActions
               destructive={
-                <Button type="button" variant="destructive">
+                <Button type="button" variant="destructive-outline">
                   {t('delete')}
                 </Button>
               }
@@ -319,6 +320,12 @@ export default async function PrimitivesPage() {
           </NativeSelect>
           <Button variant="outline" data-hover-subject="">
             {t('save')}
+          </Button>
+          <Button variant="destructive-outline" data-hover-subject="">
+            {t('delete')}
+          </Button>
+          <Button variant="destructive" data-hover-subject="">
+            {t('delete')}
           </Button>
         </Cluster>
       </Section>

@@ -102,7 +102,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.goto('/primitives');
 
     const subjects = page.locator('[data-hover-subject]');
-    await expect(subjects).toHaveCount(4);
+    await expect(subjects).toHaveCount(6);
 
     for (const subject of await subjects.all()) {
       await subject.hover();
