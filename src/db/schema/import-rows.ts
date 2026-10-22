@@ -72,6 +72,12 @@ export const importRows = pgTable(
     transactionId: uuid('transaction_id').references(() => transactions.id, {
       onDelete: 'set null',
     }),
+    /**
+     * SPEC-005 BR-005-20f (#215): why the user marked this row `ignored`. Free
+     * text the user typed, so never logged (BR-004-04). Null for every row a
+     * rule ignored, and cleared when BR-005-20 brings the row back.
+     */
+    ignoredReason: text('ignored_reason'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

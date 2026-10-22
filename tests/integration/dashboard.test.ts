@@ -623,12 +623,25 @@ describe('#98 — the dashboard read model (integration)', () => {
 
       const { summary } = await load();
 
-      expect(summary.attention[0]).toEqual({
-        kind: 'import_rows',
-        batchId: BATCH,
-        count: 3,
-      });
-      expect(summary.attention[1]).toMatchObject({ kind: 'pending_allocation' });
+      // SPEC-022 BR-022-35: two unmapped rows and a refusal resolve
+      // differently, so they are two items — each naming the asset and movement.
+      expect(summary.attention.slice(0, 2)).toEqual([
+        {
+          kind: 'import_rows',
+          batchId: BATCH,
+          resolution: 'decide',
+          count: 1,
+          movements: [{ assetCode: 'PETR4', movement: 'Desconhecido', count: 1 }],
+        },
+        {
+          kind: 'import_rows',
+          batchId: BATCH,
+          resolution: 'no_rule',
+          count: 2,
+          movements: [{ assetCode: 'PETR4', movement: 'Desconhecido', count: 2 }],
+        },
+      ]);
+      expect(summary.attention[2]).toMatchObject({ kind: 'pending_allocation' });
     });
 
     /**

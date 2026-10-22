@@ -252,6 +252,12 @@ export interface ImportRow {
   readonly ledgerType: TransactionType | null;
   /** Set once `commit-batch` has written the row into the ledger. */
   readonly transactionId: TransactionId | null;
+  /**
+   * SPEC-005 BR-005-20f (#215): the reason the user gave when marking the row
+   * `ignored`. Null for a row a rule ignored, and absent from rows built before
+   * the column existed — read as null.
+   */
+  readonly ignoredReason?: string | null;
 }
 
 export interface ImportBatchRepository {
@@ -265,17 +271,39 @@ export interface ImportBatchRepository {
 }
 
 /**
- * One committed batch's outstanding rows, for the dashboard's "Needs
- * attention" queue (#98, SPEC-010 BR-010-12).
+ * SPEC-022 BR-022-35 (#215) — one outstanding row of a committed batch, for the
+ * dashboard's "Precisa da sua atenção" queue (#98, SPEC-010 BR-010-12).
  *
- * A **count**, not the rows: the reference workload is 10.000 rows and the
- * dashboard carries a 2s p95 budget (SPEC-016 BR-016-02), so loading every row
- * to find out whether any of them is outstanding is the shape of read that
- * budget exists to forbid.
+ * `current` is the row's `raw` read again by **today's** parser, or the stored
+ * record where no re-reading exists (`ImportRowRereader`). What a re-import
+ * would do with the row is the difference between the two, and
+ * `core/ingestion/attention-resolution.ts` is where that is decided.
+ *
+ * Rows rather than a count, unlike the read this replaces: an item has to name
+ * its assets and movements. The set is small by nature — rows a committed
+ * import left `unclassified` or `invalid` — and the reference workload has
+ * none, so BR-016-02's budget is not what limits it.
  */
-export interface ImportRowAttentionCount {
-  readonly batchId: ImportBatchId;
-  readonly count: number;
+export interface NeedsAttentionRow {
+  readonly row: ImportRow;
+  readonly source: ExtractType;
+  /**
+   * Whether the row's stored ledger copy carries a user edit. No import
+   * changes such a copy (SPEC-006 BR-006-16), so a re-import cannot settle it.
+   */
+  readonly storedCopyUserModified: boolean;
+  readonly current: NormalizedRecord;
+}
+
+/**
+ * SPEC-022 BR-022-35 (#215) — a stored row's `raw` read again by the parser
+ * this build ships, so the queue can tell a row a re-import now classifies from
+ * one that still needs the user. `null` where this source has no row-level
+ * re-reading, or the stored cells no longer parse; the caller then keeps the
+ * stored record. Implemented by the `.xlsx` adapters (AR-01).
+ */
+export interface ImportRowRereader {
+  reread(source: ExtractType, raw: RawRow): NormalizedRecord | null;
 }
 
 export interface SourcePriceOccurrence {
@@ -291,8 +319,8 @@ export interface ImportRowRepository {
   findById(id: ImportRowId): Promise<ImportRow | null>;
   listByBatch(batchId: ImportBatchId): Promise<readonly ImportRow[]>;
   /**
-   * BR-005-20 / BR-010-12 — rows still needing a decision, grouped by batch,
-   * **committed batches only**.
+   * BR-005-20 / BR-010-12 — rows still needing a decision, with their batch's
+   * source, **committed batches only**.
    *
    * *Needing a decision* is `unclassified` or `invalid`, the same pair
    * `stage-batch.ts`'s `needsAttention` count and `/import/[batchId]` already
@@ -306,13 +334,15 @@ export interface ImportRowRepository {
    * excluded from the replay behind every position, and therefore quietly
    * understating every figure on the dashboard until someone reclassifies it.
    */
-  countNeedsAttentionByBatch(): Promise<readonly ImportRowAttentionCount[]>;
+  listNeedsAttention(): Promise<readonly Omit<NeedsAttentionRow, 'current'>[]>;
   /** BR-005-12: cancel deletes every staged row for the batch. */
   deleteByBatch(batchId: ImportBatchId): Promise<number>;
   /** Commit marks each applied row with the transaction it became. */
   attachTransactions(updates: ReadonlyMap<ImportRowId, TransactionId>): Promise<void>;
-  /** BR-005-20: reclassifying a row out of `unclassified`. */
+  /** BR-005-20: reclassifying a row out of `unclassified`. Clears any `ignoredReason`. */
   updateClassification(id: ImportRowId, classification: ImportRowClassification): Promise<void>;
+  /** SPEC-005 BR-005-20f (#215): the row becomes `ignored`, keeping the user's reason. */
+  markIgnored(id: ImportRowId, reason: string): Promise<void>;
   /**
    * #117 / BR-005-17 — `invalid` rows staged under any of these natural keys,
    * in any batch: an earlier commit's refusals a later commit may now apply.

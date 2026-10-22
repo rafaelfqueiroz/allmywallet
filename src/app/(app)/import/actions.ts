@@ -14,6 +14,7 @@ import { Quantity } from '@/core/shared/money';
 import { BusinessDate, SystemClock } from '@/core/shared/clock';
 import type { TransactionType } from '@/core/ledger/transaction';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
+import { ignoreImportRow } from '@/core/ingestion/ignore-row';
 import {
   keepSubscriptionClassification,
   resolveSubscriptionOffer,
@@ -240,6 +241,38 @@ export async function classifyRowAction(
   // created row) or edited a stored one (an unclassified row's own date, or
   // earlier for carried legs re-derived) — stale from the earliest scope.
   await requestSnapshotRebuild(userId, earliestFromDate(result.value.recalculations));
+  revalidateImportPages();
+  return IDLE;
+}
+
+const IgnoreRowSchema = z.object({ rowId: z.string(), reason: z.string() });
+
+/**
+ * SPEC-005 BR-005-20f (#215) — **Ignorar, com motivo**. The reason's length
+ * and blankness are `ignoreImportRow`'s to refuse, so the refusal is the one
+ * message on screen rather than a bare "invalid input". Nothing enters or
+ * leaves calculations, so no snapshot is stale and none is rebuilt.
+ */
+export async function ignoreRowAction(
+  _state: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const userId = await requireUserId();
+  const parsed = IgnoreRowSchema.safeParse({
+    rowId: formData.get('rowId'),
+    reason: formData.get('reason'),
+  });
+  if (!parsed.success) return INVALID_INPUT;
+
+  const result = await withIngestionDeps(userId, (deps) =>
+    ignoreImportRow(deps, {
+      rowId: ImportRowId.of(parsed.data.rowId),
+      reason: parsed.data.reason,
+    }),
+  );
+  if (!result.ok) return failure(result.error);
+
+  revalidatePath(importBatchPath(result.value.batchId));
   revalidateImportPages();
   return IDLE;
 }

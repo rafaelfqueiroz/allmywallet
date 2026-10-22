@@ -8,17 +8,20 @@ import type { RowRefusal } from '@/core/ingestion/refusal';
 import type { CorporateEventOutcome } from '@/core/ingestion/corporate-event-resolution';
 import { ratioPrefillFor } from '@/core/ingestion/corporate-event-evidence';
 import type { SubscriptionOffer } from '@/core/ingestion/subscription-offer';
+import type { AttentionResolution } from '@/core/ingestion/attention-resolution';
 import {
   acceptAdjustmentAction,
   cancelBatchAction,
   classifyRowAction,
   commitBatchAction,
+  ignoreRowAction,
   keepSubscriptionClassificationAction,
   resolveSubscriptionOfferAction,
 } from '@/app/(app)/import/actions';
 import { loadImportBatchDetail } from '@/app/(app)/import/data';
 import { ClassifyForm } from '@/app/(app)/settings/import/[batchId]/_components/ClassifyForm';
 import { ignoredRow } from '@/app/(app)/settings/import/[batchId]/_components/IgnoredRow';
+import { IgnoreForm } from '@/app/(app)/settings/import/[batchId]/_components/IgnoreForm';
 import { OpenOnHash } from '@/app/(app)/settings/import/[batchId]/_components/OpenOnHash';
 import {
   rowIdentityCells,
@@ -124,6 +127,7 @@ export default async function ImportBatchDetailPage({
     refusals,
     corporateEvents,
     subscriptionOffers,
+    resolutions,
   } = detail;
   // SPEC-005 #117 BR-005-24: a refused row says why, with the figures behind it.
   const refusalText = (refusal: RowRefusal) => {
@@ -262,6 +266,17 @@ export default async function ImportBatchDetailPage({
       }}
     />
   );
+  const ignoreForm = (rowId: string) => (
+    <IgnoreForm
+      rowId={rowId}
+      action={ignoreRowAction}
+      labels={{
+        reason: t('ignore.reasonLabel'),
+        reasonHint: t('ignore.reasonHint'),
+        submit: t('ignore.submit'),
+      }}
+    />
+  );
   const walletOptions = summary === null ? [] : await loadWalletOptions(userId);
   const labels =
     summary === null
@@ -351,6 +366,12 @@ export default async function ImportBatchDetailPage({
         ...rowIdentityCells(row),
         detail: (
           <Stack gap="xs" className="whitespace-normal">
+            {/* SPEC-022 BR-022-35 (#215): what resolves the row, first. */}
+            {resolutions.has(row.id) && (
+              <Text as="span" size="xs" weight="medium">
+                {t(`resolution.${resolutions.get(row.id) as AttentionResolution}`)}
+              </Text>
+            )}
             {refusals.has(row.id) && (
               <Text as="span" size="xs">
                 {refusalText(refusals.get(row.id) as RowRefusal)}
@@ -378,7 +399,14 @@ export default async function ImportBatchDetailPage({
               labels={subscriptionOfferLabels(subscriptionOffer)}
             />
           ) : (
-            row.classification === 'unclassified' && classifyForm(row.id, corporateEvent)
+            row.classification === 'unclassified' && (
+              <Stack gap="sm">
+                {classifyForm(row.id, corporateEvent)}
+                {/* SPEC-005 BR-005-20f: committed rows only — before commit
+                    nothing is stored, and cancelling deletes the row. */}
+                {batch.status === 'committed' && ignoreForm(row.id)}
+              </Stack>
+            )
           ),
       },
     };
@@ -389,6 +417,7 @@ export default async function ImportBatchDetailPage({
       row,
       committed: batch.status === 'committed',
       resolvedExerciseLabel: t('ignored.resolvedExercise'),
+      reasonLabel: t('ignore.storedReason'),
       classifyForm,
     }),
   );
@@ -612,6 +641,7 @@ export default async function ImportBatchDetailPage({
                 <NodeTable
                   columns={[
                     ...identityColumns,
+                    { id: 'detail', header: t('rows.columnDetail'), kind: 'control', width: 40 },
                     {
                       id: 'action',
                       header: t('rows.columnAction'),

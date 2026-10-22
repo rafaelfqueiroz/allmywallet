@@ -177,6 +177,117 @@ test('a signed-in user imports a Negociação extract and sees the transactions 
 });
 
 /**
+ * SPEC-022 BR-022-35 / SPEC-005 BR-005-20f (#215) — "Precisa da sua atenção"
+ * names each row's asset and movement and says what resolves it, and a row
+ * that is only evidence can be ignored with a reason, from the row itself.
+ *
+ * Two rows a fresh import leaves outstanding: a balance statement no resolver
+ * claims (`Atualização` on a position the ledger does not hold, so BR-005-20e's
+ * refresh does not apply) and a movement type no map version knows.
+ */
+test('the queue says what each outstanding row is, and one can be ignored with a reason', async ({
+  signedIn,
+}) => {
+  const { page, userId } = signedIn;
+  const reason = 'Extrato de saldo que não move a posição';
+  const file = await buildMovimentacaoXlsx([
+    {
+      data: '05/01/2026',
+      movimentacao: 'Atualização',
+      produto: 'SNTA3 - SINTETICA A ON',
+      instituicao: 'CORRETORA SINTÉTICA',
+      quantidade: '475',
+      precoUnitario: '-',
+      valorOperacao: '-',
+    },
+    {
+      data: '06/01/2026',
+      movimentacao: 'Movimento Sintético',
+      produto: 'SNTB3 - SINTETICA B ON',
+      instituicao: 'CORRETORA SINTÉTICA',
+      quantidade: '10',
+      precoUnitario: '1,00',
+      valorOperacao: '10,00',
+    },
+  ]);
+
+  await page.goto('/settings/import');
+  await page.locator(EXTRACT_INPUT).setInputFiles({
+    name: 'movimentacao.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    buffer: Buffer.from(file),
+  });
+  await page.getByRole('button', { name: /^enviar$/i }).click();
+  await expect(page).toHaveURL(/\/settings\/import\/[0-9a-f-]{36}$/);
+  const batchId = page.url().split('/').pop() ?? '';
+
+  await expect
+    .poll(
+      async () =>
+        (
+          await queryOne<{ status: string }>('SELECT status FROM import_batches WHERE id = $1', [
+            batchId,
+          ])
+        )?.status,
+      { message: 'the import.stage job should move the batch to previewed', timeout: 90_000 },
+    )
+    .toBe('previewed');
+  await page.reload();
+  await page.getByRole('button', { name: /confirmar importação/i }).click();
+  await expect
+    .poll(
+      async () =>
+        (
+          await queryOne<{ status: string }>('SELECT status FROM import_batches WHERE id = $1', [
+            batchId,
+          ])
+        )?.status,
+      { message: 'the import.commit job should commit the batch', timeout: 90_000 },
+    )
+    .toBe('committed');
+
+  // ---- The Dashboard names asset, movement and next step ------------------
+  await page.goto('/dashboard');
+  const decide = page
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('link', { name: 'Decidir' }) });
+  await expect(decide.getByText('Decida · 1 linha')).toBeVisible();
+  await expect(decide.getByText('SNTA3 — Atualização')).toBeVisible();
+  await expect(decide.getByText(/ignore-a com um motivo/)).toBeVisible();
+  const noRule = page
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('link', { name: 'Revisar' }) });
+  await expect(noRule.getByText('Sem regra ainda · 1 linha')).toBeVisible();
+  await expect(noRule.getByText('SNTB3 — Movimento Sintético')).toBeVisible();
+  await expect(noRule.getByText(/ainda não é reconhecido/)).toBeVisible();
+
+  // ---- Ignorar, com motivo -------------------------------------------------
+  await decide.getByRole('link', { name: 'Decidir' }).click();
+  await expect(page).toHaveURL(`/settings/import/${batchId}`);
+  const statement = page.locator('#attention').getByRole('row').filter({ hasText: 'SNTA3' });
+  await expect(statement.getByText(/^Decida o que fazer/)).toBeVisible();
+  await statement.getByRole('textbox', { name: 'Ignorar, com motivo' }).fill(reason);
+  await statement.getByRole('button', { name: 'Ignorar', exact: true }).click();
+
+  await expect(
+    page.locator('#attention').getByRole('row').filter({ hasText: 'SNTA3' }),
+  ).toHaveCount(0);
+  await page.getByText(/ver 1 linha\(s\) ignorada\(s\)/i).click();
+  await expect(page.locator('#ignored').getByText(`Motivo: ${reason}`)).toBeVisible();
+
+  // Nothing reached the ledger: the statement's stored copy is still inert.
+  const active = await queryOne<{ count: string }>(
+    `SELECT count(*)::text AS count FROM transactions WHERE user_id = $1 AND status = 'active'`,
+    [userId],
+  );
+  expect(Number(active?.count ?? '0')).toBe(0);
+
+  await page.goto('/dashboard');
+  await expect(page.getByRole('link', { name: 'Decidir' })).toHaveCount(0);
+  await expect(page.getByText('Sem regra ainda · 1 linha')).toBeVisible();
+});
+
+/**
  * SPEC-005 AC: "Files upload together or individually, **in any order**."
  *
  * B3 exports three extracts and a user has no reason to send them one at a

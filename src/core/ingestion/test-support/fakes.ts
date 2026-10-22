@@ -1,5 +1,5 @@
 import type { Transaction } from '@/core/ledger/transaction';
-import { AssetId, ImportBatchId, InstitutionId } from '@/core/shared/ids';
+import { AssetId, type ImportBatchId, InstitutionId } from '@/core/shared/ids';
 import type { ImportRowId, TransactionId } from '@/core/shared/ids';
 import type { BusinessDate } from '@/core/shared/clock';
 import type { Money } from '@/core/shared/money';
@@ -20,7 +20,7 @@ import type {
   ImportBatch,
   ImportBatchRepository,
   ImportRow,
-  ImportRowAttentionCount,
+  NeedsAttentionRow,
   ImportRowRepository,
   InstitutionResolverPort,
   SubscriptionEvidenceReader,
@@ -40,6 +40,11 @@ export class FakeImportBatchRepository implements ImportBatchRepository {
 
   seed(batch: ImportBatch): void {
     this.#batches.set(batch.id, batch);
+  }
+
+  /** Synchronous, for `FakeImportRowRepository.listNeedsAttention`'s committed-only filter. */
+  peek(id: ImportBatchId): ImportBatch | undefined {
+    return this.#batches.get(id);
   }
 
   async insert(batch: ImportBatch): Promise<void> {
@@ -68,7 +73,10 @@ export class FakeImportBatchRepository implements ImportBatchRepository {
 export class FakeImportRowRepository implements ImportRowRepository {
   #rows = new Map<string, ImportRow>();
 
-  constructor(private readonly transactions: () => readonly Transaction[] = () => []) {}
+  constructor(
+    private readonly transactions: () => readonly Transaction[] = () => [],
+    private readonly batch: (id: ImportBatchId) => ImportBatch | undefined = () => undefined,
+  ) {}
 
   async sourcePriceOccurrences(keys: readonly string[]): Promise<readonly SourcePriceOccurrence[]> {
     const wanted = new Set(keys);
@@ -111,16 +119,20 @@ export class FakeImportRowRepository implements ImportRowRepository {
    * the filter is a SQL fact and `tests/integration/dashboard.test.ts` is what
    * proves it, which is where a join belongs (TS-30).
    */
-  async countNeedsAttentionByBatch(): Promise<readonly ImportRowAttentionCount[]> {
-    const counts = new Map<string, number>();
+  async listNeedsAttention(): Promise<readonly Omit<NeedsAttentionRow, 'current'>[]> {
+    const found: Omit<NeedsAttentionRow, 'current'>[] = [];
     for (const row of this.#rows.values()) {
       if (row.classification !== 'unclassified' && row.classification !== 'invalid') continue;
-      counts.set(row.batchId, (counts.get(row.batchId) ?? 0) + 1);
+      const batch = this.batch(row.batchId);
+      if (batch?.status !== 'committed') continue;
+      const copy = this.transactions().find((t) => t.id === row.transactionId);
+      found.push({
+        row,
+        source: batch.source,
+        storedCopyUserModified: copy?.isUserModified ?? false,
+      });
     }
-    return [...counts].map(([batchId, count]) => ({
-      batchId: ImportBatchId.of(batchId),
-      count,
-    }));
+    return found;
   }
 
   async deleteByBatch(batchId: ImportBatchId): Promise<number> {
@@ -146,7 +158,12 @@ export class FakeImportRowRepository implements ImportRowRepository {
     classification: ImportRow['classification'],
   ): Promise<void> {
     const row = this.#rows.get(id);
-    if (row) this.#rows.set(id, { ...row, classification });
+    if (row) this.#rows.set(id, { ...row, classification, ignoredReason: null });
+  }
+
+  async markIgnored(id: ImportRowId, reason: string): Promise<void> {
+    const row = this.#rows.get(id);
+    if (row) this.#rows.set(id, { ...row, classification: 'ignored', ignoredReason: reason });
   }
 
   async listInvalidByNaturalKeys(keys: readonly string[]): Promise<readonly ImportRow[]> {
