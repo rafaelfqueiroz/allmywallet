@@ -210,7 +210,13 @@ describe('SPEC-005 BR-005-20f — ignoreImportRow', () => {
     expect(result.error.code).toBe('IMPORT_ROW_NOT_UNCLASSIFIED');
   });
 
-  it('refuses a row whose stored copy is no longer unclassified', async () => {
+  /**
+   * PR #267 review — a classification or re-import that activated the copy
+   * after this submission's form was rendered. Overwriting it `superseded`
+   * would leave the position it recalculated describing a transaction that no
+   * longer counts.
+   */
+  it('refuses, without overwriting it, a copy another write already activated', async () => {
     const deps = buildFakeIngestionDeps();
     const row = await stagedRow(deps);
     const copy = await deps.transactions.findById(row.transactionId!);
@@ -219,6 +225,33 @@ describe('SPEC-005 BR-005-20f — ignoreImportRow', () => {
     const result = await ignoreImportRow(deps, { rowId: row.id, reason: 'motivo' });
 
     expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('IMPORT_ROW_NOT_UNCLASSIFIED');
+    expect((await deps.transactions.findById(row.transactionId!))?.status).toBe('active');
+    expect((await deps.rows.findById(row.id))?.classification).toBe('unclassified');
+  });
+
+  it('refuses when the row itself moved on after it was read', async () => {
+    const deps = buildFakeIngestionDeps();
+    const row = await stagedRow(deps);
+    // The read sees the row `unclassified`; by the write it is not.
+    const stale = {
+      ...deps,
+      rows: Object.assign(Object.create(deps.rows), {
+        findById: async () => row,
+        markIgnored: async (id: ImportRowId, reason: string) => {
+          await deps.rows.updateClassification(id, 'new');
+          return deps.rows.markIgnored(id, reason);
+        },
+      }),
+    };
+
+    const result = await ignoreImportRow(stale, { rowId: row.id, reason: 'motivo' });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe('IMPORT_ROW_NOT_UNCLASSIFIED');
+    expect((await deps.rows.findById(row.id))?.ignoredReason).toBeNull();
   });
 
   it('refuses a row in a batch not yet committed', async () => {

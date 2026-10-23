@@ -23,7 +23,11 @@ import { acceptReconciliationAdjustment } from '@/core/ingestion/accept-adjustme
 import { earliestFromDate } from '@/core/ledger/recalculate-from';
 import { applyLedgerEffects } from '@/core/wallets/apply-ledger-effects';
 import { reconcileAllocationsToHoldings } from '@/core/wallets/reconcile-allocations';
-import { withIngestionAndWalletDeps, withIngestionDeps } from '@/app/(app)/import/composition';
+import {
+  withIngestionAndWalletDeps,
+  withIngestionDeps,
+  withIngestionDepsResult,
+} from '@/app/(app)/import/composition';
 import { handleImportCancel, saveUploadedFile } from '@/worker/handlers/import';
 import { enqueue } from '@/lib/queue';
 import { requestSnapshotRebuild } from '@/lib/snapshot-rebuild';
@@ -264,7 +268,7 @@ export async function ignoreRowAction(
   });
   if (!parsed.success) return INVALID_INPUT;
 
-  const result = await withIngestionDeps(userId, (deps) =>
+  const result = await withIngestionDepsResult(userId, (deps) =>
     ignoreImportRow(deps, {
       rowId: ImportRowId.of(parsed.data.rowId),
       reason: parsed.data.reason,

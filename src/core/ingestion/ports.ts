@@ -341,8 +341,11 @@ export interface ImportRowRepository {
   attachTransactions(updates: ReadonlyMap<ImportRowId, TransactionId>): Promise<void>;
   /** BR-005-20: reclassifying a row out of `unclassified`. Clears any `ignoredReason`. */
   updateClassification(id: ImportRowId, classification: ImportRowClassification): Promise<void>;
-  /** SPEC-005 BR-005-20f (#215): the row becomes `ignored`, keeping the user's reason. */
-  markIgnored(id: ImportRowId, reason: string): Promise<void>;
+  /**
+   * SPEC-005 BR-005-20f (#215): the row becomes `ignored`, keeping the user's
+   * reason — only while it is still `unclassified`; `false` otherwise.
+   */
+  markIgnored(id: ImportRowId, reason: string): Promise<boolean>;
   /**
    * #117 / BR-005-17 — `invalid` rows staged under any of these natural keys,
    * in any batch: an earlier commit's refusals a later commit may now apply.

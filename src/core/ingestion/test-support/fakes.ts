@@ -161,9 +161,11 @@ export class FakeImportRowRepository implements ImportRowRepository {
     if (row) this.#rows.set(id, { ...row, classification, ignoredReason: null });
   }
 
-  async markIgnored(id: ImportRowId, reason: string): Promise<void> {
+  async markIgnored(id: ImportRowId, reason: string): Promise<boolean> {
     const row = this.#rows.get(id);
-    if (row) this.#rows.set(id, { ...row, classification: 'ignored', ignoredReason: reason });
+    if (row?.classification !== 'unclassified') return false;
+    this.#rows.set(id, { ...row, classification: 'ignored', ignoredReason: reason });
+    return true;
   }
 
   async listInvalidByNaturalKeys(keys: readonly string[]): Promise<readonly ImportRow[]> {

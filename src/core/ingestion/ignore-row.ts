@@ -65,26 +65,24 @@ export async function ignoreImportRow(
   // cause the batch screen states; a classified one is already settled. A row
   // with no stored copy belongs to a batch not yet committed (BR-005-09), whose
   // rows cancelling deletes outright.
-  const stored =
-    row.classification === 'unclassified' && row.transactionId !== null
-      ? await deps.transactions.findById(row.transactionId)
-      : null;
-  if (stored === null || stored.status !== 'unclassified') {
-    return err(
-      ingestionError(IngestionUseCaseErrorCode.ROW_NOT_UNCLASSIFIED, {
-        rowId: row.id,
-        classification: row.classification,
-      }),
-    );
-  }
+  const refused = err(
+    ingestionError(IngestionUseCaseErrorCode.ROW_NOT_UNCLASSIFIED, {
+      rowId: row.id,
+      classification: row.classification,
+    }),
+  );
+  if (row.classification !== 'unclassified' || row.transactionId === null) return refused;
 
-  await deps.transactions.update({
-    ...stored,
-    status: 'superseded',
-    isUserModified: true,
-    updatedAt: deps.clock.now(),
-  });
-  await deps.rows.markIgnored(row.id, reason);
+  // Both writes are conditional, so a submission that went stale while it was
+  // in flight — the row classified, or a re-import that activated its copy —
+  // is refused rather than overwriting the newer state (PR #267 review). The
+  // read above alone cannot do that: another transaction may commit between
+  // it and these writes. A refusal after the first write relies on the caller
+  // rolling the tenant transaction back on a refused result (`withTenantResult`).
+  if (!(await deps.transactions.supersedeUnclassified(row.transactionId, deps.clock.now()))) {
+    return refused;
+  }
+  if (!(await deps.rows.markIgnored(row.id, reason))) return refused;
 
   await recountBatch(deps, row.batchId);
 

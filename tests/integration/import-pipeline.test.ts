@@ -18,7 +18,7 @@ import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/buil
 import { createWallet } from '@/core/wallets/create-wallet';
 import { allocateToWallet } from '@/core/wallets/allocate';
 import * as schema from '@/db/schema';
-import { withTenant } from '@/db/tenant';
+import { withTenant, withTenantResult } from '@/db/tenant';
 import { FakeClock } from '@/core/shared/clock';
 import { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
 import type { PositionRepository } from '@/core/positions/ports';
@@ -461,6 +461,102 @@ describe('SPEC-005 — import pipeline (integration)', () => {
           appDb,
         );
       }
+    });
+
+    /**
+     * PR #267 review — another write commits while the ignore is in flight.
+     * `concurrent` runs uncommitted on its own connection and holds its row
+     * lock until the ignore is waiting on it, then commits, so the ignore's
+     * conditional write sees the newer row: the interleaving the review
+     * reproduced, made deterministic.
+     */
+    async function ignoreWhileCommitting(concurrent: string, params: readonly unknown[]) {
+      const other = new Pool({ connectionString: testDb.migrationUrl, max: 1 });
+      const client = await other.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(concurrent, [...params]);
+        const ignoring = withTenantResult(
+          userId,
+          async (tx) =>
+            ignoreImportRow(buildIngestionDeps(tx, userId, clock), {
+              rowId: ImportRowId.of(String(params[0])),
+              reason,
+            }),
+          appDb,
+        );
+        await expect
+          .poll(
+            async () =>
+              (
+                await migratorPool.query(
+                  `SELECT count(*)::int AS waiting FROM pg_stat_activity
+                    WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+                )
+              ).rows[0].waiting,
+            { message: 'the ignore should wait on the concurrent write', timeout: 10_000 },
+          )
+          .toBeGreaterThan(0);
+        await client.query('COMMIT');
+        return await ignoring;
+      } finally {
+        client.release();
+        await other.end();
+      }
+    }
+
+    it('refuses, without overwriting it, a copy a concurrent write activates', async () => {
+      const batchId = await importFile(await buildMovimentacaoXlsx([application, statement]));
+      const row = await statementRow(batchId);
+
+      const result = await ignoreWhileCommitting(
+        `UPDATE transactions SET status = 'active'
+          WHERE id = (SELECT transaction_id FROM import_rows WHERE id = $1)`,
+        [row.id],
+      );
+
+      expect(result.ok).toBe(false);
+      const { rows: stored } = await migratorPool.query(
+        `SELECT r.classification, r.ignored_reason, t.status, t.is_user_modified
+           FROM import_rows r JOIN transactions t ON t.id = r.transaction_id
+          WHERE r.id = $1`,
+        [row.id],
+      );
+      expect(stored).toEqual([
+        {
+          classification: 'unclassified',
+          ignored_reason: null,
+          status: 'active',
+          is_user_modified: false,
+        },
+      ]);
+    });
+
+    it('rolls its first write back when the row is classified concurrently', async () => {
+      const batchId = await importFile(await buildMovimentacaoXlsx([application, statement]));
+      const row = await statementRow(batchId);
+
+      const result = await ignoreWhileCommitting(
+        `UPDATE import_rows SET classification = 'new' WHERE id = $1`,
+        [row.id],
+      );
+
+      expect(result.ok).toBe(false);
+      const { rows: stored } = await migratorPool.query(
+        `SELECT r.classification, r.ignored_reason, t.status, t.is_user_modified
+           FROM import_rows r JOIN transactions t ON t.id = r.transaction_id
+          WHERE r.id = $1`,
+        [row.id],
+      );
+      // The copy is still the one commit stored: the supersede was undone.
+      expect(stored).toEqual([
+        {
+          classification: 'new',
+          ignored_reason: null,
+          status: 'unclassified',
+          is_user_modified: false,
+        },
+      ]);
     });
 
     it('refuses a classified row and a row already ignored, and BR-005-20 brings an ignored one back', async () => {

@@ -159,11 +159,14 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
       .where(eq(importRows.id, id));
   }
 
-  async markIgnored(id: ImportRowId, reason: string): Promise<void> {
-    await this.tx
+  /** Conditional for the reason `supersedeUnclassified` is: see that method. */
+  async markIgnored(id: ImportRowId, reason: string): Promise<boolean> {
+    const updated = await this.tx
       .update(importRows)
       .set({ classification: 'ignored', ignoredReason: reason, updatedAt: new Date() })
-      .where(eq(importRows.id, id));
+      .where(and(eq(importRows.id, id), eq(importRows.classification, 'unclassified')))
+      .returning({ id: importRows.id });
+    return updated.length > 0;
   }
 
   /** Chunked like `insertMany`: a 10.000-row commit asks for up to 10.000 keys. */
