@@ -10,7 +10,7 @@ import { Stack } from '@/components/layout/stack';
 import { Cluster } from '@/components/layout/cluster';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
-import { importBatchPath } from '@/lib/import-paths';
+import { IMPORT_SEND_PATH, importBatchPath } from '@/lib/import-paths';
 
 /**
  * SPEC-010 BR-010-12 — "purchases awaiting allocation appear in the same
@@ -37,8 +37,8 @@ import { importBatchPath } from '@/lib/import-paths';
  * missing fixed-income rate belongs in.
  *
  * **A Dashboard card (SPEC-022 BR-022-07, #213)**: the first items, the total as
- * a count beside the heading, and a link to the rest. What each item says is
- * #215's to change; this owns the card around it.
+ * a count beside the heading, and a link to the rest. What each import item
+ * says is SPEC-022 BR-022-35's (#215).
  */
 export async function AttentionQueue({
   items,
@@ -93,24 +93,42 @@ export async function AttentionQueue({
             const consequence = t(`consequence.${gate.consequence}`);
 
             switch (item.kind) {
-              case 'import_rows':
+              // SPEC-022 BR-022-35 (#215): what resolves the rows, which assets
+              // and movements they are, and the next step — never a count and
+              // a batch alone (BR-020-18).
+              case 'import_rows': {
+                const shown = item.movements.slice(0, MOVEMENTS_SHOWN);
+                const more = item.movements.length - shown.length;
                 return (
-                  <ListItem key={`rows-${item.batchId}`} separated>
+                  <ListItem key={`rows-${item.batchId}-${item.resolution}`} separated>
                     <Stack gap="xs">
                       <Cluster justify="between" gap="sm" align="baseline">
                         <Text as="span" weight="medium">
-                          {t('importRows.label', { count: item.count })}
+                          {t(`importRows.${item.resolution}.label`, { count: item.count })}
                         </Text>
                         <Button asChild variant="outline" size="sm">
-                          <Link href={href}>{t('importRows.action')}</Link>
+                          <Link href={href}>{t(`importRows.${item.resolution}.action`)}</Link>
                         </Button>
                       </Cluster>
+                      <Text as="span" size="sm">
+                        {shown
+                          .map((entry) =>
+                            t('importRows.movement', {
+                              asset: entry.assetCode,
+                              movement: entry.movement,
+                              count: entry.count,
+                            }),
+                          )
+                          .join(' · ')}
+                        {more > 0 && ` ${t('importRows.moreMovements', { count: more })}`}
+                      </Text>
                       <Text as="span" size="xs" tone="muted">
-                        {consequence}
+                        {t(`importRows.${item.resolution}.next`)} {consequence}
                       </Text>
                     </Stack>
                   </ListItem>
                 );
+              }
 
               case 'fixed_income_rate':
                 return (
@@ -169,6 +187,13 @@ export async function AttentionQueue({
 }
 
 /**
+ * How many asset-and-movement pairs an import item names before it says how
+ * many more there are. The item says what kind of work is waiting; the batch
+ * screen lists every row.
+ */
+const MOVEMENTS_SHOWN = 4;
+
+/**
  * `core/onboarding/gates.ts` names the screen (`GateResolution`); routes are
  * an `app/` concern (AR-04), so the mapping to a URL lives here rather than in
  * `core/`.
@@ -177,6 +202,8 @@ function gateHref(resolution: GateResolution): string {
   switch (resolution.screen) {
     case 'import_batch':
       return importBatchPath(resolution.batchId);
+    case 'import_send':
+      return IMPORT_SEND_PATH;
     case 'fixed_income_contract':
       return `/fixed-income/${resolution.assetId}`;
     case 'wallets':

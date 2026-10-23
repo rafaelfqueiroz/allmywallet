@@ -23,6 +23,19 @@ export async function withIngestionDeps<T>(
 }
 
 /**
+ * `withIngestionDeps` for a use case whose refusal must undo what it already
+ * wrote: the tenant transaction rolls back on a refused result (#190).
+ * SPEC-005 BR-005-20f's ignore refuses a stale submission after its first
+ * conditional write (`ignore-row.ts`).
+ */
+export async function withIngestionDepsResult<T, E>(
+  userId: UserId,
+  fn: (deps: IngestionDependencies) => Promise<Result<T, E>>,
+): Promise<Result<T, E>> {
+  return withTenantResult(userId, (tx) => fn(buildIngestionDeps(tx, userId, clock)), db);
+}
+
+/**
  * For the ingestion paths that write a **quantity-moving** transaction
  * outside the commit queue: accepting a reconciliation figure (BR-005-25) and
  * classifying a row by hand (BR-005-20).

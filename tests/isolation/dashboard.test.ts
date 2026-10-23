@@ -247,7 +247,13 @@ describe('#98 — dashboard surface tenant isolation', () => {
     const { summary } = await loadDashboard(userB, clock);
 
     expect(summary.attention).toEqual([
-      { kind: 'import_rows', batchId: BATCH_B_MOVIMENTACAO, count: 7 },
+      {
+        kind: 'import_rows',
+        batchId: BATCH_B_MOVIMENTACAO,
+        resolution: 'no_rule',
+        count: 7,
+        movements: [{ assetCode: 'VALE3', movement: 'Desconhecido', count: 7 }],
+      },
     ]);
   });
 

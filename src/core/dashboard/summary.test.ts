@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BusinessDate } from '@/core/shared/clock';
-import { ImportBatchId, type AssetId } from '@/core/shared/ids';
+import { ImportBatchId, ImportRowId, type AssetId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import { runReportQuery, type ReportQueryResult } from '@/core/reporting/base-query';
 import type { EarningRecord, ReportAllocation } from '@/core/reporting/ports';
@@ -16,7 +16,11 @@ import {
   qty,
   walletIdOf,
 } from '@/core/reporting/test-support';
-import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
+import type {
+  ImportRow,
+  NeedsAttentionRow,
+  NormalizedTransactionRecord,
+} from '@/core/ingestion/ports';
 import type { Discrepancy, ReconciliationReport } from '@/core/ingestion/reconcile';
 import type { ContractMissingRate } from '@/core/onboarding/ports';
 import type { PendingAllocation } from '@/core/wallets/pending';
@@ -100,7 +104,7 @@ function input(overrides: Partial<DashboardSummaryInput> & { query: ReportQueryR
     today: TODAY,
     reconciliation: null,
     pending: [] as readonly PendingAllocation[],
-    unclassified: [] as readonly ImportRowAttentionCount[],
+    importRows: [] as readonly NeedsAttentionRow[],
     contractsMissingRate: [] as readonly ContractMissingRate[],
     assetLabels: LABELS,
     ...overrides,
@@ -108,6 +112,74 @@ function input(overrides: Partial<DashboardSummaryInput> & { query: ReportQueryR
 }
 
 const BATCH = ImportBatchId.of('01920000-0000-7000-8000-0000000000d1');
+const OTHER_BATCH = ImportBatchId.of('01920000-0000-7000-8000-0000000000d2');
+
+/**
+ * `count` outstanding rows of one asset and movement. `current` is the stored
+ * record unless a re-reading is given, as the loader passes it when the
+ * current parser reads the row no differently.
+ */
+function attentionRows(
+  count: number,
+  {
+    batchId = BATCH,
+    assetCode = 'PETR4',
+    b3Type = 'Um Tipo Novo',
+    classification = 'unclassified',
+    reread,
+  }: {
+    batchId?: ImportBatchId;
+    assetCode?: string;
+    b3Type?: string;
+    classification?: ImportRow['classification'];
+    reread?: Partial<NormalizedTransactionRecord>;
+  } = {},
+): NeedsAttentionRow[] {
+  return Array.from({ length: count }, () => {
+    const record: NormalizedTransactionRecord = {
+      kind: 'transaction',
+      b3Type,
+      direction: 'credit',
+      assetCode,
+      assetName: assetCode,
+      assetClass: 'stock',
+      institutionName: 'Corretora Teste',
+      tradeDate: day('2026-09-01'),
+      quantity: qty('10'),
+      unitPrice: money('1'),
+      priceStated: true,
+      fees: Money.zero(),
+      ratio: null,
+    };
+    return {
+      row: {
+        id: ImportRowId.generate(),
+        batchId,
+        raw: {},
+        record,
+        assetId: PETR,
+        institutionId: null,
+        classification,
+        naturalKey: null,
+        occurrence: null,
+        ledgerType: null,
+        transactionId: null,
+      },
+      source: 'b3_movimentacao',
+      storedCopyUserModified: false,
+      current: { ...record, ...reread },
+    };
+  });
+}
+
+/** What `attentionRows(3)` becomes in the queue. */
+const THREE_UNMAPPED_ROWS = {
+  kind: 'import_rows',
+  batchId: BATCH,
+  resolution: 'no_rule',
+  count: 3,
+  movements: [{ assetCode: 'PETR4', movement: 'Um Tipo Novo', count: 3 }],
+} as const;
 
 function aDiscrepancy(overrides: Partial<Discrepancy>): Discrepancy {
   return {
@@ -600,7 +672,7 @@ describe('needs attention (BR-010-12)', () => {
     const summary = buildDashboardSummary(
       input({
         query,
-        unclassified: [{ batchId: BATCH, count: 3 }],
+        importRows: attentionRows(3),
         pending: [
           { assetId: PETR, unassignedQuantity: Quantity.fromString('40'), reason: 'no_wallet' },
         ],
@@ -610,7 +682,7 @@ describe('needs attention (BR-010-12)', () => {
     // The item that makes every figure on the screen understated leads the one
     // that changes no figure at all.
     expect(summary.attention).toEqual([
-      { kind: 'import_rows', batchId: BATCH, count: 3 },
+      THREE_UNMAPPED_ROWS,
       {
         kind: 'pending_allocation',
         assetId: PETR,
@@ -633,7 +705,7 @@ describe('needs attention (BR-010-12)', () => {
     const summary = buildDashboardSummary(
       input({
         query,
-        unclassified: [{ batchId: BATCH, count: 3 }],
+        importRows: attentionRows(3),
         contractsMissingRate: [{ assetId: VALE, assetCode: 'VALE3', held: true }],
         pending: [
           { assetId: PETR, unassignedQuantity: Quantity.fromString('40'), reason: 'no_wallet' },
@@ -642,7 +714,7 @@ describe('needs attention (BR-010-12)', () => {
     );
 
     expect(summary.attention).toEqual([
-      { kind: 'import_rows', batchId: BATCH, count: 3 },
+      THREE_UNMAPPED_ROWS,
       { kind: 'fixed_income_rate', assetId: VALE, assetCode: 'VALE3', held: true },
       {
         kind: 'pending_allocation',
@@ -698,15 +770,162 @@ describe('needs attention (BR-010-12)', () => {
     ).toEqual(['no_wallet', 'ambiguous_split']);
   });
 
-  it('drops a batch with no unclassified rows rather than listing a zero', async () => {
+  /**
+   * SPEC-022 BR-022-35 (#215) — the owner's queue read "14 linhas importadas
+   * precisam de revisão": a count and a batch, no asset, no movement and no
+   * next step. Each item now names its assets and movements and says what
+   * resolves it, one item per batch and resolution.
+   */
+  it('names each asset and movement and what resolves them, per batch and resolution', async () => {
     const query = await queryFor([{ assetId: PETR }]);
 
     const summary = buildDashboardSummary(
-      input({ query, unclassified: [{ batchId: BATCH, count: 0 }] }),
+      input({
+        query,
+        importRows: [
+          // Unmapped when staged; the current map ignores it (#196).
+          ...attentionRows(2, {
+            assetCode: 'Tesouro Selic 2029',
+            b3Type: 'Cobrança de Taxa Semestral',
+          }),
+          // Price-less when staged; the current parser prices it (#192).
+          ...attentionRows(1, {
+            assetCode: 'GRND3',
+            b3Type: 'Dividendo',
+            reread: { priceStated: true, priceDerivedFromTotal: true },
+          }),
+          // Evidence no resolver settled (#158 D8).
+          ...attentionRows(1, { assetCode: 'BBAS3', b3Type: 'Atualização' }),
+          ...attentionRows(1, { assetCode: 'AXIA7', b3Type: 'Um Tipo Novo' }),
+          ...attentionRows(2, { batchId: OTHER_BATCH, assetCode: 'CPLE5', b3Type: 'Atualização' }),
+        ],
+      }),
     );
 
-    // An empty queue has to be able to mean "nothing to do".
-    expect(summary.attention).toEqual([]);
+    expect(summary.attention).toEqual([
+      // A re-import first: the one the user settles without a decision.
+      {
+        kind: 'import_rows',
+        batchId: BATCH,
+        resolution: 'reimport',
+        count: 3,
+        movements: [
+          { assetCode: 'GRND3', movement: 'Dividendo', count: 1 },
+          { assetCode: 'Tesouro Selic 2029', movement: 'Cobrança de Taxa Semestral', count: 2 },
+        ],
+      },
+      {
+        kind: 'import_rows',
+        batchId: BATCH,
+        resolution: 'decide',
+        count: 1,
+        movements: [{ assetCode: 'BBAS3', movement: 'Atualização', count: 1 }],
+      },
+      {
+        kind: 'import_rows',
+        batchId: BATCH,
+        resolution: 'no_rule',
+        count: 1,
+        movements: [{ assetCode: 'AXIA7', movement: 'Um Tipo Novo', count: 1 }],
+      },
+      {
+        kind: 'import_rows',
+        batchId: OTHER_BATCH,
+        resolution: 'decide',
+        count: 2,
+        movements: [{ assetCode: 'CPLE5', movement: 'Atualização', count: 2 }],
+      },
+    ]);
+    expect(summary.attentionTotal).toBe(4);
+  });
+
+  it('orders movements by asset code, then by movement, independent of input order', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        importRows: [
+          // Out of order, then in order, so the order is the sort's own.
+          ...attentionRows(1, { assetCode: 'VALE3', b3Type: 'Tipo B' }),
+          ...attentionRows(1, { assetCode: 'PETR4', b3Type: 'Tipo A' }),
+          ...attentionRows(2, { assetCode: 'PETR4', b3Type: 'Tipo B' }),
+        ],
+      }),
+    );
+
+    expect(summary.attention).toEqual([
+      {
+        kind: 'import_rows',
+        batchId: BATCH,
+        resolution: 'no_rule',
+        count: 4,
+        movements: [
+          { assetCode: 'PETR4', movement: 'Tipo A', count: 1 },
+          { assetCode: 'PETR4', movement: 'Tipo B', count: 2 },
+          { assetCode: 'VALE3', movement: 'Tipo B', count: 1 },
+        ],
+      },
+    ]);
+  });
+
+  /**
+   * Only a movement row can be outstanding, but the record type also admits a
+   * Posição row; one that somehow were would still name its asset.
+   */
+  it('names the asset of a row that carries no movement type', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+    const [outstanding] = attentionRows(1);
+    if (outstanding === undefined) throw new Error('fixture row missing');
+    const position = {
+      kind: 'position',
+      assetCode: 'PETR4',
+      assetName: 'Petrobras PN',
+      assetClass: 'stock',
+      institutionName: null,
+      quantity: qty('10'),
+      fixedIncome: null,
+    } as const;
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        importRows: [
+          { ...outstanding, row: { ...outstanding.row, record: position }, current: position },
+        ],
+      }),
+    );
+
+    expect(summary.attention).toEqual([
+      {
+        kind: 'import_rows',
+        batchId: BATCH,
+        resolution: 'decide',
+        count: 1,
+        movements: [{ assetCode: 'PETR4', movement: '', count: 1 }],
+      },
+    ]);
+  });
+
+  it('reads a commit refusal as a decision, whatever its type', async () => {
+    const query = await queryFor([{ assetId: PETR }]);
+
+    const summary = buildDashboardSummary(
+      input({
+        query,
+        importRows: attentionRows(1, { b3Type: 'Venda', classification: 'invalid' }),
+      }),
+    );
+
+    expect(summary.attention).toEqual([
+      {
+        kind: 'import_rows',
+        batchId: BATCH,
+        resolution: 'decide',
+        count: 1,
+        movements: [{ assetCode: 'PETR4', movement: 'Venda', count: 1 }],
+      },
+    ]);
   });
 
   /**
@@ -767,7 +986,7 @@ describe('needs attention (BR-010-12)', () => {
     const summary = buildDashboardSummary(
       input({
         query,
-        unclassified: [{ batchId: BATCH, count: 3 }],
+        importRows: attentionRows(3),
         pending: Array.from({ length: 20 }, (_, index) => ({
           assetId: assetIdOf(String(index + 10)),
           unassignedQuantity: Quantity.fromString('1'),
@@ -776,7 +995,7 @@ describe('needs attention (BR-010-12)', () => {
       }),
     );
 
-    expect(summary.attention[0]).toEqual({ kind: 'import_rows', batchId: BATCH, count: 3 });
+    expect(summary.attention[0]).toEqual(THREE_UNMAPPED_ROWS);
     expect(summary.attentionTotal).toBe(21);
   });
 

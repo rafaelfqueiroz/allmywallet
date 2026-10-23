@@ -140,6 +140,13 @@ export class FakeTransactionRepository implements TransactionRepository {
     this.#rows = this.#rows.map((row) => (row.id === transaction.id ? transaction : row));
   }
 
+  async supersedeUnclassified(id: TransactionId, at: Date): Promise<boolean> {
+    const current = this.#rows.find((row) => row.id === id);
+    if (current?.status !== 'unclassified') return false;
+    await this.update({ ...current, status: 'superseded', isUserModified: true, updatedAt: at });
+    return true;
+  }
+
   async deleteByIds(ids: readonly TransactionId[]): Promise<number> {
     this.deleteCount += 1;
     const removing = new Set<string>(ids);

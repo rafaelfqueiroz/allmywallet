@@ -177,6 +177,14 @@ export interface TransactionRepository {
 
   insert(transaction: Transaction): Promise<void>;
   update(transaction: Transaction): Promise<void>;
+  /**
+   * SPEC-005 BR-005-20f (#215) — `unclassified` → `superseded`, flagged
+   * user-modified, **only while the row is still `unclassified`**. `false` when
+   * another write got there first: a classification or a re-import that
+   * activated it, whose recalculated positions an unconditional `update` would
+   * leave describing a transaction that no longer counts.
+   */
+  supersedeUnclassified(id: TransactionId, at: Date): Promise<boolean>;
 
   /** BR-006-17: bulk delete. Returns how many rows were actually removed. */
   deleteByIds(ids: readonly TransactionId[]): Promise<number>;

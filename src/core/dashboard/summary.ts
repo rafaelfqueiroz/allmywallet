@@ -7,7 +7,12 @@ import { daysInMonth, monthsBefore } from '@/core/reporting/period';
 import { totalReceived, yearOverYear } from '@/core/reporting/earnings/received';
 import { unrealizedResult, type UnrealizedResult } from '@/core/reporting/composition/result';
 import type { DailyValuationSnapshot } from '@/core/valuation/ports';
-import type { ImportRowAttentionCount } from '@/core/ingestion/ports';
+import type { NeedsAttentionRow } from '@/core/ingestion/ports';
+import {
+  ATTENTION_RESOLUTIONS,
+  attentionResolutionOf,
+  type AttentionResolution,
+} from '@/core/ingestion/attention-resolution';
 import type { ReconciliationReport } from '@/core/ingestion/reconcile';
 import { daysSinceImport, isImportStale } from '@/core/ingestion/staleness';
 import type { ContractMissingRate } from '@/core/onboarding/ports';
@@ -416,13 +421,20 @@ export type AttentionItem =
       /**
        * Rows a committed import left needing a decision — `unclassified` or
        * `invalid`, the pair `/import/[batchId]` already calls "needs
-       * attention". Counted per batch so the entry links to the one screen
-       * that resolves it (SPEC-020 BR-020-18's shape, met here by the queue
-       * that already existed).
+       * attention" — one item per batch **and per resolution**, so the entry
+       * says what settles it and links to the one screen that does (SPEC-020
+       * BR-020-18).
+       *
+       * SPEC-022 BR-022-35 (#215): an item never consists only of a batch and a
+       * row count. `movements` names each asset and B3 movement type among its
+       * rows; `resolution` is `attentionResolutionOf`'s.
        */
       readonly kind: 'import_rows';
       readonly batchId: ImportBatchId;
+      readonly resolution: AttentionResolution;
       readonly count: number;
+      /** Never empty. In asset-code order, then movement. */
+      readonly movements: readonly AttentionMovement[];
     }
   | {
       /**
@@ -450,6 +462,14 @@ export type AttentionItem =
       readonly quantity: Quantity;
       readonly reason: PendingAllocation['reason'];
     };
+
+/** One asset and B3 movement type among an `import_rows` item's rows. */
+export interface AttentionMovement {
+  readonly assetCode: string;
+  /** B3's own `Movimentação` string, as the extract states it. */
+  readonly movement: string;
+  readonly count: number;
+}
 
 export interface AssetLabel {
   readonly code: string;
@@ -553,11 +573,16 @@ export interface DashboardSummaryInput {
   readonly today: BusinessDate;
   readonly reconciliation: ReconciliationSource | null;
   readonly pending: readonly PendingAllocation[];
-  readonly unclassified: readonly ImportRowAttentionCount[];
+  /**
+   * SPEC-022 BR-022-35 (#215) — the outstanding rows of committed batches,
+   * each with its re-reading by the current parser. The queue groups them and
+   * `attentionResolutionOf` says what resolves each; the loader only reads.
+   */
+  readonly importRows: readonly NeedsAttentionRow[];
   /**
    * SPEC-020 BR-020-16/19 — held fixed-income contracts with no readable
    * indexer or rate. `core/onboarding`'s own read (BR-020-07's query), passed
-   * in rather than re-derived here, for the same reason `unclassified` and
+   * in rather than re-derived here, for the same reason `importRows` and
    * `pending` are: this module assembles a queue, it does not compute one.
    */
   readonly contractsMissingRate: readonly ContractMissingRate[];
@@ -582,9 +607,9 @@ export interface DashboardSummaryInput {
  * because they are what SPEC-005 already surfaced first, on
  * `/import/[batchId]`.
  *
- * Zero-count batches are dropped rather than rendered as "0 linhas": an empty
- * queue must be able to mean "nothing to do", and a row saying there is nothing
- * to do in it is the same noise the queue exists to remove.
+ * A batch with no outstanding row has no item, never a "0 linhas" one: an
+ * empty queue must be able to mean "nothing to do", and a row saying there is
+ * nothing to do in it is the same noise the queue exists to remove.
  *
  * **Only pending allocations are capped.** The cap exists for the first-week
  * flood of one allocation per holding, and its overflow link goes to
@@ -601,10 +626,7 @@ function attentionQueue(input: DashboardSummaryInput): {
 } {
   const gates: AttentionItem[] = [];
 
-  for (const batch of input.unclassified) {
-    if (batch.count <= 0) continue;
-    gates.push({ kind: 'import_rows', batchId: batch.batchId, count: batch.count });
-  }
+  gates.push(...importRowItems(input.importRows));
 
   for (const contract of input.contractsMissingRate) {
     // The contract's own code, not `assetLabels`: an asset with no position
@@ -630,6 +652,55 @@ function attentionQueue(input: DashboardSummaryInput): {
     items: [...gates, ...pending.slice(0, room)],
     total: gates.length + pending.length,
   };
+}
+
+/**
+ * SPEC-022 BR-022-35 (#215) — outstanding rows as queue items: one per batch
+ * and resolution, batches in the order read, resolutions in
+ * `ATTENTION_RESOLUTIONS` order — a re-import first, because it is the one the
+ * user can settle without a decision.
+ *
+ * Grouped rather than one item per row: a single early Movimentação left
+ * 1.214 rows needing attention (DL-005-09), and the queue's job is to say what
+ * kind of work is waiting and where. The batch screen lists every row.
+ */
+function importRowItems(rows: readonly NeedsAttentionRow[]): AttentionItem[] {
+  const byBatch = new Map<
+    ImportBatchId,
+    Map<AttentionResolution, Map<string, { assetCode: string; movement: string; count: number }>>
+  >();
+  for (const { row, current, storedCopyUserModified } of rows) {
+    const resolution = attentionResolutionOf(row, current, storedCopyUserModified);
+    const movement = row.record.kind === 'transaction' ? row.record.b3Type : '';
+    const groups = byBatch.get(row.batchId) ?? new Map();
+    const movements = groups.get(resolution) ?? new Map();
+    // A tab cannot occur in either string, so the key is unambiguous — and,
+    // sorting below every printable character, orders by asset code first.
+    const key = `${row.record.assetCode}\t${movement}`;
+    const entry = movements.get(key) ?? { assetCode: row.record.assetCode, movement, count: 0 };
+    movements.set(key, { ...entry, count: entry.count + 1 });
+    groups.set(resolution, movements);
+    byBatch.set(row.batchId, groups);
+  }
+
+  const items: AttentionItem[] = [];
+  for (const [batchId, groups] of byBatch) {
+    for (const resolution of ATTENTION_RESOLUTIONS) {
+      const movements = groups.get(resolution);
+      if (movements === undefined) continue;
+      // Code-unit order, so it cannot change with the server's locale. Keys
+      // are unique, so no two compare equal.
+      const sorted = [...movements].sort(([a], [b]) => (a < b ? -1 : 1)).map(([, entry]) => entry);
+      items.push({
+        kind: 'import_rows',
+        batchId,
+        resolution,
+        count: sorted.reduce((sum, entry) => sum + entry.count, 0),
+        movements: sorted,
+      });
+    }
+  }
+  return items;
 }
 
 /**

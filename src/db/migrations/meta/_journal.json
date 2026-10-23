@@ -239,6 +239,13 @@
       "when": 1790870028628,
       "tag": "0033_settle_refused_import_rows",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792672691130,
+      "tag": "0034_ignored_row_reason",
+      "breakpoints": true
     }
   ]
 }

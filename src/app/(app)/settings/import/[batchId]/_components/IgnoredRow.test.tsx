@@ -44,6 +44,7 @@ function renderRow(row: ImportRow) {
     row,
     committed: true,
     resolvedExerciseLabel: 'Exercício resolvido no ativo principal',
+    reasonLabel: 'Motivo:',
     classifyForm,
   });
   expect(id).toBe(row.id);
@@ -83,5 +84,26 @@ describe('ignoredRow (SPEC-005 BR-005-19/20d, #179)', () => {
     expect(screen.getByText('XXXX11')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `Classificar ${mirror.id}` })).toBeInTheDocument();
     expect(screen.queryByText('Exercício resolvido no ativo principal')).not.toBeInTheDocument();
+  });
+
+  it('shows the reason a user gave for ignoring the row (BR-005-20f)', () => {
+    const settled: ImportRow = {
+      ...exercise,
+      id: ImportRowId.generate(),
+      record: { ...exerciseRecord, b3Type: 'Atualização', assetCode: 'BBAS3' },
+      ledgerType: null,
+      ignoredReason: 'Saldo antes da liquidação da compra',
+    };
+
+    renderRow(settled);
+
+    expect(screen.getByText('Motivo: Saldo antes da liquidação da compra')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: `Classificar ${settled.id}` })).toBeInTheDocument();
+  });
+
+  it('shows no reason for a row a rule ignored', () => {
+    renderRow({ ...exercise, ignoredReason: null });
+
+    expect(screen.queryByText(/Motivo:/)).not.toBeInTheDocument();
   });
 });

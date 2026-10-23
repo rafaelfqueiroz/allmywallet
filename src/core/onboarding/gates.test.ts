@@ -13,8 +13,18 @@ const BATCH = ImportBatchId.of('01920000-0000-7000-8000-0000000000f1');
 const CDB = AssetId.of('01920000-0000-7000-8000-0000000000a1');
 const PETR = AssetId.of('01920000-0000-7000-8000-0000000000a2');
 
+function importRows(resolution: 'reimport' | 'decide' | 'no_rule'): AttentionItem {
+  return {
+    kind: 'import_rows',
+    batchId: BATCH,
+    resolution,
+    count: 3,
+    movements: [{ assetCode: 'BBAS3', movement: 'Atualização', count: 3 }],
+  };
+}
+
 const ITEMS: readonly AttentionItem[] = [
-  { kind: 'import_rows', batchId: BATCH, count: 3 },
+  importRows('decide'),
   { kind: 'fixed_income_rate', assetId: CDB, assetCode: 'CDB-BANCO-X', held: true },
   {
     kind: 'pending_allocation',
@@ -26,12 +36,20 @@ const ITEMS: readonly AttentionItem[] = [
 ];
 
 describe('describeGate (BR-020-16..19)', () => {
-  it('describes an outstanding import row batch', () => {
-    const description = describeGate({ kind: 'import_rows', batchId: BATCH, count: 3 });
+  it.each(['decide', 'no_rule'] as const)(
+    'describes outstanding import rows the batch screen settles (%s)',
+    (resolution) => {
+      expect(describeGate(importRows(resolution))).toEqual({
+        consequence: 'figures_unreliable',
+        resolution: { screen: 'import_batch', batchId: BATCH },
+      });
+    },
+  );
 
-    expect(description).toEqual({
+  it('sends rows a re-import settles to the send screen (SPEC-022 BR-022-35)', () => {
+    expect(describeGate(importRows('reimport'))).toEqual({
       consequence: 'figures_unreliable',
-      resolution: { screen: 'import_batch', batchId: BATCH },
+      resolution: { screen: 'import_send' },
     });
   });
 

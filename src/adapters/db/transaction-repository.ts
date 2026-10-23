@@ -224,6 +224,21 @@ export class DrizzleTransactionRepository implements TransactionRepository {
       .where(eq(transactions.id, transaction.id));
   }
 
+  /**
+   * One conditional statement, so the check and the write cannot be split by
+   * a concurrent writer: under READ COMMITTED, Postgres re-evaluates the
+   * `status` predicate against a row another transaction changed while this
+   * one waited for its lock.
+   */
+  async supersedeUnclassified(id: TransactionId, at: Date): Promise<boolean> {
+    const updated = await this.tx
+      .update(transactions)
+      .set({ status: 'superseded', isUserModified: true, updatedAt: at })
+      .where(and(eq(transactions.id, id), eq(transactions.status, 'unclassified')))
+      .returning({ id: transactions.id });
+    return updated.length > 0;
+  }
+
   async deleteByIds(ids: readonly TransactionId[]): Promise<number> {
     if (ids.length === 0) return 0;
     const deleted = await this.tx

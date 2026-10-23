@@ -15,10 +15,11 @@ import type { UserId } from '@/core/shared/ids';
 import { Money, Quantity } from '@/core/shared/money';
 import type { TransactionType } from '@/core/ledger/transaction';
 import type {
+  ExtractType,
   ImportRow,
-  ImportRowAttentionCount,
   ImportRowClassification,
   ImportRowRepository,
+  NeedsAttentionRow,
   NormalizedRecord,
   RawRow,
   SourcePriceOccurrence,
@@ -93,33 +94,42 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
   }
 
   /**
-   * #98 / BR-010-12 — the dashboard's "Needs attention" count.
+   * #98 / BR-010-12, SPEC-022 BR-022-35 (#215) — the dashboard's "Precisa da
+   * sua atenção" rows.
    *
-   * **A grouped count with a join, rather than reading rows.** The reference
-   * workload is 10.000 rows (BR-016-01) against a 2s p95 dashboard budget
-   * (BR-016-02); `listByBatch` per batch would be the read that misses it.
+   * Rows rather than the grouped count this replaced, because an item now names
+   * its assets and movements and says what resolves it, which the stored
+   * payloads decide. The set is the rows committed imports left outstanding —
+   * none at all in the reference workload — and `import_rows_user_id_idx`
+   * bounds the scan to the tenant either way.
    *
-   * `import_rows_batch_id_idx` covers the grouping, and both tables are
-   * tenant-scoped and FORCEd, so the join runs entirely inside the caller's
-   * `withTenant` transaction (AR-11) with RLS applied to each side.
+   * Both tables are tenant-scoped and FORCEd, so the join runs entirely inside
+   * the caller's `withTenant` transaction (AR-11) with RLS applied to each side.
    */
-  async countNeedsAttentionByBatch(): Promise<readonly ImportRowAttentionCount[]> {
+  async listNeedsAttention(): Promise<readonly Omit<NeedsAttentionRow, 'current'>[]> {
     const rows = await this.tx
       .select({
-        batchId: importRows.batchId,
-        count: sql<number>`count(*)::int`,
+        row: importRows,
+        source: importBatches.source,
+        storedCopyUserModified: transactions.isUserModified,
       })
       .from(importRows)
       .innerJoin(importBatches, eq(importBatches.id, importRows.batchId))
+      .leftJoin(transactions, eq(transactions.id, importRows.transactionId))
       .where(
         and(
           inArray(importRows.classification, ['unclassified', 'invalid']),
           eq(importBatches.status, 'committed'),
         ),
-      )
-      .groupBy(importRows.batchId);
+      );
 
-    return rows.map((row) => ({ batchId: ImportBatchId.of(row.batchId), count: row.count }));
+    // `import_batches_source_check` restricts this to the three extract types.
+    return rows.map(({ row, source, storedCopyUserModified }) => ({
+      row: toDomain(row),
+      source: source as ExtractType,
+      // An `invalid` row has no stored copy.
+      storedCopyUserModified: storedCopyUserModified ?? false,
+    }));
   }
 
   async deleteByBatch(batchId: ImportBatchId): Promise<number> {
@@ -145,8 +155,18 @@ export class DrizzleImportRowRepository implements ImportRowRepository {
   ): Promise<void> {
     await this.tx
       .update(importRows)
-      .set({ classification, updatedAt: new Date() })
+      .set({ classification, ignoredReason: null, updatedAt: new Date() })
       .where(eq(importRows.id, id));
+  }
+
+  /** Conditional for the reason `supersedeUnclassified` is: see that method. */
+  async markIgnored(id: ImportRowId, reason: string): Promise<boolean> {
+    const updated = await this.tx
+      .update(importRows)
+      .set({ classification: 'ignored', ignoredReason: reason, updatedAt: new Date() })
+      .where(and(eq(importRows.id, id), eq(importRows.classification, 'unclassified')))
+      .returning({ id: importRows.id });
+    return updated.length > 0;
   }
 
   /** Chunked like `insertMany`: a 10.000-row commit asks for up to 10.000 keys. */
@@ -181,6 +201,7 @@ function toRow(row: ImportRow, userId: UserId): typeof importRows.$inferInsert {
     occurrence: row.occurrence,
     ledgerType: row.ledgerType,
     transactionId: row.transactionId,
+    ignoredReason: row.ignoredReason ?? null,
   };
 }
 
@@ -198,6 +219,7 @@ function toDomain(row: Row): ImportRow {
     occurrence: row.occurrence,
     ledgerType: row.ledgerType as TransactionType | null,
     transactionId: row.transactionId === null ? null : TransactionId.of(row.transactionId),
+    ignoredReason: row.ignoredReason,
   };
 }
 

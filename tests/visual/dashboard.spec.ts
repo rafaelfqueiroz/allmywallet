@@ -220,7 +220,9 @@ async function seedDashboard(userId: string): Promise<void> {
       );
     }
 
-    // SPEC-020 BR-020-16/18 — two rows left needing a decision.
+    // SPEC-020 BR-020-16/18 — two rows left needing a decision. SPEC-022
+    // BR-022-35: the item names their asset and movement from the stored
+    // record — a balance statement no resolver claimed, so a decision.
     const rowsBatchId = randomUUID();
     await pool.query(
       `INSERT INTO import_batches (id, user_id, source, status, uploaded_at, committed_at)
@@ -230,8 +232,28 @@ async function seedDashboard(userId: string): Promise<void> {
     for (let index = 0; index < 2; index += 1) {
       await pool.query(
         `INSERT INTO import_rows (id, user_id, batch_id, raw_payload, parsed_payload, classification, asset_id)
-         VALUES ($1, $2, $3, '{}'::jsonb, '{}'::jsonb, 'unclassified', $4)`,
-        [randomUUID(), userId, rowsBatchId, HOLD.id],
+         VALUES ($1, $2, $3, '{}'::jsonb, $5::jsonb, 'unclassified', $4)`,
+        [
+          randomUUID(),
+          userId,
+          rowsBatchId,
+          HOLD.id,
+          JSON.stringify({
+            kind: 'transaction',
+            b3Type: 'Atualização',
+            direction: 'credit',
+            assetCode: HOLD.code,
+            assetName: HOLD.code,
+            assetClass: 'stock',
+            institutionName: null,
+            tradeDate: '2026-01-10',
+            quantity: HOLD.quantity,
+            unitPrice: '0',
+            fees: '0',
+            priceStated: false,
+            ratio: null,
+          }),
+        ],
       );
     }
   } finally {
