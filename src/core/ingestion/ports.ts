@@ -268,6 +268,16 @@ export interface ImportBatchRepository {
   listCommitted(): Promise<readonly ImportBatch[]>;
   /** The `/import` history list — every batch regardless of status, newest first. */
   listAll(): Promise<readonly ImportBatch[]>;
+  /**
+   * PR #267 review — serialises, per tenant, every write that changes an
+   * import row's stored ledger copy: a commit (whose re-import promotion and
+   * resolvers activate copies it read earlier in the same transaction) and the
+   * user's ignore (BR-005-20f) and classify (BR-005-20). Without it, a commit
+   * that read a copy `unclassified` could write it `active` after an ignore had
+   * already superseded it. Held until the caller's transaction ends; take it
+   * before the first read.
+   */
+  lockImportWrites(): Promise<void>;
 }
 
 /**

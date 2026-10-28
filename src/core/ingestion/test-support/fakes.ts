@@ -42,6 +42,13 @@ export class FakeImportBatchRepository implements ImportBatchRepository {
     this.#batches.set(batch.id, batch);
   }
 
+  /** How many times a use case took the import-write lock; the real lock is proven in integration. */
+  importWriteLocks = 0;
+
+  async lockImportWrites(): Promise<void> {
+    this.importWriteLocks += 1;
+  }
+
   /** Synchronous, for `FakeImportRowRepository.listNeedsAttention`'s committed-only filter. */
   peek(id: ImportBatchId): ImportBatch | undefined {
     return this.#batches.get(id);

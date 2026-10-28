@@ -505,6 +505,156 @@ describe('SPEC-005 — import pipeline (integration)', () => {
       }
     }
 
+    /**
+     * PR #267 review (P1) — a re-import whose commit is already running. It
+     * reads the stored copy `unclassified`, plans to activate it, and would
+     * write that after the ignore committed: the row stays `ignored` with its
+     * reason while its transaction counts. Here the ignore commits first and
+     * the commit starts while it is open; without the shared lock the commit
+     * reads the copy before the ignore commits and overwrites it afterwards.
+     */
+    it('is not undone by a re-import whose commit was already under way', async () => {
+      const application = {
+        entradaSaida: 'Credito',
+        data: '10/03/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'VALE3 - Vale ON',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '100',
+        precoUnitario: '10,00',
+      };
+      const file = await buildMovimentacaoXlsx([application]);
+
+      // An older map stored this row `unclassified`; today's map activates it
+      // on re-import (BR-005-20) — as the #110 test below seeds it.
+      const origin = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, origin, file);
+      await handleImportStage({ batchId: origin, userId }, handlerDeps());
+      const { rowId, transactionId } = await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          const [row] = await deps.rows.listByBatch(origin);
+          if (row?.record.kind !== 'transaction') throw new Error('expected the application');
+          const record = row.record;
+          const transaction: Transaction = {
+            id: TransactionId.generate(),
+            userId,
+            assetId: row.assetId,
+            institutionId: row.institutionId,
+            type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+            status: 'unclassified',
+            tradeDate: record.tradeDate,
+            quantity: record.quantity,
+            unitPrice: record.unitPrice,
+            fees: record.fees,
+            totalValue: computeTotalValue(
+              UNCLASSIFIED_PLACEHOLDER_TYPE,
+              record.quantity,
+              record.unitPrice,
+              record.fees,
+            ),
+            ratio: null,
+            conversionGroupId: null,
+            costBasis: null,
+            naturalKey: importNaturalKeyFor(
+              {
+                assetId: row.assetId,
+                institutionId: row.institutionId,
+                type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+                tradeDate: record.tradeDate,
+                quantity: record.quantity,
+                unitPrice: record.unitPrice,
+              },
+              record.b3Type,
+            ),
+            occurrence: 1,
+            importBatchId: origin,
+            isManual: false,
+            isUserModified: false,
+            costIsEstimate: false,
+            estimateCloseDate: null,
+            createdAt: clock.now(),
+            updatedAt: clock.now(),
+          };
+          await deps.transactions.insert(transaction);
+          return { rowId: row.id, transactionId: transaction.id };
+        },
+        appDb,
+      );
+      await migratorPool.query(
+        `UPDATE import_rows SET classification = 'unclassified', natural_key = t.natural_key,
+           occurrence = 1, ledger_type = $1, transaction_id = t.id
+           FROM transactions t WHERE t.id = $2 AND import_rows.id = $3`,
+        [UNCLASSIFIED_PLACEHOLDER_TYPE, transactionId, rowId],
+      );
+      await migratorPool.query(
+        `UPDATE import_batches SET status = 'committed',
+           row_counts = row_counts || '{"new":0,"needsAttention":1,"ignored":0}'::jsonb
+         WHERE id = $1`,
+        [origin],
+      );
+
+      // The re-import is staged; its commit is what races the ignore.
+      const reimport = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, reimport, file);
+      await handleImportStage({ batchId: reimport, userId }, handlerDeps());
+
+      let committing: Promise<unknown> | undefined;
+      const ignored = await withTenantResult(
+        userId,
+        async (tx) => {
+          const result = await ignoreImportRow(buildIngestionDeps(tx, userId, clock), {
+            rowId: ImportRowId.of(rowId),
+            reason,
+          });
+          committing = handleImportCommit({ batchId: reimport, userId }, handlerDeps());
+          await expect
+            .poll(
+              async () =>
+                (
+                  await migratorPool.query(
+                    `SELECT count(*)::int AS waiting FROM pg_stat_activity
+                      WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+                  )
+                ).rows[0].waiting,
+              { message: 'the commit should wait on the open ignore', timeout: 10_000 },
+            )
+            .toBeGreaterThan(0);
+          return result;
+        },
+        appDb,
+      );
+      expect(ignored.ok).toBe(true);
+      await committing;
+
+      const { rows: stored } = await migratorPool.query(
+        `SELECT r.classification, r.ignored_reason, t.status, t.is_user_modified
+           FROM import_rows r JOIN transactions t ON t.id = r.transaction_id
+          WHERE r.id = $1`,
+        [rowId],
+      );
+      expect(stored).toEqual([
+        {
+          classification: 'ignored',
+          ignored_reason: reason,
+          status: 'superseded',
+          is_user_modified: true,
+        },
+      ]);
+      await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          expect((await deps.transactions.listAll()).filter((t) => t.status === 'active')).toEqual(
+            [],
+          );
+          expect(await deps.positions.list()).toEqual([]);
+        },
+        appDb,
+      );
+    });
+
     it('refuses, without overwriting it, a copy a concurrent write activates', async () => {
       const batchId = await importFile(await buildMovimentacaoXlsx([application, statement]));
       const row = await statementRow(batchId);

@@ -132,6 +132,20 @@ describe('SPEC-005 BR-005-20f — ignoreImportRow', () => {
     expect((await deps.batches.findById(row.batchId))?.rowCounts).toBeNull();
   });
 
+  // PR #267 review: the real lock is proven against Postgres in
+  // tests/integration/import-pipeline.test.ts; this checks every path takes it.
+  it('takes the import-write lock on commit, ignore and classify alike', async () => {
+    const deps = buildFakeIngestionDeps();
+    const row = await stagedRow(deps, 'Um Tipo Novo');
+    expect(deps.batches.importWriteLocks).toBe(1);
+
+    await ignoreImportRow(deps, { rowId: row.id, reason: 'motivo' });
+    expect(deps.batches.importWriteLocks).toBe(2);
+
+    await classifyImportRow(deps, { rowId: row.id, type: 'bonificacao' });
+    expect(deps.batches.importWriteLocks).toBe(3);
+  });
+
   it('can be brought back into calculations under BR-005-20, which clears the reason', async () => {
     const deps = buildFakeIngestionDeps();
     const row = await stagedRow(deps, 'Um Tipo Novo');

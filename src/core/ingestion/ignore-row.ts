@@ -56,6 +56,12 @@ export async function ignoreImportRow(
     );
   }
 
+  // PR #267 review: before the read. The conditional writes below refuse a
+  // state another write already committed; this lock keeps a commit that is
+  // still running — one that read the copy `unclassified` and will write it
+  // `active` — from overwriting this ignore after it succeeds. Each waits for
+  // the other, so whichever comes second sees what the first did.
+  await deps.batches.lockImportWrites();
   const row = await deps.rows.findById(input.rowId);
   if (row === null) {
     return err(ingestionError(IngestionUseCaseErrorCode.ROW_NOT_FOUND, { rowId: input.rowId }));

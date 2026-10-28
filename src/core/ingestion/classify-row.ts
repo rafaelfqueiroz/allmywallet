@@ -43,6 +43,8 @@ export async function classifyImportRow(
   deps: IngestionDependencies,
   input: ClassifyImportRowInput,
 ): Promise<Result<EditTransactionResult, DomainError>> {
+  // PR #267 review: serialised with commits, as `ignore-row.ts` is.
+  await deps.batches.lockImportWrites();
   const row = await deps.rows.findById(input.rowId);
   if (row === null) {
     return err(ingestionError(IngestionUseCaseErrorCode.ROW_NOT_FOUND, { rowId: input.rowId }));
