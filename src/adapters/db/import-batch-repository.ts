@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { importBatches } from '@/db/schema/transactions';
 import type { Tx } from '@/db/tenant';
 import { AssetId, ImportBatchId, InstitutionId, UserId } from '@/core/shared/ids';
@@ -30,6 +30,17 @@ export class DrizzleImportBatchRepository implements ImportBatchRepository {
 
   async insert(batch: ImportBatch): Promise<void> {
     await this.tx.insert(importBatches).values(toRow(batch, this.userId));
+  }
+  /**
+   * A transaction-scoped advisory lock keyed by tenant: released by the
+   * commit or rollback of the caller's `withTenant` transaction, never held
+   * across requests, and re-entrant within one transaction. Every holder takes
+   * it before any row lock, so it cannot deadlock against them.
+   */
+  async lockImportWrites(): Promise<void> {
+    await this.tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`allmywallet:import-writes:${this.userId}`}, 0))`,
+    );
   }
 
   async findById(id: ImportBatchId): Promise<ImportBatch | null> {

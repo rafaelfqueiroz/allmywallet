@@ -18,13 +18,16 @@ import { TEST_CORPORATE_EVENT_WINDOWS } from '@/core/ingestion/test-support/buil
 import { createWallet } from '@/core/wallets/create-wallet';
 import { allocateToWallet } from '@/core/wallets/allocate';
 import * as schema from '@/db/schema';
-import { withTenant } from '@/db/tenant';
+import { withTenant, withTenantResult } from '@/db/tenant';
 import { FakeClock } from '@/core/shared/clock';
 import { ImportBatchId, ImportRowId, UserId } from '@/core/shared/ids';
 import type { PositionRepository } from '@/core/positions/ports';
 import { commitBatch } from '@/core/ingestion/commit-batch';
 import { classifyImportRow } from '@/core/ingestion/classify-row';
-import type { ImportBatch } from '@/core/ingestion/ports';
+import { ignoreImportRow } from '@/core/ingestion/ignore-row';
+import { attentionResolutionOf } from '@/core/ingestion/attention-resolution';
+import { XlsxImportRowRereader } from '@/adapters/ingestion/stored-row-rereader';
+import type { ImportBatch, ImportRowRepository } from '@/core/ingestion/ports';
 import {
   buildIngestionDeps,
   handleImportCancel,
@@ -52,6 +55,15 @@ import {
 } from '@/adapters/ingestion/xlsx/test-support/builder';
 import { isValidCpf } from '@/adapters/ingestion/xlsx/strip-cpf';
 import { OFFICIAL_CLOSE_SOURCE } from '@/worker/handlers/composition';
+
+/** Outstanding rows per batch, as the dashboard queue read them before #215 grouped them by resolution. */
+async function attentionCounts(rows: Pick<ImportRowRepository, 'listNeedsAttention'>) {
+  const counts = new Map<string, number>();
+  for (const { row } of await rows.listNeedsAttention()) {
+    counts.set(row.batchId, (counts.get(row.batchId) ?? 0) + 1);
+  }
+  return [...counts].map(([batchId, count]) => ({ batchId, count }));
+}
 
 /**
  * SPEC-005 (#8) — the full stage → commit → reconcile pipeline against real
@@ -201,7 +213,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
             ignored: 1,
             needsAttention: 0,
           });
-          expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([]);
+          expect(await attentionCounts(deps.rows)).toEqual([]);
           const ledger = await deps.transactions.listAll();
           expect(ledger).toHaveLength(1);
           expect(ledger[0]).toMatchObject({ type: 'buy', status: 'active' });
@@ -223,7 +235,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
           const deps = buildIngestionDeps(tx, userId, clock);
           expect(await deps.transactions.listAll()).toEqual(before.ledger);
           expect(await deps.positions.list()).toEqual(before.positions);
-          expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([]);
+          expect(await attentionCounts(deps.rows)).toEqual([]);
         },
         appDb,
       );
@@ -287,9 +299,19 @@ describe('SPEC-005 — import pipeline (integration)', () => {
               committedAt: clock.now(),
               rowCounts: { ...batch.rowCounts, ignored: 0, needsAttention: 1 },
             });
-            expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([
-              { batchId: origin, count: 1 },
-            ]);
+            expect(await attentionCounts(deps.rows)).toEqual([{ batchId: origin, count: 1 }]);
+            // SPEC-022 BR-022-35 (#215): the stored row read again by today's
+            // parser is one the map ignores, so the queue says a re-import
+            // settles it — the state the owner's custody fees were in — unless
+            // the user edited its copy, which no import touches.
+            const [outstanding] = await deps.rows.listNeedsAttention();
+            if (outstanding === undefined) throw new Error('expected an outstanding row');
+            const current =
+              new XlsxImportRowRereader().reread(outstanding.source, outstanding.row.raw) ??
+              outstanding.row.record;
+            expect(
+              attentionResolutionOf(outstanding.row, current, outstanding.storedCopyUserModified),
+            ).toBe(isUserModified ? 'decide' : 'reimport');
             return { transaction, positions: await deps.positions.list() };
           },
           appDb,
@@ -315,7 +337,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
                 ignored: isUserModified ? 0 : 1,
                 needsAttention: isUserModified ? 1 : 0,
               });
-              expect(await deps.rows.countNeedsAttentionByBatch()).toEqual(
+              expect(await attentionCounts(deps.rows)).toEqual(
                 isUserModified ? [{ batchId: origin, count: 1 }] : [],
               );
               expect(await deps.positions.list()).toEqual(before.positions);
@@ -325,6 +347,406 @@ describe('SPEC-005 — import pipeline (integration)', () => {
         }
       },
     );
+  });
+
+  describe('SPEC-005 BR-005-20f (#215) — ignoring a row, with a reason', () => {
+    // DV-24: a generated Movimentação — a purchase, and a statement of a type
+    // no map version knows, which commit stores `unclassified`.
+    const application = {
+      entradaSaida: 'Credito',
+      data: '08/01/2026',
+      movimentacao: 'APLICAÇÃO',
+      produto: 'Tesouro Selic 2037',
+      instituicao: 'Corretora Horizonte Sintética',
+      quantidade: '2',
+      precoUnitario: '1250,00',
+      valorOperacao: '2500,00',
+    };
+    const statement = {
+      ...application,
+      data: '12/02/2026',
+      movimentacao: 'Declaração Sintética de Saldo',
+      quantidade: '2',
+      precoUnitario: '-',
+      valorOperacao: '-',
+    };
+    const reason = 'Extrato de saldo; não move a posição';
+
+    async function importFile(file: Uint8Array) {
+      const batchId = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, batchId, file);
+      await handleImportStage({ batchId, userId }, handlerDeps());
+      await handleImportCommit({ batchId, userId }, handlerDeps());
+      return batchId;
+    }
+
+    async function statementRow(batchId: ImportBatchId) {
+      return withTenant(
+        userId,
+        async (tx) => {
+          const rows = await buildIngestionDeps(tx, userId, clock).rows.listByBatch(batchId);
+          const row = rows.find(
+            (r) => r.record.kind === 'transaction' && r.record.b3Type === statement.movimentacao,
+          );
+          if (row === undefined) throw new Error('statement row missing');
+          return row;
+        },
+        appDb,
+      );
+    }
+
+    it('leaves the queue, writes no transaction, keeps the reason, and survives a re-import', async () => {
+      const file = await buildMovimentacaoXlsx([application, statement]);
+      const batchId = await importFile(file);
+      const row = await statementRow(batchId);
+      expect(row.classification).toBe('unclassified');
+
+      const before = await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          const [outstanding] = await deps.rows.listNeedsAttention();
+          expect(outstanding?.row.id).toBe(row.id);
+          return {
+            active: (await deps.transactions.listAll()).filter((t) => t.status === 'active'),
+            positions: await deps.positions.list(),
+          };
+        },
+        appDb,
+      );
+      expect(before.active).toHaveLength(1);
+
+      const ignored = await withTenant(
+        userId,
+        async (tx) =>
+          ignoreImportRow(buildIngestionDeps(tx, userId, clock), { rowId: row.id, reason }),
+        appDb,
+      );
+      expect(ignored.ok).toBe(true);
+
+      const { rows: stored } = await migratorPool.query(
+        `SELECT r.classification, r.ignored_reason, t.status, t.is_user_modified
+           FROM import_rows r JOIN transactions t ON t.id = r.transaction_id
+          WHERE r.id = $1`,
+        [row.id],
+      );
+      expect(stored).toEqual([
+        {
+          classification: 'ignored',
+          ignored_reason: reason,
+          status: 'superseded',
+          is_user_modified: true,
+        },
+      ]);
+
+      // Twice: the second re-import must change nothing the first did not.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (attempt > 0) await importFile(file);
+        await withTenant(
+          userId,
+          async (tx) => {
+            const deps = buildIngestionDeps(tx, userId, clock);
+            expect(await deps.rows.listNeedsAttention()).toEqual([]);
+            expect(
+              (await deps.transactions.listAll()).filter((t) => t.status === 'active'),
+            ).toEqual(before.active);
+            expect(await deps.positions.list()).toEqual(before.positions);
+            expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
+              needsAttention: 0,
+              ignored: 1,
+            });
+            const again = await deps.rows.findById(row.id);
+            expect(again).toMatchObject({ classification: 'ignored', ignoredReason: reason });
+          },
+          appDb,
+        );
+      }
+    });
+
+    /**
+     * PR #267 review — another write commits while the ignore is in flight.
+     * `concurrent` runs uncommitted on its own connection and holds its row
+     * lock until the ignore is waiting on it, then commits, so the ignore's
+     * conditional write sees the newer row: the interleaving the review
+     * reproduced, made deterministic.
+     */
+    async function ignoreWhileCommitting(concurrent: string, params: readonly unknown[]) {
+      const other = new Pool({ connectionString: testDb.migrationUrl, max: 1 });
+      const client = await other.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(concurrent, [...params]);
+        const ignoring = withTenantResult(
+          userId,
+          async (tx) =>
+            ignoreImportRow(buildIngestionDeps(tx, userId, clock), {
+              rowId: ImportRowId.of(String(params[0])),
+              reason,
+            }),
+          appDb,
+        );
+        await expect
+          .poll(
+            async () =>
+              (
+                await migratorPool.query(
+                  `SELECT count(*)::int AS waiting FROM pg_stat_activity
+                    WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+                )
+              ).rows[0].waiting,
+            { message: 'the ignore should wait on the concurrent write', timeout: 10_000 },
+          )
+          .toBeGreaterThan(0);
+        await client.query('COMMIT');
+        return await ignoring;
+      } finally {
+        client.release();
+        await other.end();
+      }
+    }
+
+    /**
+     * PR #267 review (P1) — a re-import whose commit is already running. It
+     * reads the stored copy `unclassified`, plans to activate it, and would
+     * write that after the ignore committed: the row stays `ignored` with its
+     * reason while its transaction counts. Here the ignore commits first and
+     * the commit starts while it is open; without the shared lock the commit
+     * reads the copy before the ignore commits and overwrites it afterwards.
+     */
+    it('is not undone by a re-import whose commit was already under way', async () => {
+      const application = {
+        entradaSaida: 'Credito',
+        data: '10/03/2026',
+        movimentacao: 'APLICAÇÃO',
+        produto: 'VALE3 - Vale ON',
+        instituicao: 'CORRETORA TESTE',
+        quantidade: '100',
+        precoUnitario: '10,00',
+      };
+      const file = await buildMovimentacaoXlsx([application]);
+
+      // An older map stored this row `unclassified`; today's map activates it
+      // on re-import (BR-005-20) — as the #110 test below seeds it.
+      const origin = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, origin, file);
+      await handleImportStage({ batchId: origin, userId }, handlerDeps());
+      const { rowId, transactionId } = await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          const [row] = await deps.rows.listByBatch(origin);
+          if (row?.record.kind !== 'transaction') throw new Error('expected the application');
+          const record = row.record;
+          const transaction: Transaction = {
+            id: TransactionId.generate(),
+            userId,
+            assetId: row.assetId,
+            institutionId: row.institutionId,
+            type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+            status: 'unclassified',
+            tradeDate: record.tradeDate,
+            quantity: record.quantity,
+            unitPrice: record.unitPrice,
+            fees: record.fees,
+            totalValue: computeTotalValue(
+              UNCLASSIFIED_PLACEHOLDER_TYPE,
+              record.quantity,
+              record.unitPrice,
+              record.fees,
+            ),
+            ratio: null,
+            conversionGroupId: null,
+            costBasis: null,
+            naturalKey: importNaturalKeyFor(
+              {
+                assetId: row.assetId,
+                institutionId: row.institutionId,
+                type: UNCLASSIFIED_PLACEHOLDER_TYPE,
+                tradeDate: record.tradeDate,
+                quantity: record.quantity,
+                unitPrice: record.unitPrice,
+              },
+              record.b3Type,
+            ),
+            occurrence: 1,
+            importBatchId: origin,
+            isManual: false,
+            isUserModified: false,
+            costIsEstimate: false,
+            estimateCloseDate: null,
+            createdAt: clock.now(),
+            updatedAt: clock.now(),
+          };
+          await deps.transactions.insert(transaction);
+          return { rowId: row.id, transactionId: transaction.id };
+        },
+        appDb,
+      );
+      await migratorPool.query(
+        `UPDATE import_rows SET classification = 'unclassified', natural_key = t.natural_key,
+           occurrence = 1, ledger_type = $1, transaction_id = t.id
+           FROM transactions t WHERE t.id = $2 AND import_rows.id = $3`,
+        [UNCLASSIFIED_PLACEHOLDER_TYPE, transactionId, rowId],
+      );
+      await migratorPool.query(
+        `UPDATE import_batches SET status = 'committed',
+           row_counts = row_counts || '{"new":0,"needsAttention":1,"ignored":0}'::jsonb
+         WHERE id = $1`,
+        [origin],
+      );
+
+      // The re-import is staged; its commit is what races the ignore.
+      const reimport = await newPendingBatch('b3_movimentacao');
+      await saveUploadedFile(uploadDir, reimport, file);
+      await handleImportStage({ batchId: reimport, userId }, handlerDeps());
+
+      let committing: Promise<unknown> | undefined;
+      const ignored = await withTenantResult(
+        userId,
+        async (tx) => {
+          const result = await ignoreImportRow(buildIngestionDeps(tx, userId, clock), {
+            rowId: ImportRowId.of(rowId),
+            reason,
+          });
+          committing = handleImportCommit({ batchId: reimport, userId }, handlerDeps());
+          await expect
+            .poll(
+              async () =>
+                (
+                  await migratorPool.query(
+                    `SELECT count(*)::int AS waiting FROM pg_stat_activity
+                      WHERE wait_event_type = 'Lock' AND datname = current_database()`,
+                  )
+                ).rows[0].waiting,
+              { message: 'the commit should wait on the open ignore', timeout: 10_000 },
+            )
+            .toBeGreaterThan(0);
+          return result;
+        },
+        appDb,
+      );
+      expect(ignored.ok).toBe(true);
+      await committing;
+
+      const { rows: stored } = await migratorPool.query(
+        `SELECT r.classification, r.ignored_reason, t.status, t.is_user_modified
+           FROM import_rows r JOIN transactions t ON t.id = r.transaction_id
+          WHERE r.id = $1`,
+        [rowId],
+      );
+      expect(stored).toEqual([
+        {
+          classification: 'ignored',
+          ignored_reason: reason,
+          status: 'superseded',
+          is_user_modified: true,
+        },
+      ]);
+      await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          expect((await deps.transactions.listAll()).filter((t) => t.status === 'active')).toEqual(
+            [],
+          );
+          expect(await deps.positions.list()).toEqual([]);
+        },
+        appDb,
+      );
+    });
+
+    it('refuses, without overwriting it, a copy a concurrent write activates', async () => {
+      const batchId = await importFile(await buildMovimentacaoXlsx([application, statement]));
+      const row = await statementRow(batchId);
+
+      const result = await ignoreWhileCommitting(
+        `UPDATE transactions SET status = 'active'
+          WHERE id = (SELECT transaction_id FROM import_rows WHERE id = $1)`,
+        [row.id],
+      );
+
+      expect(result.ok).toBe(false);
+      const { rows: stored } = await migratorPool.query(
+        `SELECT r.classification, r.ignored_reason, t.status, t.is_user_modified
+           FROM import_rows r JOIN transactions t ON t.id = r.transaction_id
+          WHERE r.id = $1`,
+        [row.id],
+      );
+      expect(stored).toEqual([
+        {
+          classification: 'unclassified',
+          ignored_reason: null,
+          status: 'active',
+          is_user_modified: false,
+        },
+      ]);
+    });
+
+    it('rolls its first write back when the row is classified concurrently', async () => {
+      const batchId = await importFile(await buildMovimentacaoXlsx([application, statement]));
+      const row = await statementRow(batchId);
+
+      const result = await ignoreWhileCommitting(
+        `UPDATE import_rows SET classification = 'new' WHERE id = $1`,
+        [row.id],
+      );
+
+      expect(result.ok).toBe(false);
+      const { rows: stored } = await migratorPool.query(
+        `SELECT r.classification, r.ignored_reason, t.status, t.is_user_modified
+           FROM import_rows r JOIN transactions t ON t.id = r.transaction_id
+          WHERE r.id = $1`,
+        [row.id],
+      );
+      // The copy is still the one commit stored: the supersede was undone.
+      expect(stored).toEqual([
+        {
+          classification: 'new',
+          ignored_reason: null,
+          status: 'unclassified',
+          is_user_modified: false,
+        },
+      ]);
+    });
+
+    it('refuses a classified row and a row already ignored, and BR-005-20 brings an ignored one back', async () => {
+      const batchId = await importFile(await buildMovimentacaoXlsx([application, statement]));
+      const row = await statementRow(batchId);
+
+      await withTenant(
+        userId,
+        async (tx) => {
+          const deps = buildIngestionDeps(tx, userId, clock);
+          const [purchase] = (await deps.rows.listByBatch(batchId)).filter(
+            (r) => r.classification === 'new',
+          );
+          if (purchase === undefined) throw new Error('purchase row missing');
+          const refused = await ignoreImportRow(deps, { rowId: purchase.id, reason });
+          expect(refused.ok).toBe(false);
+          if (!refused.ok) expect(refused.error.code).toBe('IMPORT_ROW_NOT_UNCLASSIFIED');
+
+          expect((await ignoreImportRow(deps, { rowId: row.id, reason })).ok).toBe(true);
+          expect((await ignoreImportRow(deps, { rowId: row.id, reason: 'outro' })).ok).toBe(false);
+
+          // `bonificacao` reads no price, so the price-less row can take it.
+          const restored = await classifyImportRow(deps, { rowId: row.id, type: 'bonificacao' });
+          expect(restored.ok).toBe(true);
+          if (restored.ok) {
+            expect(restored.value.transaction).toMatchObject({
+              id: row.transactionId,
+              status: 'active',
+            });
+          }
+        },
+        appDb,
+      );
+
+      const { rows: stored } = await migratorPool.query(
+        'SELECT classification, ignored_reason FROM import_rows WHERE id = $1',
+        [row.id],
+      );
+      expect(stored).toEqual([{ classification: 'new', ignored_reason: null }]);
+    });
   });
 
   it('#153 BR-005-17: duplicate-only reimport settles historical refusals and recounts their batch without changing the ledger', async () => {
@@ -410,7 +832,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
           duplicates: 1,
           needsAttention: 0,
         });
-        expect(await rows.countNeedsAttentionByBatch()).toEqual([{ batchId: legacy, count: 1 }]);
+        expect(await attentionCounts(rows)).toEqual([{ batchId: legacy, count: 1 }]);
         expect(await new DrizzleTransactionRepository(tx, userId).listAll()).toEqual(before.ledger);
         expect(await new DrizzlePositionRepository(tx, userId).list()).toEqual(before.positions);
       },
@@ -2752,9 +3174,9 @@ describe('SPEC-005 — import pipeline (integration)', () => {
                 (ordinal === 0) === missingFirst ? '0.01' : '0',
               );
             }
-            expect(
-              (await deps.rows.countNeedsAttentionByBatch()).filter((r) => r.batchId === origin),
-            ).toEqual([]);
+            expect((await attentionCounts(deps.rows)).filter((r) => r.batchId === origin)).toEqual(
+              [],
+            );
           },
           appDb,
         );
@@ -2922,7 +3344,7 @@ describe('SPEC-005 — import pipeline (integration)', () => {
     // The dashboard's Needs attention queue reads `import_rows.classification`.
     const attention = await withTenant(
       userId,
-      async (tx) => new DrizzleImportRowRepository(tx, userId).countNeedsAttentionByBatch(),
+      async (tx) => attentionCounts(new DrizzleImportRowRepository(tx, userId)),
       appDb,
     );
     expect(attention).toEqual([]);

@@ -13,6 +13,7 @@ import {
 import { DrizzleImportBatchRepository } from '@/adapters/db/import-batch-repository';
 import { DrizzleImportRowRepository } from '@/adapters/db/import-row-repository';
 import { DrizzleOnboardingFactsRepository } from '@/adapters/db/onboarding-repository';
+import { XlsxImportRowRereader } from '@/adapters/ingestion/stored-row-rereader';
 import { DrizzleReportDataPort } from '@/app/(app)/reports/data';
 import { buildWalletDeps } from '@/app/(app)/wallets/composition';
 import { db } from '@/db/client';
@@ -108,7 +109,7 @@ export async function loadDashboard(
 
       const [
         committed,
-        unclassified,
+        outstanding,
         lastImportAt,
         earliestSnapshot,
         hasEverHeldAnything,
@@ -120,7 +121,7 @@ export async function loadDashboard(
         previousEarnings,
       ] = await Promise.all([
         batches.listCommitted(),
-        rows.countNeedsAttentionByBatch(),
+        rows.listNeedsAttention(),
         port.lastImportAt(),
         port.earliestSnapshotDate(),
         // BR-020-26 — see `hasAnyPosition`. A closed position counts.
@@ -187,6 +188,14 @@ export async function loadDashboard(
         ]),
       );
 
+      // SPEC-022 BR-022-35 (#215): each row as the parser this build ships
+      // reads it, so the queue can say whether a re-import now settles it.
+      const rereader = new XlsxImportRowRereader();
+      const importRows = outstanding.map((item) => ({
+        ...item,
+        current: rereader.reread(item.source, item.row.raw) ?? item.row.record,
+      }));
+
       const [pending, quotedAt] = await Promise.all([
         listPendingAllocations(walletDeps, userId),
         port.latestQuoteAt([...assetLabels.keys()]),
@@ -206,7 +215,7 @@ export async function loadDashboard(
           today,
           reconciliation: latestReconciliation(committed),
           pending,
-          unclassified,
+          importRows,
           contractsMissingRate: onboarding.contractsMissingRate,
           assetLabels,
         }),

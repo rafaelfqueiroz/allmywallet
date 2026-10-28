@@ -7,6 +7,7 @@ import {
   dismissOnboarding,
   seedCommittedImportBatch,
   seedUnclassifiedImportRows,
+  UNMAPPED_MOVEMENT,
 } from './support/onboarding';
 import { seedHeldFixedIncomeWithMissingRate } from './support/fixed-income';
 
@@ -264,11 +265,14 @@ test.describe('the dashboard', () => {
    * elements as the fixed-income one, asserted on the rendered row. Its
    * consequence claims unreliability, never a direction: an excluded row may
    * be a purchase or an outflow.
+   *
+   * SPEC-022 BR-022-35 (#215) — and it names the asset and the movement and
+   * says what resolves them, rather than a row count alone.
    */
-  test('shows the import-rows gate with its consequence and a link to the batch', async ({
+  test('shows the import-rows gate with its asset, movement, next step and a link to the batch', async ({
     signedIn,
   }) => {
-    const { batchId } = await seedUnclassifiedImportRows(signedIn.userId, 2);
+    const { batchId, assetCode } = await seedUnclassifiedImportRows(signedIn.userId, 2);
 
     await signedIn.page.goto('/dashboard');
 
@@ -276,8 +280,11 @@ test.describe('the dashboard', () => {
       .getByRole('listitem')
       .filter({ has: signedIn.page.getByRole('link', { name: 'Revisar' }) });
     await expect(gate).toHaveCount(1);
-    await expect(gate.getByText('2 linhas importadas precisam de revisão')).toBeVisible();
+    await expect(gate.getByText('Sem regra ainda · 2 linhas')).toBeVisible();
+    await expect(gate.getByText(`${assetCode} — ${UNMAPPED_MOVEMENT} (2)`)).toBeVisible();
+    await expect(gate.getByText(/ainda não é reconhecido/)).toBeVisible();
     await expect(gate.getByText(/podem estar incorretos, para mais ou para menos/)).toBeVisible();
+    await expect(gate.getByText(/linhas importadas precisam de revisão/)).toHaveCount(0);
     await expect(gate.getByRole('link', { name: 'Revisar' })).toHaveAttribute(
       'href',
       `/settings/import/${batchId}`,

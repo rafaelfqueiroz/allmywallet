@@ -50,6 +50,9 @@ export async function seedPreviewedImportBatch(userId: string): Promise<string> 
   return batchId;
 }
 
+/** A B3 movement type no version of the map has known. */
+export const UNMAPPED_MOVEMENT = 'Um Tipo Novo';
+
 /**
  * A committed batch that left rows needing a decision — the `import_rows`
  * "Needs attention" gate (SPEC-020 BR-020-16). The asset is created for the
@@ -59,9 +62,10 @@ export async function seedPreviewedImportBatch(userId: string): Promise<string> 
 export async function seedUnclassifiedImportRows(
   userId: string,
   count: number,
-): Promise<{ readonly batchId: string }> {
+): Promise<{ readonly batchId: string; readonly assetCode: string }> {
   const batchId = randomUUID();
   const assetId = randomUUID();
+  const assetCode = `UNCL${assetId.slice(0, 6).toUpperCase()}`;
   const pool = new Pool({ connectionString: MIGRATION_URL, max: 1 });
   try {
     await pool.query(
@@ -71,20 +75,38 @@ export async function seedUnclassifiedImportRows(
     );
     await pool.query(`INSERT INTO assets (id, code, name, class) VALUES ($1, $2, $3, 'cdb')`, [
       assetId,
-      `UNCL${assetId.slice(0, 6).toUpperCase()}`,
+      assetCode,
       'Ativo de linha sem classificação',
     ]);
+    // SPEC-022 BR-022-35: the queue names each row's asset and B3 movement,
+    // read from the stored record — a type no map version knows, so the item
+    // says a rule is still missing.
+    const record = {
+      kind: 'transaction',
+      b3Type: UNMAPPED_MOVEMENT,
+      direction: 'credit',
+      assetCode,
+      assetName: 'Ativo de linha sem classificação',
+      assetClass: 'cdb',
+      institutionName: null,
+      tradeDate: '2026-01-10',
+      quantity: '1',
+      unitPrice: '1',
+      fees: '0',
+      priceStated: true,
+      ratio: null,
+    };
     for (let index = 0; index < count; index += 1) {
       await pool.query(
         `INSERT INTO import_rows (id, user_id, batch_id, raw_payload, parsed_payload, classification, asset_id)
-         VALUES ($1, $2, $3, '{}'::jsonb, '{}'::jsonb, 'unclassified', $4)`,
-        [randomUUID(), userId, batchId, assetId],
+         VALUES ($1, $2, $3, '{}'::jsonb, $5::jsonb, 'unclassified', $4)`,
+        [randomUUID(), userId, batchId, assetId, JSON.stringify(record)],
       );
     }
   } finally {
     await pool.end();
   }
-  return { batchId };
+  return { batchId, assetCode };
 }
 
 /**

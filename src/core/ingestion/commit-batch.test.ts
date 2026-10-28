@@ -3370,7 +3370,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
       ignored: 1,
       needsAttention: 0,
     });
-    expect(await deps.rows.countNeedsAttentionByBatch()).toEqual([]);
+    expect(await deps.rows.listNeedsAttention()).toEqual([]);
     expect(await deps.positions.list()).toEqual(positions);
 
     const updates = deps.transactions.updateCount;
@@ -3860,7 +3860,7 @@ describe('SPEC-005 BR-005-17..20 (#110) — rows an older map stored unclassifie
       isUserModified: false,
     });
     expect((await rowFor(deps, batchId, stored.id))?.classification).toBe('ignored');
-    // 1 needing attention − 1 = 0; 0 ignored + 1 = 1 (countNeedsAttentionByBatch drops).
+    // 1 needing attention − 1 = 0; 0 ignored + 1 = 1 (listNeedsAttention drops it).
     expect((await deps.batches.findById(batchId))?.rowCounts).toMatchObject({
       new: 0,
       needsAttention: 0,

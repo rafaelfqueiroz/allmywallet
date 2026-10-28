@@ -26,6 +26,8 @@ export type GateConsequence =
 
 export type GateResolution =
   | { readonly screen: 'import_batch'; readonly batchId: ImportBatchId }
+  /** SPEC-022 BR-022-35 (#215): where an extract is sent again. */
+  | { readonly screen: 'import_send' }
   | { readonly screen: 'fixed_income_contract'; readonly assetId: AssetId }
   | { readonly screen: 'wallets' };
 
@@ -47,10 +49,16 @@ export function describeGate(item: AttentionItem): GateDescription {
     // BR-006-03). The direction is unknowable here — the row is exactly the
     // one nobody could read — so the consequence claims unreliability, never
     // "understated": an excluded outflow leaves units the user no longer holds.
+    // SPEC-022 BR-022-35 (#215): rows the current map classifies are settled
+    // by sending the extract again; every other row on its batch's screen,
+    // where each can be classified or ignored.
     case 'import_rows':
       return {
         consequence: 'figures_unreliable',
-        resolution: { screen: 'import_batch', batchId: item.batchId },
+        resolution:
+          item.resolution === 'reimport'
+            ? { screen: 'import_send' }
+            : { screen: 'import_batch', batchId: item.batchId },
       };
     // SPEC-020 BR-020-16/19: a held fixed-income contract with no readable
     // rate cannot be accrued (SPEC-009 BR-009-13), so it is valued at cost —

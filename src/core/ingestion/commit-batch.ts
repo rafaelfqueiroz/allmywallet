@@ -399,6 +399,9 @@ export async function commitBatch(
   userId: UserId,
   input: CommitBatchInput,
 ): Promise<Result<CommitBatchOutcome, DomainError>> {
+  // PR #267 review: before any read — the stored copies this commit activates
+  // must not be ones an ignore or a classification is changing meanwhile.
+  await deps.batches.lockImportWrites();
   const batch = await deps.batches.findById(input.batchId);
   if (batch === null || batch.userId !== userId) {
     return err(

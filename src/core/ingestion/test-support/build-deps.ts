@@ -61,9 +61,13 @@ export class FakeSettlementCalendar implements SettlementCalendar {
 /** TS-02/TS-22: a builder with sensible defaults, so a test states only what it cares about. */
 export function buildFakeIngestionDeps(today = '2026-03-15'): FakeIngestionDeps {
   const transactions = new FakeTransactionRepository();
+  const batches = new FakeImportBatchRepository();
   return {
-    batches: new FakeImportBatchRepository(),
-    rows: new FakeImportRowRepository(() => transactions.rows),
+    batches,
+    rows: new FakeImportRowRepository(
+      () => transactions.rows,
+      (id) => batches.peek(id),
+    ),
     transactions,
     positions: new FakePositionRepository(),
     assets: new FakeAssetResolver((id, descriptor) => transactions.describeAsset(id, descriptor)),

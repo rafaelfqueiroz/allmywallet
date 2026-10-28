@@ -9,6 +9,7 @@ import type { IngestionDependencies } from '@/core/ingestion/dependencies';
 import { ingestionError, IngestionUseCaseErrorCode } from '@/core/ingestion/errors';
 import { isResolvedSubscriptionExercise } from '@/core/ingestion/resolved-subscription-exercise';
 import { PRICE_BEARING_TYPES } from '@/core/ingestion/stage-batch';
+import { recountBatch } from '@/core/ingestion/ignore-row';
 
 /**
  * SPEC-005 BR-005-20 — manually classifying an `unclassified` row brings it
@@ -42,6 +43,8 @@ export async function classifyImportRow(
   deps: IngestionDependencies,
   input: ClassifyImportRowInput,
 ): Promise<Result<EditTransactionResult, DomainError>> {
+  // PR #267 review: serialised with commits, as `ignore-row.ts` is.
+  await deps.batches.lockImportWrites();
   const row = await deps.rows.findById(input.rowId);
   if (row === null) {
     return err(ingestionError(IngestionUseCaseErrorCode.ROW_NOT_FOUND, { rowId: input.rowId }));
@@ -98,6 +101,8 @@ export async function classifyImportRow(
       });
       if (!restored.ok) return restored;
       await deps.rows.updateClassification(row.id, 'new');
+      // #215: an ignored row leaving `ignored` moves the batch's counts too.
+      await recountBatch(deps, row.batchId);
       return restored;
     }
 
@@ -129,6 +134,7 @@ export async function classifyImportRow(
 
     await deps.rows.attachTransactions(new Map([[row.id, created.value.transaction.id]]));
     await deps.rows.updateClassification(row.id, 'new');
+    await recountBatch(deps, row.batchId);
     return ok({
       transaction: created.value.transaction,
       recalculations: created.value.recalculations,

@@ -27,6 +27,11 @@ import {
   findSubscriptionOffers,
   type SubscriptionOffer,
 } from '@/core/ingestion/subscription-offer';
+import {
+  attentionResolutionOf,
+  type AttentionResolution,
+} from '@/core/ingestion/attention-resolution';
+import { XlsxImportRowRereader } from '@/adapters/ingestion/stored-row-rereader';
 import { withIngestionDeps } from '@/app/(app)/import/composition';
 import { withWalletDeps } from '@/app/(app)/wallets/composition';
 
@@ -161,6 +166,12 @@ export interface ImportBatchDetail {
    * exactly as `refusals`/`corporateEvents` are — no new column or table.
    */
   readonly subscriptionOffers: ReadonlyMap<string, SubscriptionOffer>;
+  /**
+   * SPEC-022 BR-022-35 (#215) — what resolves each `needsAttention` row, keyed
+   * by row id: the same `attentionResolutionOf` over the same re-reading the
+   * dashboard's queue uses, so the two screens cannot disagree.
+   */
+  readonly resolutions: ReadonlyMap<string, AttentionResolution>;
   /**
    * SPEC-010 BR-010-15 — `null` until the batch is committed. Before that
    * nothing has been allocated and a summary would be describing a future.
@@ -331,9 +342,29 @@ export async function loadImportBatchDetail(
       await loadSubscriptionCreditWindowDays(),
     );
 
+    // Committed batches only: in a preview, commit's resolvers (BR-005-20a–20e)
+    // have not run yet, so what will be left outstanding is not known.
+    const rereader = new XlsxImportRowRereader();
+    const resolutions = new Map<string, AttentionResolution>();
+    if (batch.status === 'committed') {
+      for (const row of needsAttentionRows) {
+        const copy =
+          row.transactionId === null ? null : await deps.transactions.findById(row.transactionId);
+        resolutions.set(
+          row.id,
+          attentionResolutionOf(
+            row,
+            rereader.reread(batch.source, row.raw) ?? row.record,
+            copy?.isUserModified ?? false,
+          ),
+        );
+      }
+    }
+
     return {
       batch,
       rows,
+      resolutions,
       acceptBlockers,
       refusals,
       corporateEvents,

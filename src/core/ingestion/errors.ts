@@ -57,6 +57,12 @@ export const IngestionUseCaseErrorCode = {
    * one, and the offer can be resolved again then.
    */
   SUBSCRIPTION_CLOSE_MISSING: 'IMPORT_SUBSCRIPTION_CLOSE_MISSING',
+  /**
+   * SPEC-005 BR-005-20f (#215) — ignoring a row takes a reason, and one that
+   * fits `IGNORE_REASON_MAX_LENGTH`. The reason is what keeps the decision
+   * auditable (DL-005-31); a blank one would not.
+   */
+  IGNORE_REASON_INVALID: 'IMPORT_IGNORE_REASON_INVALID',
 } as const;
 export type IngestionUseCaseErrorCode =
   (typeof IngestionUseCaseErrorCode)[keyof typeof IngestionUseCaseErrorCode];
