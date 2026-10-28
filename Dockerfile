@@ -10,14 +10,22 @@
 # the worker's separate esbuild bundle rather than reusing Next's standalone
 # trace (which only traces what the *web* server actually imports).
 
-FROM node:22-alpine AS base
+# The Node version is pinned to package.json's `devEngines.runtime`, and by
+# digest, so the personal instance runs the Node the gate ran on and a
+# re-pushed tag cannot change it (`tests/structural/node-version-is-pinned`).
+FROM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS base
 WORKDIR /app
 RUN corepack enable
 
 # --- dependencies (full, incl. dev — needed to build) ------------------------
 FROM base AS deps
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# `devEngines.runtime` makes pnpm install the pinned Node as a dev dependency
+# and put it first on every script's PATH. Its Linux variants are glibc
+# builds, which cannot run on Alpine, and the image's own Node is already that
+# exact version (pinned above), so the downloaded one is removed and the build
+# runs on the base image's. `prod-deps` installs `--prod` and never gets it.
+RUN pnpm install --frozen-lockfile && rm -rf node_modules/node node_modules/.bin/node
 
 # --- production-only dependencies (for the worker's `--packages=external` bundle) ---
 FROM base AS prod-deps

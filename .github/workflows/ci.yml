@@ -40,7 +40,8 @@ concurrency:
 # ---------------------------------------------------------------------------
 
 env:
-  NODE_VERSION: '22'
+  # package.json's `devEngines.runtime` (`tests/structural/node-version-is-pinned`).
+  NODE_VERSION: '22.23.4'
 
 # `pg_isready` needs `-d allmywallet` as well as `-U`. Without it, it connects
 # to a database named after the user — `allmywallet_migrator`, which does not
