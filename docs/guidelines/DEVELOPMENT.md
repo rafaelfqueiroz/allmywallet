@@ -78,6 +78,8 @@ pnpm worker:dev               # worker, separate terminal
 
 `pnpm` is the package manager; the lockfile is committed and CI uses `--frozen-lockfile`.
 
+**Node is pinned by pnpm, not by your shell.** `package.json`'s `devEngines.runtime` names one exact version; `pnpm install` downloads it if missing, and every `pnpm` script runs on it whatever `node -v` says. Run things through `pnpm` — a bare `node` or an editor's test runner uses the shell's version. The Docker image and CI's `NODE_VERSION` are pinned to the same version, and `tests/structural/node-version-is-pinned.test.ts` fails if any of them drifts; to upgrade, change all of them together, the image by tag and digest.
+
 > **This setup is development, and its database is disposable.** Your real portfolio runs separately, as the personal production instance ([SPEC-021](https://github.com/rafaelfqueiroz/allmywallet/wiki/SPEC-021-Personal-Deployment), ARCHITECTURE AR-71–AR-75). Never load the personal env file into a development shell: `startTestDatabase` reuses whatever `DATABASE_MIGRATION_URL` it finds. The refusal guard (AR-72) — which makes test database reuse, every `tests/support/reset.ts` helper, `db:seed:reference`, the E2E setup and the performance suite refuse a database marked `allmywallet.instance_role = 'personal'` — is the second barrier, not the first.
 
 ### The personal instance
